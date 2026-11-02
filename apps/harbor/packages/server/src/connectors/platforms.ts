@@ -1,6 +1,6 @@
 import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
 import type { ActorCtx } from '../core/kernel.js';
-import type { CredentialTarget } from '../core/agents.js';
+import type { CredentialTarget, PlatformSetup } from '../core/agents.js';
 import type { HarborService } from '../service.js';
 import { agent37Platform } from './agent37/index.js';
 import { attioPlatform } from './attio/index.js';
@@ -61,6 +61,12 @@ export interface ConnectorPlatform {
    * HarborError('invalid_request') carrying the reason on refusal.
    */
   verify(secret: string, target: CredentialTarget): Promise<void>;
+  /**
+   * The Add flow's setup for a platform whose agent is an instance
+   * (2026-11-02): the instances a pasted key reaches, and making one where
+   * the platform allows. The key is used for the call and never kept.
+   */
+  setup?: PlatformSetup;
   /** Run the connector for one agent until stopped. */
   start(env: ConnectorEnv): RunningConnector;
   /**

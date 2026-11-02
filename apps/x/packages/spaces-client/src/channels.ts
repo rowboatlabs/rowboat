@@ -22,7 +22,7 @@ export type HarborChannel =
   | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy' | 'spaces:setJevEnabled'
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
-  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentSuper' | 'spaces:setAgentProfile'
+  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
@@ -156,6 +156,8 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:setAgentProfile': async ({ orgId, agentId, ...profile }) => ({ agent: await getClient(orgId).setAgentProfile(agentId, profile) }),
     'spaces:setAgentPersonal': async (args) => ({ agent: await getClient(args.orgId).setAgentPersonal(args.agentId, args.personal) }),
     'spaces:setAgentSuper': async (args) => ({ agent: await getClient(args.orgId).setAgentSuper(args.agentId, args.superAgent) }),
+    'spaces:setupInstances': async (args) => ({ instances: await getClient(args.orgId).setupInstances(args.connection, args.key) }),
+    'spaces:createSetupInstance': async ({ orgId, connection, ...input }) => ({ instance: await getClient(orgId).createSetupInstance(connection, input) }),
     'spaces:managedAgentKinds': async (args) => ({ kinds: await getClient(args.orgId).managedAgentKinds() }),
     'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
     'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),

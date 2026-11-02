@@ -11,7 +11,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, InvitePolicy, Member, SUPER_AGENT_KINDS, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { Attribution, InvitePolicy, Member, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
@@ -798,16 +798,22 @@ export const markAllRead = tool({
 export const createAgent = tool({
   name: 'create_agent',
   description:
-    'Create a managed agent (Hermes or Codex) that you can hand work to: only for a super agent, an agent an ' +
-    'admin allowed to. The new agent belongs to your owner, joins the space you name, starts on Rowboat\'s trial ' +
-    'credit, and is a channel agent, so you can mention it once it is ready. Pass the thread you are working in: ' +
-    'when your owner must approve, Harbor puts a card there and returns status "pending"; say so and end your ' +
-    'turn, and read the thread for the outcome when you are asked again. Only when the work needs another agent.',
+    'Create an agent you can hand work to: only for a super agent, an agent an admin allowed to. It belongs to ' +
+    'your owner, joins the space you name, and is a channel agent, so you can mention it once it is ready. Leave ' +
+    'out `connection` for one Rowboat runs: hermes or codex start on Rowboat\'s trial credit, claude-code needs ' +
+    'your owner\'s Anthropic key. Or name how it is reached, as the Agents page offers: hermes/plugin, ' +
+    'custom/contract, a coding agent on replicas or conductor, hermes or openclaw on agent37, hermes, claude-code ' +
+    'or codex on maritime, or a bot (posthog, cal, attio). Ask your person in the thread for the name, kind and ' +
+    'where it runs first; never ask for keys. Pass the thread you are working in: anything needing your owner\'s ' +
+    'details (a key, an instance, setting it up where it runs) becomes a setup card there that only they fill in, ' +
+    'and the result is "pending" — say so and end your turn, and read the thread for the outcome when asked again. ' +
+    'Only when the work needs another agent.',
   input: z.object({
     spaceId: SpaceId,
     threadRootId: MessageId,
     displayName: z.string().trim().min(1).max(128),
-    kind: z.enum(SUPER_AGENT_KINDS),
+    kind: z.string().min(1).max(32),
+    connection: z.string().min(1).max(32).optional(),
     reason: z.string().min(1).max(1000),
   }),
   output: SuperAgentResult,

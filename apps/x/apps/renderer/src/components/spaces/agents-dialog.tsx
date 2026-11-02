@@ -301,7 +301,8 @@ function KindChoice({ label, kinds, selected, onSelect, first = false }: { label
  * itself and opens this straight at adding one or at one agent's page; then
  * Back, Cancel and Done close the dialog instead of showing the list.
  */
-export type AgentsDialogStart = { name: 'choose' } | { name: 'add'; bot: boolean } | { name: 'create' } | { name: 'agent'; agentId: string }
+// `request` (2026-11-02): a super agent's setup card opens the form for what it asked, filled in, and completing it settles the card.
+export type AgentsDialogStart = { name: 'choose' } | { name: 'add'; bot: boolean } | { name: 'create' } | { name: 'agent'; agentId: string } | { name: 'request'; approval: spaces.Approval }
 
 export function AgentsDialog({ org, open, onOpenChange, start }: {
     org: OrgWithSpaces
@@ -328,6 +329,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const [withDirect, setWithDirect] = useState(true)
     const [personal, setPersonal] = useState(false)
     const [progress, setProgress] = useState<string | null>(null)
+    // The super agent's setup card this completes, when the card opened the form (2026-11-02).
+    const [request, setRequest] = useState<{ id: string; connection?: string } | null>(null)
     // Its description and personality (2026-10-29): optional, saved right after it is added.
     const [profileTitle, setProfileTitle] = useState('')
     const [profileInstructions, setProfileInstructions] = useState('')
@@ -345,7 +348,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const addingBot = screen.name === 'add' && screen.bot
     // On this computer is its own path from the chooser (2026-10-28); Connect offers everything else you run.
     const addingLocal = screen.name === 'add' && screen.local === true && LOCAL_RUNTIME
-    const offered = AGENT_SETUPS.filter((k) => (addingBot ? k.bot === true : addingLocal ? k.local === true : !k.bot && !k.local))
+    // A setup card asks for one way of reaching it: only that one is offered.
+    const offered = AGENT_SETUPS.filter((k) => (request?.connection ? k.connection === request.connection : addingBot ? k.bot === true : addingLocal ? k.local === true : !k.bot && !k.local))
     const setup = offered.find((k) => k.id === chosen) ?? offered[0]!
     // An agent that is one platform instance (Agent37) runs whatever its instance runs.
     const kind = setup.bindsInstance ? instance?.kind ?? setup.kinds[0]! : chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
@@ -408,12 +412,33 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setScreen({ name: 'create' })
     }, [])
 
+    // What the super agent asked for, filled in: the kind and name, its one space, no DM; the owner gives the rest.
+    const startRequest = useCallback((approval: spaces.Approval) => {
+        const action = approval.action
+        if (action?.kind !== 'create_agent') return
+        const setupOf = action.connection ? AGENT_SETUPS.find((k) => k.connection === action.connection) : undefined
+        if (setupOf) {
+            startAdding(setupOf.bot === true)
+            setChosen(setupOf.id)
+            setChosenKind(action.agentKind)
+        } else startCreating()
+        if (!setupOf) setCreateKind(action.agentKind)
+        setName(action.displayName)
+        setNameEdited(true)
+        setSkippedSpaces(new Set(org.spaces.filter((space) => space.id !== approval.conversation.spaceId).map((space) => space.id)))
+        setWithDirect(false)
+        setRequest({ id: approval.id, ...(action.connection ? { connection: action.connection } : {}) })
+    }, [org.spaces, startAdding, startCreating])
+
     const startName = start?.name
     const startBot = start?.name === 'add' && start.bot
     const startAgentId = start?.name === 'agent' ? start.agentId : undefined
+    const startApproval = start?.name === 'request' ? start.approval : undefined
     useEffect(() => {
         if (!open) return
-        if (startName === 'add') startAdding(startBot)
+        setRequest(null)
+        if (startApproval) startRequest(startApproval)
+        else if (startName === 'add') startAdding(startBot)
         else if (startName === 'create') startCreating()
         else if (startName === 'choose') setScreen({ name: 'choose' })
         else setScreen(startAgentId ? { name: 'agent', agentId: startAgentId } : { name: 'list' })
@@ -421,7 +446,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         void load()
         // An org whose Harbor creates no agents (no Maritime key, or older) just has no Create button.
         window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
-    }, [open, load, startAdding, startCreating, startName, startBot, startAgentId, org.id])
+    }, [open, load, startAdding, startCreating, startRequest, startName, startBot, startAgentId, startApproval, org.id])
 
     // Back to the chooser from one of its paths, else to the list, or out of the dialog when it was opened past the list.
     const fromChooser = (screen.name === 'add' && !screen.bot) || screen.name === 'create'
@@ -474,6 +499,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 ...(chosenManaged === 'claude-code' ? { anthropicApiKey: anthropicKey.trim() } : {}),
                 ...(parsedEnv.env.length > 0 ? { env: parsedEnv.env } : {}),
                 ...(personal ? { personal: true } : {}),
+                ...(request ? { request: request.id } : {}),
             })
             setAnthropicKey('')
             setEnvText('')
@@ -517,7 +543,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
             let instanceId: string | undefined
             if (setup.id === 'agent37' && instance?.type === 'new') {
                 setProgress('Creating the Agent37 instance… this can take a few minutes.')
-                const { instance: created } = await window.ipc.invoke('spaces:agent37CreateInstance', {
+                const { instance: created } = await window.ipc.invoke('spaces:createSetupInstance', {
+                    orgId: org.id,
+                    connection: 'agent37',
                     key: credential.trim(),
                     kind: instance.kind,
                     name: `rowboat-${shownName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'agent'}`,
@@ -539,6 +567,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 ...(setup.credential ? { credential: credential.trim() } : {}),
                 ...(instanceId ? { instance: instanceId } : {}),
                 ...(personal ? { personal: true } : {}),
+                ...(request ? { request: request.id } : {}),
             })
             setCredential('')
             setInstance(null)
@@ -762,8 +791,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 </label>
                             )}
                             {setup.local && <LocalAgentFields cwd={shownCwd} onCwd={setLocalCwd} policy={localPolicy} onPolicy={setLocalPolicy} />}
-                            {setup.id === 'agent37' && <InstancePicker credential={credential} choice={instance} onChoice={setInstance} />}
-                            {setup.id === 'maritime' && <MaritimeAgentPicker credential={credential} choice={instance} onChoice={setInstance} />}
+                            {setup.id === 'agent37' && <InstancePicker orgId={org.id} credential={credential} choice={instance} onChoice={setInstance} />}
+                            {setup.id === 'maritime' && <MaritimeAgentPicker orgId={org.id} credential={credential} choice={instance} onChoice={setInstance} />}
                             <SpacePicker
                                 spaces={org.spaces}
                                 skipped={skippedSpaces}

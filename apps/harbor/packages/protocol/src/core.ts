@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Approval } from './approval.js';
+import { Approval, type ApprovalAction } from './approval.js';
 import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
@@ -174,11 +174,11 @@ export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
 /** The runtimes Maritime hosts that Harbor drives through its exec API (2026-10-26): each turn is the runtime's own CLI, run in the agent's VM. */
 export const MARITIME_AGENTS = ['hermes', 'claude-code', 'codex'] as const;
 /**
- * The managed kinds a super agent may create (2026-11-02): those that start on
- * Rowboat's trial credit. Claude Code needs its owner's Anthropic key, and a
- * secret never passes through a tool.
+ * The agents Rowboat runs on its trial credit (spec §8 Maritime, 2026-10-27):
+ * what a super agent's request needs nothing more for, so Harbor creates it
+ * alone (2026-11-02). Every other agent needs its owner's details.
  */
-export const SUPER_AGENT_KINDS = ['hermes', 'codex'] as const;
+export const TRIAL_KINDS = ['hermes', 'codex'] as const;
 /**
  * The coding agents the desktop app runs on its owner's own computer
  * (2026-10-28, local agents): the app holds the agent's key and drives the
@@ -223,6 +223,27 @@ export const PERSONAL_ONLY_CONNECTIONS: readonly string[] = [LOCAL_CONNECTION];
  */
 export const BUILT_IN_CONNECTION = 'builtin';
 export const JEV_KIND = 'jev';
+
+/**
+ * What a super agent may ask for (spec §4 Agent members, 2026-11-02): an
+ * agent Rowboat runs (no connection, one of MARITIME_AGENTS), or any pair in
+ * AGENT_PAIRS but a local one, which is personal and so can't be handed work.
+ */
+export function superAgentMayCreate(kind: string, connection?: string): boolean {
+  if (connection === undefined) return (MARITIME_AGENTS as readonly string[]).includes(kind);
+  return connection !== LOCAL_CONNECTION && isAgentPair(kind, connection);
+}
+
+/**
+ * A super agent's create its owner sets up (2026-11-02): every agent but one
+ * Rowboat runs on its trial credit needs the owner's details (a platform key,
+ * an instance, an Anthropic key, or setting it up where it runs). Its card is
+ * a setup card: the owner completes it by adding or creating the agent with
+ * the approval's id as `request`, or denies it; allowing it alone does nothing.
+ */
+export function ownerSetsUp(action: ApprovalAction): boolean {
+  return action.kind === 'create_agent' && (action.connection !== undefined || !(TRIAL_KINDS as readonly string[]).includes(action.agentKind));
+}
 
 export function isAgentPair(kind: string, connection: string): boolean {
   return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);
@@ -428,6 +449,21 @@ export const HostingTrigger = z.object({
 export type HostingTrigger = z.infer<typeof HostingTrigger>;
 
 /** An agent with its keys, as the Agents screen lists them, its platform credential and alert hook when Harbor runs its connector, and its hosting when Rowboat runs it. */
+/**
+ * One instance a platform key reaches, for the Add flow (2026-11-02, setup
+ * through Harbor so it works on the web): an Agent37 instance or a Maritime
+ * agent. `kind` is the Rowboat kind it runs, absent when it runs none Rowboat
+ * drives or its record does not say; `template` says what it runs then.
+ */
+export const PlatformInstance = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string().max(256).nullable(),
+  status: z.string().max(64),
+  template: z.string().max(128),
+  kind: z.string().max(32).optional(),
+});
+export type PlatformInstance = z.infer<typeof PlatformInstance>;
+
 /** What a super agent's create or delete did: done now, or waiting on its owner's card. */
 export const SuperAgentResult = z.object({
   status: z.enum(['done', 'pending']),

@@ -527,6 +527,25 @@ export class Invocations {
     });
   }
 
+  /**
+   * A super agent's setup card its owner completed by adding the agent
+   * (2026-11-02): allowed by them and applied at once, with the agent as its
+   * outcome. Only an open card: the first completion stands.
+   */
+  async fulfilRequest(id: string, by: string, outcome: NonNullable<Approval['outcome']>): Promise<Approval> {
+    const found = await this.k.store.getApproval(id);
+    if (!found?.action) throw new HarborError('not_found', 'no such request');
+    return this.k.locked(found.conversation.spaceId, async () => {
+      const current = (await this.k.store.getApproval(id))!;
+      if (current.state !== 'open') throw new HarborError('invalid_request', `this request is already ${current.state}`);
+      const at = this.k.now();
+      const next: Approval = { ...current, state: 'allowed', decision: 'allow_once', decidedBy: by, decidedAt: at, outcome, appliedAt: at, updatedAt: at };
+      await this.k.store.putApproval(next);
+      await this.k.appendNext(next.conversation.spaceId, at, { type: 'approval', approval: next });
+      return next;
+    });
+  }
+
   /** Decisions on the agent's approvals its connector has not confirmed applying: the guarantee behind `approval_decided`. */
   async listDecisionsForAgent(ctx: ActorCtx): Promise<Approval[]> {
     this.requireConnector(ctx);

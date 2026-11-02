@@ -1,7 +1,7 @@
 import {
   LLM_PROVIDERS,
   MARITIME_AGENTS,
-  SUPER_AGENT_KINDS,
+  TRIAL_KINDS,
   type AgentCredential,
   type AgentHosting,
   type AgentKeySecret,
@@ -253,24 +253,27 @@ export class Hosting {
   async createManaged(
     ctx: ActorCtx,
     input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    /** The super agent whose setup card this completes (2026-11-02): it may delete what it asked for. */
+    requestedBy?: string,
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
     const actor = await this.k.store.getMember(ctx.memberId);
     if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
     enforce(canAddAgent(actor));
-    const { agent, hosting } = await this.provision(ctx.memberId, input);
+    const { agent, hosting } = await this.provision(ctx.memberId, input, requestedBy);
     const key = await this.agents.createKey(ctx, agent.id);
     return { agent, key, hosting };
   }
 
   /**
-   * A super agent's create (spec §4 Agent members, 2026-11-02): the agent is
-   * its owner's, recorded as asked for by it, and a channel agent so it can be
-   * handed work. No key is minted: Harbor's connector holds what it needs, and
-   * the owner makes one on its page if they want one.
+   * A super agent's create that needs nothing from its owner (spec §4 Agent
+   * members, 2026-11-02): an agent on Rowboat's trial credit, its owner's,
+   * recorded as asked for by it, and a channel agent so it can be handed
+   * work. No key is minted: Harbor's connector holds what it needs, and the
+   * owner makes one on its page if they want one.
    */
   async createForSuperAgent(superAgent: Member, input: { displayName: string; kind: string }): Promise<{ agent: Member; hosting: AgentHosting }> {
     enforce(canSuperAgentCreate(superAgent));
-    if (!(SUPER_AGENT_KINDS as readonly string[]).includes(input.kind)) throw new HarborError('invalid_request', `a super agent can create ${SUPER_AGENT_KINDS.join(' or ')}, not ${input.kind}`);
+    if (!(TRIAL_KINDS as readonly string[]).includes(input.kind)) throw new HarborError('invalid_request', `${input.kind} needs its owner to set it up`);
     return this.provision(superAgent.ownerId!, input, superAgent.id);
   }
 

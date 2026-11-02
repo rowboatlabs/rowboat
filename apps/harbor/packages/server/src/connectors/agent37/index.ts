@@ -2,6 +2,7 @@ import { HarborError } from '../../errors.js';
 import type { ConnectorPlatform } from '../platforms.js';
 import { AGENT37_API, Agent37Error, agent37Api, instanceUrl, kindOfTemplate, type InstanceUrl } from './api.js';
 import { Agent37Connector } from './connector.js';
+import { createAgent37Instance, listAgent37Instances } from './setup.js';
 
 // The Agent37 platform (spec §8 Connectors, 2026-10-01): checking an agent's
 // Agent37 key, and running its connector. Agent37 has no /me, so listing the
@@ -28,6 +29,10 @@ export function agent37Platform(base = AGENT37_API, instance: InstanceUrl = inst
       if (runs !== target.kind) {
         throw new HarborError('invalid_request', `The Agent37 instance ${found.id} runs ${found.template || 'an unknown template'}, not ${target.kind}`);
       }
+    },
+    setup: {
+      list: (secret) => listAgent37Instances(secret, fetch, base),
+      create: (secret, input) => createAgent37Instance(secret, input, fetch, base),
     },
     start(env) {
       return new Agent37Connector(env, async () => agent37Api(await env.credential(), base, instance)).start();

@@ -1,8 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import { Ban, Check, Clock, Loader2, ShieldAlert, X } from 'lucide-react'
-import type { spaces } from '@x/shared'
+import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
+import { AgentsDialog } from '@/components/spaces/agents-dialog'
 import { useOrgRoster } from '@/hooks/use-space-members'
+import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { formatFeedTime, formatFullTimestamp } from '@/lib/spaces-presentation'
@@ -65,11 +67,13 @@ export function ApprovalCard({ approval, orgId, selfMemberId, memberNames }: {
         }
     }
 
+    // A super agent's setup card (2026-11-02): completed by setting the agent up, not by allowing it.
+    const setup = shown.action ? spaces.ownerSetsUp(shown.action) : false
     const allows = shown.choices.filter((c) => c !== 'deny')
     const canDeny = shown.choices.includes('deny')
 
-    const choiceButtons = (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+    const choices = (
+        <>
             {allows.map((choice, i) => (
                 <Button key={choice} size="sm" variant={i === 0 ? 'default' : 'outline'} disabled={busy !== null || !orgId} onClick={() => void decide(choice)}>
                     {busy === choice && <Loader2 className="size-3.5 animate-spin" />}
@@ -81,8 +85,9 @@ export function ApprovalCard({ approval, orgId, selfMemberId, memberNames }: {
                     Deny
                 </Button>
             )}
-        </div>
+        </>
     )
+    const choiceButtons = <div className="mt-3 flex flex-wrap items-center gap-2">{choices}</div>
 
     return (
         <div className="mt-0.5 max-w-xl rounded-lg border border-border bg-muted/30 p-3 text-sm">
@@ -119,13 +124,22 @@ export function ApprovalCard({ approval, orgId, selfMemberId, memberNames }: {
                         <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setDenying(false)}>Cancel</Button>
                     </div>
                 ) : shown.action && orgId ? (
-                    <OwnerOnly orgId={orgId} agentId={shown.agentId} selfMemberId={selfMemberId} memberNames={memberNames}>{choiceButtons}</OwnerOnly>
+                    <OwnerOnly orgId={orgId} agentId={shown.agentId} selfMemberId={selfMemberId} memberNames={memberNames} setup={setup}>
+                        {setup ? (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <SetUpButton orgId={orgId} approval={shown} disabled={busy !== null} />
+                                {choices}
+                            </div>
+                        ) : (
+                            choiceButtons
+                        )}
+                    </OwnerOnly>
                 ) : (
                     choiceButtons
                 )
             ) : (
                 <>
-                    <Outcome approval={shown} agentName={agentName} nameOf={nameOf} />
+                    <Outcome approval={shown} agentName={agentName} nameOf={nameOf} setup={setup} />
                     {shown.action && shown.state === 'allowed' && <ActionOutcome approval={shown} memberNames={memberNames} />}
                 </>
             )}
@@ -138,23 +152,37 @@ export function ApprovalCard({ approval, orgId, selfMemberId, memberNames }: {
  * sees who it waits for. Before the roster loads, the buttons show, and
  * Harbor refuses anyone but the owner.
  */
-function OwnerOnly({ orgId, agentId, selfMemberId, memberNames, children }: { orgId: string; agentId: string; selfMemberId?: string; memberNames: Map<string, string>; children: ReactNode }) {
+function OwnerOnly({ orgId, agentId, selfMemberId, memberNames, setup, children }: { orgId: string; agentId: string; selfMemberId?: string; memberNames: Map<string, string>; setup: boolean; children: ReactNode }) {
     const ownerId = useOrgRoster(orgId, []).find((m) => m.id === agentId)?.ownerId
     if (!ownerId || ownerId === selfMemberId) return <>{children}</>
-    return <p className="mt-3 text-xs text-muted-foreground">Waiting for {memberNames.get(ownerId) ?? 'its owner'} to decide.</p>
+    return <p className="mt-3 text-xs text-muted-foreground">Waiting for {memberNames.get(ownerId) ?? 'its owner'} to {setup ? 'set it up' : 'decide'}.</p>
+}
+
+/** Opens the Agents form for what the super agent asked, filled in; adding the agent there completes the card. */
+function SetUpButton({ orgId, approval, disabled }: { orgId: string; approval: spaces.Approval; disabled: boolean }) {
+    const [open, setOpen] = useState(false)
+    const org = useSpacesOrgs().orgs.find((o) => o.id === orgId)
+    if (!org) return null
+    return (
+        <>
+            <Button size="sm" disabled={disabled} onClick={() => setOpen(true)}>Set it up…</Button>
+            <AgentsDialog org={org} open={open} onOpenChange={setOpen} start={{ name: 'request', approval }} />
+        </>
+    )
 }
 
 /** What Harbor did once a super agent's request was allowed: the agent it made or removed, or why it could not. */
 function ActionOutcome({ approval, memberNames }: { approval: spaces.Approval; memberNames: Map<string, string> }) {
     const action = approval.action!
     const name = action.kind === 'create_agent' ? action.displayName : memberNames.get(action.agentId) ?? 'the agent'
-    const verb = action.kind === 'create_agent' ? 'create' : 'delete'
+    const verb = action.kind === 'create_agent' ? (spaces.ownerSetsUp(action) ? 'add' : 'create') : 'delete'
     if (!approval.appliedAt) return <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Working on it…</p>
     if (approval.outcome?.error) return <p className="mt-1.5 text-xs text-destructive">Could not {verb} {name}: {approval.outcome.error}</p>
-    return <p className="mt-1.5 text-xs text-muted-foreground">{action.kind === 'create_agent' ? `Created ${name}. It’s getting ready and joins this space.` : `Deleted ${name}.`}</p>
+    if (action.kind === 'delete_agent') return <p className="mt-1.5 text-xs text-muted-foreground">Deleted {name}.</p>
+    return <p className="mt-1.5 text-xs text-muted-foreground">{spaces.ownerSetsUp(action) ? `Added ${name} to this space.` : `Created ${name}. It’s getting ready and joins this space.`}</p>
 }
 
-function Outcome({ approval, agentName, nameOf }: { approval: spaces.Approval; agentName: string; nameOf: (id?: string) => string }) {
+function Outcome({ approval, agentName, nameOf, setup = false }: { approval: spaces.Approval; agentName: string; nameOf: (id?: string) => string; setup?: boolean }) {
     const at = approval.decidedAt ?? approval.updatedAt
     const when = (
         <span title={formatFullTimestamp(at)} className="text-muted-foreground/70">
@@ -169,7 +197,7 @@ function Outcome({ approval, agentName, nameOf }: { approval: spaces.Approval; a
             <div className={cn('mt-3 flex items-start gap-1.5 text-xs', denied ? 'text-destructive' : 'text-foreground')}>
                 <Icon className="mt-px size-3.5 shrink-0" />
                 <span>
-                    {DECIDED[approval.decision ?? (denied ? 'deny' : 'allow_once')]} by {nameOf(approval.decidedBy)}
+                    {setup && !denied ? 'Set up' : DECIDED[approval.decision ?? (denied ? 'deny' : 'allow_once')]} by {nameOf(approval.decidedBy)}
                     {approval.note && <span className="text-muted-foreground">: “{approval.note}”</span>}
                     {when}
                 </span>

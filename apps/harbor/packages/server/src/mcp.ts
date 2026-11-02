@@ -502,7 +502,7 @@ async function dispatch(
     }
     // --- super agents (spec §4 Agent members, 2026-11-02) ----------------------
     case 'create_agent':
-      return service.superAgentCreate(ctx, args as { spaceId: string; threadRootId: string; displayName: string; kind: string; reason: string });
+      return service.superAgentCreate(ctx, args as { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string });
     case 'delete_agent':
       return service.superAgentDelete(ctx, args as { spaceId: string; threadRootId: string; agentId: string; reason: string });
     case 'search_space': {

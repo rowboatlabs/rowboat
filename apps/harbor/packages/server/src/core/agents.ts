@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type SuperAgent } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
 import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
@@ -25,12 +25,20 @@ export interface CredentialTarget {
   instance?: string;
 }
 
+/** A platform's setup for the Add flow (2026-11-02): see ConnectorPlatform.setup. */
+export interface PlatformSetup {
+  list(secret: string): Promise<PlatformInstance[]>;
+  create?(secret: string, input: { kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<PlatformInstance>;
+}
+
 export interface AgentConnectorHooks {
   verify(connection: string, secret: string, target: CredentialTarget): Promise<void>;
   save(agentId: string, secret: string, setBy: string): Promise<AgentCredential>;
   added(agent: Member): void;
   /** What the agent's connector says about an alert its service sent (spec §8 Alerts): a message, or nothing to say. */
   alert(connection: string, payload: unknown): string | undefined;
+  /** The platform's setup for the Add flow, when its agent is an instance (2026-11-02). */
+  setup(connection: string): PlatformSetup | undefined;
 }
 
 /** The secret in a hook's address: like an agent key, random enough that a fast hash is safe to store. */
@@ -199,6 +207,40 @@ export class Agents {
     this.k.guardWrite();
     await this.k.store.setAgentPersonal(agentId, input.personal);
     return this.agent(agentId);
+  }
+
+  /**
+   * The Add flow's platform setup (2026-11-02, in Harbor so it works on the
+   * web): the instances a pasted key reaches, and a new one where the
+   * platform makes them. A person, as only a person adds an agent; the key is
+   * used for the call and kept nowhere.
+   */
+  async listSetupInstances(ctx: ActorCtx, connection: string, key: string): Promise<PlatformInstance[]> {
+    const setup = this.setupFor(await this.actor(ctx), connection);
+    return this.onPlatform(() => setup.list(key));
+  }
+
+  async createSetupInstance(ctx: ActorCtx, connection: string, input: { key: string; kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<PlatformInstance> {
+    const setup = this.setupFor(await this.actor(ctx), connection);
+    if (!setup.create) throw new HarborError('invalid_request', `Rowboat can’t create one on ${connection}; pick an existing one`);
+    const { key, ...rest } = input;
+    return this.onPlatform(() => setup.create!(key, rest));
+  }
+
+  private setupFor(actor: Member, connection: string) {
+    enforce(canAddAgent(actor));
+    const setup = this.hooks?.setup(connection);
+    if (!setup) throw new HarborError('invalid_request', `${connection} has nothing to set up here`);
+    return setup;
+  }
+
+  /** A platform's refusal, in its own words, as the caller's to fix. */
+  private async onPlatform<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      throw new HarborError('invalid_request', (err as Error).message.slice(0, 1000));
+    }
   }
 
   /**

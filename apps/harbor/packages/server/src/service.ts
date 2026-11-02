@@ -62,6 +62,7 @@ import type {
   SearchKind,
   SearchResults,
   Space,
+  PlatformInstance,
   SuperAgent,
   SuperAgentResult,
   Topic,
@@ -194,11 +195,17 @@ export class HarborService {
   setAgentPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
     return this.agents.setPersonal(ctx, agentId, input);
   }
+  listSetupInstances(ctx: ActorCtx, connection: string, key: string): Promise<PlatformInstance[]> {
+    return this.agents.listSetupInstances(ctx, connection, key);
+  }
+  createSetupInstance(ctx: ActorCtx, connection: string, input: { key: string; kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<PlatformInstance> {
+    return this.agents.createSetupInstance(ctx, connection, input);
+  }
   setAgentSuper(ctx: ActorCtx, agentId: string, input: { superAgent: SuperAgent | null }): Promise<Member> {
     return this.agents.setSuper(ctx, agentId, input);
   }
   /** A super agent's create_agent and delete_agent (spec §4 Agent members, 2026-11-02). */
-  superAgentCreate(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; displayName: string; kind: string; reason: string }): Promise<SuperAgentResult> {
+  superAgentCreate(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string }): Promise<SuperAgentResult> {
     return this.superAgents.create(ctx, input);
   }
   superAgentDelete(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; agentId: string; reason: string }): Promise<SuperAgentResult> {
@@ -229,11 +236,15 @@ export class HarborService {
     return this.hosting.kinds(ctx);
   }
   /** Create a managed agent on the platform Rowboat's account runs (spec §8 Maritime, 2026-10-26). */
-  createManagedAgent(
+  async createManagedAgent(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean; request?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
-    return this.hosting.createManaged(ctx, input);
+    const { request: requestId, ...rest } = input;
+    const request = requestId ? await this.superAgents.assertSetup(ctx, requestId, undefined) : undefined;
+    const created = await this.hosting.createManaged(ctx, rest, request?.agentId);
+    if (request) await this.superAgents.completeSetup(ctx, request, created.agent);
+    return created;
   }
   /** Delete a managed agent's hosting: the owner or an admin; its keys go now, the platform's resources in the background. */
   deleteManagedAgent(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
@@ -328,11 +339,16 @@ export class HarborService {
   deleteHostingTrigger(ctx: ActorCtx, agentId: string, triggerId: string) {
     return this.hosting.deleteTrigger(ctx, agentId, triggerId);
   }
-  addAgent(
+  async addAgent(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean; request?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
-    return this.agents.add(ctx, input);
+    // Completing a super agent's setup card (2026-11-02): checked before the agent exists, recorded once it does.
+    const { request: requestId, ...rest } = input;
+    const request = requestId ? await this.superAgents.assertSetup(ctx, requestId, input.connection) : undefined;
+    const added = await this.agents.add(ctx, rest);
+    if (request) await this.superAgents.completeSetup(ctx, request, added.agent);
+    return added;
   }
   setAgentCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
     return this.agents.setCredential(ctx, agentId, secret);

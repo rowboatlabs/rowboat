@@ -6,7 +6,7 @@ import type { SpaceHub } from '../hub.js';
 import { assertSealingConfigured, credentialHint, seal, unseal } from '../sealing.js';
 import type { HarborService } from '../service.js';
 import type { Store } from '../store.js';
-import type { CredentialTarget } from '../core/agents.js';
+import type { CredentialTarget, PlatformSetup } from '../core/agents.js';
 import { HOSTED_CONNECTIONS, PLATFORMS, type ConnectorEnv, type RunningConnector } from './platforms.js';
 
 // Runs one org's connectors (spec §8 Connectors, 2026-09-30): one per agent
@@ -43,6 +43,11 @@ export class HostedConnectors {
   /** The agent's platform's words for an alert, or undefined when it says nothing (spec §8 Alerts). */
   alert(connection: string, payload: unknown): string | undefined {
     return PLATFORMS[connection]?.alert?.(payload);
+  }
+
+  /** The platform's setup for the Add flow (2026-11-02), when its agent is an instance. */
+  setup(connection: string): PlatformSetup | undefined {
+    return PLATFORMS[connection]?.setup;
   }
 
   async startAll(): Promise<void> {

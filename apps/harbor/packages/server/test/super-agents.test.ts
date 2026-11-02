@@ -2,10 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { routes, type AgentListing, type Approval, type Invocation, type Member, type Message, type SuperAgentResult } from '@rowboat/spaces-protocol';
 import { MemoryBlobStore } from '../src/blobs.js';
+import { agent37Platform } from '../src/connectors/agent37/index.js';
 import { maritimePlatform } from '../src/connectors/maritime/index.js';
 import { maritimeProvisioner } from '../src/connectors/maritime/provisioning.js';
 import { PLATFORMS } from '../src/connectors/platforms.js';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
+import { FakeAgent37, GOOD_KEY as AGENT37_KEY } from './fake-agent37.js';
 import { FakeMaritime, GOOD_KEY } from './fake-maritime.js';
 import { agentClient, freshStore, restClient } from './helpers.js';
 
@@ -16,7 +18,9 @@ import { agentClient, freshStore, restClient } from './helpers.js';
 // only when allowed.
 
 const original = PLATFORMS.maritime;
+const originalAgent37 = PLATFORMS.agent37;
 let fake: FakeMaritime;
+let fake37: FakeAgent37;
 let harbor: RunningHarbor;
 let spaceId: string;
 let boss: Member;
@@ -65,6 +69,8 @@ beforeAll(async () => {
   process.env.HARBOR_INTEGRATION_KEY = 'e'.repeat(64);
   fake = await new FakeMaritime().start();
   PLATFORMS.maritime = maritimePlatform(fake.url, { pollMs: 40 });
+  fake37 = await new FakeAgent37().start();
+  PLATFORMS.agent37 = agent37Platform(fake37.url, fake37.instanceUrl);
   const { store } = await freshStore();
   harbor = await startHarbor({
     store,
@@ -89,7 +95,9 @@ afterAll(async () => {
   await bossMcp.close();
   await harbor.close();
   await fake.close();
+  await fake37.close();
   PLATFORMS.maritime = original!;
+  PLATFORMS.agent37 = originalAgent37!;
   delete process.env.HARBOR_INTEGRATION_KEY;
 });
 
@@ -159,10 +167,12 @@ describe('creating, with its owner’s approval', () => {
     expect(((await as('dev-harsh').get('/v1/agents')).body.agents as AgentListing[]).some((l) => l.agent.displayName === 'Spare')).toBe(false);
   });
 
-  it('is asked only in a thread it is working in, and never for Claude Code', async () => {
+  it('is asked only in a thread it is working in, and never for an agent on its owner’s computer', async () => {
     const posted = (await as('dev-harsh').post(`/v1/spaces/${spaceId}/messages`, { body: 'no agent here', actingMode: 'direct' })).body.message as Message;
     expect(await refused('create_agent', { spaceId, threadRootId: posted.id, displayName: 'X', kind: 'hermes', reason: 'r' })).toMatch(/thread you are working in/);
-    expect(await refused('create_agent', { spaceId, threadRootId: posted.id, displayName: 'X', kind: 'claude-code', reason: 'r' })).toMatch(/invalid arguments/);
+    const { rootId } = await turn();
+    expect(await refused('create_agent', { spaceId, threadRootId: rootId, displayName: 'X', kind: 'claude-code', connection: 'local', reason: 'r' })).toMatch(/can’t create claude-code on local/);
+    expect(await refused('create_agent', { spaceId, threadRootId: rootId, displayName: 'X', kind: 'jev', connection: 'builtin', reason: 'r' })).toMatch(/can’t create/);
   });
 
   describe('deleting', () => {
@@ -196,5 +206,66 @@ describe('creating without approval', () => {
   it('stops when the admin makes it ordinary again', async () => {
     expect((await setSuper(null)).body.agent.superAgent).toBeUndefined();
     expect(await refused('create_agent', { spaceId, threadRootId: rootId, displayName: 'Again', kind: 'hermes', reason: 'r' })).toMatch(/only a super agent/);
+  });
+});
+
+describe('setup cards: agents that need their owner’s details', () => {
+  beforeAll(async () => {
+    // Approval waived: a setup card is still its owner's to fill in.
+    await setSuper({ approval: 'never', canDelete: true });
+  });
+
+  async function card(kind: string, connection?: string) {
+    const { rootId } = await turn();
+    const result = await call('create_agent', { spaceId, threadRootId: rootId, displayName: 'Scout', kind, ...(connection ? { connection } : {}), reason: 'research' });
+    expect(result.status).toBe('pending');
+    return result.approval!;
+  }
+
+  it('puts a card for the owner that only setting it up or denying settles', async () => {
+    const approval = await card('hermes', 'agent37');
+    expect(approval).toMatchObject({ choices: ['deny'], action: { kind: 'create_agent', agentKind: 'hermes', connection: 'agent37' } });
+    expect(approval.title).toBe('Set up Scout, a Hermes on Agent37');
+    expect((await decide(approval, 'allow_once')).status).toBe(400);
+    const message = (await as('dev-harsh').get(`/v1/spaces/${spaceId}/messages/${approval.messageId}`)).body.message as Message;
+    expect(message.body).toContain('waiting for this to be set up on its card');
+  });
+
+  it('is completed by its owner adding the agent with the card as its request, through Harbor’s setup on the web', async () => {
+    const approval = await card('hermes', 'agent37');
+    // The setup the Add form runs: the instances the pasted key reaches, and a new one.
+    const listed = await as('dev-harsh').post('/v1/setup/agent37/instances', { key: AGENT37_KEY });
+    expect(listed.body.instances).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'inst1', kind: 'hermes' })]));
+    expect((await as('dev-harsh').post('/v1/setup/agent37/instances', { key: 'nope' })).body.message).toMatch(/did not accept this key/);
+    const made = await as('dev-harsh').post('/v1/setup/agent37/instances/new', { key: AGENT37_KEY, kind: 'hermes', name: 'rowboat-scout', monthlyBudgetUsd: 5 });
+    expect(made.body.instance).toMatchObject({ name: 'rowboat-scout', kind: 'hermes', status: 'running' });
+    expect((await as(bossKey).post('/v1/setup/agent37/instances', { key: AGENT37_KEY })).status).toBe(403);
+
+    const add = { displayName: 'Scout', kind: 'hermes', connection: 'agent37', credential: AGENT37_KEY, instance: made.body.instance.id, request: approval.id };
+    expect((await as('dev-ramnique').post('/v1/agents', add)).status).toBe(403);
+    expect((await as('dev-harsh').post('/v1/agents', { ...add, connection: 'plugin', credential: undefined, instance: undefined })).status).toBe(400);
+    const added = await as('dev-harsh').post('/v1/agents', add);
+    expect(added.status).toBe(200);
+    const done = ((await as('dev-harsh').get(`/v1/spaces/${spaceId}/messages/${approval.messageId}`)).body.message as Message).approval!;
+    expect(done).toMatchObject({ state: 'allowed', decidedBy: 'harsh', outcome: { agentId: added.body.agent.id }, appliedAt: expect.any(String) });
+    expect(await inSpace(added.body.agent.id)).toBe(true);
+    // Completed once: the card can't make a second agent.
+    expect((await as('dev-harsh').post('/v1/agents', { ...add, displayName: 'Again' })).status).toBe(400);
+  });
+
+  it('takes Claude Code on Rowboat with its owner’s Anthropic key, and the super agent may delete it later', async () => {
+    const approval = await card('claude-code');
+    expect(approval.action).toEqual({ kind: 'create_agent', displayName: 'Scout', agentKind: 'claude-code' });
+    const created = await as('dev-harsh').post('/v1/agents/managed', { displayName: 'Scout', kind: 'claude-code', anthropicApiKey: 'sk-ant-x', request: approval.id });
+    expect(created.status).toBe(200);
+    expect(created.body.hosting).toMatchObject({ createdBy: 'harsh', requestedBy: boss.id });
+    const { rootId } = await turn();
+    expect(await call('delete_agent', { spaceId, threadRootId: rootId, agentId: created.body.agent.id, reason: 'done' })).toMatchObject({ status: 'done' });
+  });
+
+  it('is denied like any card, and then completes nothing', async () => {
+    const approval = await card('custom', 'contract');
+    expect((await decide(approval, 'deny')).body.approval).toMatchObject({ state: 'denied' });
+    expect((await as('dev-harsh').post('/v1/agents', { displayName: 'Scout', kind: 'custom', connection: 'contract', request: approval.id })).status).toBe(400);
   });
 });

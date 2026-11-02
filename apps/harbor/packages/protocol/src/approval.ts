@@ -42,10 +42,17 @@ export type ApprovalState = z.infer<typeof ApprovalState>;
  * agent's owner alone, and Harbor applies it, recording the `outcome`.
  */
 export const ApprovalAction = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('create_agent'), displayName: z.string().min(1).max(128), agentKind: z.string().min(1).max(32) }),
+  z.object({
+    kind: z.literal('create_agent'),
+    displayName: z.string().min(1).max(128),
+    agentKind: z.string().min(1).max(32),
+    /** How it is reached, as on createAgent; absent = an agent Rowboat runs (createManagedAgent). */
+    connection: z.string().min(1).max(32).optional(),
+  }),
   z.object({ kind: z.literal('delete_agent'), agentId: MemberId }),
 ]);
 export type ApprovalAction = z.infer<typeof ApprovalAction>;
+
 
 export const Approval = z.object({
   id: ApprovalId,
