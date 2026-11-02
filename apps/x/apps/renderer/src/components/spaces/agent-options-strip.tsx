@@ -14,7 +14,9 @@ import { cn } from '@/lib/utils'
 // shown preselected, or else the connector's own. A choice list is the main
 // chat's model picker over the declared choices (2026-10-08); an agent that
 // declares both `model` and `effort` gets one picker, as the chat has: the
-// model's name on the pill, its effort levels on hover.
+// model's name on the pill, its effort levels on hover. An agent's group
+// wraps within the composer's action row rather than overflowing the box
+// when its pickers don't fit on one line (2026-11-02).
 
 export type AgentOptionValues = Record<string, Record<string, string | boolean>>
 
@@ -82,7 +84,7 @@ export function AgentOptionsStrip({ draft, values, onChange, followUpAgentId }: 
     return (
         <>
             {offering.map((agentId) => (
-                <span key={agentId} className="flex shrink-0 items-center gap-1" data-agent-options={agentId}>
+                <span key={agentId} className="flex min-w-0 max-w-full flex-wrap items-center gap-1" data-agent-options={agentId}>
                     <span className="mx-0.5 h-4 w-px bg-border" />
                     <span className="text-[11px] text-muted-foreground">{names.get(agentId) ?? 'Agent'}</span>
                     {caps.get(agentId)!.options.map((option: spaces.InvocationOption) => {
