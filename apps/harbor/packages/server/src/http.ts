@@ -598,6 +598,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.setAgentPersonal.response, { agent: await service.setAgentPersonal(actor(c), agentId, input) });
   });
 
+  app.put(routes.setAgentSuper.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentSuper.params, c.req.param());
+    const input = await body(c, routes.setAgentSuper.request);
+    return reply(c, routes.setAgentSuper.response, { agent: await service.setAgentSuper(actor(c), agentId, input) });
+  });
+
   app.put(routes.setAgentOptionDefaults.path, async (c) => {
     const { agentId } = parseWith(routes.setAgentOptionDefaults.params, c.req.param());
     const input = await body(c, routes.setAgentOptionDefaults.request);

@@ -11,6 +11,7 @@ import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
+import { SuperAgents } from './core/super-agents.js';
 import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetDefaultSpaceInput, SetMemberRoleInput, SetSpaceVisibilityInput, UpdateOrgSettingsInput } from './core/spaces.js';
 import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
@@ -61,6 +62,8 @@ import type {
   SearchKind,
   SearchResults,
   Space,
+  SuperAgent,
+  SuperAgentResult,
   Topic,
   TopicListing,
 } from '@rowboat/spaces-protocol';
@@ -87,6 +90,7 @@ export class HarborService {
   private readonly hosting: Hosting;
   private readonly invocations: Invocations;
   private readonly presence: AgentPresence;
+  private readonly superAgents: SuperAgents;
 
   constructor(
     store: Store,
@@ -109,6 +113,7 @@ export class HarborService {
     this.agents = new Agents(this.k, this.spaces);
     this.hosting = new Hosting(this.k, this.spaces, this.agents);
     this.presence = new AgentPresence(this.k, options.presenceGraceMs);
+    this.superAgents = new SuperAgents(this.k, this.hosting, this.spaces, this.feed, this.invocations);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
@@ -188,6 +193,16 @@ export class HarborService {
   }
   setAgentPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
     return this.agents.setPersonal(ctx, agentId, input);
+  }
+  setAgentSuper(ctx: ActorCtx, agentId: string, input: { superAgent: SuperAgent | null }): Promise<Member> {
+    return this.agents.setSuper(ctx, agentId, input);
+  }
+  /** A super agent's create_agent and delete_agent (spec §4 Agent members, 2026-11-02). */
+  superAgentCreate(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; displayName: string; kind: string; reason: string }): Promise<SuperAgentResult> {
+    return this.superAgents.create(ctx, input);
+  }
+  superAgentDelete(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; agentId: string; reason: string }): Promise<SuperAgentResult> {
+    return this.superAgents.delete(ctx, input);
   }
 
   setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
@@ -624,8 +639,9 @@ export class HarborService {
       throw err;
     }
   }
-  decideApproval(ctx: ActorCtx, spaceId: string, approvalId: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
-    return this.invocations.decideApproval(ctx, spaceId, approvalId, input);
+  async decideApproval(ctx: ActorCtx, spaceId: string, approvalId: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
+    // A super agent's request is applied by Harbor once decided (2026-11-02); any other goes to its connector.
+    return this.superAgents.apply(await this.invocations.decideApproval(ctx, spaceId, approvalId, input));
   }
   closeApproval(ctx: ActorCtx, approvalId: string, close: ApprovalClose): Promise<Approval> {
     return this.invocations.closeApproval(ctx, approvalId, close);

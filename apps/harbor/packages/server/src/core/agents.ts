@@ -1,8 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type SuperAgent } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
-import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, enforce } from '../policy.js';
+import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
 import type { StoredAgentKey } from '../store.js';
 import type { Kernel, ActorCtx } from './kernel.js';
 import { oneLine, type Spaces } from './spaces.js';
@@ -198,6 +198,22 @@ export class Agents {
     }
     this.k.guardWrite();
     await this.k.store.setAgentPersonal(agentId, input.personal);
+    return this.agent(agentId);
+  }
+
+  /**
+   * Make an agent a super agent, change what it may do, or make it ordinary
+   * again with null (spec §4 Agent members, 2026-11-02): an admin. The same
+   * value is a no-op: no write.
+   */
+  async setSuper(ctx: ActorCtx, agentId: string, input: { superAgent: SuperAgent | null }): Promise<Member> {
+    const agent = await this.agent(agentId);
+    enforce(canSetSuperAgent(await this.actor(ctx), agent));
+    const next = input.superAgent ? { approval: input.superAgent.approval, canDelete: input.superAgent.canDelete } : null;
+    const current = agent.superAgent ? { approval: agent.superAgent.approval, canDelete: agent.superAgent.canDelete } : null;
+    if (JSON.stringify(current) === JSON.stringify(next)) return agent; // idempotent no-op: no write
+    this.k.guardWrite();
+    await this.k.store.setAgentSuper(agentId, next);
     return this.agent(agentId);
   }
 

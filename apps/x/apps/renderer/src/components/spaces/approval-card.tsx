@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Ban, Check, Clock, Loader2, ShieldAlert, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
+import { useOrgRoster } from '@/hooks/use-space-members'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { formatFeedTime, formatFullTimestamp } from '@/lib/spaces-presentation'
@@ -11,7 +12,9 @@ import { formatFeedTime, formatFullTimestamp } from '@/lib/spaces-presentation'
 // may decide, and the first decision wins. Once settled, the card says who
 // decided, as Hermes's Slack card does. Renders INSTEAD of the message body,
 // which carries the text rendering for card-blind clients. Live changes reach
-// it through the thread's refetch on every space event.
+// it through the thread's refetch on every space event. A super agent's
+// request (2026-11-02) is Harbor's own: only the agent's owner decides it,
+// and once allowed the card says what Harbor did.
 
 const LABELS: Record<spaces.ApprovalChoice, string> = {
     allow_once: 'Allow once',
@@ -65,6 +68,22 @@ export function ApprovalCard({ approval, orgId, selfMemberId, memberNames }: {
     const allows = shown.choices.filter((c) => c !== 'deny')
     const canDeny = shown.choices.includes('deny')
 
+    const choiceButtons = (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+            {allows.map((choice, i) => (
+                <Button key={choice} size="sm" variant={i === 0 ? 'default' : 'outline'} disabled={busy !== null || !orgId} onClick={() => void decide(choice)}>
+                    {busy === choice && <Loader2 className="size-3.5 animate-spin" />}
+                    {LABELS[choice]}
+                </Button>
+            ))}
+            {canDeny && (
+                <Button size="sm" variant="outline" className="text-destructive" disabled={busy !== null || !orgId} onClick={() => setDenying(true)}>
+                    Deny
+                </Button>
+            )}
+        </div>
+    )
+
     return (
         <div className="mt-0.5 max-w-xl rounded-lg border border-border bg-muted/30 p-3 text-sm">
             <div className="flex items-center gap-2 font-medium text-foreground">
@@ -99,26 +118,40 @@ export function ApprovalCard({ approval, orgId, selfMemberId, memberNames }: {
                         </Button>
                         <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setDenying(false)}>Cancel</Button>
                     </div>
+                ) : shown.action && orgId ? (
+                    <OwnerOnly orgId={orgId} agentId={shown.agentId} selfMemberId={selfMemberId} memberNames={memberNames}>{choiceButtons}</OwnerOnly>
                 ) : (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                        {allows.map((choice, i) => (
-                            <Button key={choice} size="sm" variant={i === 0 ? 'default' : 'outline'} disabled={busy !== null || !orgId} onClick={() => void decide(choice)}>
-                                {busy === choice && <Loader2 className="size-3.5 animate-spin" />}
-                                {LABELS[choice]}
-                            </Button>
-                        ))}
-                        {canDeny && (
-                            <Button size="sm" variant="outline" className="text-destructive" disabled={busy !== null || !orgId} onClick={() => setDenying(true)}>
-                                Deny
-                            </Button>
-                        )}
-                    </div>
+                    choiceButtons
                 )
             ) : (
-                <Outcome approval={shown} agentName={agentName} nameOf={nameOf} />
+                <>
+                    <Outcome approval={shown} agentName={agentName} nameOf={nameOf} />
+                    {shown.action && shown.state === 'allowed' && <ActionOutcome approval={shown} memberNames={memberNames} />}
+                </>
             )}
         </div>
     )
+}
+
+/**
+ * A super agent's request (2026-11-02) is its owner's to decide: anyone else
+ * sees who it waits for. Before the roster loads, the buttons show, and
+ * Harbor refuses anyone but the owner.
+ */
+function OwnerOnly({ orgId, agentId, selfMemberId, memberNames, children }: { orgId: string; agentId: string; selfMemberId?: string; memberNames: Map<string, string>; children: ReactNode }) {
+    const ownerId = useOrgRoster(orgId, []).find((m) => m.id === agentId)?.ownerId
+    if (!ownerId || ownerId === selfMemberId) return <>{children}</>
+    return <p className="mt-3 text-xs text-muted-foreground">Waiting for {memberNames.get(ownerId) ?? 'its owner'} to decide.</p>
+}
+
+/** What Harbor did once a super agent's request was allowed: the agent it made or removed, or why it could not. */
+function ActionOutcome({ approval, memberNames }: { approval: spaces.Approval; memberNames: Map<string, string> }) {
+    const action = approval.action!
+    const name = action.kind === 'create_agent' ? action.displayName : memberNames.get(action.agentId) ?? 'the agent'
+    const verb = action.kind === 'create_agent' ? 'create' : 'delete'
+    if (!approval.appliedAt) return <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Working on it…</p>
+    if (approval.outcome?.error) return <p className="mt-1.5 text-xs text-destructive">Could not {verb} {name}: {approval.outcome.error}</p>
+    return <p className="mt-1.5 text-xs text-muted-foreground">{action.kind === 'create_agent' ? `Created ${name}. It’s getting ready and joins this space.` : `Deleted ${name}.`}</p>
 }
 
 function Outcome({ approval, agentName, nameOf }: { approval: spaces.Approval; agentName: string; nameOf: (id?: string) => string }) {

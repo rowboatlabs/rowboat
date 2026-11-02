@@ -308,6 +308,44 @@ export function canClearAgentHook(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner or an admin can turn its alerts off' };
 }
 
+// --- super agents (spec §4 Agent members, 2026-11-02) --------------------------
+
+/**
+ * Making an agent a super agent, changing what it may do, or making it
+ * ordinary again: an admin, since what it creates runs on Rowboat's trial
+ * credit. Only an agent with an owner, who will own what it creates.
+ */
+export function canSetSuperAgent(actor: Member, agent: Member): Decision {
+  if (agent.kind !== 'agent') return { code: 'invalid_request', message: 'only an agent can be a super agent' };
+  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can make an agent a super agent' };
+  if (agent.ownerId === undefined) return { code: 'invalid_request', message: 'an agent without an owner can’t be a super agent: what it creates needs a person to own it' };
+  return null;
+}
+
+/**
+ * A super agent creating a managed agent. What it creates is its owner's,
+ * never its own, so no agent escapes every owner (canAddAgent).
+ */
+export function canSuperAgentCreate(agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.superAgent && agent.ownerId !== undefined) return null;
+  return { code: 'forbidden', message: 'only a super agent can create agents; an admin makes one on the agent’s page' };
+}
+
+/** A super agent deleting: one an admin allowed to, and only an agent it created. */
+export function canSuperAgentDelete(agent: Member, requestedBy: string | undefined): Decision {
+  if (!(agent.kind === 'agent' && agent.superAgent?.canDelete && agent.ownerId !== undefined)) {
+    return { code: 'forbidden', message: 'this agent isn’t allowed to delete agents' };
+  }
+  if (requestedBy !== agent.id) return { code: 'forbidden', message: 'a super agent deletes only the agents it created' };
+  return null;
+}
+
+/** Deciding a super agent's request: its owner alone, who the agent is created for or taken from. */
+export function canDecideSuperAgentRequest(actor: Member, superAgent: Member | undefined): Decision {
+  if (superAgent?.ownerId !== undefined && superAgent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can decide this' };
+}
+
 /** Revoking: the owner, or any admin — the off switch for an agent that misbehaves. */
 export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && (actor.role === 'admin' || (agent.ownerId !== undefined && agent.ownerId === actor.id))) return null;

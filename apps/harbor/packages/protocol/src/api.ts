@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateAgentProfile, UpdateProfile,
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
   HostingConsole,
@@ -790,6 +790,19 @@ export const routes = {
     path: '/v1/agents/:agentId/personal',
     params: z.object({ agentId: MemberId }),
     request: z.object({ personal: z.boolean() }),
+    response: z.object({ agent: Member }),
+  },
+  /**
+   * Make an agent a super agent, change what it may do, or make it an
+   * ordinary agent again with `null` (spec §4 Agent members, 2026-11-02):
+   * admins only, for an agent with an owner, app only. The same value is a
+   * no-op. No event, as with personal: rosters carry it on the next read.
+   */
+  setAgentSuper: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/super',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ superAgent: SuperAgent.nullable() }),
     response: z.object({ agent: Member }),
   },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */

@@ -4,6 +4,7 @@ import type {
   AgentHook,
   AgentHosting,
   AgentKey,
+  SuperAgent,
   Attribution,
   ConnectorCapabilities,
   Approval,
@@ -247,6 +248,8 @@ export interface Store {
   putMember(member: Member): Promise<void>;
   /** Switch an agent between channel and personal (2026-10-27): the one write of the flag after creation. */
   setAgentPersonal(id: string, personal: boolean): Promise<void>;
+  /** Make an agent a super agent or an ordinary one again (2026-11-02): the one write of the setting. */
+  setAgentSuper(id: string, superAgent: SuperAgent | null): Promise<void>;
   /** An agent's description (its title) and instructions, both whole: null clears one (2026-10-29). */
   setAgentProfile(id: string, profile: { title: string | null; instructions: string | null }): Promise<void>;
   /** The whole org roster — operator-side reads only (the mentions backfill). */
@@ -594,9 +597,9 @@ export interface Store {
   putApproval(approval: Approval): Promise<void>;
   getApproval(id: string): Promise<Approval | undefined>;
   getApprovalByRequest(invocationId: string, requestKey: string): Promise<Approval | undefined>;
-  /** An invocation's approvals in the given states, oldest first. */
+  /** An invocation's approvals from its connector in the given states, oldest first: not a super agent's requests (2026-11-02). */
   listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]>;
-  /** One agent's decided approvals its connector has not confirmed applying, oldest first. */
+  /** One agent's decided connector approvals its connector has not confirmed applying, oldest first. */
   listUnappliedDecisions(agentId: string): Promise<Approval[]>;
   /** The approvals riding on these messages (their cards). */
   listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]>;

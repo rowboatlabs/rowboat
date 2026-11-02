@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
 
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
+const roster = vi.hoisted(() => ({ members: [] as spaces.Member[] }))
+vi.mock('@/hooks/use-space-members', () => ({ useOrgRoster: () => roster.members }))
 
 import { toast } from '@/lib/toast'
 import { ApprovalCard } from './approval-card'
@@ -82,5 +84,31 @@ describe('ApprovalCard', () => {
         expect(screen.getByText(/Expired: Hermes stopped waiting/)).toBeInTheDocument()
         rerender(<ApprovalCard approval={decided({ state: 'cancelled' })} orgId="org-1" selfMemberId="me" memberNames={names} />)
         expect(screen.getByText(/Cancelled/)).toBeInTheDocument()
+    })
+
+    // A super agent's request (2026-11-02): its owner decides, and the card says what Harbor did.
+    describe('a super agent’s request', () => {
+        const request: spaces.Approval = { ...open, agentId: 'boss', title: 'Create a Hermes agent named Helper', choices: ['allow_once', 'deny'], action: { kind: 'create_agent', displayName: 'Helper', agentKind: 'hermes' } }
+        beforeEach(() => {
+            roster.members = [{ id: 'boss', displayName: 'Boss', role: 'member', kind: 'agent', ownerId: 'harsh' }]
+        })
+
+        it('offers the choices to its owner only', () => {
+            render(<ApprovalCard approval={request} orgId="org-1" selfMemberId="me" memberNames={names} />)
+            expect(screen.queryByRole('button')).toBeNull()
+            expect(screen.getByText('Waiting for Harsh to decide.')).toBeInTheDocument()
+            cleanup()
+            render(<ApprovalCard approval={request} orgId="org-1" selfMemberId="harsh" memberNames={names} />)
+            expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Allow once', 'Deny'])
+        })
+
+        it('says what was created, or why it could not be', () => {
+            const allowed = decided({ ...request, state: 'allowed', decision: 'allow_once', decidedBy: 'harsh', appliedAt: '2026-10-01T10:01:01.000Z' })
+            render(<ApprovalCard approval={{ ...allowed, outcome: { agentId: 'helper' } }} orgId="org-1" selfMemberId="me" memberNames={names} />)
+            expect(screen.getByText(/Created Helper/)).toBeInTheDocument()
+            cleanup()
+            render(<ApprovalCard approval={{ ...allowed, outcome: { error: 'plan limit reached' } }} orgId="org-1" selfMemberId="me" memberNames={names} />)
+            expect(screen.getByText('Could not create Helper: plan limit reached')).toBeInTheDocument()
+        })
     })
 })

@@ -35,6 +35,7 @@ import {
   type ApprovalClose,
   type InvitePolicy,
   type Member,
+  type SuperAgent,
   type MemberRole,
   type OrgSettings,
   type Membership,
@@ -571,6 +572,11 @@ export class SpacesClient {
   /** Set an agent's description and instructions: its owner only; a field left out is left alone, an empty one clears it (api.ts setAgentProfile, 2026-10-29). */
   async setAgentProfile(agentId: string, profile: { title?: string; instructions?: string }): Promise<Member> {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/profile`, routes.setAgentProfile.response, profile)).agent;
+  }
+
+  /** Make an agent a super agent, or ordinary again with null (api.ts setAgentSuper, 2026-11-02): admins only. */
+  async setAgentSuper(agentId: string, superAgent: SuperAgent | null): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/super`, routes.setAgentSuper.response, { superAgent })).agent;
   }
 
   /** Switch an agent this member owns between channel and personal (api.ts setAgentPersonal, 2026-10-27). */

@@ -34,6 +34,19 @@ export const APPROVAL_CHOICE_LABELS: Record<ApprovalChoice, string> = {
 export const ApprovalState = z.enum(['open', 'allowed', 'denied', 'expired', 'cancelled']);
 export type ApprovalState = z.infer<typeof ApprovalState>;
 
+/**
+ * What Harbor itself does once a super agent's request is allowed (spec §4
+ * Agent members, 2026-11-02). An approval with an action is raised by Harbor
+ * for a super agent's create_agent or delete_agent, not by its connector: it
+ * holds no turn, outlives the turn that asked, is decided by the super
+ * agent's owner alone, and Harbor applies it, recording the `outcome`.
+ */
+export const ApprovalAction = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('create_agent'), displayName: z.string().min(1).max(128), agentKind: z.string().min(1).max(32) }),
+  z.object({ kind: z.literal('delete_agent'), agentId: MemberId }),
+]);
+export type ApprovalAction = z.infer<typeof ApprovalAction>;
+
 export const Approval = z.object({
   id: ApprovalId,
   /** The invocation it belongs to (an InvocationId). */
@@ -60,6 +73,10 @@ export const Approval = z.object({
   note: z.string().max(1000).optional(),
   /** When the connector confirmed it passed the decision to its agent. */
   appliedAt: z.iso.datetime().optional(),
+  /** Harbor's own action, for a super agent's request (ApprovalAction). */
+  action: ApprovalAction.optional(),
+  /** What applying the action did: the agent it created or deleted, or why it failed. */
+  outcome: z.object({ agentId: MemberId.optional(), error: z.string().max(1000).optional() }).optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });

@@ -37,6 +37,18 @@ export type MemberKind = z.infer<typeof MemberKind>;
 /** How long an agent's instructions may be (2026-10-29): room for a page of guidance, not a manual. */
 export const AGENT_INSTRUCTIONS_MAX = 4000;
 
+/**
+ * What an admin allows a super agent (spec §4 Agent members, 2026-11-02).
+ * `approval: 'always'` (the default) puts each create or delete on a card in
+ * the thread for the super agent's owner to allow; `never` acts at once.
+ * `canDelete` lets it delete the managed agents it created, and no others.
+ */
+export const SuperAgent = z.object({
+  approval: z.enum(['always', 'never']).default('always'),
+  canDelete: z.boolean().default(false),
+});
+export type SuperAgent = z.infer<typeof SuperAgent>;
+
 export const Member = z.object({
   id: MemberId,
   /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
@@ -74,6 +86,12 @@ export const Member = z.object({
    * may invoke. Fixed at creation; independent of the kind and connection.
    */
   personal: z.boolean().optional(),
+  /**
+   * A super agent (spec §4 Agent members, 2026-11-02): an agent an admin let
+   * create managed agents, and delete the ones it created when `canDelete`.
+   * Absent = an ordinary agent, which creates none. Set only by an admin.
+   */
+  superAgent: SuperAgent.optional(),
   /**
    * An agent's instructions from its owner (2026-10-29, agent personalities):
    * how it should behave, in its owner's words, which its connector gives the
@@ -155,6 +173,12 @@ export const CONDUCTOR_CODING_AGENTS = ['claude-code'] as const;
 export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
 /** The runtimes Maritime hosts that Harbor drives through its exec API (2026-10-26): each turn is the runtime's own CLI, run in the agent's VM. */
 export const MARITIME_AGENTS = ['hermes', 'claude-code', 'codex'] as const;
+/**
+ * The managed kinds a super agent may create (2026-11-02): those that start on
+ * Rowboat's trial credit. Claude Code needs its owner's Anthropic key, and a
+ * secret never passes through a tool.
+ */
+export const SUPER_AGENT_KINDS = ['hermes', 'codex'] as const;
 /**
  * The coding agents the desktop app runs on its owner's own computer
  * (2026-10-28, local agents): the app holds the agent's key and drives the
@@ -311,6 +335,8 @@ export const AgentHosting = z.object({
   /** The owner's key, once the agent runs on one. */
   llm: HostingLlm.optional(),
   createdBy: MemberId,
+  /** The super agent that asked for it (2026-11-02), when one did; `createdBy` is then that agent's owner. */
+  requestedBy: MemberId.optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -402,6 +428,18 @@ export const HostingTrigger = z.object({
 export type HostingTrigger = z.infer<typeof HostingTrigger>;
 
 /** An agent with its keys, as the Agents screen lists them, its platform credential and alert hook when Harbor runs its connector, and its hosting when Rowboat runs it. */
+/** What a super agent's create or delete did: done now, or waiting on its owner's card. */
+export const SuperAgentResult = z.object({
+  status: z.enum(['done', 'pending']),
+  /** The agent created or deleted, when done. */
+  agent: Member.optional(),
+  hosting: AgentHosting.optional(),
+  /** The card its owner decides on, when pending. */
+  approval: Approval.optional(),
+});
+
+export type SuperAgentResult = z.infer<typeof SuperAgentResult>;
+
 export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional(), hook: AgentHook.optional(), hosting: AgentHosting.optional() });
 export type AgentListing = z.infer<typeof AgentListing>;
 

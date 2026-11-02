@@ -4214,6 +4214,11 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), personal: z.boolean() }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
   },
+  // Making an agent a super agent, or ordinary again with null (2026-11-02, harbor setAgentSuper): admins only.
+  'spaces:setAgentSuper': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), superAgent: z.object({ approval: z.enum(['always', 'never']), canDelete: z.boolean() }).nullable() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
   // Add existing org members, people or agents, to a space the caller is in
   // (2026-09-29). They learn of it by the space_added frame.
   'spaces:addMembers': {

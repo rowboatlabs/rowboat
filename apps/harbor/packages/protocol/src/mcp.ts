@@ -11,7 +11,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { Attribution, InvitePolicy, Member, SUPER_AGENT_KINDS, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
@@ -793,6 +793,36 @@ export const markAllRead = tool({
   }),
 });
 
+// --- super agents (spec §4 Agent members, 2026-11-02) ---------------------------
+
+export const createAgent = tool({
+  name: 'create_agent',
+  description:
+    'Create a managed agent (Hermes or Codex) that you can hand work to: only for a super agent, an agent an ' +
+    'admin allowed to. The new agent belongs to your owner, joins the space you name, starts on Rowboat\'s trial ' +
+    'credit, and is a channel agent, so you can mention it once it is ready. Pass the thread you are working in: ' +
+    'when your owner must approve, Harbor puts a card there and returns status "pending"; say so and end your ' +
+    'turn, and read the thread for the outcome when you are asked again. Only when the work needs another agent.',
+  input: z.object({
+    spaceId: SpaceId,
+    threadRootId: MessageId,
+    displayName: z.string().trim().min(1).max(128),
+    kind: z.enum(SUPER_AGENT_KINDS),
+    reason: z.string().min(1).max(1000),
+  }),
+  output: SuperAgentResult,
+});
+
+export const deleteAgent = tool({
+  name: 'delete_agent',
+  description:
+    'Delete a managed agent you created: only for a super agent an admin allowed to delete. Its keys stop at ' +
+    'once and its machine is removed. Pass the thread you are working in, as with create_agent: when your ' +
+    'owner must approve, the card goes there and the result is "pending".',
+  input: z.object({ spaceId: SpaceId, threadRootId: MessageId, agentId: MemberId, reason: z.string().min(1).max(1000) }),
+  output: SuperAgentResult,
+});
+
 export const mcpTools = [
   whoami,
   updateProfile,
@@ -842,7 +872,16 @@ export const mcpTools = [
   restoreAsset,
   assetHistory,
   diff,
+  createAgent,
+  deleteAgent,
 ] as const;
+
+/**
+ * Tools only an agent member on its own key can use (super agents,
+ * 2026-11-02): Harbor lists them to agents only, and a person's own
+ * assistant (the desktop's projection) leaves them out.
+ */
+export const agentOnlyMcpToolNames: ReadonlySet<string> = new Set([createAgent.name, deleteAgent.name]);
 
 /** Tool names whose only effect is reading — no event is appended, nothing is written. */
 export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([

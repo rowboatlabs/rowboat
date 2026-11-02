@@ -1190,6 +1190,20 @@ export const MIGRATIONS: Migration[] = [
     id: '053-org-settings-jev-enabled',
     statements: [`alter table org_settings add column if not exists jev_enabled boolean not null default true`],
   },
+  {
+    // Super agents (spec §4 Agent members, 2026-11-02): what an admin lets an
+    // agent do about other agents; null = an ordinary agent.
+    id: '054-agent-super',
+    statements: [
+      `alter table members add column if not exists super_agent jsonb`,
+      `alter table members add constraint members_super_agent_check check (kind = 'agent' or super_agent is null)`,
+    ],
+  },
+  {
+    // The super agent that asked for a managed agent (2026-11-02): what lets it delete only its own.
+    id: '055-agent-hosting-requested-by',
+    statements: [`alter table agent_hosting add column if not exists requested_by text`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {
