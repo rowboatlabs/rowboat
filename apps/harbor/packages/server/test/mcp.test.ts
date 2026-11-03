@@ -70,6 +70,7 @@ describe('agent face (MCP)', () => {
       'list_assets',
       'list_members',
       'list_spaces',
+      'list_threads',
       'list_topics',
       'manage_topic',
       'mark_all_read',

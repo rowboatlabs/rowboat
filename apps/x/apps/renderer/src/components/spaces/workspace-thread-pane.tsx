@@ -51,7 +51,7 @@ export function WorkspaceThreadPane({ org, space, rootId, item, active, onClose,
         void window.ipc.invoke('spaces:getMessage', { orgId, spaceId, messageId }).then(({ message }) => {
             const root = message.threadRoot ?? message.id
             requestJump({ topicId: root, messageId, offset: message.offset })
-            if (orgId === org.id) onOpenThread(spaceId, root)
+            if (orgId === org.id && spaceIds.includes(spaceId)) onOpenThread(spaceId, root)
             else onOpenSpace(orgId, spaceId, { kind: 'thread', rootMessageId: root })
         }).catch((err) => toast(err instanceof Error ? err.message : 'Could not open message', 'error'))
     }

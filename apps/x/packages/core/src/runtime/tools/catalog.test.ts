@@ -246,6 +246,7 @@ const HISTORICAL_KEY_ORDER = [
     "read_stream",
     "read_thread",
     "read_activity",
+    "list_threads",
     "mark_all_read",
     "search_space",
     "post_message",
