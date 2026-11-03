@@ -51,6 +51,7 @@ describe('agent face (MCP)', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       'add_members',
       'archive_space',
+      'archive_thread',
       'asset_history',
       'browse_spaces',
       'create_asset',
@@ -67,6 +68,7 @@ describe('agent face (MCP)', () => {
       'get_org_settings',
       'join_space',
       'leave_space',
+      'list_archived_threads',
       'list_assets',
       'list_members',
       'list_spaces',

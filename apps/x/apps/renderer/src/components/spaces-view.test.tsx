@@ -74,7 +74,7 @@ beforeEach(() => {
         observe() { this.callback() }
         disconnect() {}
     })
-    Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke: vi.fn(async () => ({ entries: [] })) } })
+    Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke: vi.fn(async (channel: string) => channel === 'spaces:listArchivedThreads' ? { threads: [] } : { entries: [] }) } })
 })
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 

@@ -3,7 +3,7 @@ import { canActInSpace, isSpaceArchived } from '@/lib/spaces-access'
 
 const memberActions = new Set<InvokeChannels>([
     'spaces:postMessage', 'spaces:editMessage', 'spaces:deleteMessage', 'spaces:reactToMessage',
-    'spaces:votePoll', 'spaces:endPoll', 'spaces:createTopic', 'spaces:manageTopic',
+    'spaces:votePoll', 'spaces:endPoll', 'spaces:createTopic', 'spaces:manageTopic', 'spaces:archiveThread',
     'spaces:createAsset', 'spaces:proposeChange', 'spaces:moveAsset', 'spaces:deleteAsset',
     'spaces:restoreAsset', 'spaces:uploadBlob', 'spaces:renameSpace', 'spaces:createInvite',
     'spaces:markRead', 'spaces:followThread', 'spaces:presence', 'spaces:whiteboard',

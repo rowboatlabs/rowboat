@@ -500,6 +500,19 @@ async function dispatch(
       }
       return { topic: await service.manageTopic(ctx, a.spaceId, a.topicId, action) };
     }
+    case 'archive_thread': {
+      const a = args as { spaceId: string; rootMessageId: string; archived?: boolean };
+      const root = await service.archiveThread(ctx, a.spaceId, a.rootMessageId, {
+        archived: a.archived ?? true,
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
+      });
+      return { root };
+    }
+    case 'list_archived_threads': {
+      const a = args as { spaceId: string };
+      return { threads: await service.listArchivedThreads(ctx, a.spaceId) };
+    }
     // --- super agents (spec §4 Agent members, 2026-11-02) ----------------------
     case 'create_agent':
       return service.superAgentCreate(ctx, args as { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string });

@@ -318,6 +318,7 @@ interface MessageRow {
   mentions_rowboat: boolean | null;
   summary?: string | null;
   people_only?: boolean | null;
+  archived?: boolean | null;
 }
 
 /** What search indexes for a message: its summary (2026-10-25) and its body. */
@@ -349,6 +350,7 @@ function rowToMessage(r: MessageRow): Message {
     // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
     ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
     ...(r.people_only ? { peopleOnly: true as const } : {}),
+    ...(r.archived ? { archived: true as const } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
     mentionsRowboat: r.mentions_rowboat ?? false,
@@ -1236,6 +1238,19 @@ export class PgStore implements Store {
         message.peopleOnly === true,
       ],
     );
+  }
+
+  async setThreadArchived(spaceId: string, rootMessageId: string, archived: boolean): Promise<void> {
+    await this.sql.query('update messages set archived = $3 where space_id = $1 and id = $2', [spaceId, rootMessageId, archived]);
+  }
+
+  async listArchivedRoots(spaceId: string): Promise<Message[]> {
+    const rows = await this.sql.query<MessageRow>(
+      `select * from messages where space_id = $1 and archived
+       order by coalesce(last_reply_offset, stream_offset) desc`,
+      [spaceId],
+    );
+    return rows.map(rowToMessage);
   }
 
   async refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void> {

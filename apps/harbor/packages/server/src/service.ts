@@ -13,7 +13,7 @@ import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
 import { SuperAgents } from './core/super-agents.js';
 import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetDefaultSpaceInput, SetMemberRoleInput, SetSpaceVisibilityInput, UpdateOrgSettingsInput } from './core/spaces.js';
-import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
+import type { ArchiveThreadInput, CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
 import type { Notifier } from './notify.js';
@@ -705,6 +705,14 @@ export class HarborService {
   }
   manageTopic(ctx: ActorCtx, spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {
     return this.feed.manageTopic(ctx, spaceId, topicId, action);
+  }
+
+  archiveThread(ctx: ActorCtx, spaceId: string, rootMessageId: string, input: ArchiveThreadInput): Promise<Message> {
+    return this.feed.archiveThread(ctx, spaceId, rootMessageId, input);
+  }
+
+  listArchivedThreads(ctx: ActorCtx, spaceId: string): Promise<Message[]> {
+    return this.feed.listArchivedThreads(ctx, spaceId);
   }
   search(
     ctx: ActorCtx,

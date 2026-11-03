@@ -1509,6 +1509,26 @@ export const routes = {
    * replacing any earlier link; `detach_document` clears it. Both are
    * idempotent (no event when nothing changes).
    */
+  /**
+   * Archive or unarchive a plain thread (2026-11-03, "archive threads" in
+   * Main): sets the root's `archived` without naming it. A thread with a
+   * topic archives through manageTopic instead (`invalid_request` here), so
+   * there is one flag per thread. Same-state calls are no-ops with no event.
+   */
+  archiveThread: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/threads/:rootMessageId/archive',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
+    request: z.object({ archived: z.boolean(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ root: Message }),
+  },
+  /** The space's archived plain threads: their roots, newest activity first. Archived topics are listTopics'. */
+  listArchivedThreads: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/archived-threads',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ threads: z.array(Message) }),
+  },
   manageTopic: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/topics/:topicId',

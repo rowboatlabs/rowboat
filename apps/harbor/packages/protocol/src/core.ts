@@ -788,6 +788,13 @@ export const Message = z.object({
   /** A thread reply its author sent to people only (NewMessage.peopleOnly, 2026-10-27). Written once. */
   peopleOnly: z.literal(true).optional(),
   /**
+   * A root whose thread is archived (archiveThread, 2026-11-03, "archive
+   * threads" in Main): a plain thread leaves the active lists without being
+   * named. A discussion's archive stays on its Topic, so a root with a topic
+   * never carries this. A reply revives it, as it revives a topic.
+   */
+  archived: z.literal(true).optional(),
+  /**
    * Who this message addresses — STAMPED by the org at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that
    * are members of the space. Unread counts, Activity, and push read these;

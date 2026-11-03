@@ -1,7 +1,7 @@
 import { useThreadsPreference, useThreadsScroll } from '@/hooks/use-threads-view-memory'
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { invokeSpace } from '@/lib/spaces-invoke'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Archive, ArchiveRestore, Bot, ChevronDown, Link as LinkIcon, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, Users } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { messageUrl } from '@x/shared/dist/spaces.js'
@@ -11,12 +11,11 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { UnreadBadge } from '@/components/spaces/unread-badge'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
-import { prefetchThread, type ChatMessage, type SpacePresence } from '@/hooks/use-space-chat'
+import { prefetchThread, updateStreamMessage, type ChatMessage, type SpacePresence } from '@/hooks/use-space-chat'
 import { threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
 import { useFallbackReplyAuthors } from '@/lib/spaces-thread-participants'
 import { threadLabelOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
-import { archivePlainThread } from '@/lib/spaces-archive-thread'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -46,18 +45,36 @@ interface ThreadRow {
     activityAt: string
 }
 
-function threadRows(topics: readonly spaces.TopicListing[], roots: readonly ChatMessage[], filter: ThreadsFilter, archived: boolean, selfMemberId: string): ThreadRow[] {
+/**
+ * The archived unnamed threads (2026-11-03, "archive threads" in Main): the
+ * Archived list's fetch, overridden by the stream's copies of the same roots,
+ * which live events keep current, plus any root the stream saw archived since.
+ */
+function archivedPlainRoots(fetched: readonly spaces.Message[], roots: readonly ChatMessage[]): spaces.Message[] {
+    const byId = new Map(fetched.map((root) => [root.id, root]))
+    for (const root of roots) if (root.archived || byId.has(root.id)) byId.set(root.id, root)
+    return [...byId.values()].filter((root) => root.archived)
+}
+
+function threadRows(topics: readonly spaces.TopicListing[], roots: readonly ChatMessage[], archivedPlain: readonly spaces.Message[], filter: ThreadsFilter, archived: boolean, selfMemberId: string): ThreadRow[] {
     const rows = new Map<string, ThreadRow>()
     for (const topic of topics) {
         if (!!topic.archived !== archived) continue
         rows.set(topic.rootMessageId, { rootMessageId: topic.rootMessageId, topic, root: topic.rootMessage ?? undefined, activityAt: topic.lastActivityAt })
     }
-    // Archive lives on the topic row; archiving an unnamed thread names it
-    // first (archivePlainThread). Archived roots are skipped so they leave All.
+    // A discussion archives on its topic row, an unnamed thread on its root;
+    // either way it leaves All for the Archived list.
     const archivedRoots = new Set(topics.filter((topic) => topic.archived).map((topic) => topic.rootMessageId))
+    // Naming a thread unarchives its root on the server; a stale copy here must not outlive that.
+    const namedRoots = new Set(topics.map((topic) => topic.rootMessageId))
+    if (filter !== 'named' && archived) {
+        for (const root of archivedPlain) {
+            if (!namedRoots.has(root.id)) rows.set(root.id, { rootMessageId: root.id, root, activityAt: root.lastReplyAt ?? root.postedAt })
+        }
+    }
     if (filter !== 'named' && !archived) {
         for (const root of roots) {
-            if (root.pending || root.failed || root.threadRoot !== undefined || root.replyCount === 0 || archivedRoots.has(root.id)) continue
+            if (root.pending || root.failed || root.threadRoot !== undefined || root.replyCount === 0 || archivedRoots.has(root.id) || root.archived) continue
             const row = rows.get(root.id)
             if (row) row.root = root
             else rows.set(root.id, { rootMessageId: root.id, root, activityAt: root.lastReplyAt ?? root.postedAt })
@@ -104,11 +121,20 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     const archived = archiveFilter === 'archived'
     const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
     const [pending, setPending] = useState<string | null>(null)
-    const allRows = useMemo(() => threadRows(topics, roots, filter, archived, selfMemberId), [topics, roots, filter, archived, selfMemberId])
+    const [fetchedArchived, setFetchedArchived] = useState<spaces.Message[]>([])
+    useEffect(() => {
+        let live = true
+        invokeSpace('spaces:listArchivedThreads', { orgId, spaceId })
+            .then(({ threads }) => { if (live) setFetchedArchived(threads) })
+            .catch(() => { /* an older Harbor has no such route: nothing archived to show */ })
+        return () => { live = false }
+    }, [orgId, spaceId])
+    const archivedPlain = useMemo(() => archivedPlainRoots(fetchedArchived, roots), [fetchedArchived, roots])
+    const allRows = useMemo(() => threadRows(topics, roots, archivedPlain, filter, archived, selfMemberId), [topics, roots, archivedPlain, filter, archived, selfMemberId])
     const shownRoots = useMemo(() => allRows.flatMap((row) => row.root ? [row.root] : []), [allRows])
     const replyAuthors = useFallbackReplyAuthors(orgId, spaceId, shownRoots)
     const rows = participants.length ? allRows.filter((row) => participantsOf(row.root, replyAuthors).some((id) => participants.includes(id))) : allRows
-    // Archived rows are all topics, which load whole: no stream paging there.
+    // The Archived list loads whole: no stream paging there.
     const pagesStream = filter !== 'named' && !archived
     const scroll = useThreadsScroll(`spaces:threads-scroll:${memoryKey}:${filter}:${archived}:${savedParticipants ?? ''}`, {
         loaded, hasMore: pagesStream && hasMore, loadingOlder, onLoadOlder, rowCount: rows.length,
@@ -119,7 +145,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     // choice that the loaded window doesn't reach yet so it can be cleared.
     const participantIds = new Set([...allRows.flatMap((row) => participantsOf(row.root, replyAuthors)), ...participants])
     const participantOptions = [...participantIds].sort((a, b) => (memberNames.get(a) ?? '').localeCompare(memberNames.get(b) ?? ''))
-    const archivedCount = useMemo(() => threadRows(topics, [], filter, true, selfMemberId).length, [topics, filter, selfMemberId])
+    const archivedCount = useMemo(() => threadRows(topics, [], archivedPlain, filter, true, selfMemberId).length, [topics, archivedPlain, filter, selfMemberId])
     const manage = async (id: string, action: spaces.SpacesManageTopicAction) => {
         setPending(id)
         try {
@@ -130,11 +156,12 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
             toast(error instanceof Error ? error.message : 'Could not update the discussion', 'error')
         } finally { setPending(null) }
     }
-    const archivePlain = async (root: spaces.Message) => {
+    const archivePlain = async (root: spaces.Message, archive: boolean) => {
         setPending(root.id)
         try {
-            await archivePlainThread(orgId, spaceId, root.id, root.body)
-            await refreshSpaceFeed(orgId, spaceId)
+            const res = await invokeSpace('spaces:archiveThread', { orgId, spaceId, rootMessageId: root.id, archived: archive })
+            updateStreamMessage(orgId, spaceId, res.root)
+            setFetchedArchived((prev) => [...prev.filter((m) => m.id !== res.root.id), res.root])
         } catch (error) {
             toast(error instanceof Error ? error.message : 'Could not archive the thread', 'error')
         } finally { setPending(null) }
@@ -215,7 +242,9 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                                     <DropdownMenuItem onSelect={copyLink}><LinkIcon className="mr-2 size-3.5" />Copy link</DropdownMenuItem>
                                     {!topic && root && <>
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem disabled={!writable} onSelect={() => void archivePlain(root)}><Archive className="mr-2 size-3.5" />Archive</DropdownMenuItem>
+                                        <DropdownMenuItem disabled={!writable} onSelect={() => void archivePlain(root, !root.archived)}>
+                                            {root.archived ? <ArchiveRestore className="mr-2 size-3.5" /> : <Archive className="mr-2 size-3.5" />}{root.archived ? 'Unarchive' : 'Archive'}
+                                        </DropdownMenuItem>
                                     </>}
                                     {topic && <>
                                         <DropdownMenuSeparator />

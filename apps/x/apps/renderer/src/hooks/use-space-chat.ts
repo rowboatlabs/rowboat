@@ -4,7 +4,7 @@ import type { spaces } from '@x/shared'
 import { toast } from '@/lib/toast'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
-import { applyReaction, mergeMessages } from '@/lib/spaces-conventions'
+import { applyReaction, mergeMessages, withArchived } from '@/lib/spaces-conventions'
 import { applyPollVote } from '@/lib/spaces-poll'
 import { getStreamView, subscribeStreamView, useStreamView } from '@/lib/spaces-stream-view'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, isReconnect, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
@@ -630,6 +630,10 @@ function wireBus(): void {
             ingestTopic(event.orgId, frame.spaceId, frame.event.topic)
         } else if (frame.event.type === 'topic_removed') {
             removeTopicByRoot(event.orgId, frame.spaceId, frame.event.removal.rootMessageId)
+        } else if (frame.event.type === 'thread_archive') {
+            const { rootMessageId, action } = frame.event
+            const root = state.messages.find((m) => m.id === rootMessageId)
+            if (root) updateStreamMessage(event.orgId, frame.spaceId, withArchived(root, action === 'archived'))
         } else if (frame.event.type === 'reaction') {
             // Fold the toggle into the message in place (thread panes refetch on
             // their own tick; the stream keeps its messages live here). The

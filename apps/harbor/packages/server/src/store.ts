@@ -415,6 +415,10 @@ export interface Store {
    * and replays can't drift it.
    */
   refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void>;
+  /** A plain thread's archive flag (archiveThread, 2026-11-03) on its root. */
+  setThreadArchived(spaceId: string, rootMessageId: string, archived: boolean): Promise<void>;
+  /** The space's archived roots, newest activity first. */
+  listArchivedRoots(spaceId: string): Promise<Message[]>;
   /**
    * Tombstone: blanks the row's body and summary and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one

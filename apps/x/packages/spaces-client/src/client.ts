@@ -1009,6 +1009,21 @@ export class SpacesClient {
     ).message;
   }
 
+  async archiveThread(spaceId: string, rootMessageId: string, archived: boolean): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}/archive`),
+        routes.archiveThread.response,
+        { archived, actingMode: 'direct' },
+      )
+    ).root;
+  }
+
+  async listArchivedThreads(spaceId: string): Promise<Message[]> {
+    return (await this.request('GET', this.space(spaceId, '/archived-threads'), routes.listArchivedThreads.response)).threads;
+  }
+
   async manageTopic(spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {
     return (
       await this.request(

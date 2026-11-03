@@ -1215,6 +1215,17 @@ export const MIGRATIONS: Migration[] = [
       `update org_settings set jev_enabled = false where jev_enabled`,
     ],
   },
+  {
+    // Archiving a plain thread (2026-11-03, "archive threads" in Main): the
+    // flag sits on its root, so every read of the root carries it and naming
+    // the thread is not needed to archive it. The partial index serves the
+    // Archived list.
+    id: '057-message-archived',
+    statements: [
+      `alter table messages add column if not exists archived boolean not null default false`,
+      `create index if not exists messages_archived_idx on messages (space_id) where archived`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {
