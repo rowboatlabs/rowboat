@@ -5,6 +5,7 @@ import {
     deleteItem,
     deleteSection,
     isTodoListPath,
+    itemDetails,
     itemRef,
     itemsOf,
     moveItem,
@@ -66,6 +67,15 @@ describe('parseTodoList', () => {
         expect(itemsOf(doc.sections[1]!).map((i) => i.text)).toEqual(['real'])
         expect(itemsOf(doc.sections[1]!)[0]!.extra).toEqual(['  - [ ] nested'])
     })
+
+    it('reads indented lines under an item as its details, blank lines between them included', () => {
+        const doc = parseTodoList('## A\n- [ ] Fix search\n  Repro: search `x`.\n\n  Acceptance:\n    - found\n\n- [ ] next\n')
+        const [fix, next] = itemsOf(doc.sections[1]!)
+        expect(itemDetails(fix!)).toBe('Repro: search `x`.\n\nAcceptance:\n  - found')
+        expect(itemDetails(next!)).toBe('')
+        // The blank line before the next item is not the details'.
+        expect(serializeTodoList(doc)).toBe('## A\n- [ ] Fix search\n  Repro: search `x`.\n\n  Acceptance:\n    - found\n\n- [ ] next\n')
+    })
 })
 
 describe('edits', () => {
@@ -89,6 +99,13 @@ describe('edits', () => {
         expect(assigned).toBe(base.replace('- [ ] one', `- [ ] one [@Arjun](#member:${ARJUN})`))
         expect(run(assigned, (d) => updateItem(itemRef(d, 1, 0), { assignee: null }))).toBe(base)
         expect(run(base, (d) => updateItem(itemRef(d, 1, 0), { text: '  ' }))).toBeNull()
+    })
+
+    it('writes, rewrites and clears details under the item', () => {
+        expect(run(base, (d) => updateItem(itemRef(d, 1, 0), { details: '\nEvidence: 3/3 failed.\n\n- step one\n  ' })))
+            .toBe(base.replace('- [ ] one\n', '- [ ] one\n  Evidence: 3/3 failed.\n\n  - step one\n'))
+        expect(run(base, (d) => updateItem(itemRef(d, 1, 1), { details: 'new note' }))).toBe(base.replace('note on two', 'new note'))
+        expect(run(base, (d) => updateItem(itemRef(d, 1, 1), { details: '  ' }))).toBe(base.replace('  note on two\n', ''))
     })
 
     it('moves an item and its notes across sections', () => {
