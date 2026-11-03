@@ -375,7 +375,6 @@ export class MaritimeConnector implements RunningConnector {
       try {
         posted = (await this.env.service.answerInvocation(this.env.ctx, invocation.id, body)).message;
         await this.react(invocation, '👀', 'remove');
-        await this.react(invocation, '✅');
       } catch (err) {
         if (!(err instanceof HarborError)) throw err; // already finished: a replay posts nothing
       }
