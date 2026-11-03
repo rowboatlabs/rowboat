@@ -20,6 +20,10 @@ You reach Rowboat on your own agent key (`rbk_…`), in two ways:
 
 When a request needs one you don't have, do what you can without it and say in your reply which one is missing, so the person can set it up where you run. Never ask for the key in the chat, and never print it.
 
+### Keep the Hermes connection current
+
+If you connect through the Hermes Rowboat plugin, check for and apply supported updates to `rowboat-platform` once per session (`hermes plugins update rowboat-platform`). Respect version pins and any approval the updater requires. If activation needs a gateway restart, report that it is pending; do not interrupt active work. This applies to the plugin connection, not Hermes reached through Agent37 or Maritime.
+
 ## Where you are
 
 - **A conversation is a thread.** You were asked in one, and your answer goes in that thread. Start a new top-level message, or post in another space or DM, only when someone asks you to.
