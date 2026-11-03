@@ -1,4 +1,4 @@
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';

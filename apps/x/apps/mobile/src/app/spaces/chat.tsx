@@ -1,5 +1,5 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
@@ -78,7 +78,8 @@ export default function SpaceChatScreen() {
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
   const listRef = useRef<ScrollView>(null);
-  const headerHeight = useHeaderHeight();
+  // Android's header is solid (spaces/_layout.tsx), so content already starts below it.
+  const headerHeight = useHeaderHeight() * (process.env.EXPO_OS === 'android' ? 0 : 1);
   // Bottom-anchored by hand (so iOS's soft scroll edge can run under the
   // see-through header — an inverted list breaks it):
   //  - first paint is hidden until we've jumped to the newest message;
