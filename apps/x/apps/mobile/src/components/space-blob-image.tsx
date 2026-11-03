@@ -28,7 +28,8 @@ export function parseBlobLink(src: string): { host: string; spaceId: string; has
 // frame instead of flashing a grey box while a token is fetched again.
 let lastToken: string | null = null;
 
-export function SpaceBlobImage({ src }: { src: string }) {
+/** `onLongPress`: the message's own menu (Copy image lives there), not the viewer a tap opens. */
+export function SpaceBlobImage({ src, onLongPress }: { src: string; onLongPress?: () => void }) {
   const colors = useColors();
   const account = useSpacesAccount();
   const { width: screenWidth } = useWindowDimensions();
@@ -59,7 +60,7 @@ export function SpaceBlobImage({ src }: { src: string }) {
     // Non-blob image (external URL) — plain render.
     return (
       <>
-        <Pressable onPress={() => setOpen(true)}>
+        <Pressable onPress={() => setOpen(true)} onLongPress={onLongPress} delayLongPress={250}>
           <Image source={{ uri: src }} style={{ width: '100%', height: 200, borderRadius: 10, marginVertical: 6 }} contentFit="contain" />
         </Pressable>
         <ImageViewer visible={open} source={{ uri: src }} onClose={() => setOpen(false)} />
@@ -86,7 +87,7 @@ export function SpaceBlobImage({ src }: { src: string }) {
   };
   return (
     <>
-      <Pressable onPress={() => setOpen(true)}>
+      <Pressable onPress={() => setOpen(true)} onLongPress={onLongPress} delayLongPress={250}>
         <Image
           source={source}
           style={{ width, height, borderRadius: 10, marginVertical: 6, backgroundColor: colors.secondaryBackground }}
