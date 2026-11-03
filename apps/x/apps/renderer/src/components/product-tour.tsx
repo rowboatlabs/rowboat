@@ -8,7 +8,6 @@ import { TourSounds } from '@/lib/tour-sounds'
 import type { TTSState } from '@/hooks/useVoiceTTS'
 import { cn } from '@/lib/utils'
 import tourClipWelcome from '@/assets/tour/welcome.mp3'
-import tourClipSpaces from '@/assets/tour/spaces.mp3'
 import tourClipEmail from '@/assets/tour/email.mp3'
 import tourClipMeetings from '@/assets/tour/meetings.mp3'
 import tourClipCode from '@/assets/tour/code.mp3'
@@ -17,7 +16,6 @@ import tourClipAgents from '@/assets/tour/agents.mp3'
 import tourClipWorkspaces from '@/assets/tour/workspaces.mp3'
 import tourClipChats from '@/assets/tour/chats.mp3'
 import tourClipComposer from '@/assets/tour/composer.mp3'
-import tourClipDone from '@/assets/tour/done.mp3'
 
 export type TourNavTarget =
   | 'assistant'
@@ -47,9 +45,11 @@ type TourStep = {
   voiceText?: string
 }
 
-// Stops follow the sidebar top to bottom (Spaces, then the destinations,
-// then Chats) and end back at the Assistant, where the app lands. A stop
-// whose anchor is missing (Spaces behind its flag, Code mode off) is skipped.
+// Stops follow the main rail (Rowboats, then Assistant), then the Assistant
+// sidebar top to bottom, and end back at the Assistant page. Todo and Apps
+// are off by default, so they have no stops (2026-11-03, spaces-first
+// desktop). A stop whose anchor is missing (Spaces behind its flag, the
+// Assistant sidebar collapsed) is skipped.
 const TOUR_STEPS: TourStep[] = [
   {
     id: 'welcome',
@@ -63,8 +63,16 @@ const TOUR_STEPS: TourStep[] = [
     navigate: 'spaces',
     hat: 'sailor',
     vignette: 'spaces',
-    title: 'Spaces',
-    text: "Spaces is where your team talks. A server holds your spaces and direct messages, plus the files and boards you decide on together. Your agent and your teammates' agents work in there with you.",
+    title: 'Rowboats',
+    text: "Rowboats is where you, your team and your crew of agents work together: spaces, direct messages, and the files and boards you share. Your agents and your teammates' agents pick up work right alongside you.",
+  },
+  {
+    id: 'assistant',
+    targetId: 'nav-assistant',
+    navigate: 'assistant',
+    hat: 'captain',
+    title: 'Assistant',
+    text: 'Assistant is Rowboat working for you on this computer. Its sidebar holds your email, meetings, Brain, projects and background agents.',
   },
   {
     id: 'email',
@@ -129,16 +137,16 @@ const TOUR_STEPS: TourStep[] = [
     id: 'done',
     hat: 'party',
     title: 'Land ho! 🎉',
-    text: "That's the whole bay, and there's my wake to prove it. Take this voyage again anytime from Take a tour at the bottom of the sidebar, or under Settings in the dock. Happy rowing!",
+    text: "That's the whole bay, and there's my wake to prove it. Take this voyage again anytime from Take a tour in your account menu, at the foot of the rail. Happy rowing!",
   },
 ]
 
 // Pre-recorded narration bundled with the app (no TTS API call, works
 // offline/signed-out). Regenerate with scripts/generate-tour-audio.mjs after
-// editing any step's text. Steps without a clip fall back to live TTS.
+// editing any step's text. Steps without a clip fall back to live TTS
+// (spaces, assistant and done await new clips after the 2026-11-03 rewrite).
 const TOUR_CLIPS: Record<string, string> = {
   welcome: tourClipWelcome,
-  spaces: tourClipSpaces,
   email: tourClipEmail,
   meetings: tourClipMeetings,
   code: tourClipCode,
@@ -147,7 +155,6 @@ const TOUR_CLIPS: Record<string, string> = {
   workspaces: tourClipWorkspaces,
   chats: tourClipChats,
   composer: tourClipComposer,
-  done: tourClipDone,
 }
 
 const MASCOT_SIZE = 120

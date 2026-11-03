@@ -1350,20 +1350,6 @@ export const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
-  // The ⌥/⌃+Tab section switcher, forwarded from the main process when an
-  // embedded page (e.g. the browser <webview>) holds keyboard focus — its
-  // keystrokes go to the guest and never reach the app renderer's listeners.
-  'shortcuts:switcherKey': {
-    req: z.object({
-      type: z.enum(['keyDown', 'keyUp']),
-      key: z.string(),
-      code: z.string(),
-      alt: z.boolean(),
-      control: z.boolean(),
-      shift: z.boolean(),
-    }),
-    res: z.null(),
-  },
   // Launch-at-login (resident app). The OS login-item registry is the source
   // of truth; these read/write it directly rather than a config file.
   'app:getLoginItemSettings': {
@@ -3408,6 +3394,16 @@ export const ipcSchemas = {
       success: z.boolean(),
       error: z.string().optional(),
     }),
+  },
+  // Optional sidebar sections (2026-11-03, spaces-first desktop): Todo and
+  // Apps, off for new installs, toggled from Settings.
+  'sections:get': {
+    req: z.null(),
+    res: z.object({ todo: z.boolean(), apps: z.boolean() }),
+  },
+  'sections:set': {
+    req: z.object({ todo: z.boolean().optional(), apps: z.boolean().optional() }),
+    res: z.object({ todo: z.boolean(), apps: z.boolean() }),
   },
   // The planner's Home-surface controls: on/off + frequency presets.
   'todo:getPlanner': {

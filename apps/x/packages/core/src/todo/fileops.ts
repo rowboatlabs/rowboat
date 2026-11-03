@@ -227,7 +227,7 @@ function resolveLocked(list: TodoList, key: string): FoundItem | null {
 // First-run seed — the tutorial is real data in the real file.
 // ---------------------------------------------------------------------------
 
-const SEED = `- [ ] Add your first to-do — just type below
+export const TODO_SEED = `- [ ] Add your first to-do — just type below
 - [ ] @rowboat introduce yourself — what can you do here?
 - [ ] Dismiss anything you don't want — hover a row and hit ✕ (it lands in Done & dismissed below, restorable)
 `;
@@ -262,7 +262,7 @@ export async function readTodo(): Promise<TodoList> {
     return withTodoLock(async () => {
         if (!fsSync.existsSync(TODO_PATH)) {
             log.log('first run — seeding todo.md');
-            await writeRaw(SEED);
+            await writeRaw(TODO_SEED);
         }
         return parseTodoFile(await readRaw());
     });

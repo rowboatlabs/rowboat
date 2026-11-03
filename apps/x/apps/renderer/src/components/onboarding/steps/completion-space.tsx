@@ -20,14 +20,19 @@ export function suggestedSpaceName(token: string | null): string {
   }
 }
 
+/** The space this person lands in: the one they name here, or the one an
+ *  invite already put them in. */
+export type OnboardingOrg = { id: string; name: string }
+
 export function useCompletionSpace(enabled: boolean) {
   const [loading, setLoading] = useState(enabled)
   const [needed, setNeeded] = useState(false)
+  const [org, setOrg] = useState<OnboardingOrg | null>(null)
   const [name, setName] = useState('My space')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const inFlight = useRef(false)
-  const created = useRef(false)
+  const created = useRef<{ org: OnboardingOrg; createdHere: boolean } | null>(null)
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
@@ -41,6 +46,7 @@ export function useCompletionSpace(enabled: boolean) {
     ]).then(([{ orgs }, account]) => {
       if (cancelled) return
       setNeeded(account.signedIn && orgs.length === 0)
+      setOrg(orgs[0] ?? null)
       setName(suggestedSpaceName(account.accessToken))
     }).catch(() => {
       if (!cancelled) setError('Could not check your spaces. Please try again.')
@@ -50,7 +56,9 @@ export function useCompletionSpace(enabled: boolean) {
     return () => { cancelled = true }
   }, [enabled, attempt])
 
-  const complete = async (onComplete: () => void) => {
+  /** Creates the space when one is needed, then hands over the org and
+   *  whether it was made here (only its maker is sure to be able to invite). */
+  const complete = async (onComplete: (org: OnboardingOrg | null, createdHere: boolean) => void) => {
     if (inFlight.current || loading || (needed && !name.trim())) return
     inFlight.current = true
     setBusy(true)
@@ -60,13 +68,16 @@ export function useCompletionSpace(enabled: boolean) {
         // Recheck in case an invite was accepted while onboarding was open.
         const { orgs } = await window.ipc.invoke('spaces:listOrgs', null)
         if (orgs.length === 0) {
-          await window.ipc.invoke('spaces:createOrg', { name: name.trim() })
+          const result = await window.ipc.invoke('spaces:createOrg', { name: name.trim() })
           analytics.spacesServerCreated()
+          created.current = { org: { id: result.org.id, name: result.org.name }, createdHere: true }
+        } else {
+          created.current = { org: orgs[0], createdHere: false }
         }
-        created.current = true
+        setOrg(created.current.org)
         await refreshSpacesOrgs()
       }
-      onComplete()
+      onComplete(created.current?.org ?? org, created.current?.createdHere ?? false)
     } catch {
       setError('Could not create your space. Please try again.')
     } finally {
@@ -75,7 +86,7 @@ export function useCompletionSpace(enabled: boolean) {
     }
   }
 
-  return { loading, needed, name, setName, error, busy, complete, retry: () => setAttempt(value => value + 1) }
+  return { loading, needed, org, name, setName, error, busy, complete, retry: () => setAttempt(value => value + 1) }
 }
 
 export function CompletionSpaceName({ name, onChange, disabled }: {
@@ -110,9 +121,6 @@ export function CompletionSpaceName({ name, onChange, disabled }: {
           {editing ? <Check className="size-4" /> : <Pencil className="size-4" />}
         </Button>
       </div>
-      <p className="text-sm text-muted-foreground leading-relaxed">
-        Invite teammates to your space, or join an existing one. You can always rename this space later.
-      </p>
     </div>
   )
 }

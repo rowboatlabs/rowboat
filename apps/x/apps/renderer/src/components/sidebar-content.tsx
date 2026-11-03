@@ -1,6 +1,5 @@
 "use client"
 
-import { ProfileSettings } from './spaces/profile-settings'
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -9,25 +8,21 @@ import {
   Bot,
   FileText,
   Folder,
-  AlertTriangle,
   LayoutGrid,
   ListTodo,
   Mic,
   PanelLeftClose,
   Pencil,
   Pin,
+  Plus,
   Trash2,
-  Plug,
   LoaderIcon,
   Mail,
   MoreHorizontal,
   Search,
-  Settings,
   SquarePen,
   Square,
   Video,
-  CircleAlert,
-  X,
 } from "lucide-react"
 import {
   AlertDialog,
@@ -42,21 +37,12 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-  useSidebar,
 } from "@/components/ui/sidebar"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-  PopoverArrow,
-  PopoverAnchor,
-} from "@/components/ui/popover"
 import {
   Tooltip,
   TooltipContent,
@@ -76,26 +62,18 @@ import {
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
-import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
-import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
 import { SidebarSection } from "@/components/sidebar-section"
 import { Keys } from "@/components/keys"
 import { SHORTCUTS } from "@/lib/shortcuts"
+import { useSections } from "@/hooks/use-sections"
 import { useCodeSessions } from "@/components/code/use-code-sessions"
 import { useUnreadCodeSessions } from "@/components/code/session-read-state"
 import { UnreadBadge } from "@/components/spaces/unread-badge"
-import { SPACES_ENABLED } from "@/lib/feature-flags"
-import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
-import { useBilling } from "@/hooks/useBilling"
-import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { toast } from "@/lib/toast"
-import { getBillingPlanData } from "@x/shared/dist/billing.js"
-import { ServiceEvent } from "@x/shared/src/service-events.js"
-import z from "zod"
 import "@/styles/sidebar.css"
 
 interface TreeNode {
@@ -149,48 +127,12 @@ type TaskSummary = {
   lastRunError?: string
 }
 
-type ServiceEventType = z.infer<typeof ServiceEvent>
-
-const MAX_SYNC_EVENTS = 1000
-const RUN_STALE_MS = 2 * 60 * 60 * 1000
 const PINNED_CHATS_STORAGE_KEY = 'x:pinned-chats'
 const MAX_PINNED_CHATS = 3
 const MIN_CHATS = 10
 const MAX_CHATS = 60
 /** One chat row: 32px tall plus the 2px gap (styles/sidebar.css). */
 const CHAT_ROW_PX = 34
-
-const SERVICE_LABELS: Record<string, string> = {
-  gmail: "Syncing Gmail",
-  outlook: "Syncing Outlook",
-  calendar: "Syncing Calendar",
-  fireflies: "Syncing Fireflies",
-  granola: "Syncing Granola",
-  graph: "Updating knowledge",
-  voice_memo: "Processing voice memo",
-  email_labeling: "Labeling emails",
-  note_tagging: "Tagging notes",
-  agent_notes: "Updating agent notes",
-}
-
-function summarizeServiceError(error: string): string {
-  const firstLine = error.split("\n").find((line) => line.trim().length > 0)
-  return firstLine?.trim() || error.trim()
-}
-
-function collectServiceErrors(events: ServiceEventType[]): Map<string, string> {
-  const errors = new Map<string, string>()
-  for (const event of events) {
-    if (event.type === "error") {
-      errors.set(event.service, summarizeServiceError(event.error))
-      continue
-    }
-    if (event.type === "run_complete" && event.outcome !== "error") {
-      errors.delete(event.service)
-    }
-  }
-  return errors
-}
 
 type SidebarContentPanelProps = {
   tree: TreeNode[]
@@ -203,11 +145,6 @@ type SidebarContentPanelProps = {
   onOpenApps?: () => void
   /** Open a specific app (pinned in the sidebar) inside the Apps view. */
   onOpenApp?: (folder: string) => void
-  /** Open one space (org + space) in the Spaces view. */
-  onOpenSpace?: (orgId: string, spaceId: string) => void
-  onOpenSpaces?: () => void
-  /** The space currently open, for highlighting its sidebar row. */
-  activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenAssistant?: () => void
@@ -233,220 +170,6 @@ type SidebarContentPanelProps = {
   onToggleMeetingRecording?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
-function formatEventTime(ts: string): string {
-  const date = new Date(ts)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-}
-
-function SyncStatusBar() {
-  const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
-  const [serviceErrors, setServiceErrors] = useState<Map<string, string>>(new Map())
-  const [popoverOpen, setPopoverOpen] = useState(false)
-  const [logEvents, setLogEvents] = useState<ServiceEventType[]>([])
-  const [logLoading, setLogLoading] = useState(false)
-  const runTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-
-  // Track active runs from real-time events
-  useEffect(() => {
-    const cleanup = window.ipc.on('services:events', (event) => {
-      const nextEvent = event as ServiceEventType
-      if (nextEvent.type === 'run_start') {
-        setActiveServices((prev) => {
-          const next = new Map(prev)
-          next.set(nextEvent.runId, nextEvent.service)
-          return next
-        })
-        const existingTimeout = runTimeoutsRef.current.get(nextEvent.runId)
-        if (existingTimeout) clearTimeout(existingTimeout)
-        const timeout = setTimeout(() => {
-          setActiveServices((prev) => {
-            if (!prev.has(nextEvent.runId)) return prev
-            const next = new Map(prev)
-            next.delete(nextEvent.runId)
-            return next
-          })
-          runTimeoutsRef.current.delete(nextEvent.runId)
-        }, RUN_STALE_MS)
-        runTimeoutsRef.current.set(nextEvent.runId, timeout)
-      } else if (nextEvent.type === 'run_complete') {
-        setActiveServices((prev) => {
-          const next = new Map(prev)
-          next.delete(nextEvent.runId)
-          return next
-        })
-        if (nextEvent.outcome !== 'error') {
-          setServiceErrors((prev) => {
-            if (!prev.has(nextEvent.service)) return prev
-            const next = new Map(prev)
-            next.delete(nextEvent.service)
-            return next
-          })
-        }
-        const existingTimeout = runTimeoutsRef.current.get(nextEvent.runId)
-        if (existingTimeout) {
-          clearTimeout(existingTimeout)
-          runTimeoutsRef.current.delete(nextEvent.runId)
-        }
-      } else if (nextEvent.type === 'error') {
-        setServiceErrors((prev) => {
-          const next = new Map(prev)
-          next.set(nextEvent.service, summarizeServiceError(nextEvent.error))
-          return next
-        })
-      }
-    })
-    return cleanup
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      runTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout))
-      runTimeoutsRef.current.clear()
-    }
-  }, [])
-
-  // Load logs from JSONL file when popover opens
-  useEffect(() => {
-    if (!popoverOpen) return
-    let cancelled = false
-    async function loadLogs() {
-      setLogLoading(true)
-      try {
-        const result = await window.ipc.invoke('workspace:readFile', {
-          path: 'logs/services.jsonl',
-          encoding: 'utf8',
-        })
-        if (cancelled) return
-        const lines = result.data.trim().split('\n').filter(Boolean)
-        const parsed: ServiceEventType[] = []
-        for (const line of lines) {
-          try {
-            parsed.push(JSON.parse(line))
-          } catch {
-            // skip malformed lines
-          }
-        }
-        setServiceErrors(collectServiceErrors(parsed))
-        // Newest first, limit to 1000
-        setLogEvents(parsed.reverse().slice(0, MAX_SYNC_EVENTS))
-      } catch {
-        if (!cancelled) {
-          setLogEvents([])
-          setServiceErrors(new Map())
-        }
-      } finally {
-        if (!cancelled) setLogLoading(false)
-      }
-    }
-    loadLogs()
-    return () => { cancelled = true }
-  }, [popoverOpen])
-
-  const isSyncing = activeServices.size > 0
-  const errorEntries = Array.from(serviceErrors.entries())
-  const primaryErrorService = errorEntries[0]?.[0] ?? null
-  const hasServiceErrors = errorEntries.length > 0
-
-  // Build status label from active services
-  const activeServiceNames = [...new Set(activeServices.values())]
-  const statusLabel = isSyncing
-    ? activeServiceNames.map((s) => SERVICE_LABELS[s] || s).join(", ")
-    : hasServiceErrors
-      ? errorEntries.length === 1
-        ? `${SERVICE_LABELS[primaryErrorService ?? ""] || primaryErrorService} failed`
-        : "Recent sync issues"
-      : "All caught up"
-
-  // Sidebar redesign (2026-10-21): sync status is a small mark at the right of
-  // the account row instead of its own footer strip; it opens the same log.
-  return (
-    <>
-      {/* Collapsed, the rail's avatar shows syncing as a turning ring
-          (dock-sidebar.tsx, 2026-10-22), where this floating spinner sat. */}
-      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <Tooltip delayDuration={400}>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                aria-label={`Sync activity: ${statusLabel}`}
-                className={cn("sb-row-action sb-sync", hasServiceErrors && !isSyncing && "text-destructive!")}
-              >
-                {isSyncing ? (
-                  <LoaderIcon className="animate-spin" />
-                ) : hasServiceErrors ? (
-                  <AlertTriangle />
-                ) : (
-                  <span className="size-1.5 rounded-full bg-emerald-500/80" />
-                )}
-              </button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={6}>{statusLabel}</TooltipContent>
-        </Tooltip>
-        <PopoverContent
-          side="right"
-          align="end"
-          sideOffset={12}
-          className="w-96 p-0"
-        >
-          <div className="p-3 border-b">
-            <h4 className="font-semibold text-sm">Sync Activity</h4>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {isSyncing || hasServiceErrors ? statusLabel : "All services up to date"}
-            </p>
-          </div>
-          <div className="max-h-80 overflow-y-auto p-2">
-            {logLoading ? (
-              <div className="flex items-center justify-center py-4">
-                <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
-              </div>
-            ) : logEvents.length === 0 ? (
-              <div className="py-4 text-center text-xs text-muted-foreground">
-                No recent activity.
-              </div>
-            ) : (
-              <div className="space-y-0.5">
-                {logEvents.map((event, idx) => (
-                  <div
-                    key={`${event.runId}-${event.ts}-${idx}`}
-                    className="flex items-start gap-2 rounded px-2 py-1 text-xs hover:bg-accent"
-                  >
-                    <span className="shrink-0 text-[10px] leading-4 text-muted-foreground/70">
-                      {formatEventTime(event.ts)}
-                    </span>
-                    <span className="shrink-0">
-                      <span className={cn(
-                        "inline-block rounded px-1 py-0.5 text-[10px] font-medium leading-none",
-                        event.level === 'error' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
-                        event.level === 'warn' ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
-                        "bg-muted text-muted-foreground"
-                      )}>
-                        {SERVICE_LABELS[event.service]?.split(" ").slice(-1)[0] || event.service}
-                      </span>
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="leading-4 text-foreground/80">{event.message}</p>
-                      {event.type === 'error' && (
-                        <p
-                          className="truncate text-[11px] leading-4 text-red-600/90 dark:text-red-400/90"
-                          title={event.error}
-                        >
-                          {summarizeServiceError(event.error)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </PopoverContent>
-      </Popover>
-    </>
-  )
-}
 
 export function SidebarContentPanel({
   tree,
@@ -456,9 +179,6 @@ export function SidebarContentPanel({
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
-  onOpenSpace,
-  onOpenSpaces,
-  activeSpace,
   recentRuns = [],
   onOpenRun,
   onOpenAssistant,
@@ -483,34 +203,12 @@ export function SidebarContentPanel({
   const unreadProjectCount = projectSessions.filter((session) => unreadProjectSessions.has(session.id)).length
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
-  const [profileSettingsOpen, setProfileSettingsOpen] = useState(false)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [openConnectionsAfterClose, setOpenConnectionsAfterClose] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
-  const [creditPopoverOpen, setCreditPopoverOpen] = useState(false)
-  // 2026-10-07: the sidebar collapses offcanvas, sliding the plan card off-screen,
-  // and a popover anchored to it is cut off. Hide it while collapsed; the open
-  // state is kept, so an out-of-credits auto-open still shows on expand.
-  const { state: sidebarState } = useSidebar()
-  const sidebarCollapsed = sidebarState === "collapsed"
-  const [outOfCredits, setOutOfCredits] = useState(false)
-  const outOfCreditsRef = useRef(false)
-  const creditPopoverAutoShownRef = useRef(false)
-  const [loggingIn, setLoggingIn] = useState(false)
-  const appUrl = useRowboatConfig()?.appUrl ?? null
-  const { billing, refresh: refreshBilling } = useBilling(isRowboatConnected)
-  const currentBillingPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
+  const [sectionsSettingsOpen, setSectionsSettingsOpen] = useState(false)
+  const sections = useSections()
 
-  // The Gmail account's display name, for the footer.
-  const [gmailName, setGmailName] = useState('')
-  useEffect(() => {
-    let cancelled = false
-    window.ipc.invoke('gmail:getAccountName', {})
-      .then((res) => { if (!cancelled && res?.name) setGmailName(res.name) })
-      .catch(() => { /* fall back to the email address */ })
-    return () => { cancelled = true }
-  }, [])
 
   // Nav previews: unread important emails + next upcoming meetings (top 2 each).
   const [unreadEmailCount, setUnreadEmailCount] = useState(0)
@@ -752,18 +450,6 @@ export function SidebarContentPanel({
     return () => clearInterval(tick)
   }, [bgTaskSummaries])
 
-  const handleRowboatLogin = useCallback(async () => {
-    try {
-      setLoggingIn(true)
-      const result = await window.ipc.invoke('oauth:connect', { provider: 'rowboat' })
-      if (!result.success) {
-        setLoggingIn(false)
-      }
-    } catch {
-      setLoggingIn(false)
-    }
-  }, [])
-
   useEffect(() => {
     let mounted = true
 
@@ -772,10 +458,8 @@ export function SidebarContentPanel({
         const result = await window.ipc.invoke('oauth:getState', null)
         const config = result.config || {}
         const hasError = Object.values(config).some((entry) => Boolean(entry?.error))
-        const connected = config['rowboat']?.connected ?? false
         if (mounted) {
           setHasOauthError(hasError)
-          setIsRowboatConnected(connected)
           if (!hasError) {
             setShowOauthAlert(true)
           }
@@ -784,7 +468,6 @@ export function SidebarContentPanel({
         console.error('Failed to fetch OAuth state:', error)
         if (mounted) {
           setHasOauthError(false)
-          setIsRowboatConnected(false)
           setShowOauthAlert(true)
         }
       }
@@ -793,7 +476,6 @@ export function SidebarContentPanel({
     refreshOauthError()
     const cleanup = window.ipc.on('oauth:didConnect', () => {
       refreshOauthError()
-      setLoggingIn(false)
     })
 
     return () => {
@@ -802,49 +484,6 @@ export function SidebarContentPanel({
     }
   }, [])
 
-  // Re-anchor the warning whenever billing (re)loads — billing is authoritative.
-  useEffect(() => {
-    if (billing) {
-      const next = isOutOfCredits(billing)
-      outOfCreditsRef.current = next
-      setOutOfCredits(next)
-    }
-  }, [billing])
-
-  // Live signals: a usage API error flips it on; a successful cost-incurring
-  // call flips it off and triggers a single billing refresh to reconcile.
-  useEffect(() => {
-    const onExhausted = () => {
-      outOfCreditsRef.current = true
-      setOutOfCredits(true)
-    }
-    const onReplenished = () => {
-      const wasOut = outOfCreditsRef.current
-      outOfCreditsRef.current = false
-      setOutOfCredits(false)
-      if (wasOut) void refreshBilling()
-    }
-    window.addEventListener(CREDIT_EXHAUSTED_EVENT, onExhausted)
-    window.addEventListener(CREDIT_REPLENISHED_EVENT, onReplenished)
-    return () => {
-      window.removeEventListener(CREDIT_EXHAUSTED_EVENT, onExhausted)
-      window.removeEventListener(CREDIT_REPLENISHED_EVENT, onReplenished)
-    }
-  }, [refreshBilling])
-
-  // Auto-open the popover the first time we go out of credits; reset when
-  // credits return so it can auto-open again on a future episode.
-  useEffect(() => {
-    if (outOfCredits) {
-      if (!creditPopoverAutoShownRef.current) {
-        creditPopoverAutoShownRef.current = true
-        setCreditPopoverOpen(true)
-      }
-    } else {
-      creditPopoverAutoShownRef.current = false
-      setCreditPopoverOpen(false)
-    }
-  }, [outOfCredits])
 
   // Single preview shown as a sublabel on the Email / Meetings nav buttons.
   const previewEmail = emailThreads[0]
@@ -872,27 +511,6 @@ export function SidebarContentPanel({
   const bgFailed = bgTaskSummaries.filter((t) => t.lastRunError).length
   const bgActive = bgTaskSummaries.filter((t) => t.active).length
 
-  // The footer's one account row: who you are, your plan, and everything that
-  // used to be stacked under the chats (plan card, Connect Accounts, tour,
-  // Settings, sync) behind it.
-  const planName = billing
-    ? (currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown plan' : 'No plan'))
-    : null
-  const trialDays = billing?.subscriptionStatus === 'trialing' && billing.trialExpiresAt
-    ? Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - now) / (1000 * 60 * 60 * 24)))
-    : null
-  const trialLabel = trialDays === null ? null : trialDays === 0 ? 'Trial ends today' : trialDays === 1 ? '1 day left' : `${trialDays} days left`
-  const upgradeLabel = billing && (!billing.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter') ? 'Upgrade' : 'Manage'
-  const userEmail = billing?.userEmail ?? null
-  // Your first name: from the connected Gmail account, else read off the
-  // email address ("gagan.p@…" → "Gagan"). The account API has no name.
-  const accountName = firstName(gmailName) || nameFromEmail(userEmail) || (isRowboatConnected ? 'Rowboat' : 'Not signed in')
-  const accountInitial = accountName === 'Not signed in' ? '?' : accountName.charAt(0).toUpperCase()
-  // The pill beside the name: Upgrade on a trial or a free plan, otherwise
-  // Manage; red once credits run out.
-  const pillLabel = outOfCredits || billing?.subscriptionStatus === 'trialing' ? 'Upgrade' : upgradeLabel
-  const pillTip = outOfCredits ? 'Out of credits' : [planName, trialLabel].filter(Boolean).join(' · ')
-  const openUpgrade = () => { if (appUrl) window.open(`${appUrl}?intent=upgrade`) }
 
   return (
     <Sidebar variant="floating" className="rowboat-sidebar border-r-0" {...props}>
@@ -1025,13 +643,15 @@ export function SidebarContentPanel({
                 </div>
               ) : null}
             </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
-                <ListTodo />
-                <span className="flex-1 truncate">Todo</span>
-                <Keys keys={SHORTCUTS.todo} className="sb-row-keys" />
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {sections.todo && (
+              <SidebarMenuItem>
+                <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
+                  <ListTodo />
+                  <span className="flex-1 truncate">Todo</span>
+                  <Keys keys={SHORTCUTS.todo} className="sb-row-keys" />
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
             <SidebarMenuItem>
               <RowTip tip={knowledgeUpdatedLabel}>
                 <SidebarMenuButton data-tour-id="nav-knowledge" isActive={activeNav === 'knowledge'} onClick={() => knowledgeActions.openKnowledgeView()}>
@@ -1075,14 +695,16 @@ export function SidebarContentPanel({
                 </SidebarMenuButton>
               </RowTip>
             </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton data-tour-id="nav-apps" isActive={activeNav === 'apps'} onClick={onOpenApps}>
-                <LayoutGrid />
-                <span className="flex-1 truncate">Apps</span>
-                <Keys keys={SHORTCUTS.apps} className="sb-row-keys" />
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            {pinnedApps.map(({ folder, name }) => (
+            {sections.apps && (
+              <SidebarMenuItem>
+                <SidebarMenuButton data-tour-id="nav-apps" isActive={activeNav === 'apps'} onClick={onOpenApps}>
+                  <LayoutGrid />
+                  <span className="flex-1 truncate">Apps</span>
+                  <Keys keys={SHORTCUTS.apps} className="sb-row-keys" />
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
+            {sections.apps && pinnedApps.map(({ folder, name }) => (
               <SidebarMenuItem key={folder}>
                 <ContextMenu>
                   <ContextMenuTrigger asChild>
@@ -1100,14 +722,19 @@ export function SidebarContentPanel({
                 </ContextMenu>
               </SidebarMenuItem>
             ))}
+            {/* Todo and Apps start off (2026-11-03, spaces-first desktop);
+                this is how anyone finds them. */}
+            {(!sections.todo || !sections.apps) && (
+              <SidebarMenuItem>
+                <SidebarMenuButton className="sb-quiet" onClick={() => setSectionsSettingsOpen(true)}>
+                  <Plus />
+                  <span className="flex-1 truncate">Add sections</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Trying Spaces right after Apps (2026-10-21). */}
-        {SPACES_ENABLED && (
-          <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
-            onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} onOpenSpaces={onOpenSpaces} />
-        )}
 
         <SidebarSection id="chats" label="Chats" tourId="nav-chats">
           {recentChats.length === 0 ? (
@@ -1245,134 +872,6 @@ export function SidebarContentPanel({
         onOpenApps={onOpenApps}
         onConnectAccounts={() => setConnectionsSettingsOpen(true)}
       />
-      <SidebarFooter className="gap-0 px-2 pb-2 pt-1">
-        {profileSettingsOpen && <ProfileSettings onClose={() => setProfileSettingsOpen(false)} />}
-        {/* The out-of-credits notice anchors to the account row and opens by
-            itself once per episode, as the plan card's did. */}
-        <Popover open={creditPopoverOpen && outOfCredits && !sidebarCollapsed} onOpenChange={setCreditPopoverOpen}>
-          <PopoverAnchor asChild>
-            <div className="sb-account-bar">
-              {/* Name and plan pill share one hover surface (2026-10-21). */}
-              <div className="sb-account-group">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button type="button" className="sb-account" aria-label={`${accountName}: account and settings`}>
-                    <span className="sb-avatar" aria-hidden="true">
-                      {accountInitial}
-                      {(outOfCredits || hasOauthError) && <span className={cn('sb-avatar-flag', outOfCredits && 'is-alert')} />}
-                    </span>
-                    <span className="sb-account-name">{accountName}</span>
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  side="top"
-                  align="start"
-                  sideOffset={8}
-                  className="sb-menu w-[248px] rounded-xl p-1.5"
-                >
-                  <div className="flex items-center gap-2.5 px-2 pb-2 pt-1.5">
-                    <span className="sb-avatar size-8! text-[13px]!" aria-hidden="true">{accountInitial}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-semibold">{accountName}</div>
-                      <div className="truncate text-[11.5px] text-muted-foreground">{userEmail ?? 'Not signed in'}</div>
-                    </div>
-                  </div>
-                  {isRowboatConnected ? (
-                    billing && (
-                      <div className="mb-1 flex items-center gap-3 rounded-lg bg-foreground/[0.04] px-2.5 py-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-[13px] font-medium capitalize">{planName}</div>
-                          <div className={cn('truncate text-[11.5px]', outOfCredits ? 'text-destructive' : 'text-muted-foreground')}>
-                            {outOfCredits ? 'Out of credits' : (trialLabel ?? 'Current plan')}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={openUpgrade}
-                          className="h-7 shrink-0 rounded-md bg-foreground/[0.08] px-2.5 text-xs font-medium transition-colors hover:bg-foreground/[0.14]"
-                        >
-                          {upgradeLabel}
-                        </button>
-                      </div>
-                    )
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleRowboatLogin}
-                      disabled={loggingIn}
-                      className="mb-1 flex h-9 w-full items-center justify-center rounded-lg bg-foreground text-[13px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
-                    >
-                      {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
-                    </button>
-                  )}
-                  <DropdownMenuItem onSelect={() => setProfileSettingsOpen(true)}><Pencil />Edit Spaces profile</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setConnectionsSettingsOpen(true)}>
-                    <Plug />
-                    Connect accounts
-                    {hasOauthError && <AlertTriangle className="ml-auto text-amber-500" aria-label="Needs attention" />}
-                  </DropdownMenuItem>
-                  {onStartTour && (
-                    <DropdownMenuItem onSelect={onStartTour}>
-                      <MascotFaceIcon className="size-4" />
-                      Take a tour
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
-                    <Settings />
-                    Settings
-                    <Keys keys={SHORTCUTS.settings} className="ml-auto" />
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {!isRowboatConnected ? (
-                <button type="button" className="sb-plan-pill" onClick={handleRowboatLogin} disabled={loggingIn}>
-                  {loggingIn ? 'Signing in…' : 'Sign in'}
-                </button>
-              ) : billing && (
-                <Tooltip delayDuration={400}>
-                  <TooltipTrigger asChild>
-                    <button type="button" className={cn('sb-plan-pill', outOfCredits && 'is-alert')} onClick={openUpgrade}>
-                      {pillLabel}
-                    </button>
-                  </TooltipTrigger>
-                  {pillTip && <TooltipContent side="top" sideOffset={6}>{pillTip}</TooltipContent>}
-                </Tooltip>
-              )}
-              </div>
-              <span className="flex-1" aria-hidden="true" />
-              <SyncStatusBar />
-            </div>
-          </PopoverAnchor>
-          <PopoverContent side="top" align="start" sideOffset={10} className="w-72">
-            <PopoverArrow className="fill-popover" />
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-red-500/15 text-red-500">
-                  <CircleAlert className="size-4" />
-                </span>
-                <h4 className="text-sm font-bold text-foreground">You&apos;ve run out of credits</h4>
-              </div>
-              <button
-                type="button"
-                aria-label="Close"
-                onClick={() => setCreditPopoverOpen(false)}
-                className="rounded-md p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Upgrade your plan to continue using all features.
-            </p>
-            <button
-              onClick={() => { openUpgrade(); setCreditPopoverOpen(false) }}
-              className="mt-3 w-full rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600"
-            >
-              Upgrade now
-            </button>
-          </PopoverContent>
-        </Popover>
-      </SidebarFooter>
       {hasOauthError && (
         <AlertDialog open={showOauthAlert} onOpenChange={setShowOauthAlert}>
           <AlertDialogContent
@@ -1413,6 +912,7 @@ export function SidebarContentPanel({
         </AlertDialog>
       )}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog defaultTab="sections" open={sectionsSettingsOpen} onOpenChange={setSectionsSettingsOpen} />
       <SettingsDialog
         defaultTab="connections"
         open={connectionsSettingsOpen}
@@ -1544,15 +1044,6 @@ type SidebarEmailThread = {
   subject: string
   from: string
   date: string
-}
-
-function firstName(name: string): string {
-  return name.trim().replace(/^["']|["']$/g, '').split(/\s+/)[0] ?? ''
-}
-
-function nameFromEmail(email: string | null): string {
-  const first = email?.split('@')[0]?.split(/[._+-]/)[0] ?? ''
-  return first ? first.charAt(0).toUpperCase() + first.slice(1) : ''
 }
 
 function formatEmailFrom(from: string): string {

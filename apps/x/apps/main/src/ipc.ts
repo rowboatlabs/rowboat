@@ -103,7 +103,7 @@ import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
 import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
-import { setMenuRecordingState } from './menu.js';
+import { refreshMenuSections, setMenuRecordingState } from './menu.js';
 import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
 
 // Ambient meeting detection must ignore Rowboat's own mic use: meeting
@@ -180,6 +180,7 @@ import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/sessio
 import { getConversation as getTodoConversation, deriveConversation as deriveSessionConversation } from '@x/core/dist/todo/conversation.js';
 import { recordPlannerSignal, addYourRule as addPlannerRule, listSuggestions as listTodoSuggestions, takeSuggestion as takeTodoSuggestion } from '@x/core/dist/todo/planner-memory.js';
 import { getPlannerConfig, setPlannerConfig } from '@x/core/dist/todo/planner-task.js';
+import { getSections, setSections } from '@x/core/dist/config/sections.js';
 import { findItem as findTodoItem } from '@x/core/dist/todo/fileops.js';
 import { todoBus } from '@x/core/dist/todo/bus.js';
 import {
@@ -2922,6 +2923,14 @@ export function setupIpcHandlers() {
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    'sections:get': async () => getSections(),
+    'sections:set': async (_event, args) => {
+      const sections = setSections(args);
+      // Off means it all stops: Todo's scheduled planner pauses with it.
+      if (args.todo === false) await setPlannerConfig({ active: false }).catch(() => {});
+      refreshMenuSections();
+      return sections;
     },
     'todo:getPlanner': async () => {
       return getPlannerConfig();

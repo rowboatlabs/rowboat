@@ -3,11 +3,8 @@ import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
-// Phosphor's chat bubbles for Spaces (2026-10-22), matching the dock.
-import { ChatsCircle } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
-import { SidebarNavSection } from '@/components/sidebar-section'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -18,7 +15,7 @@ import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from 
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import { NO_BADGE, streamBadge, threadBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
-import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
+import { MemberAvatar } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { InviteDialog } from '@/components/spaces/invite-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
@@ -28,87 +25,8 @@ import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/l
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
-import { openServerDialog } from '@/lib/server-dialog'
-import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
-import { AddServerDialog } from '@/components/spaces/add-server-dialog'
+import { isGroupChat } from '@/lib/spaces-navigation'
 
-/**
- * Group chats and workspaces (2026-10-07): a server that is one conversation
- * is a row that opens it, most recent first, whichever server you were in;
- * a server with channels is a shortcut into its own navigation.
- */
-export function SpacesSidebarSection({ active, activeSpace, onOpenSpace, onOpenSpaces }: {
-    active: boolean
-    activeSpace?: SpaceSelection
-    onOpenSpace: (orgId: string, spaceId: string) => void
-    /** The Spaces row itself: the last space, or the Spaces home. */
-    onOpenSpaces?: () => void
-}) {
-    const { orgs } = useSpacesOrgs()
-    const [addingServer, setAddingServer] = useState(false)
-    const unread = useSpacesUnreadCounts()
-    const serverBadges = new Map<string, SpaceBadge>()
-    for (const org of orgs) {
-        const badge = { unread: 0, forYou: 0 }
-        for (const space of [...org.spaces, ...org.directs]) {
-            const count = unread.get(`${org.id}/${space.id}`)
-            badge.unread += count?.unread ?? 0
-            badge.forYou += count?.forYou ?? 0
-        }
-        serverBadges.set(org.id, badge)
-    }
-    const chats = orgs.filter(isGroupChat)
-    const workspaces = orgs.filter((org) => !isGroupChat(org))
-    // Warm each chat's tail so recency (and its unread) can read it.
-    const chatKeys = chats.map((org) => `${org.id}/${org.spaces[0].id}`).join(',')
-    useEffect(() => {
-        for (const org of chats) prefetchStream(org.id, org.spaces[0].id)
-    }, [chatKeys]) // eslint-disable-line react-hooks/exhaustive-deps
-    const lastActivity = (org: OrgWithSpaces) => spaceLastActivityAt(org.id, org.spaces[0].id) ?? org.spaces[0].createdAt
-    chats.sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)))
-    // Sidebar redesign (2026-10-21): server rows line up with every other row
-    // (the monogram sits in the icon column), under a heading that folds.
-    const row = (org: OrgWithSpaces, spaceId: string) => <SidebarMenuItem key={org.id}>
-        <SidebarMenuButton isActive={active && activeSpace?.orgId === org.id}
-            title={org.name} onClick={() => onOpenSpace(org.id, spaceId)}>
-            <OrgMonogram org={org} size="sm" />
-            <span className="min-w-0 flex-1 truncate">{org.name}</span>
-            <UnreadBadge badge={serverBadges.get(org.id)!} />
-        </SidebarMenuButton>
-    </SidebarMenuItem>
-    // Headings only when both kinds are there: one kind needs no label.
-    const both = chats.length > 0 && workspaces.length > 0
-    // Spaces is a nav row like Email or Apps (2026-10-21): it opens Spaces,
-    // its servers nest under it, and the chevron folds them. Folded, the row
-    // carries the unread from all of them.
-    const total = { unread: 0, forYou: 0 }
-    for (const badge of serverBadges.values()) { total.unread += badge.unread; total.forYou += badge.forYou }
-    const onAServer = active && orgs.some((org) => org.id === activeSpace?.orgId)
-    return <SidebarNavSection id="spaces" label="Spaces" tourId="nav-spaces"
-        icon={<ChatsCircle />}
-        active={active && !onAServer}
-        onOpen={onOpenSpaces}
-        foldedBadge={<UnreadBadge badge={total} />}
-        tools={<button type="button" aria-label="New group chat" title="New group chat"
-            className="sb-row-action" onClick={() => setAddingServer(true)}>
-            <Plus />
-        </button>}>
-        <div>
-            {both && <h3 className="sb-subhead">Chats</h3>}
-            <SidebarMenu aria-label="Chats">
-                {chats.map((org) => row(org, org.spaces[0].id))}
-            </SidebarMenu>
-            {both && <h3 className="sb-subhead">Workspaces</h3>}
-            <SidebarMenu aria-label="Workspaces">
-                {workspaces.map((org) => row(org, serverLandingSpaceId(org)))}
-            </SidebarMenu>
-        </div>
-        {addingServer && <AddServerDialog onClose={() => setAddingServer(false)} onChoose={(kind) => {
-            setAddingServer(false)
-            openServerDialog({ kind })
-        }} />}
-    </SidebarNavSection>
-}
 
 function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces

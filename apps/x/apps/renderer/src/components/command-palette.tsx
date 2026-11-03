@@ -29,6 +29,7 @@ import { projectLabel, useCodeSessions } from '@/components/code/use-code-sessio
 import { highlight } from '@/components/spaces/highlight'
 import { useOrgRosters } from '@/hooks/use-space-members'
 import { useSpaceFeeds, useSpacesOrgs } from '@/hooks/use-spaces'
+import { useSections } from '@/hooks/use-sections'
 import {
   PALETTE_SCOPES,
   PALETTE_SECTIONS,
@@ -230,6 +231,7 @@ function byRecency(a: NavItem, b: NavItem): number {
 
 export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope, onNavigate }: CommandPaletteProps) {
   const { orgs } = useSpacesOrgs()
+  const sections = useSections()
   const feedOf = useSpaceFeeds()
   const codeMode = true
   const { sessions: codeSessions, projects } = useCodeSessions()
@@ -335,6 +337,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
     for (const s of PALETTE_SECTIONS) {
       if (s.key === 'spaces' && !SPACES_ENABLED) continue
       if (s.key === 'code' && !codeMode) continue
+      if ((s.key === 'home' && !sections.todo) || (s.key === 'apps' && !sections.apps)) continue
       items.push({
         texts: [s.label, ...s.keywords],
         priority: 0,
@@ -487,7 +490,7 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
       })
     }
     return items
-  }, [orgs, rosters, visitedAt, spaceRefs, feedOf, chats, codeIds, codeMode, codeSessions, projects, notes])
+  }, [orgs, rosters, visitedAt, spaceRefs, feedOf, chats, codeIds, codeMode, sections.todo, sections.apps, codeSessions, projects, notes])
 
   const q = query.trim()
   const { sigil, needle } = splitSigil(q)

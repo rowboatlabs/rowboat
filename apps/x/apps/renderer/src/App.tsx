@@ -39,7 +39,7 @@ import {
   reloadCleanActiveMarkdownAfterExternalChange,
 } from '@/lib/active-markdown-external-change';
 import { useDebounce } from './hooks/use-debounce';
-import { DockSidebar, DOCK_GUTTER_PX, LAST_SPACE_STORAGE_KEY } from '@/components/dock-sidebar';
+import { MainRail, DOCK_GUTTER_PX, LAST_SPACE_STORAGE_KEY } from '@/components/main-rail';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
@@ -788,17 +788,18 @@ function parseDeepLink(input: string): ViewState | null {
   }
 }
 
-/** Sidebar toggle (fixed position, top-left) — one persistent control that
-    swaps between the expanded panel and the icon rail, in both directions.
-    Reports its rendered width so collapsed-mode headers can pad past the
-    whole cluster (toggle and caffeinate; New chat moved into the panel and
-    the rail, 2026-10-22). */
+/** Sidebar toggle (fixed position, top-left): shows and hides the Assistant
+    sidebar beside the main rail. Reports its rendered width so collapsed-mode
+    headers can pad past the whole cluster (toggle and caffeinate; New chat
+    moved into the panel, 2026-10-22). */
 function FixedSidebarToggle({
   leftInsetPx,
   onWidthChange,
+  showToggle = true,
 }: {
   leftInsetPx: number
   onWidthChange?: (px: number) => void
+  showToggle?: boolean
 }) {
   const { toggleSidebar, state } = useSidebar()
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -816,23 +817,25 @@ function FixedSidebarToggle({
     // sits level with them (2026-10-21).
     <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-[38px] items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-full shrink-0" style={{ width: leftInsetPx, transition: 'width 200ms ease' }} />
-      <Tooltip delayDuration={400}>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-            style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
-            aria-label={state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">
-          {state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
-          <Keys keys={SHORTCUTS.toggleSidebar} tone="dark" />
-        </TooltipContent>
-      </Tooltip>
+      {showToggle && (
+        <Tooltip delayDuration={400}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
+              aria-label={state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">
+            {state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
+            <Keys keys={SHORTCUTS.toggleSidebar} tone="dark" />
+          </TooltipContent>
+        </Tooltip>
+      )}
       {/* Caffeinate lives here rather than in a pane header: it is app-wide
           state, and this cluster is the one control group present on every
           view, sidebar expanded or docked. */}
@@ -5559,6 +5562,19 @@ function App() {
     void navigateToView(target ? { type: 'spaces', ...target } : { type: 'spaces' })
   }, [spacesLoading, spaceSelection, railSelection, navigateToView])
 
+  // The rail's Assistant (2026-11-03, spaces-first desktop): from Rowboats it
+  // returns to wherever the Assistant side was left; from there, the
+  // Assistant page itself.
+  const lastAssistantViewRef = useRef<ViewState | null>(null)
+  useEffect(() => {
+    if (currentViewState.type !== 'spaces') lastAssistantViewRef.current = currentViewState
+  }, [currentViewState])
+  const openAssistantArea = useCallback(() => {
+    const last = lastAssistantViewRef.current
+    if (isSpacesOpen && last) void navigateToView(last)
+    else openAssistant()
+  }, [isSpacesOpen, navigateToView, openAssistant])
+
   const openMeetingsView = useCallback(() => {
     void navigateToView({ type: 'meetings' })
   }, [navigateToView])
@@ -6379,9 +6395,10 @@ function App() {
     checkOnboarding()
   }, [])
 
-  // Handler for onboarding completion. When the user accepts the tour offer
-  // on the final step, hand off to the mascot tour once the modal's exit
-  // animation has cleared.
+  // Handler for onboarding completion: new users land in their space
+  // (2026-11-03, spaces-first onboarding). When the user accepts the tour
+  // offer, hand off to the mascot tour once the modal's exit animation has
+  // cleared.
   const handleOnboardingComplete = useCallback(async (opts?: { startTour?: boolean }) => {
     try {
       await window.ipc.invoke('onboarding:markComplete', null)
@@ -6390,10 +6407,11 @@ function App() {
     }
     analytics.onboardingCompleted()
     setShowOnboarding(false)
+    void openSpaces()
     if (opts?.startTour) {
       window.setTimeout(() => setTourActive(true), 400)
     }
-  }, [])
+  }, [openSpaces])
 
   const knowledgeActions = React.useMemo(() => ({
     createNote: async (parentPath: string = 'knowledge') => {
@@ -7262,8 +7280,12 @@ function App() {
   /** Mounted = visited at least once (or showing now); visible = showing now. */
   const sectionMounted = (key: MiddleView) => activeMiddle === key || visitedSections.has(key)
 
-  // Everything the left navigation needs, shared by its two forms: the
-  // expanded panel sidebar and the collapsed floating dock.
+  // Rowboats (Spaces) or the Assistant side: which of the main rail's two
+  // places is showing, and so whether the Assistant sidebar can show.
+  const inRowboats = isSpacesOpen && !isBrowserOpen
+  const assistantSidebarVisible = sidebarOpen && !inRowboats
+
+  // Everything the Assistant sidebar needs.
   const sidebarNavProps = {
     tree,
     knowledgeActions,
@@ -7288,10 +7310,6 @@ function App() {
     onOpenBgTasks: () => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() },
     onOpenApps: openAppsGrid,
     onOpenApp: (folder: string) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() },
-    onOpenSpace: openSpace,
-    onOpenActivity: openActivity,
-    onOpenSpaces: () => { void openSpaces() },
-    activeSpace: spaceSelection,
     recentRuns: chatRuns,
     onOpenRun: openAssistantRun,
     onOpenAssistant: openAssistant,
@@ -7324,17 +7342,20 @@ function App() {
         }
       }}>
         <div className="rowboat-shell flex h-svh w-full overflow-hidden">
-          {/* Left navigation, two forms: expanded = the panel sidebar,
-              collapsed = the slim icon rail. The collapse button (fixed
-              top-left) swaps between them; the gutter padding clears the
-              rail when it's showing. */}
+          {/* Left navigation (2026-11-03, spaces-first desktop): the fixed
+              main rail (Rowboats, Assistant) is always there; the panel
+              sidebar is the Assistant's own and sits beside it, collapsible
+              with the button at the top left. Rowboats brings its own rail. */}
           <SidebarProvider
-            open={sidebarOpen}
-            onOpenChange={handleSidebarOpenChange}
+            open={assistantSidebarVisible}
+            onOpenChange={(open) => { if (!inRowboats) handleSidebarOpenChange(open) }}
             style={{
-              paddingLeft: sidebarOpen ? 0 : DOCK_GUTTER_PX,
+              // The floating panel pads itself by 8px, so it starts 8px into
+              // the rail's gap.
+              '--sidebar-offset': `${DOCK_GUTTER_PX - 8}px`,
+              paddingLeft: assistantSidebarVisible ? DOCK_GUTTER_PX - 8 : DOCK_GUTTER_PX,
               transition: 'padding-left var(--sb-dur) var(--sb-ease)',
-            }}
+            } as React.CSSProperties}
           >
             <SidebarContentPanel
               {...sidebarNavProps}
@@ -7342,12 +7363,17 @@ function App() {
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onVoiceNoteCreated={handleVoiceNoteCreated}
             />
-            {/* Always mounted: renders the tray when collapsed, and only the
-                ⌥/⌃+Tab switcher while the panel is expanded (so the MRU order
-                survives toggling between the two). */}
-            <DockSidebar
-              {...sidebarNavProps}
-              switcherOnly={sidebarOpen}
+            <MainRail
+              area={inRowboats ? 'rowboats' : 'assistant'}
+              onOpenRowboats={() => { void openSpaces() }}
+              onOpenAssistant={openAssistantArea}
+              onOpenEmail={() => openEmailView()}
+              onOpenMeetings={openMeetingsView}
+              onOpenBgTasks={sidebarNavProps.onOpenBgTasks}
+              onOpenApps={openAppsGrid}
+              onStartTour={() => setTourActive(true)}
+              assistantSidebarVisible={assistantSidebarVisible}
+              meetingRecordingState={meetingTranscription.state}
             />
             <SidebarInset
               className={cn(
@@ -8159,7 +8185,7 @@ function App() {
             <div
               aria-hidden="true"
               className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
-              style={{ width: sidebarOpen ? 'var(--sidebar-width)' : DOCK_GUTTER_PX }}
+              style={{ width: assistantSidebarVisible ? `calc(var(--sidebar-width) + ${DOCK_GUTTER_PX - 8}px)` : DOCK_GUTTER_PX }}
             />
             {/* Sidebar toggle — always present (both directions), rendered
                 last so its no-drag region paints over the drag regions. */}
@@ -8168,6 +8194,9 @@ function App() {
               // their place, in line with the sidebar's icons (2026-10-21).
               leftInsetPx={isMac && !fullScreen ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 8}
               onWidthChange={setTitlebarControlsWidthPx}
+              // Rowboats has no Assistant sidebar to toggle (its own rail
+              // has its own control).
+              showToggle={!inRowboats}
             />
             <MenuSidebarToggleBridge />
           </SidebarProvider>

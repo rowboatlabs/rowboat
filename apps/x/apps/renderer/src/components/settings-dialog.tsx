@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, Keyboard, QrCode } from "lucide-react"
+import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, Keyboard, QrCode, LayoutGrid } from "lucide-react"
 
 import {
   Dialog,
@@ -42,8 +42,9 @@ import { PermissionsSettings } from "@/components/settings/permissions-settings"
 import { ShortcutSettings } from "@/components/settings/shortcut-settings"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
+import { useSections, type Sections } from "@/hooks/use-sections"
 
-export type ConfigTab = "account" | "connections" | "mobile" | "phone" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
+export type ConfigTab = "account" | "connections" | "mobile" | "phone" | "models" | "mcp" | "security" | "code-mode" | "sections" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -106,6 +107,12 @@ const tabs: TabConfig[] = [
     description: "Delegate coding tasks to Claude Code or Codex",
   },
   {
+    id: "sections",
+    label: "Sections",
+    icon: LayoutGrid,
+    description: "Choose what the Assistant sidebar shows",
+  },
+  {
     id: "appearance",
     label: "Appearance",
     icon: Palette,
@@ -154,7 +161,7 @@ const tabs: TabConfig[] = [
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile", "phone"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
-  { label: "App", ids: ["appearance", "shortcuts", "notifications", "permissions", "help"] },
+  { label: "App", ids: ["sections", "appearance", "shortcuts", "notifications", "permissions", "help"] },
 ]
 
 interface SettingsDialogProps {
@@ -1555,6 +1562,49 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Optional sections (2026-11-03, spaces-first desktop) ---
+
+const OPTIONAL_SECTIONS: { key: keyof Sections; label: string; description: string }[] = [
+  {
+    key: "todo",
+    label: "Todo",
+    description: "A to-do list Rowboat can work through with you. Turning it off also pauses its scheduled planner.",
+  },
+  {
+    key: "apps",
+    label: "Apps",
+    description: "Small apps Rowboat builds and runs for you.",
+  },
+]
+
+function SectionsSettings() {
+  const sections = useSections()
+  return (
+    <div className="space-y-5">
+      <div className="text-sm text-muted-foreground leading-relaxed">
+        Add sections to the Assistant sidebar. Turning one off hides it everywhere and stops its background work.
+      </div>
+      <div className="space-y-2">
+        {OPTIONAL_SECTIONS.map((section) => (
+          <div key={section.key} className="rounded-md border px-3 py-3 flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">{section.label}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{section.description}</div>
+            </div>
+            <Switch
+              aria-label={section.label}
+              checked={sections[section.key]}
+              onCheckedChange={(next) => {
+                void sections.set({ [section.key]: next }).catch(() => toast.error("Failed to update sections"))
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // --- Notification Settings ---
 
 type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready" | "space_mention"
@@ -2198,6 +2248,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 </div>
               ) : activeTab === "note-tagging" ? (
                 <NoteTaggingSettings dialogOpen={open} />
+              ) : activeTab === "sections" ? (
+                <SectionsSettings />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
               ) : activeTab === "shortcuts" ? (
