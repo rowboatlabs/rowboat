@@ -1204,6 +1204,17 @@ export const MIGRATIONS: Migration[] = [
     id: '055-agent-hosting-requested-by',
     statements: [`alter table agent_hosting add column if not exists requested_by text`],
   },
+  {
+    // Ro off by default (spec §8 Jev, 2026-11-03, Arjun's call): every org
+    // starts without it, and an admin turns it on. Orgs that had it on from
+    // 053's default are switched off once, since the column cannot tell that
+    // default from an admin's choice.
+    id: '056-org-settings-jev-off',
+    statements: [
+      `alter table org_settings alter column jev_enabled set default false`,
+      `update org_settings set jev_enabled = false where jev_enabled`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

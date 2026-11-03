@@ -213,3 +213,19 @@ describe('Agent37 effort key migration', () => {
     } finally { await db.close(); }
   });
 });
+
+describe('Ro off by default (056)', () => {
+  it('switches off every org that had Ro on, and a new row starts off', async () => {
+    const db = await pgliteDb();
+    try {
+      await migrate(db);
+      // An org on from 053's default, as databases before 056 have it.
+      await db.query(`insert into org_settings (org_id, jev_enabled, set_by, set_at) values ('o1', true, 'a', 'now')`);
+      await db.query(`delete from schema_migrations where id = '056-org-settings-jev-off'`);
+      await migrate(db);
+      await db.query(`insert into org_settings (org_id, set_by, set_at) values ('o2', 'a', 'now')`);
+      const rows = await db.query<{ org_id: string; jev_enabled: boolean }>('select org_id, jev_enabled from org_settings order by org_id');
+      expect(rows).toEqual([{ org_id: 'o1', jev_enabled: false }, { org_id: 'o2', jev_enabled: false }]);
+    } finally { await db.close(); }
+  });
+});
