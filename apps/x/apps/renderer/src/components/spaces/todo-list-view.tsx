@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns3, GripVertical, MoreHorizontal, Pencil, Plus, Rows3, Trash2, UserPlus, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, Columns3, GripVertical, MoreHorizontal, NotebookPen, Pencil, Plus, Rows3, Trash2, UserPlus, X } from 'lucide-react'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { canActInSpace, useSpaceAccess } from '@/lib/spaces-access'
 import { useSpaceMembers } from '@/hooks/use-space-members'
@@ -8,13 +8,14 @@ import { useOrgSettings } from '@/hooks/use-org-settings'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { MemberAvatar } from '@/components/spaces/atoms'
+import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-    addItem, addSection, deleteItem, deleteSection, itemRef, itemsOf, moveItem, moveSection, parseTodoList, renameSection, sectionRef, serializeTodoList, updateItem,
+    addItem, addSection, deleteItem, deleteSection, itemDetails, itemRef, itemsOf, moveItem, moveSection, parseTodoList, renameSection, sectionRef, serializeTodoList, updateItem,
     type ItemRef, type TodoAssignee, type TodoDoc, type TodoEdit, type TodoItem,
 } from '@/lib/todo-list'
 
@@ -366,77 +367,126 @@ function TodoItemRow({ item, board, writable, roster, names, sections, onApply, 
     onDragEnd: () => void
 }) {
     const [editing, setEditing] = useState(false)
+    // Details start collapsed for every reader (2026-11-03, Arjun): the list stays scannable, a card opens on demand.
+    const details = itemDetails(item)
+    const [open, setOpen] = useState(false)
+    const [editingDetails, setEditingDetails] = useState(false)
     const commit = (value: string) => {
         setEditing(false)
         if (value.trim() && value.trim() !== item.text) onApply((ref) => updateItem(ref, { text: value }))
     }
+    const commitDetails = (value: string) => {
+        setEditingDetails(false)
+        if (value.trim() !== details) onApply((ref) => updateItem(ref, { details: value }))
+    }
+    const editDetails = () => {
+        setOpen(true)
+        setEditingDetails(true)
+    }
     return (
         <div
-            draggable={writable && !editing}
+            draggable={writable && !editing && !editingDetails}
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDragEnd={onDragEnd}
             className={cn(
-                'group/item flex items-center gap-2 rounded-md px-1 py-1',
+                'group/item rounded-md px-1 py-1',
                 board ? 'border border-border bg-background px-2 py-2 shadow-xs' : 'hover:bg-accent/50',
             )}
         >
-            {writable && <GripVertical aria-hidden className="size-3.5 shrink-0 cursor-grab text-muted-foreground opacity-0 group-hover/item:opacity-100" />}
-            <input
-                type="checkbox"
-                checked={item.done}
-                disabled={!writable}
-                aria-label={item.done ? `Mark "${item.text}" not done` : `Mark "${item.text}" done`}
-                onChange={(e) => onApply((ref) => updateItem(ref, { done: e.target.checked }))}
-                className="size-4 shrink-0 cursor-pointer accent-primary"
-            />
-            {editing ? (
+            <div className="flex items-center gap-2">
+                {writable && <GripVertical aria-hidden className="size-3.5 shrink-0 cursor-grab text-muted-foreground opacity-0 group-hover/item:opacity-100" />}
                 <input
-                    autoFocus
-                    defaultValue={item.text}
-                    aria-label="Item text"
-                    className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm outline-none"
-                    onKeyDown={commitKeys}
-                    onBlur={(e) => (e.currentTarget.dataset.cancel ? setEditing(false) : commit(e.currentTarget.value))}
+                    type="checkbox"
+                    checked={item.done}
+                    disabled={!writable}
+                    aria-label={item.done ? `Mark "${item.text}" not done` : `Mark "${item.text}" done`}
+                    onChange={(e) => onApply((ref) => updateItem(ref, { done: e.target.checked }))}
+                    className="size-4 shrink-0 cursor-pointer accent-primary"
                 />
-            ) : (
-                <span
-                    className={cn('min-w-0 flex-1 break-words text-sm', item.done && 'text-muted-foreground line-through', writable && 'cursor-text')}
-                    onClick={() => writable && setEditing(true)}
+                {editing ? (
+                    <input
+                        autoFocus
+                        defaultValue={item.text}
+                        aria-label="Item text"
+                        className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm outline-none"
+                        onKeyDown={commitKeys}
+                        onBlur={(e) => (e.currentTarget.dataset.cancel ? setEditing(false) : commit(e.currentTarget.value))}
+                    />
+                ) : (
+                    <span
+                        className={cn('min-w-0 flex-1 break-words text-sm', item.done && 'text-muted-foreground line-through', writable && 'cursor-text')}
+                        onClick={() => writable && setEditing(true)}
+                    >
+                        {item.text || <span className="text-muted-foreground">Untitled</span>}
+                    </span>
+                )}
+                {details && (
+                    <button
+                        type="button"
+                        aria-expanded={open}
+                        aria-label={open ? 'Hide details' : 'Show details'}
+                        title={open ? 'Hide details' : 'Show details'}
+                        onClick={() => setOpen(!open)}
+                        className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                        <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
+                    </button>
+                )}
+                <AssigneePicker
+                    assignee={item.assignee}
+                    writable={writable}
+                    roster={roster}
+                    names={names}
+                    onAssign={(assignee) => onApply((ref) => updateItem(ref, { assignee }))}
+                />
+                {writable && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button type="button" aria-label="Item options" className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/item:opacity-100 data-[state=open]:opacity-100">
+                                <MoreHorizontal className="size-3.5" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onCloseAutoFocus={(e) => e.preventDefault()}>
+                            <DropdownMenuItem onClick={() => setEditing(true)}><Pencil className="size-3.5 mr-2" /> Edit</DropdownMenuItem>
+                            <DropdownMenuItem onClick={editDetails}><NotebookPen className="size-3.5 mr-2" /> {details ? 'Edit details' : 'Add details'}</DropdownMenuItem>
+                            {sections.length > 0 && (
+                                <DropdownMenuSub>
+                                    <DropdownMenuSubTrigger><ArrowRight className="size-3.5 mr-2" /> Move to</DropdownMenuSubTrigger>
+                                    <DropdownMenuSubContent>
+                                        {sections.map((s) => (
+                                            <DropdownMenuItem key={s.index} onClick={() => onMoveTo(s.index)}>{s.title}</DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuSubContent>
+                                </DropdownMenuSub>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => onApply((ref) => deleteItem(ref))}><Trash2 className="size-3.5 mr-2" /> Delete</DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
+            </div>
+            {editingDetails ? (
+                <textarea
+                    autoFocus
+                    defaultValue={details}
+                    rows={Math.min(12, Math.max(3, details.split('\n').length + 1))}
+                    placeholder="Details, in markdown… (⌘/Ctrl+Enter to save, Esc to cancel)"
+                    aria-label="Item details"
+                    className={cn('mt-1 block w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none', !board && 'ml-6 w-[calc(100%-1.5rem)]')}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Escape') e.currentTarget.dataset.cancel = '1'
+                        if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) e.currentTarget.blur()
+                    }}
+                    onBlur={(e) => (e.currentTarget.dataset.cancel ? setEditingDetails(false) : commitDetails(e.currentTarget.value))}
+                />
+            ) : open && details && (
+                <div
+                    className={cn('mt-1 min-w-0 break-words text-sm text-muted-foreground', !board && 'pl-6', writable && 'cursor-text')}
+                    onDoubleClick={() => writable && setEditingDetails(true)}
                 >
-                    {item.text || <span className="text-muted-foreground">Untitled</span>}
-                </span>
-            )}
-            <AssigneePicker
-                assignee={item.assignee}
-                writable={writable}
-                roster={roster}
-                names={names}
-                onAssign={(assignee) => onApply((ref) => updateItem(ref, { assignee }))}
-            />
-            {writable && (
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <button type="button" aria-label="Item options" className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/item:opacity-100 data-[state=open]:opacity-100">
-                            <MoreHorizontal className="size-3.5" />
-                        </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" onCloseAutoFocus={(e) => e.preventDefault()}>
-                        <DropdownMenuItem onClick={() => setEditing(true)}><Pencil className="size-3.5 mr-2" /> Edit</DropdownMenuItem>
-                        {sections.length > 0 && (
-                            <DropdownMenuSub>
-                                <DropdownMenuSubTrigger><ArrowRight className="size-3.5 mr-2" /> Move to</DropdownMenuSubTrigger>
-                                <DropdownMenuSubContent>
-                                    {sections.map((s) => (
-                                        <DropdownMenuItem key={s.index} onClick={() => onMoveTo(s.index)}>{s.title}</DropdownMenuItem>
-                                    ))}
-                                </DropdownMenuSubContent>
-                            </DropdownMenuSub>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => onApply((ref) => deleteItem(ref))}><Trash2 className="size-3.5 mr-2" /> Delete</DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                    <SpaceMarkdown body={details} />
+                </div>
             )}
         </div>
     )

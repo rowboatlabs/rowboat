@@ -14,6 +14,16 @@ import { spaces } from '@x/shared'
 // A section is a `##` heading; an item is a top-level `- [ ]` line, assigned
 // by a trailing mention token. Every other line is kept as it was and moves
 // with its section, so a hand-edited file round-trips byte for byte.
+//
+// An item's details are the indented lines under it (2026-11-03, Arjun, so an
+// agent can put a ticket's evidence and acceptance criteria on the card
+// itself): markdown, shown collapsed under the item. A blank line between
+// indented lines stays in the details, so they can run to paragraphs.
+//
+//   - [ ] Fix search decoding
+//     Repro: search `spaces-ux` in Main.
+//
+//     Acceptance: the file is found.
 
 export const TODO_DIR = 'todos'
 
@@ -48,7 +58,7 @@ export interface TodoItem {
     done: boolean
     text: string
     assignee: TodoAssignee | null
-    /** Indented lines under the item (notes, sub-bullets). They move with it. */
+    /** Indented lines under the item, blank lines between them included: its details. They move with it. */
     extra: string[]
 }
 
@@ -87,6 +97,13 @@ function parseItem(line: string): TodoItem | null {
         text = text.slice(0, a.index)
     }
     return { raw: line, done: m[2] !== ' ', text: text.trim(), assignee, extra: [] }
+}
+
+/** A blank line is the item's when the next non-blank line is indented, so it is more of the details. */
+function continuesDetails(lines: string[], i: number): boolean {
+    let j = i + 1
+    while (j < lines.length && lines[j]!.trim() === '') j += 1
+    return j < lines.length && /^\s/.test(lines[j]!)
 }
 
 export function parseTodoList(content: string): TodoDoc {
@@ -137,6 +154,10 @@ export function parseTodoList(content: string): TodoDoc {
             lastItem.extra.push(line)
             continue
         }
+        if (lastItem && line.trim() === '' && continuesDetails(lines, i)) {
+            lastItem.extra.push(line)
+            continue
+        }
         lastItem = null
         current.entries.push({ kind: 'raw', line })
     }
@@ -158,6 +179,19 @@ export function serializeTodoList(doc: TodoDoc): string {
 
 function oneLine(text: string): string {
     return text.replace(/\s*\n\s*/g, ' ').trim()
+}
+
+/** The details as markdown: the indented lines with their shared indent removed. */
+export function itemDetails(item: Pick<TodoItem, 'extra'>): string {
+    const lines = item.extra.map((l) => (l.trim() === '' ? '' : l))
+    const indent = Math.min(...lines.filter((l) => l !== '').map((l) => l.match(/^\s*/)![0].length))
+    return lines.map((l) => l.slice(Number.isFinite(indent) ? indent : 0)).join('\n').trim()
+}
+
+/** Details text → the indented lines stored under the item. Blank lines in between stay blank; at the ends they go. */
+export function formatDetails(details: string): string[] {
+    const text = details.replace(/\r\n?/g, '\n').replace(/^\s*\n|\s+$/g, '')
+    return text ? text.split('\n').map((l) => (l.trim() === '' ? '' : `  ${l}`)) : []
 }
 
 export function formatItem(item: Pick<TodoItem, 'done' | 'text' | 'assignee'>, bullet = '-'): string {
@@ -315,7 +349,7 @@ export function addItem(section: SectionRef, text: string, assignee: TodoAssigne
     }
 }
 
-export function updateItem(ref: ItemRef, patch: Partial<Pick<TodoItem, 'done' | 'text' | 'assignee'>>): TodoEdit {
+export function updateItem(ref: ItemRef, patch: Partial<Pick<TodoItem, 'done' | 'text' | 'assignee'>> & { details?: string }): TodoEdit {
     return (doc) => {
         const at = findItem(doc, ref)
         if (!at) return null
@@ -326,7 +360,8 @@ export function updateItem(ref: ItemRef, patch: Partial<Pick<TodoItem, 'done' | 
         const fields = { done: patch.done ?? old.done, text: patch.text !== undefined ? oneLine(patch.text) : old.text, assignee: patch.assignee !== undefined ? patch.assignee : old.assignee }
         if (!fields.text) return null
         const bullet = old.raw.match(ITEM_RE)?.[1] ?? '-'
-        section.entries[e] = { kind: 'item', item: { ...old, ...fields, raw: formatItem(fields, bullet) } }
+        const extra = patch.details !== undefined ? formatDetails(patch.details) : old.extra
+        section.entries[e] = { kind: 'item', item: { ...old, ...fields, raw: formatItem(fields, bullet), extra } }
         return next
     }
 }
