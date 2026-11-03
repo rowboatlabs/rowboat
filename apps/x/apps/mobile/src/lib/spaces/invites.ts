@@ -31,7 +31,7 @@ export function listNames(names: string[]): string {
   return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
-const DEFAULT_SETTINGS: OrgSettings = { invitePolicy: 'members', jevEnabled: true };
+const DEFAULT_SETTINGS: OrgSettings = { invitePolicy: 'members', jevEnabled: false };
 
 /**
  * The org's settings, last-known first. An org that predates the route has

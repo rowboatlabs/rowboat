@@ -19,6 +19,8 @@ let online: string[] = []
 let spaceMembers: Record<string, spaces.Member[]>
 // Create agent (2026-10-26): the kinds this org's Harbor creates on Rowboat's own account; none = the card reads New agent.
 let managedKinds: string[] = []
+// Ro's switch (2026-11-03: off by default): these tests have it on unless they say.
+let jevEnabled = true
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
     switch (channel) {
         case 'spaces:listOrgMembers': return { members: roster, online }
@@ -26,6 +28,7 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:listAgents': return { agents: roster.filter((m) => m.kind === 'agent' && m.ownerId === 'me').map((a) => ({ agent: a, keys: [] })) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: [] }, defaults: {} }
         case 'spaces:managedAgentKinds': return { kinds: managedKinds }
+        case 'spaces:getOrgSettings': return { settings: { invitePolicy: 'members', jevEnabled } }
         case 'spaces:renameAgent':
             roster = roster.map((m) => (m.id === args.agentId ? { ...m, displayName: args.displayName! } : m))
             return { agent: roster.find((m) => m.id === args.agentId) }
@@ -53,6 +56,7 @@ const gone = agent('gone', 'Gone', 'harsh', 'custom', 'contract', { removedAt: '
 beforeEach(() => {
     invoke.mockClear()
     managedKinds = []
+    jevEnabled = true
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh'), hermes, scout, ro, gone]
     spaceMembers = { S1: [person('me', 'Ramnique'), hermes, scout], S2: [hermes] }
@@ -177,4 +181,11 @@ describe('AgentsView', () => {
         expect(within(kinds).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'Claude Code', 'Codex'])
     })
 
+    it('leaves Ro out while an admin has it off (2026-10-30)', async () => {
+        jevEnabled = false
+        show()
+        await screen.findByText('Scout')
+        expect(screen.getByRole('heading', { name: /Agents/ })).toHaveTextContent('Agents2')
+        expect(screen.queryByText('Ro')).toBeNull()
+    })
 })

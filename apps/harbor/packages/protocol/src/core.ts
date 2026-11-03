@@ -132,9 +132,10 @@ export const OrgSettings = z.object({
   /**
    * Whether Ro, the built-in Jev agent, is on (spec §8 Jev, 2026-10-30): off,
    * it tags no one and clients leave it out of their agent lists and pickers.
-   * It keeps its spaces, so on again it carries on there.
+   * It keeps its spaces, so on again it carries on there. Off until an admin
+   * turns it on (2026-11-03, Arjun's call).
    */
-  jevEnabled: z.boolean().default(true),
+  jevEnabled: z.boolean().default(false),
 });
 export type OrgSettings = z.infer<typeof OrgSettings>;
 

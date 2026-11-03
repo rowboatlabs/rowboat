@@ -614,7 +614,7 @@ export class PgStore implements Store {
       'select invite_policy, jev_enabled from org_settings where org_id = $1',
       [this.orgId],
     );
-    return { invitePolicy: rows[0]?.invite_policy ?? 'members', jevEnabled: rows[0]?.jev_enabled ?? true };
+    return { invitePolicy: rows[0]?.invite_policy ?? 'members', jevEnabled: rows[0]?.jev_enabled ?? false };
   }
 
   async setJevEnabled(enabled: boolean, by: string, at: string): Promise<void> {

@@ -102,6 +102,14 @@ describe('Jev', () => {
     expect(members.some((m) => m.id === jev.id)).toBe(false);
   });
 
+  it('is off until an admin turns it on (2026-11-03)', async () => {
+    expect((await as('dev-harsh').get('/v1/org/settings')).body.settings).toMatchObject({ jevEnabled: false });
+    await db.store.setMemberRole('ramnique', 'admin'); // no seed space here, so no one is admin yet
+    expect((await as('dev-harsh').patch('/v1/org/settings', { jevEnabled: true })).status).toBe(403);
+    const on = await as('dev-ramnique').patch('/v1/org/settings', { jevEnabled: true });
+    expect(on.body.settings).toMatchObject({ jevEnabled: true });
+  });
+
   it('is never created twice: a restart finds it', async () => {
     await harbor.close();
     harbor = await start();
@@ -185,7 +193,6 @@ describe('Jev', () => {
   });
 
   it('is off when an admin turns it off: it tags no one, keeps its spaces, and on again tags only what comes after (2026-10-30)', async () => {
-    await db.store.setMemberRole('ramnique', 'admin'); // no seed space here, so no one is admin yet
     expect((await as('dev-harsh').patch('/v1/org/settings', { jevEnabled: false })).status).toBe(403);
     const off = await as('dev-ramnique').patch('/v1/org/settings', { jevEnabled: false });
     expect(off.body.settings).toMatchObject({ jevEnabled: false });
