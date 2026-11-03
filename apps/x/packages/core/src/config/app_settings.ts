@@ -32,6 +32,12 @@ export interface AppSettings {
      * (2026-10-13, #415)
      */
     telemetryOptOut?: boolean;
+    /**
+     * Optional sidebar sections (2026-11-03, spaces-first desktop): off for
+     * new installs, on for existing ones that already use them. Written once
+     * by config/sections.ts, then only by the Settings toggles.
+     */
+    sections?: { todo: boolean; apps: boolean };
 }
 
 export function loadAppSettings(): AppSettings {

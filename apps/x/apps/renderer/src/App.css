@@ -1357,70 +1357,50 @@
   background: var(--stream-alert);
 }
 
-.rowboat-dock-tip {
-  position: fixed;
-  transform: translateY(-50%);
-  background: var(--rowboat-bubble);
-  color: var(--rowboat-bubble-foreground);
-  border-radius: 9px;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  z-index: 40;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
+/* The main rail's two places (2026-11-03, spaces-first desktop): an icon
+   over a short label, so the rail reads without hovering. */
+.rowboat-rail-tile {
   display: flex;
+  width: 48px;
   flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 0 5px;
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 65%, transparent);
 }
-
-.rowboat-dock-tip-status {
-  font-size: 11px;
-  font-weight: 400;
-  color: color-mix(in oklab, var(--rowboat-bubble-foreground) 72%, transparent);
-  white-space: nowrap;
+.rowboat-rail-tile:hover {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-foreground);
 }
-
-.rowboat-dock-tip-status-alert {
-  color: #ff9d94;
+.rowboat-rail-tile:focus-visible {
+  outline: 2px solid var(--sidebar-ring);
+  outline-offset: -2px;
 }
-
-.rowboat-dock-flyout {
-  position: fixed;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 296px;
-  max-height: 70%;
-  overflow: auto;
-  background: var(--rowboat-raised);
-  border: 1px solid transparent;
-  border-radius: 18px;
-  box-shadow: var(--rowboat-shadow);
-  padding: 12px;
-  z-index: 35;
-  animation: rowboat-dock-flyin 0.18s ease-out;
+.rowboat-rail-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.01em;
 }
-
-@keyframes rowboat-dock-flyin {
-  from {
-    opacity: 0;
-    transform: translateX(-14px) translateY(-50%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) translateY(-50%);
-  }
+.rowboat-rail-recording,
+.rowboat-rail-recording > span {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgb(239 68 68);
+  border: 1.5px solid var(--sidebar);
+  box-sizing: border-box;
+  z-index: 2;
 }
-
-/* The ⌥Tab switcher pill: same dark bubble surface as the rail tooltips,
-   so the monochrome glyphs pop against it. */
-.rowboat-dock-switcher {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 10px;
-  background: var(--rowboat-bubble);
-  border-radius: 14px;
-  box-shadow: var(--rowboat-shadow);
+.rowboat-rail-recording > span {
+  top: -1.5px;
+  right: -1.5px;
+  border: none;
+  opacity: .75;
 }
 
 /* The sidebar carries no internal borders — spacing does the separating. */

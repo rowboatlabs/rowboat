@@ -1,5 +1,6 @@
 import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
 import { WorkDir } from "@x/core/dist/config/config.js";
+import { getSections } from "@x/core/dist/config/sections.js";
 import type { ipc } from "@x/shared";
 import { dispatchDeepLink } from "./deeplink.js";
 import {
@@ -57,6 +58,11 @@ export function installAppMenu(menuActions: MenuActions): void {
   rebuildMenu();
   onQuickAskShortcutChanged(() => rebuildMenu());
   onUpdaterStatusChanged(() => rebuildMenu());
+}
+
+/** Todo and Apps leave the Go menu while they are off (2026-11-03). */
+export function refreshMenuSections(): void {
+  rebuildMenu();
 }
 
 /** Mirror of setTrayRecordingState — both surfaces relabel together. */
@@ -147,11 +153,17 @@ const GO_ITEMS: ReadonlyArray<{ label: string; type: string; accelerator?: strin
   { label: "Projects", type: "workspace", accelerator: "CmdOrCtrl+6" },
   { label: "Background Agents", type: "bg-tasks", accelerator: "CmdOrCtrl+7" },
   { label: "Apps", type: "apps", accelerator: "CmdOrCtrl+8" },
-  { label: "Spaces", type: "spaces", accelerator: "CmdOrCtrl+9" },
+  { label: "Rowboats", type: "spaces", accelerator: "CmdOrCtrl+9" },
   { label: "Chat History", type: "chat-history" },
   { label: "Live Notes", type: "live-notes" },
   { label: "Graph", type: "graph" },
 ];
+
+function goItemEnabled(item: { type: string }): boolean {
+  if (item.type !== "home" && item.type !== "apps") return true;
+  const sections = getSections();
+  return item.type === "home" ? sections.todo : sections.apps;
+}
 
 function rebuildMenu(): void {
   const isMac = process.platform === "darwin";
@@ -317,7 +329,7 @@ function rebuildMenu(): void {
         click: () => sendCommand({ command: "go-forward" }),
       },
       { type: "separator" },
-      ...GO_ITEMS.map((item): MenuItemConstructorOptions => ({
+      ...GO_ITEMS.filter(goItemEnabled).map((item): MenuItemConstructorOptions => ({
         label: item.label,
         ...(item.accelerator ? { accelerator: item.accelerator } : {}),
         click: () => navigate(item.type),

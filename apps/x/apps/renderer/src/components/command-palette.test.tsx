@@ -77,6 +77,9 @@ vi.mock('@/components/code/use-code-sessions', () => ({
     projectLabel: (row: { project: { name: string } }) => row.project.name,
 }))
 vi.mock('@/lib/feature-flags', () => ({ SPACES_ENABLED: true, LOCAL_RUNTIME: true }))
+// Todo and Apps are optional sections; most tests run with both on.
+const sections = vi.hoisted(() => ({ todo: true, apps: true }))
+vi.mock('@/hooks/use-sections', () => ({ useSections: () => ({ ...sections, set: vi.fn() }) }))
 vi.mock('@/lib/analytics', () => ({ searchOpened: vi.fn(), searchExecuted: vi.fn(), searchResultSelected: vi.fn() }))
 vi.mock('posthog-js', () => ({ default: { people: { set_once: vi.fn() } } }))
 
@@ -95,6 +98,8 @@ const notes = [
 beforeEach(() => {
     ;(window as unknown as { ipc: unknown }).ipc = { invoke, on: () => () => {}, send: () => undefined }
     invoke.mockClear()
+    sections.todo = true
+    sections.apps = true
 })
 afterEach(cleanup)
 
@@ -124,6 +129,17 @@ describe('CommandPalette', () => {
         expect(screen.getAllByRole('button', { pressed: false }).map((b) => b.textContent)).toEqual(['Spaces', 'Chats', 'Brain', 'Projects'])
         // Nothing is searched until something is typed.
         expect(invoke).not.toHaveBeenCalledWith('search:query', expect.anything())
+    })
+
+    it('leaves Todo and Apps out of Go to while they are off', async () => {
+        sections.todo = false
+        sections.apps = false
+        open()
+        const group = (await screen.findByText('Go to')).closest('[cmdk-group]') as HTMLElement
+        const labels = within(group).getAllByRole('option').map((o) => o.textContent?.replace(/⌘\d|Ctrl\+\d/g, '').trim())
+        expect(labels).not.toContain('Todo')
+        expect(labels).not.toContain('Apps')
+        expect(labels).toContain('Email')
     })
 
     it('closes and goes to the section when a Go to row is clicked', () => {

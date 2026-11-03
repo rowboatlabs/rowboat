@@ -267,43 +267,6 @@
 }
 .sb-section[data-open="false"] .sb-collapse { grid-template-rows: 0fr; opacity: 0; }
 .sb-collapse > * { min-height: 0; overflow: hidden; }
-/* A nav row with children (Spaces): sits in the row rhythm, not as a heading.
-   Its chevron points down when open and right when folded. */
-.sb-section.sb-nav-section { margin-top: 2px; }
-.sb-nav-section .sb-chevron { opacity: 1; width: 14px; height: 14px; }
-.sb-nav-section[data-open="false"] .sb-chevron { transform: rotate(-90deg); }
-.sb-nav-section .sb-tree { margin-left: 17px; margin-top: 2px; }
-/* Two buttons on hover (+ and the chevron): leave room for both. */
-.sb-nav-section [data-sidebar="menu-item"]:has(.sb-row-actions):hover > [data-sidebar="menu-button"],
-.sb-nav-section [data-sidebar="menu-item"]:has(.sb-row-actions):focus-within > [data-sidebar="menu-button"] { padding-right: 58px; }
-
-/* A nested list: indented under its heading with a faint guide line, the
-   line centred under the heading's first letter. */
-.sb-tree {
-  position: relative;
-  margin-left: 14px;
-  padding-left: 8px;
-}
-.sb-tree::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 1px;
-  border-radius: 1px;
-  background: color-mix(in srgb, var(--sidebar-foreground) 10%, transparent);
-}
-.sb-tree .sb-subhead { padding-left: 10px; }
-.sb-subhead {
-  display: flex;
-  align-items: center;
-  height: 24px;
-  padding: 4px 10px 0;
-  font-size: 11px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--sidebar-foreground) 38%, transparent);
-}
 
 /* A chat that just arrived slides into place. */
 @keyframes sb-row-in {
@@ -448,22 +411,6 @@
 }
 .sb-menu[data-state="open"] { animation: sb-menu-in 150ms ease; }
 
-/* The collapsed rail hands off to the panel and back with a short fade,
-   instead of swapping in a single frame. */
-@keyframes rowboat-dock-in {
-  from { opacity: 0; transform: translateX(-6px); }
-  to { opacity: 1; transform: none; }
-}
-/* It arrives as the panel finishes clipping away. */
-.rowboat-dock { animation: rowboat-dock-in 180ms ease-out 140ms both; }
-@keyframes rowboat-dock-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateX(-6px); }
-}
-.rowboat-dock[data-leaving="true"] {
-  animation: rowboat-dock-out 120ms ease-out both;
-  pointer-events: none;
-}
 .rowboat-dock-tile { transition: transform 120ms ease !important; }
 .rowboat-dock-tile:active { transform: scale(.94); }
 .rowboat-dock-tile[data-active="true"] {
@@ -478,7 +425,5 @@
   .sb-collapse,
   .sb-chevron { transition: none; }
   .sb-row-in,
-  .sb-menu[data-state="open"],
-  .rowboat-dock,
-  .rowboat-dock[data-leaving="true"] { animation: none; }
+  .sb-menu[data-state="open"] { animation: none; }
 }

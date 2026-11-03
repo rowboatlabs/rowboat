@@ -3,14 +3,11 @@ import { CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Step } from "./use-onboarding-state"
 
-// Keep one sequence for account and API-key setup so users can revisit
-// Providers to add models after either login (2026-09-22, ChatGPT onboarding).
+// Spaces-first onboarding (2026-11-03): three screens.
 const STEPS = [
-  { step: 0 as Step, label: "Welcome" },
-  { step: 1 as Step, label: "Providers" },
-  { step: 2 as Step, label: "Connect" },
-  { step: 3 as Step, label: "Code" },
-  { step: 4 as Step, label: "Done" },
+  { step: 0 as Step, label: "Sign in" },
+  { step: 1 as Step, label: "Space" },
+  { step: 2 as Step, label: "Invite" },
 ]
 
 interface StepIndicatorProps {
@@ -22,7 +19,7 @@ export function StepIndicator({ currentStep }: StepIndicatorProps) {
   const currentIndex = steps.findIndex(s => s.step === currentStep)
 
   return (
-    <div className="flex items-center gap-2 mb-20 px-4">
+    <div className="flex items-center gap-2 mb-14 px-16">
       {steps.map((s, i) => (
         <React.Fragment key={s.step}>
           {i > 0 && (

@@ -77,9 +77,6 @@ const BLOCKING_OVERLAY_SLOTS = new Set([
   'popover-content',
   'select-content',
   'sheet-content',
-  // The dock's ⌥Tab switcher and Chats/Spaces flyouts (custom overlays, not
-  // Radix) — they stamp data-slot/data-state themselves (see dock-sidebar).
-  'dock-overlay',
 ])
 
 interface BrowserPaneProps {

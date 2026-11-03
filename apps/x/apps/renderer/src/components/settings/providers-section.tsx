@@ -73,14 +73,8 @@ function flavorMeta(flavor: string) {
   return BYOK_CATALOG.find((c) => c.flavor === flavor)
 }
 
-export function ProvidersSection({ dialogOpen, variant = "settings" }: {
+export function ProvidersSection({ dialogOpen }: {
   dialogOpen: boolean
-  /**
-   * "onboarding" renders the same connected-provider list + add flow but
-   * without the settings-only chrome (Manage buttons, defer toggle) — the
-   * onboarding step supplies its own framing and navigation.
-   */
-  variant?: "settings" | "onboarding"
 }) {
   const { groups, isRowboatConnected, refresh } = useModels()
   const chatgpt = useChatGPT()
@@ -192,11 +186,9 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
                 Retry
               </Button>
             )}
-            {variant === "settings" && (
-              <Button variant="outline" size="sm" onClick={() => setManageId(c.id)}>
-                Manage
-              </Button>
-            )}
+            <Button variant="outline" size="sm" onClick={() => setManageId(c.id)}>
+              Manage
+            </Button>
           </div>
         ))}
       </div>
@@ -207,17 +199,15 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
       </Button>
 
       {/* Defer background tasks while chatting */}
-      {variant === "settings" && (
-        <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5">
-          <div className="min-w-0">
-            <div className="text-sm font-medium">Defer background tasks while chatting</div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              Background agents wait until no chat is running. Recommended for local models.
-            </div>
+      <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">Defer background tasks while chatting</div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            Background agents wait until no chat is running. Recommended for local models.
           </div>
-          <Switch checked={deferBackgroundTasks} onCheckedChange={handleDeferToggle} />
         </div>
-      )}
+        <Switch checked={deferBackgroundTasks} onCheckedChange={handleDeferToggle} />
+      </div>
 
       <AddProviderDialog
         open={addOpen}
@@ -228,7 +218,6 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
         onChatGPTSignIn={chatgpt.signIn}
         hadAssistant={selections.assistantModel !== null}
         modelRecommendations={modelRecommendations}
-        analyticsSource={variant === "onboarding" ? "onboarding" : "connect"}
       />
 
       {manageCard && (
@@ -253,7 +242,7 @@ type AddStep =
   | { kind: "result"; name: string; first: boolean; pickedModel: string | null; modelCount: number | null }
   | { kind: "error"; flavor: ByokFlavor; message: string }
 
-function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnected, chatgptSignedIn, onChatGPTSignIn, hadAssistant, modelRecommendations, analyticsSource }: {
+function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnected, chatgptSignedIn, onChatGPTSignIn, hadAssistant, modelRecommendations }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   connectedIds: string[]
@@ -262,7 +251,6 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
   onChatGPTSignIn: () => Promise<unknown> | void
   hadAssistant: boolean
   modelRecommendations: ModelRecommendations | undefined
-  analyticsSource: 'connect' | 'onboarding'
 }) {
   const [step, setStep] = useState<AddStep>({ kind: "choose" })
   const [apiKey, setApiKey] = useState("")
@@ -411,7 +399,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
           model,
           recommended: model === normalizeModelRecommendation(modelRecommendations, flavor)?.assistantModel.model,
           taskOverridesSeeded: Object.keys(taskModels).length,
-          source: analyticsSource,
+          source: 'connect',
         })
         // The user has now been offered this version of the recommendation:
         // the update prompt waits for the next one. Awaited BEFORE the

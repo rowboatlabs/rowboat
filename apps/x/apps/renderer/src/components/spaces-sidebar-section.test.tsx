@@ -1,13 +1,12 @@
 import { useState } from 'react'
-import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SpacesSidebarSection, ServerSpaceNavigation } from './spaces-sidebar-section'
+import { ServerSpaceNavigation } from './spaces-sidebar-section'
 import { ServerOptionsMenu } from './spaces/server-options-menu'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { isSpaceExpanded, setSpacesExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
-import { forgetOrg, loadUnread, markStreamRead } from '@/lib/spaces-read-state'
+import { forgetOrg } from '@/lib/spaces-read-state'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { openServerDialog } from '@/lib/server-dialog'
 
 const { org, other, topics } = vi.hoisted(() => ({
     org: {
@@ -60,96 +59,6 @@ afterEach(() => {
     forgetOrg(other.id)
     vi.mocked(useSpacesOrgs).mockImplementation(() => ({ orgs: [org] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() }))
     vi.unstubAllGlobals()
-})
-
-describe('the sidebar server list', () => {
-    it('lists only servers and opens each server using the shared landing destination', () => {
-        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
-        const open = vi.fn()
-        render(<SidebarProvider><SpacesSidebarSection active activeSpace={{ orgId: org.id, spaceId: 'main' }}
-            onOpenSpace={open} /></SidebarProvider>)
-        expect(screen.getByRole('button', { name: 'Our server' })).toHaveAttribute('data-active', 'true')
-        expect(screen.getByRole('button', { name: 'Other server' })).toHaveAttribute('data-active', 'false')
-        expect(screen.queryByText('founders')).toBeNull()
-        expect(screen.queryByText('Person 0')).toBeNull()
-        expect(screen.queryByRole('button', { name: /Spaces activity/ })).toBeNull()
-        expect(screen.queryByRole('region', { name: 'Activity across organizations' })).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'Other server' }))
-        expect(open).toHaveBeenCalledWith(other.id, 'welcome')
-        // Spaces is a nav row; its chevron folds the servers (sidebar
-        // redesign, 2026-10-21) and the choice is remembered.
-        expect(screen.getByRole('button', { name: 'Spaces' })).toBeVisible()
-        const fold = screen.getByRole('button', { name: 'Hide spaces list' })
-        expect(fold).toHaveAttribute('aria-expanded', 'true')
-        fireEvent.click(fold)
-        expect(fold).toHaveAttribute('aria-expanded', 'false')
-        expect(window.localStorage.getItem('x:sidebar-section:spaces')).toBe('closed')
-        fireEvent.click(fold)
-        expect(fold).toHaveAttribute('aria-expanded', 'true')
-    })
-    it('can open an empty server and add a server when none are connected', () => {
-        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...org, spaces: [], directs: [] }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
-        const open = vi.fn()
-        const view = render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={open} /></SidebarProvider>)
-        fireEvent.click(screen.getByRole('button', { name: 'Our server' }))
-        expect(open).toHaveBeenCalledWith(org.id, '')
-        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [], loading: false, refresh: vi.fn() })
-        view.rerender(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={open} /></SidebarProvider>)
-        expect(screen.queryByText('Our server')).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'New group chat' }))
-        expect(screen.getByRole('dialog', { name: 'New group chat' })).toBeVisible()
-        fireEvent.click(screen.getByRole('button', { name: /Create a group chat/ }))
-        expect(openServerDialog).toHaveBeenLastCalledWith({ kind: 'create' })
-        expect(screen.queryByRole('dialog')).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'New group chat' }))
-        fireEvent.click(screen.getByRole('button', { name: /Join a server/ }))
-        expect(openServerDialog).toHaveBeenLastCalledWith({ kind: 'join' })
-    })
-    it('lists one-space servers as chats, most recent first, and the rest as workspaces', () => {
-        const quiet = { ...other, id: 'quiet', name: 'Quiet chat', spaces: [{ id: 'q', name: 'Quiet chat', createdAt: '2026-08-01' }] }
-        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, quiet, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
-        const open = vi.fn()
-        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={open} /></SidebarProvider>)
-        const chats = screen.getByRole('list', { name: 'Chats' })
-        expect(within(chats).getAllByRole('button').map((button) => button.textContent)).toEqual(['Other server', 'Quiet chat'])
-        expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Our server' })).toBeVisible()
-        expect(screen.getByRole('heading', { name: 'Chats' })).toBeVisible()
-        // A chat row opens the conversation itself.
-        fireEvent.click(within(chats).getByRole('button', { name: 'Quiet chat' }))
-        expect(open).toHaveBeenCalledWith('quiet', 'q')
-    })
-    it('takes the server at its word: one space of yours in a workspace is still a workspace', () => {
-        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...other, groupChat: false }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
-        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
-        expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Other server' })).toBeVisible()
-        expect(within(screen.getByRole('list', { name: 'Chats' })).queryAllByRole('button')).toHaveLength(0)
-    })
-    it('lists a group chat you are in no space of as a workspace, without breaking', () => {
-        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [{ ...other, spaces: [], groupChat: true }] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
-        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
-        expect(within(screen.getByRole('list', { name: 'Workspaces' })).getByRole('button', { name: 'Other server' })).toBeVisible()
-    })
-    it('drops the headings when every server is one kind', () => {
-        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
-        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpace={vi.fn()} /></SidebarProvider>)
-        expect(screen.queryByRole('heading', { name: 'Chats' })).toBeNull()
-        expect(screen.queryByRole('heading', { name: 'Workspaces' })).toBeNull()
-    })
-    it('aggregates space and DM unread counts per server and updates after reading', async () => {
-        vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
-        vi.stubGlobal('ipc', { on: vi.fn(() => () => {}), invoke: vi.fn(async (_channel, args) => ({
-            spaces: [{ spaceId: args.orgId === org.id ? 'founders' : 'welcome', head: 3, readOffset: 0, unreadRoots: 3, unreadMentions: args.orgId === org.id ? 1 : 0, threads: [] },
-                ...(args.orgId === org.id ? [{ spaceId: 'dm0', head: 2, readOffset: 0, unreadRoots: 2, unreadMentions: 0, threads: [] }] : [])],
-        })) })
-        await act(async () => { await loadUnread(org.id, 'me'); await loadUnread(other.id, 'me') })
-        render(<SidebarProvider><SpacesSidebarSection active onOpenSpace={vi.fn()} /></SidebarProvider>)
-        const ourServer = screen.getByText('Our server').closest('button')!
-        const otherServer = screen.getByText('Other server').closest('button')!
-        expect(within(ourServer).getByLabelText('5 unread · 3 for you')).toBeVisible()
-        expect(within(otherServer).getByLabelText('3 unread · none for you')).toBeVisible()
-        act(() => markStreamRead(org.id, 'founders', 3, { sync: false }))
-        expect(within(ourServer).getByLabelText('2 unread · 2 for you')).toBeVisible()
-    })
 })
 
 describe('server and space navigation', () => {
