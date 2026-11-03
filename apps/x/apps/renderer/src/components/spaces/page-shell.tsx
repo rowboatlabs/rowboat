@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref, UIEventHandler } from 'react'
 import { cn } from '@/lib/utils'
 
 // Spaces redesign (2026-10-21): Activity, Discussions and Files share the
@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 // page is, then a filter row, at the app's 14px body size — instead of each
 // drawing its own 13px header strip. Same column as the Agents page.
 
-export function SpacesPage({ label, title, count, subtitle, actions, toolbar, className, children }: {
+export function SpacesPage({ label, title, count, subtitle, actions, toolbar, className, children, scrollRef, onScroll }: {
     label: string
     title: string
     count?: number
@@ -17,9 +17,11 @@ export function SpacesPage({ label, title, count, subtitle, actions, toolbar, cl
     toolbar?: ReactNode
     className?: string
     children: ReactNode
+    scrollRef?: Ref<HTMLElement>
+    onScroll?: UIEventHandler<HTMLElement>
 }) {
     return (
-        <section aria-label={label} className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background', className)}>
+        <section ref={scrollRef} onScroll={onScroll} aria-label={label} className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background', className)}>
             <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
                 <header className="flex flex-wrap items-end justify-between gap-4">
                     <div className="min-w-0">

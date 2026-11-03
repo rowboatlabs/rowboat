@@ -6,6 +6,7 @@ describe('web routes', () => {
     const rails: RailSelection[] = [
         { kind: 'general' },
         { kind: 'discussions' },
+        { kind: 'discussions', rootMessageId: 'thread/with spaces' },
         { kind: 'files' },
         { kind: 'thread', rootMessageId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' },
         { kind: 'file', assetId: '01ARZ3NDEKTSV4RRFFQ69G5FAW' },

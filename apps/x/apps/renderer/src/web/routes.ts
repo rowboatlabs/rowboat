@@ -11,6 +11,7 @@ import type { RailSelection } from '@/lib/spaces-selection'
 //   /<org>/activity | /browse | /agents   an org-level surface
 //   /<org>/s/<space>            the stream
 //   …/discussions | …/files     the space's lists
+//   …/discussions/t/<root>      a thread beside the Threads list (2026-11-03)
 //   …/t/<root>                  a thread
 //   …/a/<asset> | …/w/<asset>   a file | a whiteboard
 //
@@ -33,7 +34,7 @@ export function parseRoute(pathname: string): WebRoute {
     if (isOrgView(section)) return { orgKey, view: section, rail: GENERAL }
     if (section !== 's' || !spaceId) return { orgKey, rail: GENERAL }
     const rail: RailSelection =
-        kind === 'discussions' ? { kind: 'discussions' }
+        kind === 'discussions' ? { kind: 'discussions', ...(id === 't' && parts[5] ? { rootMessageId: parts[5] } : {}) }
         : kind === 'files' ? { kind: 'files' }
         : kind === 't' && id ? { kind: 'thread', rootMessageId: id }
         : kind === 'a' && id ? { kind: 'file', assetId: id }
@@ -50,6 +51,7 @@ export function routePath(orgKey: string, target: { spaceId?: string; view?: Org
     const rail = target.rail ?? GENERAL
     switch (rail.kind) {
         case 'discussions':
+            return `${space}/discussions${rail.rootMessageId ? `/t/${encodeURIComponent(rail.rootMessageId)}` : ''}`
         case 'files':
             return `${space}/${rail.kind}`
         case 'thread':

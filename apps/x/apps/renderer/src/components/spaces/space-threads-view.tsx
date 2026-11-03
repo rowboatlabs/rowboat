@@ -1,6 +1,7 @@
+import { useThreadsPreference, useThreadsScroll } from '@/hooks/use-threads-view-memory'
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { invokeSpace } from '@/lib/spaces-invoke'
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Archive, ArchiveRestore, Bot, Check, ChevronDown, Link as LinkIcon, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, Users } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { messageUrl } from '@x/shared/dist/spaces.js'
@@ -30,30 +31,6 @@ import { FilterTabs, SpacesEmpty, SpacesPage } from '@/components/spaces/page-sh
  * window, so "Load older" pages the stream itself rather than a new route.
  */
 type ThreadsFilter = 'all' | 'named' | 'mine'
-
-/**
- * The participant filter (2026-10-25, "managing sessions" in Main) is sticky
- * per space: kept in localStorage so leaving the Threads view, or the app,
- * and coming back finds the same subset.
- */
-const participantKey = (orgId: string, spaceId: string) => `spaces:threads-participant:${orgId}:${spaceId}`
-
-function useStickyParticipant(orgId: string, spaceId: string): [string | null, (memberId: string | null) => void] {
-    const key = participantKey(orgId, spaceId)
-    const read = () => { try { return window.localStorage.getItem(key) } catch { return null } }
-    const [state, setState] = useState(() => ({ key, value: read() }))
-    // Switching spaces remounts nothing, so re-read when the key changes.
-    const value = state.key === key ? state.value : read()
-    if (state.key !== key) setState({ key, value })
-    const set = useCallback((memberId: string | null) => {
-        try {
-            if (memberId) window.localStorage.setItem(key, memberId)
-            else window.localStorage.removeItem(key)
-        } catch { /* storage unavailable: the filter still holds for this visit */ }
-        setState({ key, value: memberId })
-    }, [key])
-    return [value, set]
-}
 
 /** A thread's participants: the root's author, then everyone who replied, in first-reply order. */
 function participantsOf(root: spaces.Message | undefined, replyAuthors: (root: spaces.Message) => readonly string[]): string[] {
@@ -90,7 +67,7 @@ function threadRows(topics: readonly spaces.TopicListing[], roots: readonly Chat
         .sort((a, b) => b.activityAt.localeCompare(a.activityAt) || a.rootMessageId.localeCompare(b.rootMessageId))
 }
 
-export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMemberId, topics, roots, hasMore, loadingOlder, onLoadOlder, loaded, memberNames, spaceNames, presence, inline = false, onOpen }: {
+export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMemberId, topics, roots, hasMore, loadingOlder, onLoadOlder, loaded, memberNames, spaceNames, presence, inline = false, selectedRootMessageId, onOpen }: {
     orgId: string
     orgAddress: string
     spaceId: string
@@ -106,15 +83,18 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     memberNames: ReadonlyMap<string, string>
     spaceNames: ReadonlyMap<string, string>
     presence: SpacePresence
-    /** The space shows replies inline (2026-10-25): a row lands on its first message in the stream and opens the conversation beside it. */
+    /** Inline spaces call the side pane a conversation. */
     inline?: boolean
+    selectedRootMessageId?: string | null
     onOpen: (rootMessageId: string) => void
 }) {
     const { writable } = useSpaceAccess()
     useReadStateVersion()
-    const [filter, setFilter] = useState<ThreadsFilter>('all')
-    const [participant, setParticipant] = useStickyParticipant(orgId, spaceId)
-    const [archived, setArchived] = useState(false)
+    const memoryKey = `${orgId}:${spaceId}`
+    const [filter, setFilter] = useThreadsPreference<ThreadsFilter>(`spaces:threads-filter:${memoryKey}`, (raw) => raw === 'named' || raw === 'mine' ? raw : 'all')
+    const [participant, setParticipant] = useThreadsPreference(`spaces:threads-participant:${memoryKey}`, (raw) => raw)
+    const [archiveFilter, setArchiveFilter] = useThreadsPreference(`spaces:threads-archive:${memoryKey}`, (raw) => raw === 'archived' ? 'archived' : 'active')
+    const archived = archiveFilter === 'archived'
     const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
     const [pending, setPending] = useState<string | null>(null)
     const showArchived = filter === 'named' && archived
@@ -122,6 +102,9 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     const shownRoots = useMemo(() => allRows.flatMap((row) => row.root ? [row.root] : []), [allRows])
     const replyAuthors = useFallbackReplyAuthors(orgId, spaceId, shownRoots)
     const rows = participant ? allRows.filter((row) => participantsOf(row.root, replyAuthors).includes(participant)) : allRows
+    const scroll = useThreadsScroll(`spaces:threads-scroll:${memoryKey}:${filter}:${showArchived}:${participant ?? ''}`, {
+        loaded, hasMore: filter !== 'named' && hasMore, loadingOlder, onLoadOlder, rowCount: rows.length,
+    })
     const nameOf = (memberId: string) => memberNames.get(memberId) ?? 'Unknown member'
     // The menu offers whoever appears in the threads on screen, plus a sticky
     // choice that the loaded window doesn't reach yet so it can be cleared.
@@ -139,12 +122,12 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
             toast(error instanceof Error ? error.message : 'Could not update the discussion', 'error')
         } finally { setPending(null) }
     }
-    return <SpacesPage label="Threads" title="Threads" count={rows.length}
+    return <SpacesPage scrollRef={scroll.ref} onScroll={scroll.onScroll} label="Threads" title="Threads" count={rows.length}
         subtitle="Every conversation in this space. Named threads have a title so the team can find them again."
         toolbar={<>
             <FilterTabs label="Show threads" value={filter} onChange={setFilter}
                 options={[{ value: 'all', label: 'All' }, { value: 'named', label: 'Named' }, { value: 'mine', label: 'By me' }]} />
-            {filter === 'named' && <FilterTabs label="Show" value={archived ? 'archived' : 'active'} onChange={(value) => setArchived(value === 'archived')}
+            {filter === 'named' && <FilterTabs label="Show" value={archiveFilter} onChange={setArchiveFilter}
                 options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived', count: archivedCount }]} />}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -178,7 +161,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                 const people = participantsOf(root, replyAuthors)
                 return <li key={rootMessageId}><ContextMenu>
                     <ContextMenuTrigger asChild>
-                        <div className="group relative flex items-center rounded-xl transition-colors hover:bg-accent/60 has-[[data-state=open]]:bg-accent/60">
+                        <div className={cn('group relative flex items-center rounded-xl transition-colors hover:bg-accent/60 has-[[data-state=open]]:bg-accent/60', selectedRootMessageId === rootMessageId && 'bg-accent/60')}>
                             {topic && renaming?.id === topic.id ? <form className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5" onSubmit={(event) => {
                                 event.preventDefault()
                                 if (renaming.title.trim()) void manage(topic.id, { action: 'retitle', title: renaming.title.trim() })
@@ -189,6 +172,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                                 <Button type="submit" size="sm" disabled={pending === topic.id || !renaming.title.trim()}>Save</Button>
                                 <Button type="button" size="sm" variant="ghost" onClick={() => setRenaming(null)}>Cancel</Button>
                             </form> : <button type="button" className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 pr-12 text-left"
+                                aria-current={selectedRootMessageId === rootMessageId ? 'true' : undefined}
                                 onMouseEnter={() => prefetchThread(orgId, spaceId, rootMessageId)} onClick={() => onOpen(rootMessageId)}>
                                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                                     <Icon className="size-4" />
