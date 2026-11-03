@@ -19,6 +19,7 @@ import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveR
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, openBlobFile } from '@/lib/spaces/open-blob';
+import { copyBlobImage, type MessageImage } from '@/lib/spaces/copy-image';
 import { postMessageReliably } from '@/lib/spaces/send';
 import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
 
@@ -462,6 +463,17 @@ export default function SpaceChatScreen() {
     [client, org, openingFile],
   );
 
+  const copyImage = useCallback(
+    (image: MessageImage) => {
+      // Another org's image: this account can't fetch its bytes.
+      if (image.host !== org) return;
+      copyBlobImage(client, image.spaceId, image.hash).catch((err) =>
+        Alert.alert("Couldn't copy the image", friendlyError(err, "You're offline. Try again when you're back online.")),
+      );
+    },
+    [client, org],
+  );
+
   // A file link in a message: this org's files open in the file screen (by
   // id, so a rename never breaks it); any other host goes to the browser.
   const openAssetLink = useCallback(
@@ -632,6 +644,7 @@ export default function SpaceChatScreen() {
         onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
         onBlock={(m) => blockMember({ org, spaceId: space, member: { id: m.author.memberId, name: profiles.get(m.author.memberId)?.displayName ?? 'this person' }, getAccessToken: () => account.getAccessToken() })}
         linkFor={linkFor}
+        onCopyImage={copyImage}
       />
     </KeyboardAvoidingView>
   );

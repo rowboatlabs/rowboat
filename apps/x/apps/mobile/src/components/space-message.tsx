@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
@@ -16,6 +16,7 @@ import { AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 import { memberLabel } from '@/lib/spaces/profiles';
+import { messageImages, type MessageImage } from '@/lib/spaces/copy-image';
 
 /** The contract's file link: https://<org>/s/<spaceId>/a/<assetId> (the label is the file's name at write time). */
 const ASSET_LINK_RE = /^https:\/\/([^/?#]+)\/s\/([^/?#]+)\/a\/([^/?#]+)$/;
@@ -246,13 +247,17 @@ export const MessageRow = memo(function MessageRow({
   // Long-press a reaction chip → who reacted (opens on that emoji's tab).
   const [reactorsFor, setReactorsFor] = useState<string | null>(null);
 
+  const longPress = useCallback(() => {
+    if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onLongPress(message);
+  }, [onLongPress, message]);
   const imageRule = useMemo(
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
-        node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} /> : null,
+        node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} onLongPress={longPress} /> : null,
       link: fileLinkRule(colors.label),
     }),
-    [colors.label],
+    [colors.label, longPress],
   );
 
   // Deleted messages are filtered out by the screens (Slack); one that still
@@ -288,10 +293,7 @@ export const MessageRow = memo(function MessageRow({
     <Pressable
       // Tap opens the thread (Slack); long-press keeps the action sheet.
       onPress={onOpenThread ? () => onOpenThread(message) : undefined}
-      onLongPress={() => {
-        if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        onLongPress(message);
-      }}
+      onLongPress={longPress}
       delayLongPress={250}
       style={({ pressed }) => ({
         flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 6,
@@ -503,6 +505,7 @@ export function MessageActionSheet({
   onDelete,
   onReport,
   onBlock,
+  onCopyImage,
   linkFor,
   reactionsOnly,
 }: {
@@ -521,6 +524,8 @@ export function MessageActionSheet({
   onBlock?: (message: Message) => void;
   /** The message's canonical link (https://<org>/s/<space>/m/<id>). */
   linkFor?: (message: Message) => string;
+  /** Copy one of the message's uploaded images to the clipboard (lib/spaces/copy-image.ts). */
+  onCopyImage?: (image: MessageImage) => void;
   /** The emoji+ pill's mode: just the reactions row. */
   reactionsOnly?: boolean;
 }) {
@@ -535,6 +540,12 @@ export function MessageActionSheet({
   if (onReply) actions.push({ key: 'reply', icon: 'sf:arrowshape.turn.up.left', label: 'Reply in thread', run: () => onReply(message) });
   if (onQuote) actions.push({ key: 'quote', icon: 'sf:quote.opening', label: 'Quote reply', run: () => onQuote(message) });
   actions.push({ key: 'copy', icon: 'sf:doc.on.doc', label: 'Copy message', run: () => void Clipboard.setStringAsync(message.body) });
+  if (onCopyImage) {
+    const images = messageImages(message.body);
+    images.forEach((image, i) =>
+      actions.push({ key: `image-${image.hash}`, icon: 'sf:photo', label: images.length > 1 ? `Copy image ${i + 1}` : 'Copy image', run: () => onCopyImage(image) }),
+    );
+  }
   if (linkFor) actions.push({ key: 'link', icon: 'sf:link', label: 'Copy link', run: () => void Clipboard.setStringAsync(linkFor(message)) });
   if (isAuthor && onEdit && !message.poll) actions.push({ key: 'edit', icon: 'sf:pencil', label: 'Edit message', run: () => onEdit(message) });
   if (isAuthor && onDelete) actions.push({ key: 'delete', icon: 'sf:trash', label: 'Delete message', destructive: true, run: () => onDelete(message) });

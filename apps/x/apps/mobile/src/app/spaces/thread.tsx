@@ -23,6 +23,7 @@ import { AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, openBlobFile } from '@/lib/spaces/open-blob';
+import { copyBlobImage, type MessageImage } from '@/lib/spaces/copy-image';
 import { postMessageReliably } from '@/lib/spaces/send';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
@@ -246,6 +247,17 @@ export default function SpaceThreadScreen() {
         .finally(() => setOpeningFile(false));
     },
     [client, org, openingFile],
+  );
+
+  const copyImage = useCallback(
+    (image: MessageImage) => {
+      // Another org's image: this account can't fetch its bytes.
+      if (image.host !== org) return;
+      copyBlobImage(client, image.spaceId, image.hash).catch((err) =>
+        Alert.alert("Couldn't copy the image", friendlyError(err, "You're offline. Try again when you're back online.")),
+      );
+    },
+    [client, org],
   );
 
   // A file link in a message: this org's files open in the file screen (by
@@ -561,6 +573,7 @@ export default function SpaceThreadScreen() {
         onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
         onBlock={(m) => blockMember({ org, spaceId: space, member: { id: m.author.memberId, name: profiles.get(m.author.memberId)?.displayName ?? 'this person' }, getAccessToken: () => account.getAccessToken() })}
         linkFor={linkFor}
+        onCopyImage={copyImage}
       />
     </KeyboardAvoidingView>
   );
@@ -588,13 +601,17 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
   const body = nameFileLinks(spaces.decorateMentions(message.body, memberNames), fileNames);
   // Same authed blob-image rule the chat rows use — the default renderer
   // can't fetch Harbor blobs.
+  const longPress = useCallback(() => {
+    if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onLongPress(message);
+  }, [onLongPress, message]);
   const imageRule = useMemo(
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
-        node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} /> : null,
+        node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} onLongPress={longPress} /> : null,
       link: fileLinkRule(colors.label),
     }),
-    [colors.label],
+    [colors.label, longPress],
   );
   const posted = new Date(message.postedAt);
   const today = new Date().toDateString() === posted.toDateString();
@@ -602,10 +619,7 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
 
   return (
     <Pressable
-      onLongPress={() => {
-        if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        onLongPress(message);
-      }}
+      onLongPress={longPress}
       delayLongPress={250}
       style={{ paddingHorizontal: 16, paddingTop: 4 }}
     >
