@@ -1,7 +1,5 @@
 import { Image } from '@/components/sf-image';
-import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
-import { File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
@@ -9,6 +7,7 @@ import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Pressable, ScrollVi
 import type { Member } from '@rowboat/spaces-protocol';
 import { mentionToken } from '@rowboat/spaces-protocol';
 
+import { addImagePasteListener, IMAGE_PASTE_TARGET, type PastedImage } from '../../modules/image-paste';
 import { clearUnsent, loadUnsent, newUnsentId, saveUnsent, trackSend } from '@/lib/spaces/unsent';
 import { useColors } from '@/theme/colors';
 
@@ -91,7 +90,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [text, setText] = useState('');
   const [cursor, setCursor] = useState(0);
   const [picked, setPicked] = useState<Map<string, MentionPick>>(new Map());
-  const [uploading, setUploading] = useState(false);
+  // A count, not a flag: a paste can land while another upload is in flight.
+  const [uploads, setUploads] = useState(0);
+  const uploading = uploads > 0;
   // The native multiline field keeps its grown height after the text is
   // cleared — remount it after a send so it snaps back to one line.
   const [inputKey, setInputKey] = useState(0);
@@ -99,49 +100,55 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   // wire markdown joins the body only on send.
   const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean; file?: string }[]>([]);
 
-  // "+" → photos and videos, any file, or an image on the clipboard
-  // (2026-10-07: a text field can't take an image paste, so the menu does).
-  const openAttachMenu = async () => {
+  // "+" → photos and videos, or any file. A copied image goes in with the
+  // field's own Paste (2026-11-04, modules/image-paste), not a menu item.
+  const openAttachMenu = () => {
     if (!onPickMedia || uploading) return;
     if (process.env.EXPO_OS !== 'ios') {
       void pickMedia();
       return;
     }
-    const clip = await Clipboard.hasImageAsync().catch(() => false);
-    const options = ['Photo or video', 'File', ...(clip ? ['Paste image'] : []), 'Cancel'];
+    const options = ['Photo or video', 'File', 'Cancel'];
     ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: options.length - 1 }, (i) => {
       if (i === 0) void pickMedia();
       else if (i === 1) void pickFile();
-      else if (clip && i === 2) void pasteImage();
     });
   };
 
-  const pasteImage = async () => {
-    if (!onPickMedia || uploading) return;
-    setUploading(true);
+  const attachPasted = async (images: PastedImage[]) => {
+    if (!onPickMedia) return;
+    setUploads((n) => n + 1);
     try {
-      const image = await Clipboard.getImageAsync({ format: 'png' });
-      if (!image) return;
-      // A data URL → bytes on disk, so the upload path is the same as a picked photo.
-      const base64 = image.data.replace(/^data:[^,]*,/, '');
-      const file = new File(Paths.cache, `pasted-${Date.now()}.png`);
-      file.create({ overwrite: true });
-      file.write(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
-      const md = await onPickMedia({ uri: file.uri, mime: 'image/png', name: 'pasted-image.png' });
-      setAttachments((prev) => [...prev, { key: `${Date.now()}`, uri: file.uri, md, video: false }]);
+      for (const image of images) {
+        const md = await onPickMedia(image);
+        setAttachments((prev) => [...prev, { key: `${Date.now()}-${image.uri}`, uri: image.uri, md, video: false }]);
+      }
     } catch (err) {
       Alert.alert("Couldn't paste the image", err instanceof Error ? err.message : String(err));
     } finally {
-      setUploading(false);
+      setUploads((n) => n - 1);
     }
   };
+
+  // Every composer hears every paste; only the focused one takes it.
+  const attachPastedRef = useRef(attachPasted);
+  useEffect(() => {
+    attachPastedRef.current = attachPasted;
+  });
+  useEffect(
+    () =>
+      addImagePasteListener((images) => {
+        if (inputRef.current?.isFocused()) void attachPastedRef.current(images);
+      }),
+    [],
+  );
 
   const pickFile = async () => {
     if (!onPickMedia || uploading) return;
     const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
     const asset = result.canceled ? null : result.assets[0];
     if (!asset) return;
-    setUploading(true);
+    setUploads((n) => n + 1);
     try {
       const mime = asset.mimeType ?? 'application/octet-stream';
       const md = await onPickMedia({ uri: asset.uri, mime, name: asset.name });
@@ -150,7 +157,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     } catch (err) {
       Alert.alert("Couldn't attach the file", err instanceof Error ? err.message : String(err));
     } finally {
-      setUploading(false);
+      setUploads((n) => n - 1);
     }
   };
 
@@ -159,7 +166,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.85 });
     const asset = result.assets?.[0];
     if (result.canceled || !asset) return;
-    setUploading(true);
+    setUploads((n) => n + 1);
     try {
       const video = asset.type === 'video';
       const md = await onPickMedia({
@@ -169,7 +176,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
       });
       setAttachments((prev) => [...prev, { key: `${Date.now()}`, uri: asset.uri, md, video }]);
     } finally {
-      setUploading(false);
+      setUploads((n) => n - 1);
     }
   };
 
@@ -426,6 +433,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
         <TextInput
           ref={inputRef}
           key={inputKey}
+          nativeID={onPickMedia ? IMAGE_PASTE_TARGET : undefined}
           style={{ minHeight: 40, maxHeight: 140, fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
           placeholder={placeholder}
           placeholderTextColor={colors.tertiaryLabel}
@@ -440,7 +448,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
             <Pressable
               hitSlop={8}
               disabled={uploading}
-              onPress={() => void openAttachMenu()}
+              onPress={openAttachMenu}
               style={{
                 width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
                 backgroundColor: colors.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
