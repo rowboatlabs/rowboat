@@ -16,6 +16,7 @@ import { threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
 import { useFallbackReplyAuthors } from '@/lib/spaces-thread-participants'
 import { threadLabelOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
+import { archivePlainThread } from '@/lib/spaces-archive-thread'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -51,8 +52,8 @@ function threadRows(topics: readonly spaces.TopicListing[], roots: readonly Chat
         if (!!topic.archived !== archived) continue
         rows.set(topic.rootMessageId, { rootMessageId: topic.rootMessageId, topic, root: topic.rootMessage ?? undefined, activityAt: topic.lastActivityAt })
     }
-    // Archive is a discussion's lifecycle; an unnamed thread is always active.
-    // Archived topics' roots are skipped so archiving still hides them from All.
+    // Archive lives on the topic row; archiving an unnamed thread names it
+    // first (archivePlainThread). Archived roots are skipped so they leave All.
     const archivedRoots = new Set(topics.filter((topic) => topic.archived).map((topic) => topic.rootMessageId))
     if (filter !== 'named' && !archived) {
         for (const root of roots) {
@@ -103,13 +104,14 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     const archived = archiveFilter === 'archived'
     const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
     const [pending, setPending] = useState<string | null>(null)
-    const showArchived = filter === 'named' && archived
-    const allRows = useMemo(() => threadRows(topics, roots, filter, showArchived, selfMemberId), [topics, roots, filter, showArchived, selfMemberId])
+    const allRows = useMemo(() => threadRows(topics, roots, filter, archived, selfMemberId), [topics, roots, filter, archived, selfMemberId])
     const shownRoots = useMemo(() => allRows.flatMap((row) => row.root ? [row.root] : []), [allRows])
     const replyAuthors = useFallbackReplyAuthors(orgId, spaceId, shownRoots)
     const rows = participants.length ? allRows.filter((row) => participantsOf(row.root, replyAuthors).some((id) => participants.includes(id))) : allRows
-    const scroll = useThreadsScroll(`spaces:threads-scroll:${memoryKey}:${filter}:${showArchived}:${savedParticipants ?? ''}`, {
-        loaded, hasMore: filter !== 'named' && hasMore, loadingOlder, onLoadOlder, rowCount: rows.length,
+    // Archived rows are all topics, which load whole: no stream paging there.
+    const pagesStream = filter !== 'named' && !archived
+    const scroll = useThreadsScroll(`spaces:threads-scroll:${memoryKey}:${filter}:${archived}:${savedParticipants ?? ''}`, {
+        loaded, hasMore: pagesStream && hasMore, loadingOlder, onLoadOlder, rowCount: rows.length,
     })
     const nameOf = (memberId: string) => memberNames.get(memberId) ?? 'Unknown member'
     const chosenNames = new Intl.ListFormat('en', { type: 'disjunction' }).format(participants.map(nameOf))
@@ -117,7 +119,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     // choice that the loaded window doesn't reach yet so it can be cleared.
     const participantIds = new Set([...allRows.flatMap((row) => participantsOf(row.root, replyAuthors)), ...participants])
     const participantOptions = [...participantIds].sort((a, b) => (memberNames.get(a) ?? '').localeCompare(memberNames.get(b) ?? ''))
-    const archivedCount = topics.filter((topic) => topic.archived).length
+    const archivedCount = useMemo(() => threadRows(topics, [], filter, true, selfMemberId).length, [topics, filter, selfMemberId])
     const manage = async (id: string, action: spaces.SpacesManageTopicAction) => {
         setPending(id)
         try {
@@ -128,13 +130,22 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
             toast(error instanceof Error ? error.message : 'Could not update the discussion', 'error')
         } finally { setPending(null) }
     }
+    const archivePlain = async (root: spaces.Message) => {
+        setPending(root.id)
+        try {
+            await archivePlainThread(orgId, spaceId, root.id, root.body)
+            await refreshSpaceFeed(orgId, spaceId)
+        } catch (error) {
+            toast(error instanceof Error ? error.message : 'Could not archive the thread', 'error')
+        } finally { setPending(null) }
+    }
     return <SpacesPage scrollRef={scroll.ref} onScroll={scroll.onScroll} label="Threads" title="Threads" count={rows.length}
         subtitle="Every conversation in this space. Named threads have a title so the team can find them again."
         toolbar={<>
             <FilterTabs label="Show threads" value={filter} onChange={setFilter}
                 options={[{ value: 'all', label: 'All' }, { value: 'named', label: 'Named' }, { value: 'mine', label: 'By me' }]} />
-            {filter === 'named' && <FilterTabs label="Show" value={archiveFilter} onChange={setArchiveFilter}
-                options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived', count: archivedCount }]} />}
+            <FilterTabs label="Show" value={archiveFilter} onChange={setArchiveFilter}
+                options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived', count: archivedCount }]} />
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button type="button" size="sm" variant="ghost" aria-label={participants.length ? `Participants: ${chosenNames}` : 'Filter by participant'}
@@ -198,10 +209,14 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                                 <UnreadBadge badge={badge} direct={direct} />
                             </button>}
                             {!(topic && renaming?.id === topic.id) && <DropdownMenu>
-                                <DropdownMenuTrigger asChild><button type="button" aria-label={`Options for ${title}`} disabled={!!topic && pending === topic.id}
+                                <DropdownMenuTrigger asChild><button type="button" aria-label={`Options for ${title}`} disabled={pending === (topic?.id ?? rootMessageId)}
                                     className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"><MoreHorizontal className="size-4" /></button></DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                     <DropdownMenuItem onSelect={copyLink}><LinkIcon className="mr-2 size-3.5" />Copy link</DropdownMenuItem>
+                                    {!topic && root && <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem disabled={!writable} onSelect={() => void archivePlain(root)}><Archive className="mr-2 size-3.5" />Archive</DropdownMenuItem>
+                                    </>}
                                     {topic && <>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem disabled={!writable} onSelect={() => setRenaming({ id: topic.id, title })}><Pencil className="mr-2 size-3.5" />Rename</DropdownMenuItem>
@@ -224,8 +239,8 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
         </ul>
         {rows.length === 0 && (!loaded
             ? <p className="px-3 py-12 text-sm text-muted-foreground">Loading threads…</p>
-            : showArchived
-                ? <SpacesEmpty icon={<Archive />} title="No archived discussions">Archived discussions stay readable here.</SpacesEmpty>
+            : archived
+                ? <SpacesEmpty icon={<Archive />} title="No archived threads">Archived threads stay readable here. A new reply brings one back.</SpacesEmpty>
                 : filter === 'named'
                     ? <SpacesEmpty icon={<MessagesSquare />} title="No named threads yet">Give a thread a title from its ⋯ menu, or type /discussion in a reply, and it shows up here.</SpacesEmpty>
                     : participants.length
@@ -235,7 +250,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                     : filter === 'mine'
                         ? <SpacesEmpty icon={<MessageSquare />} title="No threads started by you">Threads whose first message you posted show up here.</SpacesEmpty>
                         : <SpacesEmpty icon={<MessageSquare />} title="No threads yet">Reply to a message to start a thread.</SpacesEmpty>)}
-        {filter !== 'named' && hasMore && <Button type="button" size="sm" variant="ghost" className="mt-3" disabled={loadingOlder} onClick={onLoadOlder}>
+        {pagesStream && hasMore && <Button type="button" size="sm" variant="ghost" className="mt-3" disabled={loadingOlder} onClick={onLoadOlder}>
             {loadingOlder ? 'Loading…' : 'Load older threads'}
         </Button>}
     </SpacesPage>

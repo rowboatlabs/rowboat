@@ -50,6 +50,7 @@ import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
 import { toast } from '@/lib/toast'
+import { archivePlainThread } from '@/lib/spaces-archive-thread'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 
@@ -876,6 +877,15 @@ export function ThreadPane({
         }
     }
 
+    const archiveThread = async () => {
+        if (!root) return
+        try {
+            setTopic(await archivePlainThread(org.id, space.id, rootMessageId, root.body))
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not archive the thread', 'error')
+        }
+    }
+
     // The one file this discussion is about: picked from the space's live
     // files; the org keeps the link by asset id, so it survives renames.
     const [attaching, setAttaching] = useState(false)
@@ -1098,9 +1108,12 @@ export function ThreadPane({
                                 </DropdownMenuItem>
                             </>
                         ) : (
-                            <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle('')}>
-                                <Tag className="size-3.5 mr-2" /> Make this a discussion…
-                            </DropdownMenuItem>
+                            <>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle('')}>
+                                    <Tag className="size-3.5 mr-2" /> Make this a discussion…
+                                </DropdownMenuItem>
+                                <DropdownMenuItem disabled={!writable || !root} onClick={() => void archiveThread()}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
+                            </>
                         )}
                         {!showBack && (
                             <>
@@ -1410,7 +1423,7 @@ export function ThreadPane({
                                   ? { name: 'unarchive', hint: 'Unarchive this discussion', run: () => void manage({ action: 'unarchive' }) }
                                   : { name: 'archive', hint: 'Archive this discussion — it leaves the rail until a new reply revives it', run: () => void manage({ action: 'archive' }) },
                           ]
-                        : []),
+                        : [{ name: 'archive', hint: 'Archive this thread — named after its first line until a new reply revives it', run: () => void archiveThread() }]),
                     // Scheduled sends live on the desktop (core's scheduler), so the browser has no /remind.
                     ...(LOCAL_RUNTIME ? [{
                         name: 'remind',

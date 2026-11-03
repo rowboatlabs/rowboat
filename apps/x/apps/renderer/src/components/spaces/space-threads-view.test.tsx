@@ -8,7 +8,7 @@ import { toast } from '@/lib/toast'
 import { resetFallbackReplyAuthors } from '@/lib/spaces-thread-participants'
 
 vi.mock('@/hooks/use-spaces', () => ({ refreshSpaceFeed: vi.fn(async () => {}) }))
-vi.mock('@/hooks/use-space-chat', () => ({ prefetchThread: vi.fn() }))
+vi.mock('@/hooks/use-space-chat', () => ({ prefetchThread: vi.fn(), ingestTopic: vi.fn() }))
 vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: () => () => {} }))
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 const invoke = vi.fn(async () => ({}))
@@ -55,7 +55,6 @@ describe('threads view', () => {
         expect(screen.getByText('Launch', { exact: true })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'By me' }))
         expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^Fix the login bug/)])
-        expect(screen.queryByRole('button', { name: /^Archived/ })).not.toBeInTheDocument()
     })
     it('remembers the primary and archive filters after remounting', () => {
         mount()
@@ -174,5 +173,25 @@ describe('threads view', () => {
         await waitFor(() => expect(toast).toHaveBeenCalledWith('Could not reach server', 'error'))
         expect(screen.getByText('Launch', { exact: true })).toBeInTheDocument()
         expect(refreshSpaceFeed).not.toHaveBeenCalled()
+    })
+    it('archives an unnamed thread by naming it after its first line', async () => {
+        invoke.mockImplementation((async (channel: string) => channel === 'spaces:createTopic'
+            ? { topic: { id: 'new', rootMessageId: 'root-mine', title: 'Fix the login bug', archived: false } }
+            : { topic: { id: 'new', rootMessageId: 'root-mine', title: 'Fix the login bug', archived: true } }) as never)
+        mount()
+        openOptions('Options for Fix the login bug')
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:manageTopic', { orgId: 'org', spaceId: 'dm', topicId: 'new', action: { action: 'archive' } }))
+        expect(invoke).toHaveBeenCalledWith('spaces:createTopic', { orgId: 'org', spaceId: 'dm', rootMessageId: 'root-mine', title: 'Fix the login bug' })
+        await waitFor(() => expect(refreshSpaceFeed).toHaveBeenCalledWith('org', 'dm'))
+    })
+    it('shows archived threads from All and By me without paging the stream', () => {
+        mount()
+        fireEvent.click(screen.getByRole('button', { name: /^Archived/ }))
+        expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^Old launch/)])
+        expect(screen.queryByRole('button', { name: 'Load older threads' })).not.toBeInTheDocument()
+        // The fixture's archived topic carries no root message, so By me has no author to match.
+        fireEvent.click(screen.getByRole('button', { name: 'By me' }))
+        expect(screen.getByText('No archived threads')).toBeInTheDocument()
     })
 })
