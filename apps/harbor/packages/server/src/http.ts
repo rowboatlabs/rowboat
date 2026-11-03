@@ -968,6 +968,17 @@ export function buildHttpApp(deps: {
     return reply(c, routes.manageTopic.response, { topic });
   });
 
+  app.post('/v1/spaces/:spaceId/threads/:rootMessageId/archive', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.archiveThread.params, c.req.param());
+    const input = await body(c, routes.archiveThread.request);
+    return reply(c, routes.archiveThread.response, { root: await service.archiveThread(actor(c), spaceId, rootMessageId, input) });
+  });
+
+  app.get('/v1/spaces/:spaceId/archived-threads', async (c) => {
+    const { spaceId } = parseWith(routes.listArchivedThreads.params, c.req.param());
+    return reply(c, routes.listArchivedThreads.response, { threads: await service.listArchivedThreads(actor(c), spaceId) });
+  });
+
   // --- read state ------------------------------------------------------------
 
   app.post('/v1/spaces/:spaceId/read', async (c) => {

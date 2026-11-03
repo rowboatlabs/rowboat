@@ -57,6 +57,18 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   }),
   /** The row deleted ("convert back to thread") — the thread itself is untouched. */
   z.object({ type: z.literal('topic_removed'), removal: TopicRemoval }),
+  /**
+   * A plain thread archived or unarchived (api.ts archiveThread, 2026-11-03):
+   * clients set or clear the root's `archived`. A reply reviving it, or
+   * naming it (createTopic), emits 'unarchived' attributed to that member.
+   * Idempotent re-archives emit nothing.
+   */
+  z.object({
+    type: z.literal('thread_archive'),
+    rootMessageId: MessageId,
+    action: z.enum(['archived', 'unarchived']),
+    by: Attribution,
+  }),
   MembershipEvent,
   /** A reaction toggled on or off a message. Idempotent re-adds/re-removes emit nothing. */
   z.object({

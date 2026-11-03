@@ -64,7 +64,8 @@ everyone in the space. To point at a space, \`[#Its Name](#space:<spaceId>)\`
 | "edit / delete my message" | \`edit_message\` / \`delete_message\` |
 | "react", "pin" | \`react\` (pin is the 📌 emoji) |
 | "start a poll", "vote" | \`post_message\` with \`poll\` / \`vote_poll\` |
-| "title this thread", "archive it", "make it about roadmap.md" | \`create_topic\` / \`manage_topic\` (\`attach_document\` with the file's assetId) |
+| "title this thread", "make it about roadmap.md" | \`create_topic\` / \`manage_topic\` (\`attach_document\` with the file's assetId) |
+| "archive this thread" | \`manage_topic\` when it has a topic, otherwise \`archive_thread\` (it stays unnamed) |
 | "change my name", "set my title to Design lead" | \`update_profile\` — only what they asked to change; an empty title removes it. Their photo is set in the app, not here |
 | "mark everything read", "clear my unread", "I'm caught up" | \`mark_all_read\` (\`spaceId\` for one space) — after the summary, never instead of it; it cannot be undone |
 | "add X to roadmap.md" | \`list_spaces\` (its id) → \`read_asset\` → \`propose_change\` |

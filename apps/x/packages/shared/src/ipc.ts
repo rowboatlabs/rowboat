@@ -4455,6 +4455,16 @@ export const ipcSchemas = {
   },
   // One-row lifecycle ops on the annotation ('remove' = convert back to
   // thread; the conversation is untouched).
+  // A plain thread archived without a name (harbor archiveThread, 2026-11-03);
+  // a discussion archives through spaces:manageTopic.
+  'spaces:archiveThread': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), archived: z.boolean() }),
+    res: z.object({ root: z.custom<SpacesTypes.Message>() }),
+  },
+  'spaces:listArchivedThreads': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ threads: z.array(z.custom<SpacesTypes.Message>()) }),
+  },
   'spaces:manageTopic': {
     req: z.object({
       orgId: z.string(),

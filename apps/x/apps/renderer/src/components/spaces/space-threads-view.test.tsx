@@ -3,17 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
 import { SpaceThreadsView } from './space-threads-view'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
+import { updateStreamMessage } from '@/hooks/use-space-chat'
 import { forgetOrg, loadUnread, markThreadRead, spaceBadge, threadsBadge } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
 import { resetFallbackReplyAuthors } from '@/lib/spaces-thread-participants'
 
 vi.mock('@/hooks/use-spaces', () => ({ refreshSpaceFeed: vi.fn(async () => {}) }))
-vi.mock('@/hooks/use-space-chat', () => ({ prefetchThread: vi.fn() }))
+vi.mock('@/hooks/use-space-chat', () => ({ prefetchThread: vi.fn(), updateStreamMessage: vi.fn() }))
 vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: () => () => {} }))
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
-const invoke = vi.fn(async () => ({}))
+// The view fetches the archived unnamed threads on mount; every other channel answers {} unless a test says otherwise.
+let archivedThreads: spaces.Message[] = []
+const defaultInvoke = async (channel: string): Promise<unknown> => channel === 'spaces:listArchivedThreads' ? { threads: archivedThreads } : {}
+const invoke = vi.fn(defaultInvoke)
 beforeEach(() => { Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } }) })
-afterEach(() => { cleanup(); forgetOrg('org'); vi.clearAllMocks(); window.localStorage.clear(); resetFallbackReplyAuthors() })
+afterEach(() => { cleanup(); forgetOrg('org'); vi.clearAllMocks(); invoke.mockImplementation(defaultInvoke); archivedThreads = []; window.localStorage.clear(); resetFallbackReplyAuthors() })
 const topics = [
     { id: 'live', rootMessageId: 'root-live', title: 'Launch', archived: false, lastActivityAt: '2026-09-15T10:00:00Z' },
     { id: 'archived', rootMessageId: 'root-archived', title: 'Old launch', archived: true, lastActivityAt: '2026-09-14T10:00:00Z' },
@@ -55,7 +59,6 @@ describe('threads view', () => {
         expect(screen.getByText('Launch', { exact: true })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'By me' }))
         expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^Fix the login bug/)])
-        expect(screen.queryByRole('button', { name: /^Archived/ })).not.toBeInTheDocument()
     })
     it('remembers the primary and archive filters after remounting', () => {
         mount()
@@ -98,12 +101,12 @@ describe('threads view', () => {
     })
     it('reads the repliers from the thread when Harbor sends no reply authors', async () => {
         const reply = (memberId: string) => ({ ...root(`r-${memberId}`, memberId, 'reply', 0), threadRoot: 'root-old' })
-        invoke.mockImplementation((async () => ({ root: roots[0], topic: null, messages: [reply('bo'), reply('me'), reply('bo')], hasMore: false })) as never)
+        invoke.mockImplementation((async (channel: string) => channel === 'spaces:listArchivedThreads' ? { threads: [] } : ({ root: roots[0], topic: null, messages: [reply('bo'), reply('me'), reply('bo')], hasMore: false })) as never)
         mount(vi.fn(), [root('root-old', 'ana', 'From an older Harbor', 3, '2026-09-16T10:00:00Z')])
         const row = screen.getByRole('button', { name: /^From an older Harbor/ })
         await waitFor(() => expect(row.querySelector('[title="Ana, Bo, Arjun"]')).not.toBeNull())
         expect(invoke).toHaveBeenCalledWith('spaces:listThread', { orgId: 'org', spaceId: 'dm', rootMessageId: 'root-old', afterOffset: 1, limit: 200 })
-        expect(invoke).toHaveBeenCalledTimes(1)
+        expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:listThread')).toHaveLength(1)
     })
     it('filters by several participants and keeps the choice after leaving and coming back', () => {
         mount()
@@ -167,12 +170,40 @@ describe('threads view', () => {
         await waitFor(() => expect(refreshSpaceFeed).toHaveBeenCalledWith('org', 'dm'))
     })
     it('reports a failed lifecycle action instead of hiding the discussion', async () => {
-        invoke.mockRejectedValueOnce(new Error('Could not reach server'))
+        invoke.mockImplementation((async (channel: string) => {
+            if (channel === 'spaces:manageTopic') throw new Error('Could not reach server')
+            return defaultInvoke(channel)
+        }) as never)
         mount()
         openOptions('Options for Launch')
         fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
         await waitFor(() => expect(toast).toHaveBeenCalledWith('Could not reach server', 'error'))
         expect(screen.getByText('Launch', { exact: true })).toBeInTheDocument()
         expect(refreshSpaceFeed).not.toHaveBeenCalled()
+    })
+    it('archives an unnamed thread without naming it', async () => {
+        invoke.mockImplementation((async (channel: string) => channel === 'spaces:archiveThread'
+            ? { root: { ...roots[0], archived: true } }
+            : defaultInvoke(channel)) as never)
+        mount()
+        openOptions('Options for Fix the login bug')
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:archiveThread', { orgId: 'org', spaceId: 'dm', rootMessageId: 'root-mine', archived: true }))
+        expect(invoke).not.toHaveBeenCalledWith('spaces:createTopic', expect.anything())
+        await waitFor(() => expect(updateStreamMessage).toHaveBeenCalledWith('org', 'dm', expect.objectContaining({ id: 'root-mine', archived: true })))
+    })
+    it('lists archived unnamed threads beside archived discussions, and leaves them out of All', async () => {
+        archivedThreads = [{ ...root('root-old', 'me', 'Old coding session', 3, '2026-09-17T10:00:00Z'), archived: true }]
+        mount(vi.fn(), [...roots, { ...root('root-done', 'ana', 'Done session', 2, '2026-09-18T10:00:00Z'), archived: true }])
+        expect(screen.queryByText('Done session')).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /^Archived/ }))
+        await waitFor(() => expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([
+            expect.stringMatching(/^Done session/),
+            expect.stringMatching(/^Old coding session/),
+            expect.stringMatching(/^Old launch/),
+        ]))
+        expect(screen.queryByRole('button', { name: 'Load older threads' })).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'By me' }))
+        expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^Old coding session/)])
     })
 })

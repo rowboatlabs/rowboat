@@ -585,6 +585,29 @@ export const manageTopic = tool({
   output: z.object({ topic: Topic }),
 });
 
+export const archiveThread = tool({
+  name: 'archive_thread',
+  description:
+    'Archive a thread that has no topic, taking it off the active thread lists without naming it ' +
+    '(archived: false brings it back). A new reply also brings it back. A thread with a topic ' +
+    'archives through manage_topic. Only when your person asked for it.',
+  input: z.object({
+    spaceId: SpaceId,
+    rootMessageId: MessageId,
+    archived: z.boolean().optional(),
+  }),
+  output: z.object({ root: Message }),
+});
+
+export const listArchivedThreads = tool({
+  name: 'list_archived_threads',
+  description:
+    "The space's archived threads that have no topic: their root messages, newest activity first. " +
+    'Archived topics are in list_topics with includeArchived. Read one via read_thread.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ threads: z.array(Message) }),
+});
+
 // --- files --------------------------------------------------------------------
 // Files are addressed by id (2026-09-14): every tool here takes the assetId
 // from list_spaces (each space's `assets`), search_space, or a link. The path
@@ -870,6 +893,8 @@ export const mcpTools = [
   listTopics,
   createTopic,
   manageTopic,
+  archiveThread,
+  listArchivedThreads,
   createAsset,
   readAsset,
   proposeChange,
@@ -901,6 +926,7 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   readActivity.name,
   searchSpace.name,
   listTopics.name,
+  listArchivedThreads.name,
   readAsset.name,
   assetHistory.name,
   diff.name,
