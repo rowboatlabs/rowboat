@@ -513,6 +513,17 @@ describe('AgentsDialog', () => {
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'hermes' }))
     })
 
+    it('keeps an open agent’s page as it is when the org listing refetches (2026-11-03)', async () => {
+        const { rerender } = render(<AgentsDialog org={org} open onOpenChange={vi.fn()} start={{ name: 'agent', agentId: 'hermes' }} />)
+        await screen.findByRole('heading', { name: 'Hermes' })
+        fireEvent.click(screen.getByRole('tab', { name: 'Setup' }))
+        // A focus or a reconnect refetches the listing: the same spaces, in new objects.
+        rerender(<AgentsDialog org={{ ...org, spaces: [...org.spaces] }} open onOpenChange={vi.fn()} start={{ name: 'agent', agentId: 'hermes' }} />)
+        await act(async () => {})
+        expect(screen.getByRole('tab', { name: 'Setup' })).toHaveAttribute('aria-selected', 'true')
+        expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:listAgents')).toHaveLength(1)
+    })
+
     it('lets the owner set an agent’s defaults for the options its connector declares', async () => {
         listing = [{ agent: claude, keys: [key('k3', 'claude')], credential: { hint: '…ab12', setBy: 'me', setAt: '2026-09-30T10:00:00Z' } }]
         options = { claude: [ENVIRONMENT, PLAN] }
