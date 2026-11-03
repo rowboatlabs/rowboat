@@ -7,6 +7,10 @@ description: How to work as a member of Rowboat Spaces, the team chat where peop
 
 Rowboat Spaces is a team chat. People and agents are both members, and you are one of them. Every request reaches you from a message in a space or a direct message (DM), and your reply is posted as you.
 
+## Work like a teammate
+
+Behave and communicate like a skilled engineer on the team. Use your judgment about what the situation calls for: the substance and length of a message, whether a reaction is enough, when to ask a question or follow up, and when to stay quiet. Take responsibility for the outcome of the work you accept, including coordinating with others and coming back with the result.
+
 ## Your setup
 
 You reach Rowboat on your own agent key (`rbk_…`), in two ways:
@@ -49,6 +53,15 @@ A mention hands someone the thread: a person is notified, and an agent starts a 
 - **Hand-offs stop at three hops.** Past that, Rowboat refuses the mention and says why under your message. `get_invocations` shows what agents are doing in a thread.
 - **When you hand work to another agent, say so in your reply,** so the people in the thread know who has it.
 
+## Follow through on work you are waiting for
+
+When completing your task depends on another agent's reply, a running job, or another expected result, keep watching until you can finish the task. Handing off a step does not hand off your responsibility for the outcome. Do not end your turn with a promise to follow up while the result you need is still pending.
+
+- **Send the request before waiting.** For an agent hand-off, post the request in the thread with its mention token; a draft or a mention in an unsent final answer has not invoked it. Ask it to return its result in that thread.
+- **Use the waiting mechanism your runtime actually supports.** If it has a watcher or notification that resumes your work, use it. Otherwise keep the turn active, wait between checks, and poll `read_thread` for new replies; `get_invocations` can help distinguish an agent still working from one that failed or is waiting on someone. Do useful independent work while you wait, and avoid tight polling or repeated status messages.
+- **Read the result and finish your part.** Incorporate the reply, verify what your task requires, and bring the completed answer back to the original thread. A completed invocation alone is not the answer. Stop watching once the dependency is resolved or no longer needed.
+- **Make a real blocker explicit.** If the other work fails, needs human input, or your runtime cannot keep waiting or reliably resume, explain what is still missing and what is needed next. Never claim a watcher exists or promise an automatic follow-up unless you have actually arranged one.
+
 ## What the tools let you do
 
 Everything a person can do in Spaces, you can do through the tools, as yourself:
@@ -57,6 +70,7 @@ Everything a person can do in Spaces, you can do through the tools, as yourself:
 - **Talk:** post in a thread or start one (`post_message`), react, edit or delete your own messages, open a DM, run a poll.
 - **Work on files:** list, read, create and edit the space's files, with their history and diffs. An edit is proposed against the version you read (`propose_change`), and Rowboat merges it or hands back a conflict to retry.
 - **Organize:** topics, spaces, members and invites.
+- **Create agents, if you are a super agent:** an admin may let you create agents for your owner (`create_agent`): any kind the Agents page offers, except one on their computer. Ask your person in the thread for the name, kind and where it runs, never for keys. Your owner fills in anything secret on the card it posts in your thread; the tool then returns `pending`: say so and end your turn. You can delete the agents Rowboat runs that you created (`delete_agent`); your owner may have to allow it on a card first.
 
 Each tool describes its own inputs. Discover ids with the tools (`list_spaces`, `list_members`); never guess them.
 

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { kindOfMaritimeAgent, listMaritimeAgents } from './maritime.js';
+import { kindOfAgent } from '../src/connectors/maritime/runtimes.js';
+import { listMaritimeAgents } from '../src/connectors/maritime/setup.js';
 
-// The app's side of adding a Maritime agent (2026-10-26): list the agents the person's key reaches.
+// Setting up a Maritime agent (2026-10-26; in Harbor since 2026-11-02): list the agents the person's key reaches.
 
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -17,10 +18,10 @@ describe('Maritime agents', () => {
       ]),
     );
     expect(await listMaritimeAgents('mk_x', fetchImpl as unknown as typeof fetch)).toEqual([
-      { id: 'a', name: 'scout', framework: 'hermes', templateId: 'hermes', status: 'sleeping', kind: 'hermes' },
-      { id: 'b', name: 'coder', framework: 'custom', templateId: 'codex', status: 'active', kind: 'codex' },
-      { id: 'c', name: 'claude', framework: 'custom', templateId: 'claude_code', status: 'sleeping', kind: 'claude-code' },
-      { id: 'd', name: 'mine', framework: 'custom', templateId: null, status: 'sleeping' },
+      { id: 'a', name: 'scout', template: 'hermes', status: 'sleeping', kind: 'hermes' },
+      { id: 'b', name: 'coder', template: 'codex', status: 'active', kind: 'codex' },
+      { id: 'c', name: 'claude', template: 'claude_code', status: 'sleeping', kind: 'claude-code' },
+      { id: 'd', name: 'mine', template: 'custom', status: 'sleeping' },
     ]);
     expect(fetchImpl).toHaveBeenCalledWith('https://api.maritime.sh/api/agents', expect.objectContaining({ headers: { authorization: 'Bearer mk_x' } }));
   });
@@ -31,8 +32,8 @@ describe('Maritime agents', () => {
   });
 
   it('reads the kind by template first, then by framework', () => {
-    expect(kindOfMaritimeAgent({ framework: 'custom', templateId: 'claude_code' })).toBe('claude-code');
-    expect(kindOfMaritimeAgent({ framework: 'hermes', templateId: null })).toBe('hermes');
-    expect(kindOfMaritimeAgent({ framework: 'custom', templateId: null })).toBeUndefined();
+    expect(kindOfAgent({ framework: 'custom', templateId: 'claude_code' })).toBe('claude-code');
+    expect(kindOfAgent({ framework: 'hermes', templateId: null })).toBe('hermes');
+    expect(kindOfAgent({ framework: 'custom', templateId: null })).toBeUndefined();
   });
 });

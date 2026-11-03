@@ -186,6 +186,12 @@ export class FakeAgent37 {
 
     if (url.pathname === '/v1/instances') {
       if (req.headers.authorization !== `Bearer ${GOOD_KEY}`) return error(401, 'invalid_api_key');
+      // Creating one (the Add flow's setup, 2026-11-02): running at once here, where the real one takes minutes.
+      if (req.method === 'POST') {
+        const created = { id: `inst${this.instances.length + 1}`, name: typeof body?.name === 'string' ? body.name : null, template: String(body?.template ?? ''), status: 'running' };
+        this.instances.push(created);
+        return json(201, created);
+      }
       return json(200, { data: this.instances });
     }
 

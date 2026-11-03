@@ -426,6 +426,7 @@ export function buildHttpApp(deps: {
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
         ...(input.instance !== undefined ? { instance: input.instance } : {}),
         personal: input.personal,
+        ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
   });
@@ -444,6 +445,7 @@ export function buildHttpApp(deps: {
         ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
         ...(input.env !== undefined ? { env: input.env } : {}),
         personal: input.personal,
+        ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
   });
@@ -596,6 +598,24 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.setAgentPersonal.params, c.req.param());
     const input = await body(c, routes.setAgentPersonal.request);
     return reply(c, routes.setAgentPersonal.response, { agent: await service.setAgentPersonal(actor(c), agentId, input) });
+  });
+
+  app.post(routes.listSetupInstances.path, async (c) => {
+    const { connection } = parseWith(routes.listSetupInstances.params, c.req.param());
+    const { key } = await body(c, routes.listSetupInstances.request);
+    return reply(c, routes.listSetupInstances.response, { instances: await service.listSetupInstances(actor(c), connection, key) });
+  });
+
+  app.post(routes.createSetupInstance.path, async (c) => {
+    const { connection } = parseWith(routes.createSetupInstance.params, c.req.param());
+    const input = await body(c, routes.createSetupInstance.request);
+    return reply(c, routes.createSetupInstance.response, { instance: await service.createSetupInstance(actor(c), connection, input) });
+  });
+
+  app.put(routes.setAgentSuper.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentSuper.params, c.req.param());
+    const input = await body(c, routes.setAgentSuper.request);
+    return reply(c, routes.setAgentSuper.response, { agent: await service.setAgentSuper(actor(c), agentId, input) });
   });
 
   app.put(routes.setAgentOptionDefaults.path, async (c) => {

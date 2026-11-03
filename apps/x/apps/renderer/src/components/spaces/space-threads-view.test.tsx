@@ -1,18 +1,19 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
 import { SpaceThreadsView } from './space-threads-view'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
+import { forgetOrg, loadUnread, markThreadRead, spaceBadge, threadsBadge } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
 import { resetFallbackReplyAuthors } from '@/lib/spaces-thread-participants'
 
 vi.mock('@/hooks/use-spaces', () => ({ refreshSpaceFeed: vi.fn(async () => {}) }))
 vi.mock('@/hooks/use-space-chat', () => ({ prefetchThread: vi.fn() }))
-vi.mock('@/lib/spaces-read-state', () => ({ useReadStateVersion: () => 0, threadBadge: () => ({ unread: 0, forYou: 0 }) }))
+vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: () => () => {} }))
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 const invoke = vi.fn(async () => ({}))
 beforeEach(() => { Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } }) })
-afterEach(() => { cleanup(); vi.clearAllMocks(); window.localStorage.clear(); resetFallbackReplyAuthors() })
+afterEach(() => { cleanup(); forgetOrg('org'); vi.clearAllMocks(); window.localStorage.clear(); resetFallbackReplyAuthors() })
 const topics = [
     { id: 'live', rootMessageId: 'root-live', title: 'Launch', archived: false, lastActivityAt: '2026-09-15T10:00:00Z' },
     { id: 'archived', rootMessageId: 'root-archived', title: 'Old launch', archived: true, lastActivityAt: '2026-09-14T10:00:00Z' },
@@ -55,6 +56,40 @@ describe('threads view', () => {
         fireEvent.click(screen.getByRole('button', { name: 'By me' }))
         expect(screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^Fix the login bug/)])
         expect(screen.queryByRole('button', { name: /^Archived/ })).not.toBeInTheDocument()
+    })
+    it('remembers the primary and archive filters after remounting', () => {
+        mount()
+        fireEvent.click(screen.getByRole('button', { name: 'By me' }))
+        cleanup()
+        mount()
+        expect(screen.getByRole('button', { name: 'By me' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.queryByText('Plan the release')).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Named' }))
+        fireEvent.click(screen.getByRole('button', { name: /^Archived/ }))
+        cleanup()
+        mount()
+        expect(screen.getByRole('button', { name: 'Named' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('button', { name: /^Archived/ })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByText('Old launch')).toBeInTheDocument()
+    })
+    it('ignores invalid persisted filter values', () => {
+        localStorage.setItem('spaces:threads-filter:org:dm', 'obsolete')
+        mount()
+        expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+    })
+    it('updates row and aggregate badges together when an unnamed thread is read', async () => {
+        invoke.mockResolvedValueOnce({ spaces: [{ spaceId: 'dm', head: 20, readOffset: 20, unreadRoots: 0, unreadMentions: 1,
+            threads: [{ rootMessageId: 'root-mine', readOffset: 1, lastReplyOffset: 20, unreadReplies: 3, unreadMentions: 1 }],
+        }] })
+        await loadUnread('org', 'me')
+        mount()
+        expect(screen.getByLabelText('3 unread · all for you')).toBeInTheDocument()
+        expect(threadsBadge('org', 'dm', false)).toEqual({ unread: 3, forYou: 1 })
+        expect(threadsBadge('org', 'dm', true)).toEqual(spaceBadge('org', 'dm', true))
+        act(() => markThreadRead('org', 'dm', 'root-mine', 20, { sync: false }))
+        expect(screen.queryByLabelText('3 unread · all for you')).not.toBeInTheDocument()
+        expect(threadsBadge('org', 'dm', true)).toEqual({ unread: 0, forYou: 0 })
+        expect(spaceBadge('org', 'dm', true)).toEqual({ unread: 0, forYou: 0 })
     })
     it('shows each thread\'s participants, root author first', () => {
         mount()

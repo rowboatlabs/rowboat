@@ -13,6 +13,7 @@ import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
 import { PersonalitySection } from '@/components/spaces/agent-personality'
+import { SuperAgentSection } from '@/components/spaces/agent-super'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, LOCAL_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
@@ -143,6 +144,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                     {agent.ownerId && <PersonalitySection key={`${agent.title ?? ''}|${agent.instructions ?? ''}`} orgId={org.id} agent={agent} canEdit={mine} onSaved={onChanged} />}
                     {isLocal && <LocalAgentSection orgId={org.id} agent={agent} mine={mine} ownerName={ownerName} />}
                     {agent.ownerId && !isLocal && <AccessSection orgId={org.id} agent={agent} canSwitch={mine} onChanged={onChanged} />}
+                    {agent.ownerId && <SuperAgentSection orgId={org.id} agent={agent} isAdmin={isAdmin} ownerName={ownerName} onChanged={onChanged} />}
                     {isLocal && (
                         <div className="flex flex-col gap-0.5">
                             <h3 className="text-sm font-semibold text-foreground">Who can use it</h3>

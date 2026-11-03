@@ -3,7 +3,7 @@ import { memo, useMemo, useState, type ReactNode } from 'react';
 import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Clipboard from 'expo-clipboard';
 import { spaces } from '@x/shared';
 

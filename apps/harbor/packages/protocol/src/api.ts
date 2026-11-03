@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateAgentProfile, UpdateProfile,
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
   HostingConsole,
@@ -499,8 +499,37 @@ export const routes = {
       instance: z.string().min(1).max(128).optional(),
       /** Only the owner may use it (spec §4 Agent members, 2026-10-26); absent = a channel agent, as before. */
       personal: z.boolean().default(false),
+      /** A super agent's setup card this completes (2026-11-02): its owner only; the agent joins the card's space. */
+      request: ApprovalId.optional(),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /**
+   * The Add flow's platform setup (2026-11-02, through Harbor so it works on
+   * the web): the instances a pasted key reaches on a platform whose agent is
+   * an instance (INSTANCE_CONNECTIONS: Agent37 instances, Maritime agents), and
+   * making a new one where the platform allows (Agent37). A person only,
+   * render face only; the key is used for this call and kept nowhere.
+   */
+  listSetupInstances: {
+    method: 'POST',
+    path: '/v1/setup/:connection/instances',
+    params: z.object({ connection: z.string().min(1).max(32) }),
+    request: z.object({ key: z.string().min(1).max(512) }),
+    response: z.object({ instances: z.array(PlatformInstance) }),
+  },
+  createSetupInstance: {
+    method: 'POST',
+    path: '/v1/setup/:connection/instances/new',
+    params: z.object({ connection: z.string().min(1).max(32) }),
+    request: z.object({
+      key: z.string().min(1).max(512),
+      kind: z.string().min(1).max(32),
+      name: z.string().trim().min(1).max(128),
+      monthlyBudgetUsd: z.number().nonnegative().max(100_000),
+      autoSleep: z.boolean().default(true),
+    }),
+    response: z.object({ instance: PlatformInstance }),
   },
   /**
    * The kinds of agent this Harbor creates on Rowboat's own platform account
@@ -533,6 +562,8 @@ export const routes = {
       env: z.array(z.object({ key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/), value: z.string().max(4096), secret: z.boolean().optional() })).max(20).optional(),
       /** A personal agent, as on createAgent (spec §4 Agent members, 2026-10-27). */
       personal: z.boolean().default(false),
+      /** A super agent's setup card this completes, as on createAgent (2026-11-02). */
+      request: ApprovalId.optional(),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret, hosting: AgentHosting }),
   },
@@ -790,6 +821,19 @@ export const routes = {
     path: '/v1/agents/:agentId/personal',
     params: z.object({ agentId: MemberId }),
     request: z.object({ personal: z.boolean() }),
+    response: z.object({ agent: Member }),
+  },
+  /**
+   * Make an agent a super agent, change what it may do, or make it an
+   * ordinary agent again with `null` (spec §4 Agent members, 2026-11-02):
+   * admins only, for an agent with an owner, app only. The same value is a
+   * no-op. No event, as with personal: rosters carry it on the next read.
+   */
+  setAgentSuper: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/super',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ superAgent: SuperAgent.nullable() }),
     response: z.object({ agent: Member }),
   },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */

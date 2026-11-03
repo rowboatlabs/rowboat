@@ -1,4 +1,4 @@
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
@@ -9,6 +9,7 @@ import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Pressable, ScrollVi
 import type { Member } from '@rowboat/spaces-protocol';
 import { mentionToken } from '@rowboat/spaces-protocol';
 
+import { clearUnsent, loadUnsent, newUnsentId, saveUnsent, trackSend } from '@/lib/spaces/unsent';
 import { useColors } from '@/theme/colors';
 
 // The space composer (Slack's rounded field) with @-mentions. Pill in, token
@@ -82,7 +83,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   onEdit?: (id: string, body: string) => Promise<boolean> | boolean | void;
   /** Every change to the text, mentions as tokens: the thread's follow-up line follows it (2026-10-27). */
   onDraftChange?: (body: string) => void;
-}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit, onDraftChange }, ref) {
+  /** The chat this box posts to: an unsent message is saved under it until the server confirms (lib/spaces/unsent.ts). */
+  draftKey?: string;
+}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit, onDraftChange, draftKey }, ref) {
   const colors = useColors();
   const inputRef = useRef<TextInput>(null);
   const [text, setText] = useState('');
@@ -173,6 +176,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [editing, setEditing] = useState<string | null>(null);
   /** The last send failed and its draft is back in the box. */
   const [failed, setFailed] = useState(false);
+  /** The saved unsent copy this box last wrote or restored — the only one it may clear. */
+  const ownedUnsent = useRef<string | undefined>(undefined);
 
   useImperativeHandle(
     ref,
@@ -245,16 +250,25 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     // Clear at once (it feels sent), but hold the draft: if the send fails
     // it goes back in the box instead of vanishing (2026-10-03).
     const draft = { text, picked, attachments };
+    // Edits aren't saved: the message they change is already posted.
+    const unsentId = draftKey && !editingId ? newUnsentId() : undefined;
+    if (draftKey && unsentId) {
+      saveUnsent(draftKey, { id: unsentId, text, picked: [...picked], attachments });
+      ownedUnsent.current = unsentId;
+    }
     setFailed(false);
     setEditing(null);
     setText('');
     setPicked(new Map());
     setAttachments([]);
     setInputKey((k) => k + 1);
-    void Promise.resolve(editingId && onEdit ? onEdit(editingId, body) : onSend(body))
+    const settled = Promise.resolve(editingId && onEdit ? onEdit(editingId, body) : onSend(body))
       .catch(() => false)
       .then((ok) => {
-        if (ok !== false) return;
+        if (ok !== false) {
+          if (draftKey && unsentId) clearUnsent(draftKey, unsentId);
+          return;
+        }
         setFailed(true);
         // Don't clobber anything typed while the send was in flight.
         let restored = false;
@@ -268,7 +282,44 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
         if (editingId) setEditing((now) => now ?? editingId);
         if (restored) setInputKey((k) => k + 1);
       });
+    if (draftKey && unsentId) trackSend(draftKey, settled);
   };
+
+  // A send that failed after you left this chat comes back on the next open.
+  const boxRef = useRef({ text, attachments });
+  boxRef.current = { text, attachments };
+  useEffect(() => {
+    if (!draftKey) return;
+    let cancelled = false;
+    void loadUnsent(draftKey).then((draft) => {
+      if (cancelled || !draft) return;
+      // Don't clobber anything typed while we looked.
+      if (boxRef.current.text.length > 0 || boxRef.current.attachments.length > 0) return;
+      setText(draft.text);
+      setCursor(draft.text.length);
+      setPicked(new Map(draft.picked));
+      setAttachments(draft.attachments);
+      ownedUnsent.current = draft.id;
+      setFailed(true);
+      setInputKey((k) => k + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftKey]);
+
+  // While the box holds a "Not sent" draft, the saved copy follows it: leave
+  // again and it still comes back; clear the box and it's gone.
+  useEffect(() => {
+    if (!draftKey || !failed || editing) return;
+    if (text.trim() || attachments.length > 0) {
+      const id = newUnsentId();
+      saveUnsent(draftKey, { id, text, picked: [...picked], attachments });
+      ownedUnsent.current = id;
+    } else if (ownedUnsent.current) {
+      clearUnsent(draftKey, ownedUnsent.current);
+    }
+  }, [draftKey, failed, editing, text, picked, attachments]);
 
   // Picked mentions read as pills: bold spans inside the field.
   const styled = useMemo(() => {

@@ -108,14 +108,14 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
             if (args.credential === 'attio_refused') throw new Error('Attio did not accept this key')
             if (args.credential === 'rpl_refused') throw new Error('Replicas did not accept this key: Invalid or missing API key')
             return { agent: { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: args.connection, ...(args.instance ? { agentInstance: args.instance } : {}) }, key: { ...key('k9', 'new'), secret: NEW_KEY } }
-        case 'spaces:agent37Instances':
+        case 'spaces:setupInstances':
             if (args.key === 'sk_live_bad') throw new Error('Agent37 did not accept this key: Missing, malformed, or revoked API key.')
             return { instances: [
                 { id: 'ab12cd34ef', name: 'main', template: 'agent37-hermes', status: 'running', kind: 'hermes' },
                 { id: 'cd34ef56gh', name: 'claws', template: 'agent37-openclaw', status: 'sleeping', kind: 'openclaw' },
                 { id: 'ef56gh78ij', name: 'coder', template: 'agent37-codex', status: 'running' },
             ] }
-        case 'spaces:agent37CreateInstance': return { instance: { id: 'zz99', name: args.name, template: 'agent37-openclaw', status: 'running', kind: 'openclaw' } }
+        case 'spaces:createSetupInstance': return { instance: { id: 'zz99', name: args.name, template: 'agent37-openclaw', status: 'running', kind: 'openclaw' } }
         case 'spaces:managedAgentKinds': return { kinds: managedKinds }
         case 'spaces:setAgentPersonal': {
             const on = (args as unknown as { personal: boolean }).personal
@@ -639,7 +639,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
         await screen.findByRole('heading', { name: 'Connect OpenClaw' })
         expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'OpenClaw', kind: 'openclaw', connection: 'agent37', credential: 'sk_live_ab12', instance: 'cd34ef56gh' })
-        expect(invoke).not.toHaveBeenCalledWith('spaces:agent37CreateInstance', expect.anything())
+        expect(invoke).not.toHaveBeenCalledWith('spaces:createSetupInstance', expect.anything())
         // On the instance: OpenClaw's own commands, with our MCP server on the new key, and its own address.
         fireEvent.click(screen.getAllByRole('button', { name: /Copy/ })[0]!)
         expect(vi.mocked(navigator.clipboard.writeText).mock.calls.at(-1)![0]).toBe(
@@ -666,8 +666,27 @@ describe('AgentsDialog', () => {
         fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Claws' } })
         fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
         await screen.findByRole('heading', { name: 'Connect Claws' })
-        expect(invoke).toHaveBeenCalledWith('spaces:agent37CreateInstance', { key: 'sk_live_ab12', kind: 'openclaw', name: 'rowboat-claws', monthlyBudgetUsd: 10, autoSleep: false })
+        expect(invoke).toHaveBeenCalledWith('spaces:createSetupInstance', { orgId: 'org-1', connection: 'agent37', key: 'sk_live_ab12', kind: 'openclaw', name: 'rowboat-claws', monthlyBudgetUsd: 10, autoSleep: false })
         expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Claws', kind: 'openclaw', connection: 'agent37', credential: 'sk_live_ab12', instance: 'zz99' })
+    })
+
+    // A super agent's setup card (2026-11-02) opens the form for what it asked, filled in.
+    it('completes a super agent’s setup card: only the way it asked for, its name, and the card as the request', async () => {
+        const approval = {
+            id: 'ap9', invocationId: 'inv9', agentId: 'boss', conversation: { spaceId: 'S1', threadRootId: 'R1' }, messageId: 'M9', requestKey: 'k',
+            title: 'Set up Scout, a Hermes on Agent37', detail: '', choices: ['deny'], state: 'open',
+            action: { kind: 'create_agent', displayName: 'Scout', agentKind: 'hermes', connection: 'agent37' },
+            createdAt: '2026-11-02T10:00:00.000Z', updatedAt: '2026-11-02T10:00:00.000Z',
+        } as spaces.Approval
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} start={{ name: 'request', approval }} />)
+        expect(await screen.findByLabelText('Agent name')).toHaveValue('Scout')
+        expect(screen.queryByRole('radio', { name: 'Replicas' })).toBeNull()
+        fireEvent.change(screen.getByLabelText('Agent37 API key'), { target: { value: 'sk_live_ab12' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Find instances' }))
+        fireEvent.click(within(await screen.findByRole('radiogroup', { name: 'Instance' })).getByRole('radio', { name: /main/ }))
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Scout' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Scout', kind: 'hermes', connection: 'agent37', credential: 'sk_live_ab12', instance: 'ab12cd34ef', request: 'ap9' })
     })
 
     it('shows a Replicas agent’s key by its end, flags a rejected one, and lets its owner replace it', async () => {

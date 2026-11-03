@@ -5,6 +5,7 @@ import {
   type Approval,
   type ApprovalClose,
   type ApprovalDecision,
+  type ApprovalAction,
   type ApprovalRequest,
   type Invocation,
   type InvocationActivity,
@@ -16,7 +17,7 @@ import {
   type Space,
 } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
-import { canCancelQueuedInvocation, canDecideApproval, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
+import { canCancelQueuedInvocation, canDecideApproval, canDecideSuperAgentRequest, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
 import type { ActorCtx, Kernel } from './kernel.js';
 
 // Invoking agent members (spec §8, 2026-09-30). Harbor decides and a
@@ -408,7 +409,7 @@ export class Invocations {
   }
 
   /** The approval a card carries: open, for the invocation's agent and thread. */
-  approvalFor(current: Invocation, messageId: string, request: ApprovalRequest): Approval {
+  approvalFor(current: Invocation, messageId: string, request: ApprovalRequest, action?: ApprovalAction): Approval {
     const now = this.k.now();
     return {
       id: this.k.ulid(),
@@ -421,6 +422,7 @@ export class Invocations {
       detail: request.detail,
       ...(request.reason ? { reason: request.reason } : {}),
       choices: request.choices,
+      ...(action ? { action } : {}),
       state: 'open',
       createdAt: now,
       updatedAt: now,
@@ -430,6 +432,8 @@ export class Invocations {
   /** The other half: the approval is stored with its card, and the invocation waits on it. */
   async raiseWithin(current: Invocation, approval: Approval, out: InvocationOutbox): Promise<void> {
     await this.k.store.insertApproval(approval);
+    // A super agent's request holds no turn: the agent says it asked and goes on (2026-11-02).
+    if (approval.action) return;
     const held: Invocation = { ...current, state: 'waiting', activity: `Waiting for approval: ${approval.title}`.slice(0, 200), updatedAt: this.k.now() };
     await this.k.store.putInvocation(held);
     this.announce(held, out);
@@ -451,6 +455,11 @@ export class Invocations {
     if (!found || found.conversation.spaceId !== spaceId) throw new HarborError('not_found', 'no such approval');
     if (input.note && input.decision !== 'deny') throw new HarborError('invalid_request', 'a note goes with a deny');
     await this.k.requireMember(ctx, spaceId);
+    // A super agent's request is its owner's to decide (2026-11-02).
+    if (found.action) {
+      const actor = await this.k.store.getMember(ctx.memberId);
+      enforce(actor ? canDecideSuperAgentRequest(actor, await this.k.store.getMember(found.agentId)) : { code: 'not_a_member', message: 'not a member of this org' });
+    }
     const out: InvocationOutbox = [];
     const result = await this.k.lockedAs(ctx, spaceId, async () => {
       const current = (await this.k.store.getApproval(id))!;
@@ -467,7 +476,8 @@ export class Invocations {
         updatedAt: at,
       };
       await this.settleApproval(next, out);
-      out.push({ to: 'agent', memberId: next.agentId, frame: { kind: 'approval_decided', approval: next } });
+      // Harbor applies a super agent's request itself (SuperAgents.apply); its connector never sees it.
+      if (!next.action) out.push({ to: 'agent', memberId: next.agentId, frame: { kind: 'approval_decided', approval: next } });
       return next;
     });
     this.flush(out);
@@ -497,6 +507,43 @@ export class Invocations {
     const next: Approval = { ...found, appliedAt: this.k.now() };
     await this.k.store.putApproval(next);
     return next;
+  }
+
+  /**
+   * Harbor applied a super agent's request (2026-11-02): what it did goes on
+   * the card, and the approval counts as applied. The first outcome stands.
+   */
+  async recordOutcome(id: string, outcome: NonNullable<Approval['outcome']>): Promise<Approval> {
+    const found = await this.k.store.getApproval(id);
+    if (!found?.action) throw new HarborError('not_found', 'no such request');
+    return this.k.locked(found.conversation.spaceId, async () => {
+      const current = (await this.k.store.getApproval(id))!;
+      if (current.appliedAt) return current;
+      const at = this.k.now();
+      const next: Approval = { ...current, outcome, appliedAt: at, updatedAt: at };
+      await this.k.store.putApproval(next);
+      await this.k.appendNext(next.conversation.spaceId, at, { type: 'approval', approval: next });
+      return next;
+    });
+  }
+
+  /**
+   * A super agent's setup card its owner completed by adding the agent
+   * (2026-11-02): allowed by them and applied at once, with the agent as its
+   * outcome. Only an open card: the first completion stands.
+   */
+  async fulfilRequest(id: string, by: string, outcome: NonNullable<Approval['outcome']>): Promise<Approval> {
+    const found = await this.k.store.getApproval(id);
+    if (!found?.action) throw new HarborError('not_found', 'no such request');
+    return this.k.locked(found.conversation.spaceId, async () => {
+      const current = (await this.k.store.getApproval(id))!;
+      if (current.state !== 'open') throw new HarborError('invalid_request', `this request is already ${current.state}`);
+      const at = this.k.now();
+      const next: Approval = { ...current, state: 'allowed', decision: 'allow_once', decidedBy: by, decidedAt: at, outcome, appliedAt: at, updatedAt: at };
+      await this.k.store.putApproval(next);
+      await this.k.appendNext(next.conversation.spaceId, at, { type: 'approval', approval: next });
+      return next;
+    });
   }
 
   /** Decisions on the agent's approvals its connector has not confirmed applying: the guarantee behind `approval_decided`. */

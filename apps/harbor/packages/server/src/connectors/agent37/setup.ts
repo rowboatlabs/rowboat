@@ -1,28 +1,13 @@
-// Agent37's hosting API, for the app's Add flow (Harbor spec §8 Connectors,
-// Agent37, 2026-10-05). An Agent37 agent is one instance, so adding one finds
-// or creates that instance with the person's key while they are adding it:
-// setup is the app's, and Harbor creates nothing on a platform. Harbor then
-// checks the key and the instance itself and keeps the key sealed; the app
-// keeps nothing. Shapes from https://www.agent37.com/docs/agents-api/instances.
+import type { PlatformInstance } from '@rowboat/spaces-protocol';
+import { AGENT37_API, kindOfTemplate } from './api.js';
 
-export const AGENT37_API = 'https://api.agent37.com';
-
-export interface Agent37Instance {
-  id: string;
-  name: string | null;
-  template: string;
-  status: string;
-  /** The Rowboat kind its template runs (`hermes`, `openclaw`), or undefined for one Rowboat does not drive. */
-  kind?: string;
-}
-
-/** The kind an Agent37 system template runs (https://www.agent37.com/docs/agents-api/templates); a pinned `@tag` is the same template. */
-export function kindOfTemplate(template: string): string | undefined {
-  const name = template.split('@')[0];
-  if (name === 'agent37-hermes' || name === 'agent37-hermes-small') return 'hermes';
-  if (name === 'agent37-openclaw') return 'openclaw';
-  return undefined;
-}
+// Agent37's hosting API, for the Add flow (spec §8 Connectors, Agent37,
+// 2026-10-05). An Agent37 agent is one instance, so adding one finds or
+// creates that instance with the person's key while they are adding it. Moved
+// here from the desktop app on 2026-11-02, so the web app and a super agent's
+// setup card can do it too: Harbor uses the key for the call and keeps
+// nothing; adding the agent then checks the key again and seals it. Shapes
+// from https://www.agent37.com/docs/agents-api/instances.
 
 /** The system template a new instance of a kind runs. */
 const TEMPLATE_FOR: Record<string, string> = { hermes: 'agent37-hermes', openclaw: 'agent37-openclaw' };
@@ -54,14 +39,14 @@ async function call<T>(key: string, path: string, init: { method?: string; body?
   return (await res.json()) as T;
 }
 
-const shape = (i: { id: string; name?: string | null; template?: string; status?: string }): Agent37Instance => {
+const shape = (i: { id: string; name?: string | null; template?: string; status?: string }): PlatformInstance => {
   const template = i.template ?? '';
   const kind = kindOfTemplate(template);
   return { id: i.id, name: i.name ?? null, template, status: i.status ?? '', ...(kind ? { kind } : {}) };
 };
 
 /** The instances this key's workspace holds, newest first, minus failed ones. */
-export async function listAgent37Instances(key: string, fetchImpl: Fetch = fetch, base = AGENT37_API): Promise<Agent37Instance[]> {
+export async function listAgent37Instances(key: string, fetchImpl: Fetch = fetch, base = AGENT37_API): Promise<PlatformInstance[]> {
   const body = await call<{ data?: Array<{ id: string; name?: string | null; template?: string; status?: string }> }>(key, '/v1/instances', {}, fetchImpl, base);
   return (body.data ?? []).map(shape).filter((i) => !['failed', 'deleted', 'deleting'].includes(i.status));
 }
@@ -76,7 +61,7 @@ export async function createAgent37Instance(
   input: { kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean },
   fetchImpl: Fetch = fetch,
   base = AGENT37_API,
-): Promise<Agent37Instance> {
+): Promise<PlatformInstance> {
   const template = TEMPLATE_FOR[input.kind];
   if (!template) throw new Error(`Agent37 has no instance for ${input.kind}`);
   const body = await call<{ id: string; name?: string | null; template?: string; status?: string }>(

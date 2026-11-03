@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';

@@ -20,25 +20,38 @@ export default function SpacesTabsLayout() {
       // Monochrome, like the rest of the app: the glass capsule and the filled
       // icon say which tab you're on, not a blue tint.
       tintColor={colors.label}
+      // Android's Material bar defaulted to a lavender ground, a dark slate
+      // pill and a label on the selected tab only (2026-10-28). Match the
+      // page instead, a faint pill, and every tab labelled.
+      {...(process.env.EXPO_OS === 'android'
+        ? {
+            backgroundColor: colors.background,
+            indicatorColor: colors.separator,
+            iconColor: colors.secondaryLabel,
+            labelVisibilityMode: 'labeled' as const,
+          }
+        : null)}
     >
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} />
+        <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} md="home" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="dms">
         <NativeTabs.Trigger.Label>DMs</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={{ default: 'paperplane', selected: 'paperplane.fill' }} />
+        <NativeTabs.Trigger.Icon sf={{ default: 'paperplane', selected: 'paperplane.fill' }} md="send" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="activity">
         <NativeTabs.Trigger.Label>Activity</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={{ default: 'bell', selected: 'bell.fill' }} />
+        <NativeTabs.Trigger.Icon sf={{ default: 'bell', selected: 'bell.fill' }} md="notifications" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="more">
         <NativeTabs.Trigger.Label>More</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="ellipsis" />
+        <NativeTabs.Trigger.Icon sf="ellipsis" md="more_horiz" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="jump" role="search">
         <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
+        {/* iOS draws the search role's own icon; Android needs one (2026-10-28). */}
+        {process.env.EXPO_OS === 'android' ? <NativeTabs.Trigger.Icon md="search" /> : null}
       </NativeTabs.Trigger>
     </NativeTabs>
   );

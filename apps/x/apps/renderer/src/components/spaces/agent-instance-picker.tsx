@@ -8,8 +8,9 @@ import { cn } from '@/lib/utils'
 // Which Agent37 instance a new agent is (Harbor spec §8 Connectors, Agent37,
 // 2026-10-05). An instance keeps its own memory and files, so a Rowboat agent
 // is exactly one: the person picks one of the instances their key reaches, or
-// creates one here. Either way the app talks to Agent37 with the key being
-// pasted, then adds the agent with the instance; the instance's template
+// creates one here. Either way the org's Harbor talks to Agent37 with the
+// key being pasted (since 2026-11-02, so the web app can too), then the agent
+// is added with the instance; the instance's template
 // decides the agent's kind. Creating bills the person's Agent37 wallet, so it
 // is never automatic, and its monthly model budget is asked for (Agent37's
 // defaults to $0, which refuses every turn).
@@ -30,7 +31,8 @@ export type InstanceChoice =
 const FROM_PER_MONTH = '$4.76'
 const NEW_KINDS = ['hermes', 'openclaw']
 
-export function InstancePicker({ credential, choice, onChoice }: {
+export function InstancePicker({ orgId, credential, choice, onChoice }: {
+    orgId: string
     /** The Agent37 key being pasted; the picker lists what it reaches. */
     credential: string
     choice: InstanceChoice | null
@@ -50,7 +52,7 @@ export function InstancePicker({ credential, choice, onChoice }: {
         setError(null)
         onChoice(null)
         try {
-            const { instances: list } = await window.ipc.invoke('spaces:agent37Instances', { key })
+            const { instances: list } = await window.ipc.invoke('spaces:setupInstances', { orgId, connection: 'agent37', key })
             setFound({ key, instances: list })
             const usable = list.filter((i) => i.kind)
             if (usable.length === 1) onChoice({ type: 'existing', id: usable[0]!.id, kind: usable[0]!.kind!, name: usable[0]!.name })

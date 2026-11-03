@@ -1,6 +1,7 @@
 import {
   LLM_PROVIDERS,
   MARITIME_AGENTS,
+  TRIAL_KINDS,
   type AgentCredential,
   type AgentHosting,
   type AgentKeySecret,
@@ -19,7 +20,7 @@ import {
   type Member,
 } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
-import { canAddAgent, canRevokeAgentKey, enforce } from '../policy.js';
+import { canAddAgent, canRevokeAgentKey, canSuperAgentCreate, canSuperAgentDelete, enforce } from '../policy.js';
 import { credentialHint } from '../sealing.js';
 import type { StoredAgentHosting } from '../store.js';
 import type { Agents } from './agents.js';
@@ -188,6 +189,7 @@ function publicShape(row: StoredAgentHosting): AgentHosting {
     ...(row.trial ? { trial: row.trial } : {}),
     ...(row.llm ? { llm: row.llm } : {}),
     createdBy: row.createdBy,
+    ...(row.requestedBy ? { requestedBy: row.requestedBy } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -251,10 +253,35 @@ export class Hosting {
   async createManaged(
     ctx: ActorCtx,
     input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    /** The super agent whose setup card this completes (2026-11-02): it may delete what it asked for. */
+    requestedBy?: string,
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
     const actor = await this.k.store.getMember(ctx.memberId);
     if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
     enforce(canAddAgent(actor));
+    const { agent, hosting } = await this.provision(ctx.memberId, input, requestedBy);
+    const key = await this.agents.createKey(ctx, agent.id);
+    return { agent, key, hosting };
+  }
+
+  /**
+   * A super agent's create that needs nothing from its owner (spec §4 Agent
+   * members, 2026-11-02): an agent on Rowboat's trial credit, its owner's,
+   * recorded as asked for by it, and a channel agent so it can be handed
+   * work. No key is minted: Harbor's connector holds what it needs, and the
+   * owner makes one on its page if they want one.
+   */
+  async createForSuperAgent(superAgent: Member, input: { displayName: string; kind: string }): Promise<{ agent: Member; hosting: AgentHosting }> {
+    enforce(canSuperAgentCreate(superAgent));
+    if (!(TRIAL_KINDS as readonly string[]).includes(input.kind)) throw new HarborError('invalid_request', `${input.kind} needs its owner to set it up`);
+    return this.provision(superAgent.ownerId!, input, superAgent.id);
+  }
+
+  private async provision(
+    ownerId: string,
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    requestedBy?: string,
+  ): Promise<{ agent: Member; hosting: AgentHosting }> {
     if (!this.provider || !this.hooks) throw new HarborError('invalid_request', 'this Harbor runs no managed hosting');
     if (!(MARITIME_AGENTS as readonly string[]).includes(input.kind)) throw new HarborError('invalid_request', `${input.kind} is not a kind of agent Rowboat can create`);
     if (input.kind === 'claude-code' && !input.anthropicApiKey) throw new HarborError('invalid_request', 'Claude Code needs your Anthropic API key');
@@ -266,7 +293,7 @@ export class Hosting {
     const now = this.k.now();
     // Claude Code runs on the key it was given from the start; the rest on Rowboat's trial credit, for a while.
     const funding: Pick<StoredAgentHosting, 'funding' | 'trial' | 'llm'> = input.anthropicApiKey
-      ? { funding: 'own', llm: { provider: 'anthropic', keyHint: credentialHint(input.anthropicApiKey), setBy: ctx.memberId, setAt: now } }
+      ? { funding: 'own', llm: { provider: 'anthropic', keyHint: credentialHint(input.anthropicApiKey), setBy: ownerId, setAt: now } }
       : { funding: 'trial', trial: { endsAt: new Date(Date.parse(now) + this.trialMs).toISOString() } };
     let row: StoredAgentHosting = {
       id,
@@ -276,7 +303,8 @@ export class Hosting {
       kind: input.kind,
       displayName,
       ...funding,
-      createdBy: ctx.memberId,
+      createdBy: ownerId,
+      ...(requestedBy ? { requestedBy } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -300,18 +328,17 @@ export class Hosting {
 
     const agent = await this.spaces.createAgent({
       displayName,
-      ownerId: ctx.memberId,
+      ownerId,
       agentKind: input.kind,
       agentConnection: 'maritime',
       agentInstance: externalId,
       // Channel or personal, as on Add (spec §4 Agent members, 2026-10-27).
       ...(input.personal ? { personal: true } : {}),
     });
-    await this.hooks.save(agent.id, this.provider.credential(), ctx.memberId);
+    await this.hooks.save(agent.id, this.provider.credential(), ownerId);
     row = { ...row, agentId: agent.id, externalId, status: 'deploying', updatedAt: this.k.now() };
     await this.k.store.putHosting(row);
-    const key = await this.agents.createKey(ctx, agent.id);
-    return { agent, key, hosting: publicShape(row) };
+    return { agent, hosting: publicShape(row) };
   }
 
   /** Delete a managed agent's hosting: the owner or an admin. Keys go now; the platform's resources in the background. */
@@ -323,6 +350,18 @@ export class Hosting {
     enforce(canRevokeAgentKey(actor, agent));
     const row = await this.k.store.getAgentHosting(agentId);
     if (!row) throw new HarborError('not_found', 'this agent is not one Rowboat hosts');
+    return this.remove(agentId, row);
+  }
+
+  /** A super agent's delete (2026-11-02): only one an admin let delete, and only an agent it created. */
+  async deleteForSuperAgent(superAgent: Member, agentId: string): Promise<AgentHosting> {
+    const row = await this.k.store.getAgentHosting(agentId);
+    enforce(canSuperAgentDelete(superAgent, row?.requestedBy));
+    if (!row) throw new HarborError('not_found', 'this agent is not one Rowboat hosts');
+    return this.remove(agentId, row);
+  }
+
+  private async remove(agentId: string, row: StoredAgentHosting): Promise<AgentHosting> {
     if (row.status === 'deleted' || row.status === 'deleting') return publicShape(row);
     this.k.guardWrite();
     const at = this.k.now();
@@ -706,12 +745,25 @@ export class Hosting {
   }
 
   private async move(row: StoredAgentHosting, status: StoredAgentHosting['status']): Promise<void> {
+    if (await this.movedOn(row)) return;
     const next: StoredAgentHosting = { ...row, status, updatedAt: this.k.now() };
     delete next.error;
     await this.k.store.putHosting(next);
   }
 
   private async fail(row: StoredAgentHosting, error: string): Promise<void> {
+    if (await this.movedOn(row)) return;
     await this.k.store.putHosting({ ...row, status: 'failed', error: error.slice(0, 1000), updatedAt: this.k.now() });
+  }
+
+  /**
+   * The row changed while the platform answered (2026-11-02): a delete landed
+   * during a check, say. The worker's stale copy must not write over it, or
+   * a deleted agent reads ready and its machine is never removed.
+   */
+  private async movedOn(row: StoredAgentHosting): Promise<boolean> {
+    if (!row.agentId) return false;
+    const current = await this.k.store.getAgentHosting(row.agentId);
+    return current !== undefined && current.status !== row.status;
   }
 }

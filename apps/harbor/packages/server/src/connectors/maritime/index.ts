@@ -3,6 +3,7 @@ import type { ConnectorPlatform } from '../platforms.js';
 import { MARITIME_API, MaritimeError, maritimeApi } from './api.js';
 import { MaritimeConnector, type PollTiming } from './connector.js';
 import { kindOfAgent, RUNTIMES } from './runtimes.js';
+import { listMaritimeAgents } from './setup.js';
 
 // The Maritime platform (spec §8 Connectors, Maritime, 2026-10-26): checking
 // an agent's Maritime key, and running its connector. A Maritime agent is one
@@ -31,6 +32,7 @@ export function maritimePlatform(base = MARITIME_API, timing?: PollTiming): Conn
         throw new HarborError('invalid_request', `The Maritime agent ${agent.name || agent.id} runs ${runs}, not ${target.kind}`);
       }
     },
+    setup: { list: (secret) => listMaritimeAgents(secret, fetch, base) },
     start(env) {
       return new MaritimeConnector(env, async () => maritimeApi(await env.credential(), base), timing).start();
     },
