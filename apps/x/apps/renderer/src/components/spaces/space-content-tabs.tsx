@@ -1,7 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { spaces } from '@x/shared'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
-import { streamBadge, threadBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
+import { streamBadge, threadsBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { cn } from '@/lib/utils'
 
@@ -12,22 +12,17 @@ import { cn } from '@/lib/utils'
 
 type Tab = 'messages' | 'discussions' | 'files'
 
-export function SpaceContentTabs({ orgId, spaceId, direct, topics, entries, unreadAssetIds, selection, onSelect }: {
+export function SpaceContentTabs({ orgId, spaceId, direct, entries, unreadAssetIds, selection, onSelect }: {
     orgId: string
     spaceId: string
     direct: boolean
-    topics: spaces.TopicListing[]
     entries: spaces.SpacesAssetEntry[]
     unreadAssetIds: ReadonlySet<string>
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
 }) {
     useReadStateVersion()
-    const liveTopics = useMemo(() => topics.filter((topic) => !topic.archived), [topics])
-    const discussionBadge = liveTopics.reduce<SpaceBadge>((sum, topic) => {
-        const badge = threadBadge(orgId, spaceId, topic.rootMessageId, direct)
-        return { unread: sum.unread + badge.unread, forYou: sum.forYou + badge.forYou }
-    }, { unread: 0, forYou: 0 })
+    const discussionBadge = threadsBadge(orgId, spaceId, direct)
     const filesBadge = { unread: entries.filter((entry) => !entry.state && unreadAssetIds.has(entry.id)).length, forYou: 0 }
     const current: Tab = selection.kind === 'discussions' || selection.kind === 'thread' ? 'discussions'
         : ['files', 'file', 'whiteboard', 'attachment'].includes(selection.kind) ? 'files'
