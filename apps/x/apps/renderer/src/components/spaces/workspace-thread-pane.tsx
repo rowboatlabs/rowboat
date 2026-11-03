@@ -69,7 +69,7 @@ export function WorkspaceThreadPane({ org, space, rootId, item, active, onClose,
             onOpenAttachment={(src, name) => { const url = new URL(src); url.searchParams.set('name', name); onOpenSpace(org.id, space.id, { kind: 'attachment', src: url.href, fromThreadRootId: rootId }) }}>
             <ThreadPane org={org} space={space} rootMessageId={rootId} rootFromStream={item?.root} topicFromStream={item?.topic ?? undefined}
                 changeSets={feed.changeSets} entries={entries} presence={presence} memberNames={names} refreshTick={refreshTick}
-                showBack={showBack} onBack={onClose} expanded={expanded} onToggleExpanded={onToggleExpanded}
+                showBack={showBack} onBack={onClose} listLabel="Threads" expanded={expanded} onToggleExpanded={onToggleExpanded}
                 onOpenFile={openFile} onOpenSession={onOpenSession} onOpenThread={(id) => onOpenThread(space.id, id)}
                 artifactsRailOpen={artifactsOpen} onToggleArtifactsRail={() => setArtifactsOpen((v) => !v)} visible={active} />
         </SpaceNavProvider></SpaceAssetsProvider></SpaceInvocationsProvider></SpaceRefsProvider></MemberAdminProvider></SpaceProfilesProvider></SpaceMembersProvider>
