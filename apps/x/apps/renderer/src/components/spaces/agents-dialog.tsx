@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
 import { BotIcon, ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
 import type { spaces } from '@x/shared'
@@ -434,8 +434,13 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const startBot = start?.name === 'add' && start.bot
     const startAgentId = start?.name === 'agent' ? start.agentId : undefined
     const startApproval = start?.name === 'request' ? start.approval : undefined
-    useEffect(() => {
-        if (!open) return
+    const startApprovalId = startApproval?.id
+    // Opening resets the dialog, so it runs only when the dialog opens or is
+    // pointed somewhere new (2026-11-03). It used to run again whenever a
+    // callback it used changed identity: startRequest follows org.spaces, a
+    // new array on every listing refetch (focus, reconnect), and that blanked
+    // the open agent's page, reloaded it and put it back on Overview.
+    const opened = useEffectEvent(() => {
         setRequest(null)
         if (startApproval) startRequest(startApproval)
         else if (startName === 'add') startAdding(startBot)
@@ -446,7 +451,10 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         void load()
         // An org whose Harbor creates no agents (no Maritime key, or older) just has no Create button.
         window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
-    }, [open, load, startAdding, startCreating, startRequest, startName, startBot, startAgentId, startApproval, org.id])
+    })
+    useEffect(() => {
+        if (open) opened()
+    }, [open, startName, startBot, startAgentId, startApprovalId, org.id])
 
     // Back to the chooser from one of its paths, else to the list, or out of the dialog when it was opened past the list.
     const fromChooser = (screen.name === 'add' && !screen.bot) || screen.name === 'create'
