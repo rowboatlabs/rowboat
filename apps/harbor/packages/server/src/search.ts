@@ -32,23 +32,38 @@ export interface SearchTerm {
   prefix: boolean;
 }
 
-export interface SearchQuery {
+/**
+ * The terms one whitespace-separated chunk of the query produced. `whole` is
+ * the chunk as typed when it split into more than one word ("github.com/a/b",
+ * "file.ts"): Postgres's parser keeps URLs, hosts and file names as single
+ * lexemes, which the split words never reach, so the group also matches the
+ * chunk as Postgres parses it (2026-11-03: a pasted URL found nothing).
+ */
+export interface SearchGroup {
+  whole: string | null;
   terms: SearchTerm[];
 }
 
+export interface SearchQuery {
+  terms: SearchTerm[];
+  groups: SearchGroup[];
+}
+
 /**
- * Tokenize the raw query the same way to_tsvector('simple') tokenizes bodies
+ * Tokenize one chunk the same way to_tsvector('simple') tokenizes bodies
  * (split on non-alphanumerics, lowercase), so a term always compares against
  * lexemes that actually exist in the index. "@harsh" and "harsh" are the same
  * query; punctuation never produces phantom AND terms.
  */
-function tokenize(raw: string): string[] {
-  return raw
+function tokenize(chunk: string): string[] {
+  return chunk
     .toLowerCase()
     .split(/[^\p{L}\p{N}_]+/u)
-    .filter((t) => t.length > 0)
-    .slice(0, 8); // AND-ing more words than this only ever yields nothing
+    .filter((t) => t.length > 0);
 }
+
+/** AND-ing more words than this only ever yields nothing. */
+const MAX_TERMS = 8;
 
 /**
  * Query-time mention expansion: a term that matches a word of a member's
@@ -59,16 +74,25 @@ function tokenize(raw: string): string[] {
  * renames are correct instantly, and a name shared by two members ORs in both.
  */
 export function parseSearchQuery(raw: string, members: readonly Member[]): SearchQuery {
-  const words = tokenize(raw);
-  const terms = words.map((text, i) => {
-    const alts: string[] = [];
-    for (const m of members) {
-      const nameWords = m.displayName.toLowerCase().split(/\s+/);
-      if (nameWords.some((w) => w.startsWith(text))) alts.push(m.id.toLowerCase());
-    }
-    return { text, alts, prefix: i === words.length - 1 };
-  });
-  return { terms };
+  const groups: SearchGroup[] = [];
+  let count = 0;
+  for (const chunk of raw.split(/\s+/)) {
+    const words = tokenize(chunk).slice(0, MAX_TERMS - count);
+    if (words.length === 0) continue;
+    count += words.length;
+    const terms = words.map((text) => {
+      const alts: string[] = [];
+      for (const m of members) {
+        const nameWords = m.displayName.toLowerCase().split(/\s+/);
+        if (nameWords.some((w) => w.startsWith(text))) alts.push(m.id.toLowerCase());
+      }
+      return { text, alts, prefix: false };
+    });
+    groups.push({ whole: words.length > 1 ? chunk : null, terms });
+  }
+  const terms = groups.flatMap((g) => g.terms);
+  if (terms.length > 0) terms[terms.length - 1]!.prefix = true;
+  return { terms, groups };
 }
 
 /** A lexeme quoted for to_tsquery: single-quoted, internal quotes doubled. */
@@ -77,16 +101,38 @@ function lexeme(text: string, prefix: boolean): string {
 }
 
 /**
- * The pg form: "('harsh' | '01j8kq…') & 'deploy':*" for to_tsquery('simple').
- * Everything is quoted, so no user text ever reaches tsquery syntax.
+ * The pg form, one entry per group: "('harsh' | '01j8kq…') & 'deploy':*" for
+ * to_tsquery('simple'), beside the group's `whole` ('' for none), which
+ * TSQUERY_SQL parses with plainto_tsquery and ORs in. Everything is quoted or
+ * parsed by Postgres, so no user text ever reaches tsquery syntax.
  */
-export function toTsQueryString(q: SearchQuery): string {
-  return q.terms
-    .map((t) => {
-      const branches = [lexeme(t.text, t.prefix), ...t.alts.map((a) => lexeme(a, false))];
-      return branches.length > 1 ? `(${branches.join(' | ')})` : branches[0];
-    })
-    .join(' & ');
+export function toTsQueryParams(q: SearchQuery): { groups: string[]; wholes: string[] } {
+  const groups = q.groups.map((g) => {
+    const and = g.terms
+      .map((t) => {
+        const branches = [lexeme(t.text, t.prefix), ...t.alts.map((a) => lexeme(a, false))];
+        return branches.length > 1 ? `(${branches.join(' | ')})` : branches[0];
+      })
+      .join(' & ');
+    return g.terms.length > 1 ? `(${and})` : and;
+  });
+  return { groups, wholes: q.groups.map((g) => g.whole ?? '') };
+}
+
+/**
+ * The tsquery from toTsQueryParams' two arrays, at the given placeholders:
+ * the groups AND-ed, each OR-ed with its whole chunk as Postgres parses it.
+ * plainto_tsquery's text output is valid tsquery input; an empty parse (a
+ * chunk of punctuation) leaves the group as it was.
+ */
+export function tsquerySql(groups: string, wholes: string): string {
+  return `to_tsquery('simple', (
+    select string_agg(
+      case when numnode(plainto_tsquery('simple', w)) > 0
+        then '(' || g || ' | (' || plainto_tsquery('simple', w)::text || '))'
+        else g end,
+      ' & ' order by i)
+    from unnest(${groups}::text[], ${wholes}::text[]) with ordinality as x(g, w, i)))`;
 }
 
 /** ILIKE patterns for path matching (one per term), LIKE metacharacters escaped. */
