@@ -2,12 +2,12 @@ import { useThreadsPreference, useThreadsScroll } from '@/hooks/use-threads-view
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { useMemo, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, Check, ChevronDown, Link as LinkIcon, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, ChevronDown, Link as LinkIcon, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, Users } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
@@ -92,7 +92,13 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     useReadStateVersion()
     const memoryKey = `${orgId}:${spaceId}`
     const [filter, setFilter] = useThreadsPreference<ThreadsFilter>(`spaces:threads-filter:${memoryKey}`, (raw) => raw === 'named' || raw === 'mine' ? raw : 'all')
-    const [participant, setParticipant] = useThreadsPreference(`spaces:threads-participant:${memoryKey}`, (raw) => raw)
+    // Several participants at once (2026-11-03, "threads ui" in Main): a thread
+    // shows when any chosen person is in it. Stored comma-joined under the old
+    // key, so a single saved choice from before still reads back.
+    const [savedParticipants, setSavedParticipants] = useThreadsPreference(`spaces:threads-participant:${memoryKey}`, (raw) => raw || null)
+    const participants = useMemo(() => savedParticipants?.split(',') ?? [], [savedParticipants])
+    const setParticipants = (ids: string[]) => setSavedParticipants(ids.length ? ids.join(',') : null)
+    const toggleParticipant = (id: string) => setParticipants(participants.includes(id) ? participants.filter((p) => p !== id) : [...participants, id])
     const [archiveFilter, setArchiveFilter] = useThreadsPreference(`spaces:threads-archive:${memoryKey}`, (raw) => raw === 'archived' ? 'archived' : 'active')
     const archived = archiveFilter === 'archived'
     const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
@@ -101,15 +107,15 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     const allRows = useMemo(() => threadRows(topics, roots, filter, showArchived, selfMemberId), [topics, roots, filter, showArchived, selfMemberId])
     const shownRoots = useMemo(() => allRows.flatMap((row) => row.root ? [row.root] : []), [allRows])
     const replyAuthors = useFallbackReplyAuthors(orgId, spaceId, shownRoots)
-    const rows = participant ? allRows.filter((row) => participantsOf(row.root, replyAuthors).includes(participant)) : allRows
-    const scroll = useThreadsScroll(`spaces:threads-scroll:${memoryKey}:${filter}:${showArchived}:${participant ?? ''}`, {
+    const rows = participants.length ? allRows.filter((row) => participantsOf(row.root, replyAuthors).some((id) => participants.includes(id))) : allRows
+    const scroll = useThreadsScroll(`spaces:threads-scroll:${memoryKey}:${filter}:${showArchived}:${savedParticipants ?? ''}`, {
         loaded, hasMore: filter !== 'named' && hasMore, loadingOlder, onLoadOlder, rowCount: rows.length,
     })
     const nameOf = (memberId: string) => memberNames.get(memberId) ?? 'Unknown member'
+    const chosenNames = new Intl.ListFormat('en', { type: 'disjunction' }).format(participants.map(nameOf))
     // The menu offers whoever appears in the threads on screen, plus a sticky
     // choice that the loaded window doesn't reach yet so it can be cleared.
-    const participantIds = new Set(allRows.flatMap((row) => participantsOf(row.root, replyAuthors)))
-    if (participant) participantIds.add(participant)
+    const participantIds = new Set([...allRows.flatMap((row) => participantsOf(row.root, replyAuthors)), ...participants])
     const participantOptions = [...participantIds].sort((a, b) => (memberNames.get(a) ?? '').localeCompare(memberNames.get(b) ?? ''))
     const archivedCount = topics.filter((topic) => topic.archived).length
     const manage = async (id: string, action: spaces.SpacesManageTopicAction) => {
@@ -131,21 +137,25 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                 options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived', count: archivedCount }]} />}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button type="button" size="sm" variant="ghost" aria-label={participant ? `Participant: ${nameOf(participant)}` : 'Filter by participant'}
-                        className={cn('h-8 gap-1.5 px-2.5 text-[13px]', participant ? 'bg-accent text-foreground' : 'text-muted-foreground')}>
-                        {participant ? <MemberAvatar id={participant} name={nameOf(participant)} size="sm" className="rounded-full" /> : <Users className="size-3.5" />}
-                        {participant ? nameOf(participant) : 'Everyone'}
+                    <Button type="button" size="sm" variant="ghost" aria-label={participants.length ? `Participants: ${chosenNames}` : 'Filter by participant'}
+                        className={cn('h-8 gap-1.5 px-2.5 text-[13px]', participants.length ? 'bg-accent text-foreground' : 'text-muted-foreground')}>
+                        {participants.length
+                            ? <span className="flex items-center -space-x-1">{participants.slice(0, 3).map((id) => <MemberAvatar key={id} id={id} name={nameOf(id)} size="sm" className="rounded-full ring-2 ring-background" />)}</span>
+                            : <Users className="size-3.5" />}
+                        {participants.length === 0 ? 'Everyone' : participants.length === 1 ? nameOf(participants[0]) : `${participants.length} people`}
                         <ChevronDown className="size-3.5 opacity-60" />
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
-                    <DropdownMenuItem onSelect={() => setParticipant(null)}>
-                        <Users className="mr-2 size-3.5" />Everyone{!participant && <Check className="ml-auto size-3.5" />}
-                    </DropdownMenuItem>
+                    <DropdownMenuCheckboxItem checked={participants.length === 0} onCheckedChange={() => setParticipants([])}>
+                        <Users className="size-3.5" />Everyone
+                    </DropdownMenuCheckboxItem>
                     {participantOptions.length > 0 && <DropdownMenuSeparator />}
-                    {participantOptions.map((id) => <DropdownMenuItem key={id} onSelect={() => setParticipant(id)}>
-                        <MemberAvatar id={id} name={nameOf(id)} size="sm" className="mr-2 rounded-full" />{nameOf(id)}{participant === id && <Check className="ml-auto size-3.5" />}
-                    </DropdownMenuItem>)}
+                    {/* The menu stays open so several people can be picked in one go. */}
+                    {participantOptions.map((id) => <DropdownMenuCheckboxItem key={id} checked={participants.includes(id)}
+                        onCheckedChange={() => toggleParticipant(id)} onSelect={(event) => event.preventDefault()}>
+                        <MemberAvatar id={id} name={nameOf(id)} size="sm" className="rounded-full" />{nameOf(id)}
+                    </DropdownMenuCheckboxItem>)}
                 </DropdownMenuContent>
             </DropdownMenu>
         </>}>
@@ -218,9 +228,9 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                 ? <SpacesEmpty icon={<Archive />} title="No archived discussions">Archived discussions stay readable here.</SpacesEmpty>
                 : filter === 'named'
                     ? <SpacesEmpty icon={<MessagesSquare />} title="No named threads yet">Give a thread a title from its ⋯ menu, or type /discussion in a reply, and it shows up here.</SpacesEmpty>
-                    : participant
-                        ? <SpacesEmpty icon={<Users />} title={`No threads with ${nameOf(participant)}`}>
-                            Threads {nameOf(participant)} started or replied to show up here. <button type="button" className="underline" onClick={() => setParticipant(null)}>Show everyone</button>
+                    : participants.length
+                        ? <SpacesEmpty icon={<Users />} title={`No threads with ${chosenNames}`}>
+                            Threads {chosenNames} started or replied to show up here. <button type="button" className="underline" onClick={() => setParticipants([])}>Show everyone</button>
                         </SpacesEmpty>
                     : filter === 'mine'
                         ? <SpacesEmpty icon={<MessageSquare />} title="No threads started by you">Threads whose first message you posted show up here.</SpacesEmpty>
