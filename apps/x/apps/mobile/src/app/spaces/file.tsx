@@ -154,6 +154,9 @@ export default function SpaceFileScreen() {
       options={{
         title: name,
         headerBackVisible: !editing,
+        // Android left-aligns the title flush against headerLeft, so "Cancel"
+        // ran into the file name (2026-11-03). Centre it while editing, as iOS does.
+        headerTitleAlign: editing ? 'center' : undefined,
         headerLeft: editing ? () => headerButton('Cancel', cancel) : undefined,
         headerRight: () =>
           saving ? (

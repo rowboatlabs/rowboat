@@ -148,6 +148,9 @@ export default function NoteViewScreen() {
         options={{
           title,
           headerBackVisible: !editing,
+          // Android left-aligns the title flush against headerLeft, so "Cancel"
+          // ran into it (2026-11-03). Centre it while editing, as iOS does.
+          headerTitleAlign: editing ? 'center' : undefined,
           headerLeft: editing ? () => headerButton('Cancel', cancel) : undefined,
           headerRight: () =>
             saving ? (
