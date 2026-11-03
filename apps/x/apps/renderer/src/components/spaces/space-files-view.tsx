@@ -7,6 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Button } from '@/components/ui/button'
 import { SpacesPage } from '@/components/spaces/page-shell'
 import { FileTree } from '@/components/spaces/files-tab'
+import { revealOnMount } from '@/lib/reveal-on-mount'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { todoListPathForName } from '@/lib/todo-list'
 
@@ -52,6 +53,13 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
             if (path) onCreateTodoList(path)
         }
     }
+    // New-file focus (2026-10-27): a menu holds focus until it has closed, so an
+    // input opened from its item lost focus at once (a board or todo name row
+    // closed on that blur). Open it a tick later, as agents-view's Rename does.
+    const afterMenu = (open: () => void) => () => { window.setTimeout(open, 0) }
+    const startFile = afterMenu(() => { setNaming(null); setCreatingFile({ prefix: '' }) })
+    const startFolder = afterMenu(() => { setNaming(null); setCreatingFolder(true) })
+    const startNaming = (kind: 'board' | 'todo') => afterMenu(() => { setCreatingFile(null); setCreatingFolder(false); setNaming(kind) })
     const liveFiles = entries.filter((e) => !e.state).length
     return <>
         <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={(e) => {
@@ -90,33 +98,53 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                                 <Plus className="size-4" /> New
                             </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
+                        {/* Closing returns focus to "New" by default, which would pull it off the name input just opened. */}
+                        <DropdownMenuContent align="end" onCloseAutoFocus={(e) => e.preventDefault()}>
                             <DropdownMenuItem onClick={() => uploadInputRef.current?.click()}>
                                 <Upload className="size-3.5 mr-2" /> Upload files…
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setNaming(null); setCreatingFile({ prefix: '' }) }}>
+                            <DropdownMenuItem onClick={startFile}>
                                 <FileText className="size-3.5 mr-2" /> New file
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setNaming(null); setCreatingFolder(true) }}>
+                            <DropdownMenuItem onClick={startFolder}>
                                 <FolderPlus className="size-3.5 mr-2" /> New folder
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setCreatingFile(null); setCreatingFolder(false); setNaming('board') }}>
+                            <DropdownMenuItem onClick={startNaming('board')}>
                                 <PenTool className="size-3.5 mr-2" /> New board
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setCreatingFile(null); setCreatingFolder(false); setNaming('todo') }}>
+                            <DropdownMenuItem onClick={startNaming('todo')}>
                                 <ListTodo className="size-3.5 mr-2" /> New todo list
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </>}>
                     <FileListContextMenu actions={writable ? [
-                        { label: 'New file', onSelect: () => { setNaming(null); setCreatingFile({ prefix: '' }) } },
-                        { label: 'New folder', onSelect: () => { setNaming(null); setCreatingFolder(true) } },
-                        { label: 'New board', onSelect: () => { setCreatingFile(null); setCreatingFolder(false); setNaming('board') } },
-                        { label: 'New todo list', onSelect: () => { setCreatingFile(null); setCreatingFolder(false); setNaming('todo') } },
+                        { label: 'New file', onSelect: startFile },
+                        { label: 'New folder', onSelect: startFolder },
+                        { label: 'New board', onSelect: startNaming('board') },
+                        { label: 'New todo list', onSelect: startNaming('todo') },
                         { label: 'Upload files…', onSelect: () => uploadInputRef.current?.click() },
                     ] : []}>
                     <div className="-mx-1">
+                        {naming && (
+                            <div className="flex items-center gap-1.5 px-1 pb-1">
+                                {naming === 'board'
+                                    ? <PenTool className="size-4 shrink-0 text-muted-foreground" />
+                                    : <ListTodo className="size-4 shrink-0 text-muted-foreground" />}
+                                <input
+                                    autoFocus
+                                    ref={revealOnMount}
+                                    key={naming}
+                                    placeholder={naming === 'board' ? 'Board name…' : 'Todo list name…'}
+                                    className="h-9 min-w-0 flex-1 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') createNamed(e.currentTarget.value)
+                                        else if (e.key === 'Escape') setNaming(null)
+                                    }}
+                                    onBlur={(e) => (e.currentTarget.value.trim() ? createNamed(e.currentTarget.value) : setNaming(null))}
+                                />
+                            </div>
+                        )}
                         <FileTree
                             orgId={orgId}
                             orgAddress={orgAddress}
@@ -132,7 +160,7 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                                 onCreateFile(path)
                             }}
                             onCancelCreate={() => setCreatingFile(null)}
-                            onStartCreate={writable ? (prefix) => setCreatingFile({ prefix }) : undefined}
+                            onStartCreate={writable ? (prefix) => afterMenu(() => { setNaming(null); setCreatingFile({ prefix }) })() : undefined}
                             creatingFolder={creatingFolder}
                             onCreateFolder={(path) => {
                                 setCreatingFolder(false)
@@ -141,24 +169,6 @@ export function SpaceFilesView({ orgId, orgAddress, spaceId, entries, draftFolde
                             onCancelCreateFolder={() => setCreatingFolder(false)}
                             onRemoveFolder={writable ? onRemoveFolder : undefined}
                         />
-                        {naming && (
-                            <div className="flex items-center gap-1.5 px-1 pt-1">
-                                {naming === 'board'
-                                    ? <PenTool className="size-4 shrink-0 text-muted-foreground" />
-                                    : <ListTodo className="size-4 shrink-0 text-muted-foreground" />}
-                                <input
-                                    autoFocus
-                                    key={naming}
-                                    placeholder={naming === 'board' ? 'Board name…' : 'Todo list name…'}
-                                    className="h-9 min-w-0 flex-1 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') createNamed(e.currentTarget.value)
-                                        else if (e.key === 'Escape') setNaming(null)
-                                    }}
-                                    onBlur={(e) => (e.currentTarget.value.trim() ? createNamed(e.currentTarget.value) : setNaming(null))}
-                                />
-                            </div>
-                        )}
                     </div>
                     </FileListContextMenu>
             </SpacesPage>

@@ -17,7 +17,8 @@ export function FileListContextMenu({ children, actions, onOpenChange }: {
       }}>
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent>
+      {/* An action may open an input (a new file's name); returning focus to the list would pull it away. */}
+      <ContextMenuContent onCloseAutoFocus={(event) => event.preventDefault()}>
         {actions.map((action) => <ContextMenuItem key={action.label} disabled={action.disabled} onSelect={action.onSelect}>{action.label}</ContextMenuItem>)}
       </ContextMenuContent>
     </ContextMenu>
