@@ -489,9 +489,6 @@ export class SpacesClient {
     return (await this.request('DELETE', this.hostingPath(agentId, `/commands/${encodeURIComponent(executionId)}`), routes.cancelHostingCommand.response)).execution;
   }
   /** A sign-in to a plan made from the Terminal (2026-10-30): asked, Harbor has the VM say whether one is there; the agent runs on it from then on. */
-  async startHostingSignIn(agentId: string): Promise<{ execution: HostingExecution; outputPath: string }> {
-    return this.request('POST', this.hostingPath(agentId, '/sign-in/start'), routes.startHostingSignIn.response);
-  }
   async checkHostingSignIn(agentId: string): Promise<{ hosting: AgentHosting; signedIn: boolean }> {
     return this.request('POST', this.hostingPath(agentId, '/sign-in'), routes.checkHostingSignIn.response);
   }

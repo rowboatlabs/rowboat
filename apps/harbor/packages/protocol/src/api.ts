@@ -627,13 +627,7 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     response: z.object({ console: HostingConsole }),
   },
-  /** Guided login (spec §8 Maritime, 2026-11-02): the instructions file exposes output while detached exec is still running. */
-  startHostingSignIn: {
-    method: 'POST',
-    path: '/v1/agents/:agentId/hosting/sign-in/start',
-    params: z.object({ agentId: MemberId }),
-    response: z.object({ execution: HostingExecution, outputPath: z.string() }),
-  },
+  /** A sign-in to a plan made from the Terminal (2026-10-30), which Harbor cannot see happen: asked, Harbor has the runtime say whether one is there, and records what it finds. */
   checkHostingSignIn: {
     method: 'POST',
     path: '/v1/agents/:agentId/hosting/sign-in',

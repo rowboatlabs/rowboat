@@ -125,9 +125,7 @@ export interface HostingOps {
   stopFunding(): Promise<void>;
   /** The platform's cap for this agent lifted, so it may wake: for a check on an agent a closed trial holds asleep. */
   liftCap(): Promise<void>;
-  /** Guided login (2026-11-02): a closed trial must never regain proxy credit just to authenticate. */
-  startSignIn(unfunded: boolean): Promise<{ execution: HostingExecution; outputPath: string }>;
-  /** Whether the runtime holds a sign-in to its owner's plan. */
+  /** Whether the runtime on the VM holds a sign-in to a plan of its owner's, as the runtime itself reports it; nothing for a kind without one. */
   signIn(kind: string): Promise<'chatgpt' | undefined>;
   /** The sign-in found is what the agent runs on from now: the proxy token replaced by a dud, the provider recorded for the turn script, the platform's config pointed at the runtime's own provider, the cap lifted. */
   useSignIn(input: { kind: string }): Promise<void>;
@@ -442,15 +440,6 @@ export class Hosting {
     const next: StoredAgentHosting = { ...row, trial: { ...(row.trial ?? { endsAt: at }), closedAt: at, closedReason: reason }, updatedAt: at };
     await this.k.store.putHosting(next);
     return next;
-  }
-
-  async startSignIn(ctx: ActorCtx, agentId: string): Promise<{ execution: HostingExecution; outputPath: string }> {
-    const { row, ops } = await this.managed(ctx, agentId, SIGN_IN_KINDS);
-    this.k.guardWrite();
-    if (row.status !== 'ready') throw new HarborError('invalid_request', 'wait until the agent is ready');
-    const expired = row.funding === 'trial' && !row.trial?.closedAt && Date.parse(row.trial?.endsAt ?? '') <= Date.parse(this.k.now());
-    if (expired) await this.platform(() => this.endTrial(row, ops, 'expired'));
-    return this.platform(() => ops.startSignIn(row.funding === 'trial' && (!!row.trial?.closedAt || expired)));
   }
 
   /**

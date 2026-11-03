@@ -494,10 +494,6 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.openHostingConsole.params, c.req.param());
     return reply(c, routes.openHostingConsole.response, { console: await service.openHostingConsole(actor(c), agentId) });
   });
-  app.post(routes.startHostingSignIn.path, async (c) => {
-    const { agentId } = parseWith(routes.startHostingSignIn.params, c.req.param());
-    return reply(c, routes.startHostingSignIn.response, await service.startHostingSignIn(actor(c), agentId));
-  });
   app.post(routes.checkHostingSignIn.path, async (c) => {
     const { agentId } = parseWith(routes.checkHostingSignIn.params, c.req.param());
     return reply(c, routes.checkHostingSignIn.response, await service.checkHostingSignIn(actor(c), agentId));

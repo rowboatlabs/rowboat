@@ -425,7 +425,6 @@ describe('managed Maritime agents', () => {
     expect((await org.ended(back.invocations[0]!.id)).state).toBe('done');
   });
 
-  // The owner's ChatGPT sign-in (2026-10-30): made from the Terminal, found when asked, and the agent runs on it.
   it('uploads binary files to the selected folder, refuses collisions and gates writes', async () => {
     const me = org.as('dev-ramnique');
     const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Uploads', kind: 'codex' })).body as { agent: Member };
@@ -467,49 +466,7 @@ describe('managed Maritime agents', () => {
     await expect(org.harbor.service.uploadHostingFile({ memberId: 'ramnique' }, agent.id, { directory, name: 'oversized.zip' }, async () => new Uint8Array(100_000_001))).rejects.toMatchObject({ code: 'payload_too_large' });
   });
 
-  it('starts guided login, exposes live instructions, cancels without adoption, and gates access', async () => {
-    const me = org.as('dev-ramnique');
-    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Guided', kind: 'codex' })).body as { agent: Member };
-    await org.hostingStatus(agent.id, 'ready');
-    const path = `/v1/agents/${agent.id}/hosting/sign-in/start`;
-    expect((await org.as('dev-harsh').post(path)).status).toBe(403);
-    const started = await me.post(path);
-    expect(started.status).toBe(200);
-    const { execution, outputPath } = started.body;
-    expect(execution.status).toBe('running');
-    expect(fake.power).toContainEqual({ agentId: agent.agentInstance, action: 'start' });
-    expect((await org.listing(agent.id))?.hosting?.funding).toBe('trial');
-    const file = await me.get(`/v1/agents/${agent.id}/hosting/files/content?path=${encodeURIComponent(outputPath)}`);
-    expect(file.body.content).toContain('ABCD-EFGHI');
-    expect(fake.executions.get(execution.id)?.stdout).toBe('');
-    expect((await me.post(`/v1/agents/${agent.id}/hosting/sign-in`)).body.signedIn).toBe(false);
-    const cancelled = await me.delete(`/v1/agents/${agent.id}/hosting/commands/${execution.id}`);
-    expect(cancelled.body.execution.status).toBe('cancelled');
-    expect((await org.listing(agent.id))?.hosting?.funding).toBe('trial');
-    const again = await me.post(path);
-    expect(again.body.outputPath).not.toBe(outputPath);
-    fake.signIns.add(agent.agentInstance!);
-    expect((await me.post(`/v1/agents/${agent.id}/hosting/sign-in`)).body).toMatchObject({ signedIn: true, hosting: { funding: 'own', llm: { provider: 'chatgpt' } } });
-    const { agent: hermes } = (await me.post('/v1/agents/managed', { displayName: 'No login', kind: 'hermes' })).body;
-    await org.hostingStatus(hermes.id, 'ready');
-    expect((await me.post(`/v1/agents/${hermes.id}/hosting/sign-in/start`)).status).toBe(400);
-  });
-
-  it('can start login after trial exhaustion without restoring the proxy credential or trial', async () => {
-    const me = org.as('dev-ramnique');
-    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Exhausted login', kind: 'codex' })).body as { agent: Member };
-    await org.hostingStatus(agent.id, 'ready');
-    fake.spend.set(agent.agentInstance!, { limit: 500, spent: 500, reached: true });
-    await me.get(`/v1/agents/${agent.id}/hosting`);
-    expect((await org.listing(agent.id))?.hosting?.trial?.closedReason).toBe('exhausted');
-    const started = await me.post(`/v1/agents/${agent.id}/hosting/sign-in/start`);
-    expect(started.status).toBe(200);
-    expect(fake.env.get(agent.agentInstance!)?.get('OPENAI_API_KEY')?.value).toBe('disabled-by-rowboat-owner-key');
-    expect(fake.spend.get(agent.agentInstance!)?.limit).toBeNull();
-    await me.delete(`/v1/agents/${agent.id}/hosting/commands/${started.body.execution.id}`);
-    expect((await org.listing(agent.id))?.hosting).toMatchObject({ funding: 'trial', trial: { closedReason: 'exhausted' } });
-  });
-
+  // The owner's ChatGPT sign-in (2026-10-30): made from the Terminal, found when asked, and the agent runs on it.
   it('finds a ChatGPT sign-in on a Codex when asked, runs the agent on it from then on, and signs it out again', async () => {
     const me = org.as('dev-ramnique');
     const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Cx', kind: 'codex' })).body as { agent: Member };
@@ -543,7 +500,7 @@ describe('managed Maritime agents', () => {
     const { invocations } = await org.post(`${mention(agent)} hi`);
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     const script = fake.submits().at(-1)!.script;
-    expect(script).toContain('unset OPENAI_API_KEY OPENAI_BASE_URL CODEX_API_KEY CODEX_ACCESS_TOKEN');
+    expect(script).toContain(`elif codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai"'; unset OPENAI_BASE_URL;`);
     expect(script).toContain("2>> '/data/rowboat/");
     // A key takes no `chatgpt`; Hermes has no sign-in; Harsh is not the owner.
     expect((await me.put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'chatgpt', apiKey: 'not-a-key-at-all' })).status).toBe(400);

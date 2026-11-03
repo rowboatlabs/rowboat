@@ -416,11 +416,6 @@ export class FakeMaritime {
         generation: 0,
       };
       this.executions.set(execution.executionId, execution);
-      if (script.includes('login --device-auth')) {
-        const outputPath = script.match(/exec > '([^']+)'/)?.[1];
-        if (outputPath) this.files.set(outputPath, 'Open https://auth.openai.com/codex/device and enter ABCD-EFGHI');
-        return send(200, { executionId: execution.executionId, status: 'running' });
-      }
       if (script.includes('/rowboat/models.json')) {
         if (!this.holdCatalog) Object.assign(execution, { status: 'completed', exitCode: 0 });
         return send(200, { executionId: execution.executionId, status: execution.status, exitCode: execution.exitCode });

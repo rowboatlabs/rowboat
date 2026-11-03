@@ -1,4 +1,3 @@
-import { CodexCreateAccess } from './codex-create-access'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
 import { BotIcon, ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
@@ -62,7 +61,6 @@ type Screen =
     | { name: 'choose' }
     | { name: 'add'; bot: boolean; local?: boolean }
     | { name: 'create' }
-    | { name: 'create-access'; agent: spaces.Member; mode: 'chatgpt' | 'key' }
     | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string; instance?: string }
     | { name: 'agent'; agentId: string }
 
@@ -340,8 +338,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     // Create agent: the kinds this org's Harbor creates (none until loaded, or on a Harbor with no Maritime key), and the form.
     const [managedKinds, setManagedKinds] = useState<string[]>([])
     const [createKind, setCreateKind] = useState<string | null>(null)
-    const [codexAccess, setCodexAccess] = useState<'trial' | 'chatgpt' | 'key'>('trial')
-    const [openaiKey, setOpenaiKey] = useState('')
     const [anthropicKey, setAnthropicKey] = useState('')
     const [envText, setEnvText] = useState('')
     const [envOpen, setEnvOpen] = useState(false)
@@ -398,8 +394,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
 
     const startCreating = useCallback(() => {
         setCreateKind(null)
-        setCodexAccess('trial')
-        setOpenaiKey('')
         setName('')
         setNameEdited(false)
         setAnthropicKey('')
@@ -418,7 +412,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const startBot = start?.name === 'add' && start.bot
     const startAgentId = start?.name === 'agent' ? start.agentId : undefined
     useEffect(() => {
-        if (!open) { setOpenaiKey(''); return }
+        if (!open) return
         if (startName === 'add') startAdding(startBot)
         else if (startName === 'create') startCreating()
         else if (startName === 'choose') setScreen({ name: 'choose' })
@@ -443,7 +437,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
     const createName = nameEdited ? name : personal ? personalAgentName(ownName, kindInfo(chosenManaged).label) : kindInfo(chosenManaged).label
     const parsedEnv = parseEnv(envText)
-    const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && (chosenManaged !== 'codex' || codexAccess !== 'key' || openaiKey.trim() !== '') && !('bad' in parsedEnv)
+    const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && !('bad' in parsedEnv)
 
     // The new agent into the spaces picked on the form, and your DM with it; one that refuses doesn't undo the agent.
     const settle = async (agent: spaces.Member, homeChannel: boolean) => {
@@ -484,10 +478,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
             setAnthropicKey('')
             setEnvText('')
             await saveAgentProfile(org.id, agent.id, { title: profileTitle, instructions: profileInstructions })
-            if (chosenManaged === 'codex' && codexAccess !== 'trial') {
-                setScreen({ name: 'create-access', agent, mode: codexAccess })
-                return
-            }
             await settle(agent, false)
             setScreen({ name: 'agent', agentId: agent.id })
         } catch (err) {
@@ -795,15 +785,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                     </form>
                 )}
 
-                {screen.name === 'create-access' && <>
-                    <Header title="Finish creating Codex" description={screen.mode === 'chatgpt' ? 'Connect your ChatGPT account to finish setup.' : 'Connect your OpenAI API key to finish setup.'} />
-                    <Body><CodexCreateAccess orgId={org.id} agentId={screen.agent.id} mode={screen.mode} apiKey={openaiKey} onComplete={async () => {
-                        await settle(screen.agent, false)
-                        setOpenaiKey('')
-                        setScreen({ name: 'agent', agentId: screen.agent.id })
-                    }} /></Body>
-                    <Footer><Button variant="ghost" onClick={() => { setOpenaiKey(''); setScreen({ name: 'agent', agentId: screen.agent.id }) }}>Finish setup later</Button></Footer>
-                </>}
                 {screen.name === 'create' && (
                     <form
                         className="contents"
@@ -814,7 +795,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                     >
                         <Header
                             title="Create an agent"
-                            description="Rowboat runs it for you, on Maritime. Pick what it runs and a name; the machine is ready in a minute or two. Choose how Codex connects: your ChatGPT account, Rowboat trial credits, or your OpenAI API key."
+                            description="Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect. Hermes and Codex start on Rowboat's trial credit; add your own key on the agent's page any time, and the trial ends then."
                             onBack={back}
                         />
                         <Body>
@@ -852,16 +833,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             <div className="mt-4">
                                 <PersonalityFields name={createName} kind={kindInfo(chosenManaged).label} title={profileTitle} onTitle={setProfileTitle} instructions={profileInstructions} onInstructions={setProfileInstructions} />
                             </div>
-                            {chosenManaged === 'codex' && <fieldset className="mt-4 flex flex-col gap-2">
-                                <legend className="mb-2 text-xs font-medium">Codex model access</legend>
-                                {([['chatgpt', 'Sign in with ChatGPT'], ['trial', 'Use Rowboat trial credits'], ['key', 'Use an OpenAI API key']] as const).map(([value, label]) => (
-                                    <label key={value} className="flex items-center gap-2 text-sm">
-                                        <input type="radio" name="codex-access" value={value} checked={codexAccess === value} onChange={() => setCodexAccess(value)} />{label}
-                                    </label>
-                                ))}
-                                {codexAccess === 'chatgpt' && <p className="text-xs text-muted-foreground">After creating the agent, sign in here using a browser link and code. Anyone allowed to use this agent uses your account’s limits.</p>}
-                                {codexAccess === 'key' && <Input type="password" aria-label="OpenAI API key" placeholder="sk-…" autoComplete="off" value={openaiKey} onChange={event => setOpenaiKey(event.target.value)} />}
-                            </fieldset>}
                             {chosenManaged === 'claude-code' && (
                                 <label className="mt-4 flex flex-col gap-1.5">
                                     <span className="text-xs font-medium text-foreground">Anthropic API key</span>

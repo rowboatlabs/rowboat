@@ -261,9 +261,6 @@ export class HarborService {
     return this.hosting.console(ctx, agentId);
   }
   /** A sign-in to a plan made from the Terminal (2026-10-30): asked, Harbor has the VM say whether one is there, and the agent runs on it from then on. */
-  startHostingSignIn(ctx: ActorCtx, agentId: string) {
-    return this.hosting.startSignIn(ctx, agentId);
-  }
   checkHostingSignIn(ctx: ActorCtx, agentId: string) {
     return this.hosting.checkSignIn(ctx, agentId);
   }

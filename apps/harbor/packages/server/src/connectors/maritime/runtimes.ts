@@ -243,7 +243,7 @@ const codex: Runtime = {
       // The owner's ChatGPT sign-in (2026-10-30): Codex honours one on its built-in provider only, and the template's
       // config names its own, so a turn not on a key asks Codex whether a sign-in is there and forces the built-in
       // provider when it is, the proxy's address unset with it. Its answer goes first into the stderr file, for Harbor.
-      `OWN=""; if [ "$ROWBOAT_LLM_PROVIDER" = openai ]; then OWN='-c model_provider="openai"'; elif [ "$ROWBOAT_LLM_PROVIDER" = chatgpt ] || codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai" -c forced_login_method="chatgpt" -c cli_auth_credentials_store="file"'; unset OPENAI_API_KEY OPENAI_BASE_URL CODEX_API_KEY CODEX_ACCESS_TOKEN; if codex login status 2>&1 | grep -q 'ChatGPT'; then echo '${SIGN_IN_MARK}chatgpt'; else echo '${SIGN_IN_MARK}none'; fi > ${q(input.errPath)}; else echo '${SIGN_IN_MARK}none' > ${q(input.errPath)}; fi`,
+      `OWN=""; if [ "$ROWBOAT_LLM_PROVIDER" = openai ]; then OWN='-c model_provider="openai"'; elif codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai"'; unset OPENAI_BASE_URL; echo '${SIGN_IN_MARK}chatgpt' > ${q(input.errPath)}; else echo '${SIGN_IN_MARK}none' > ${q(input.errPath)}; fi`,
       `${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="$OWN -m $ROWBOAT_LLM_MODEL"; '}true`,
       `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2>> ${q(input.errPath)}`,
     ].join('\n');

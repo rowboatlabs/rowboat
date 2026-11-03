@@ -4086,10 +4086,6 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
     res: z.object({ console: z.custom<SpacesTypes.HostingConsole>() }),
   },
-  'spaces:startHostingSignIn': {
-    req: z.object({ orgId: z.string(), agentId: z.string() }),
-    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>(), outputPath: z.string() }),
-  },
   'spaces:checkHostingSignIn': {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
     res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), signedIn: z.boolean() }),

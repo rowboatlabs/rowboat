@@ -91,7 +91,7 @@ export const LOCAL_CONNECTION = 'local'
 export const MANAGED_KINDS: ReadonlyArray<{ kind: string; description: string }> = [
     { kind: 'hermes', description: 'A general agent with tools, memory and skills. Starts on Rowboat’s trial credit; add your own key on its page.' },
     { kind: 'claude-code', description: 'Anthropic’s coding agent, on your Anthropic API key' },
-    { kind: 'codex', description: 'OpenAI’s coding agent. Use your ChatGPT account, trial credits, or an OpenAI API key.' },
+    { kind: 'codex', description: 'OpenAI’s coding agent. Starts on Rowboat’s trial credit; add your OpenAI key on its page.' },
 ]
 
 /**
