@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Share, Text, View } from 'react-native';
 

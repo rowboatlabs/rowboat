@@ -2,7 +2,7 @@ import { Stack, useLocalSearchParams, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
+import { Image as SymbolImage } from '@/components/sf-image';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -163,7 +163,7 @@ export default function SpaceFileScreen() {
           ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
               <Pressable hitSlop={10} accessibilityLabel="Share file" onPress={() => setSheetOpen(true)}>
-                <ExpoImage source="sf:square.and.arrow.up" style={{ width: 19, height: 22 }} contentFit="contain" tintColor={colors.label} />
+                <SymbolImage source="sf:square.and.arrow.up" style={{ width: 19, height: 22 }} contentFit="contain" tintColor={colors.label} />
               </Pressable>
               {content !== null ? headerButton('Edit', () => setDraft(content)) : null}
             </View>

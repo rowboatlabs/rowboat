@@ -2,7 +2,7 @@ import type { AndroidSymbol } from 'expo-symbols';
 
 // SF Symbol → Material Symbol, for the Android build (2026-10-28). The app
 // names its icons as SF Symbols (`sf:…` image sources); Android has none, so
-// components/image.tsx draws the Material Symbol named here instead. An SF
+// components/sf-image.tsx draws the Material Symbol named here instead. An SF
 // name missing from this map renders nothing on Android: add it here.
 export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   'arrow.down': 'arrow_downward',
@@ -41,19 +41,23 @@ export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   'laptopcomputer.and.iphone': 'devices',
   'line.3.horizontal': 'menu',
   link: 'link',
+  lock: 'lock',
   magnifyingglass: 'search',
   megaphone: 'campaign',
   moon: 'dark_mode',
   number: 'tag',
+  paperplane: 'send',
   'paperplane.fill': 'send',
   pencil: 'edit',
   'person.2': 'group',
+  'person.badge.plus': 'person_add',
   photo: 'image',
   'play.circle.fill': 'play_circle',
   plus: 'add',
   'qrcode.viewfinder': 'qr_code_scanner',
   'quote.opening': 'format_quote',
   'rectangle.portrait.and.arrow.right': 'logout',
+  safari: 'explore',
   sailboat: 'sailing',
   sparkles: 'auto_awesome',
   square: 'check_box_outline_blank',
