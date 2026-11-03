@@ -194,6 +194,39 @@ jobs:
         run: npx electron-forge publish --arch=x64 --platform=linux
         working-directory: apps/x/apps/main
 
+      - name: Cache Flatpak build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/flatpak
+            .flatpak-builder/cache
+          key: ${{ runner.os }}-flatpak-builder-${{ hashFiles('packaging/flatpak/com.rowboatlabs.Rowboat.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-flatpak-builder-
+
+      - name: Build Flatpak Bundle
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+          # The runner user cannot configure or install into the system Flatpak
+          # install (2026-11-02: "Flatpak system operation ConfigureRemote not
+          # allowed for user" on ubuntu-latest). Everything stays in the user
+          # session so the cache below also hits.
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          flatpak-builder --user --force-clean --repo=build-repo build-dir packaging/flatpak/com.rowboatlabs.Rowboat.yaml
+          mkdir -p apps/x/apps/main/out/make
+          flatpak build-bundle build-repo "apps/x/apps/main/out/make/Rowboat-${VERSION}-x64.flatpak" com.rowboatlabs.Rowboat
+
+      - name: Upload Flatpak to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            gh release upload "v${VERSION}" "apps/x/apps/main/out/make/Rowboat-${VERSION}-x64.flatpak" --clobber
+          fi
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v6
         with:
