@@ -17,6 +17,8 @@ import {
   type StreamEvent,
   type Topic,
   type TopicListing,
+  type ThreadsQuery,
+  type ThreadsPage,
   type TopicRemoval,
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
@@ -146,6 +148,35 @@ export class Feed {
 
   private pageLimit(limit?: number): number {
     return Math.min(Math.max(limit ?? MESSAGES_PAGE_DEFAULT, 1), MESSAGES_PAGE_MAX);
+  }
+
+  async listThreads(ctx: ActorCtx, q: ThreadsQuery): Promise<ThreadsPage> {
+    await this.k.requireOrgMember(ctx);
+    let spaces = await this.k.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    if (q.spaceId !== undefined) {
+      await this.k.requireMember(ctx, q.spaceId);
+      spaces = spaces.filter((s) => s.id === q.spaceId);
+    }
+    let before: { at: string; id: string } | undefined;
+    if (q.cursor !== undefined) {
+      const [at, id, extra] = q.cursor.split('~');
+      if (!at || !id || extra !== undefined || !Number.isFinite(Date.parse(at))) throw new HarborError('invalid_request', 'malformed threads cursor');
+      before = { at, id };
+    }
+    const limit = Math.min(100, Math.max(1, q.limit ?? 40));
+    const rows = await this.k.store.listWorkspaceThreads({ ...q, memberId: ctx.memberId, spaceIds: spaces.map((s) => s.id), ...(before ? { before } : {}), limit: limit + 1 });
+    const page = rows.slice(0, limit);
+    const byId = new Map(spaces.map((s) => [s.id, s]));
+    const roots = new Map<string, Message>();
+    for (const spaceId of new Set(page.map((r) => r.root.spaceId))) {
+      for (const root of await this.foldPage(spaceId, page.filter((r) => r.root.spaceId === spaceId).map((r) => r.root))) roots.set(root.id, root);
+    }
+    const items = page.map((r) => ({ ...r, root: roots.get(r.root.id)!, space: byId.get(r.root.spaceId)! }));
+    const wanted = new Set(items.flatMap((r) => [r.root.author.memberId, ...r.root.mentions, ...(r.root.replyAuthors ?? []), ...(r.space.participants ?? [])]));
+    const names: Record<string, string> = {};
+    for (const member of await this.k.store.listAllMembers()) if (wanted.has(member.id)) names[member.id] = member.displayName;
+    const last = page.at(-1);
+    return { items, names, ...(rows.length > limit && last ? { nextCursor: `${last.lastActivityAt}~${last.root.id}` } : {}) };
   }
 
   async listTopics(ctx: ActorCtx, spaceId: string, includeArchived = false): Promise<TopicListing[]> {

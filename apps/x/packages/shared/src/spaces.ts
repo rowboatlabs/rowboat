@@ -473,3 +473,5 @@ export function decorateMentions(body: string, memberNames: ReadonlyMap<string, 
 export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): string {
   return mentionsAsText(body, memberNames, spaceNames);
 }
+
+export type { ThreadsQuery, ThreadsPage, WorkspaceThread } from '@rowboat/spaces-protocol';

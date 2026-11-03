@@ -1,4 +1,4 @@
-import type { ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
+import type { ActivityKind, ActivityPage, ThreadsQuery, ThreadsPage } from '@rowboat/spaces-protocol';
 import {
   routes,
   type AcceptInviteResult,
@@ -886,6 +886,13 @@ export class SpacesClient {
   /** The unread snapshot: every space with its cursor, unread roots, and unread followed threads. */
   async unread(): Promise<UnreadSnapshot> {
     return this.request('GET', routes.unread.path, routes.unread.response);
+  }
+
+  /** 2026-11-03: one membership-scoped request for the workspace Threads view. */
+  async listThreads(query: ThreadsQuery = {}): Promise<ThreadsPage> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
+    return this.request('GET', `${routes.listThreads.path}?${params}`, routes.listThreads.response);
   }
 
   /** Activity: everything that involves the member, newest first, cursor paged (layer 3, 2026-09-10). */

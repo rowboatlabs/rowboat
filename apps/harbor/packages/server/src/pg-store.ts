@@ -1,5 +1,5 @@
 import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
-import type { ActivityQuery, ActivityRow } from './store.js';
+import type { ActivityQuery, ActivityRow, WorkspaceThreadsQuery, WorkspaceThreadRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   AgentKey,
@@ -1100,6 +1100,26 @@ export class PgStore implements Store {
       [spaceId, rootMessageId],
     );
     return rows[0] ? rowToTopic(rows[0]) : undefined;
+  }
+
+  async listWorkspaceThreads(q: WorkspaceThreadsQuery): Promise<WorkspaceThreadRow[]> {
+    if (q.spaceIds.length === 0) return [];
+    const rows = await this.sql.query<MessageRow & { topic: TopicRow | null; activity_at: string }>(
+      `select m.*, row_to_json(t) as topic, coalesce(m.last_reply_at, m.posted_at) as activity_at
+       from messages m left join topics t on t.space_id = m.space_id and t.root_message_id = m.id
+       where m.space_id = any($1::text[]) and m.thread_root is null
+         and (m.reply_count > 0 or t.id is not null)
+         and coalesce(t.archived, false) = $2
+         and ($3 <> 'named' or t.id is not null)
+         and ($3 <> 'mine' or m.author_member_id = $4)
+         and ($5::text is null or m.author_member_id = $5 or exists (
+           select 1 from messages r where r.space_id = m.space_id and r.thread_root = m.id
+             and r.author_member_id = $5 and r.deleted_at is null))
+         and ($6::text is null or (coalesce(m.last_reply_at, m.posted_at), m.id) < ($6, $7))
+       order by activity_at desc, m.id desc limit $8`,
+      [q.spaceIds, q.archived === true, q.filter ?? 'all', q.memberId, q.participantId ?? null, q.before?.at ?? null, q.before?.id ?? null, q.limit],
+    );
+    return rows.map((r) => ({ root: rowToMessage(r), topic: r.topic ? rowToTopic(r.topic) : null, lastActivityAt: r.activity_at }));
   }
 
   async listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]> {

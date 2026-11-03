@@ -1,3 +1,4 @@
+import type { ThreadsQuery, ThreadsPage } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
@@ -726,6 +727,9 @@ export class HarborService {
     following: boolean,
   ): Promise<{ following: boolean; readOffset: number }> {
     return this.readState.followThread(ctx, spaceId, rootMessageId, following);
+  }
+  listThreads(ctx: ActorCtx, q: ThreadsQuery): Promise<ThreadsPage> {
+    return this.feed.listThreads(ctx, q);
   }
   activity(
     ctx: ActorCtx,

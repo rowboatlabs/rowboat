@@ -197,6 +197,30 @@ export const ActivityPage = z.object({
 });
 export type ActivityPage = z.infer<typeof ActivityPage>;
 
+// Workspace Threads (2026-11-03): one membership-scoped page across channels and DMs.
+export const ThreadsQuery = z.object({
+  filter: z.enum(['all', 'named', 'mine']).optional(),
+  spaceId: SpaceId.optional(),
+  participantId: MemberId.optional(),
+  archived: z.boolean().optional(),
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(100).optional(),
+});
+export type ThreadsQuery = z.infer<typeof ThreadsQuery>;
+export const WorkspaceThread = z.object({
+  space: Space,
+  root: Message,
+  topic: Topic.nullable(),
+  lastActivityAt: z.iso.datetime(),
+});
+export type WorkspaceThread = z.infer<typeof WorkspaceThread>;
+export const ThreadsPage = z.object({
+  items: z.array(WorkspaceThread),
+  nextCursor: z.string().optional(),
+  names: z.record(MemberId, z.string()),
+});
+export type ThreadsPage = z.infer<typeof ThreadsPage>;
+
 export const routes = {
   // --- identity ------------------------------------------------------------
   /** Who am I on this org — the client's only source of its own memberId under OAuth. */
@@ -1576,6 +1600,16 @@ export const routes = {
     method: 'GET',
     path: '/v1/unread',
     response: UnreadSnapshot,
+  },
+  /** Workspace Threads (2026-11-03): filters apply before the membership-scoped page. */
+  listThreads: {
+    method: 'GET',
+    path: '/v1/threads',
+    query: ThreadsQuery.extend({
+      archived: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+      limit: z.coerce.number().int().positive().max(100).optional(),
+    }),
+    response: ThreadsPage,
   },
   /**
    * Activity: everything that involves the member, newest first, cursor

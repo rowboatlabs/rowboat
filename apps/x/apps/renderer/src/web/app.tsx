@@ -176,6 +176,7 @@ export function WebApp({ signInError }: { signInError: string | null }) {
                                 railSelection={rail}
                                 onRailSelect={(next) => { if (selection?.spaceId) go(selection.orgId, { spaceId: selection.spaceId, rail: next }) }}
                                 onOpenMessage={onOpenMessage}
+                                onOpenThreads={(id, spaceId, rootMessageId) => go(id, { view: 'threads', ...(spaceId && rootMessageId ? { spaceId, rail: { kind: 'thread', rootMessageId } } : {}) })}
                                 onOpenActivity={(id) => go(id, { view: 'activity' })}
                                 onOpenBrowse={(id) => go(id, { view: 'browse' })}
                                 onOpenAgents={(id) => go(id, { view: 'agents' })}

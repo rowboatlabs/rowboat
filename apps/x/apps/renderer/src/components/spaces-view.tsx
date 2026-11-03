@@ -1,3 +1,4 @@
+import { WorkspaceThreadsView } from '@/components/spaces/workspace-threads-view'
 import { MemberDirectory } from '@/components/spaces/member-directory'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
@@ -128,7 +129,7 @@ const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 // Root view: the selected space (the org/space list lives in the app sidebar)
 // ---------------------------------------------------------------------------
 
-export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, onOpenBrowse, onOpenAgents, active = true }: {
+export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, onOpenThreads, onOpenBrowse, onOpenAgents, active = true }: {
     selection: SpaceSelection
     onSelect: (selection: SpaceSelection) => void
     /** Navigate to the destination and its rail together, without using the current space's selection. */
@@ -144,6 +145,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     /** Every agent in the org (2026-10-21). */
     onOpenAgents?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
+    onOpenThreads?: (orgId: string, spaceId?: string, rootMessageId?: string) => void
     /**
      * False while the view is kept mounted but hidden (the app shows another
      * section). Gates presence and read marks — a hidden pane must not report
@@ -219,7 +221,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         )
     }
 
-    if (selectedOrg && selectedSpace) {
+    if (selectedOrg && selectedSpace && !selection?.view) {
         return (
             <SpaceAccessContext.Provider value={{ member, writable: member && !selectedSpace.archived, archived: selectedSpace.archived === true, join: () => void join(), joining }}>
             <SpacePane
@@ -230,6 +232,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 onSelect={onRailSelect}
                 onSwitchSpace={onSwitchSpace}
                 onOpenSession={onOpenSession}
+                onOpenThreads={onOpenThreads}
                 onOpenActivity={onOpenActivity}
                 onOpenBrowse={onOpenBrowse}
                 onOpenAgents={onOpenAgents}
@@ -245,9 +248,14 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
             </header>
             <div className="flex min-h-0 flex-1">
-            <OrgRail org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenBrowse={onOpenBrowse} browseActive={selection?.view === 'browse'}
+            <OrgRail org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenThreads={onOpenThreads} threadsActive={selection?.view === 'threads'} onOpenBrowse={onOpenBrowse} browseActive={selection?.view === 'browse'}
                 onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'} onOpenActivity={onOpenActivity} activityActive={selection?.view === 'activity'} />
-            {selection?.view === 'browse' || !selection?.spaceId && !selection?.view ? (
+            {selection?.view === 'threads' ? (
+                <WorkspaceThreadsView key={selectedOrg.id} org={selectedOrg} active={active} selectedSpaceId={selection.spaceId || undefined}
+                    selectedRootId={railSelection.kind === 'thread' ? railSelection.rootMessageId : undefined}
+                    onOpenThread={(spaceId, rootId) => onOpenThreads?.(selectedOrg.id, spaceId, rootId)} onCloseThread={() => onOpenThreads?.(selectedOrg.id)}
+                    onOpenSpace={onSwitchSpace} onOpenSession={onOpenSession} />
+            ) : selection?.view === 'browse' || !selection?.spaceId && !selection?.view ? (
                 <SpaceBrowser key={selectedOrg.id} orgId={selectedOrg.id} memberId={selectedOrg.memberId} active={active} onOpenSpace={onSwitchSpace} />
             ) : selection?.spaceId ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-sm text-muted-foreground">
@@ -315,7 +323,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenBrowse, onOpenAgents, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenThreads, onOpenBrowse, onOpenAgents, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
@@ -326,6 +334,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     /** Every agent in the org (2026-10-21). */
     onOpenAgents?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
+    onOpenThreads?: (orgId: string, spaceId?: string, rootMessageId?: string) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
@@ -1232,6 +1241,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 <SpaceRail
                     onOpenBrowse={onOpenBrowse}
                     onOpenAgents={onOpenAgents}
+                    onOpenThreads={onOpenThreads}
                     onOpenActivity={onOpenActivity}
                     org={org}
                     onOpenSpace={(orgId, spaceId) => {

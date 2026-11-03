@@ -5,7 +5,7 @@ import { SpacesSidebarSection, ServerSpaceNavigation } from './spaces-sidebar-se
 import { ServerOptionsMenu } from './spaces/server-options-menu'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { isSpaceExpanded, setSpacesExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
-import { forgetOrg, loadUnread, markStreamRead } from '@/lib/spaces-read-state'
+import { forgetOrg, loadUnread, markStreamRead, markThreadRead } from '@/lib/spaces-read-state'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { openServerDialog } from '@/lib/server-dialog'
 
@@ -63,6 +63,22 @@ afterEach(() => {
 })
 
 describe('the sidebar server list', () => {
+    it('opens workspace Threads and sums followed threads across channels and DMs', async () => {
+        vi.stubGlobal('ipc', { on: vi.fn(() => () => {}), invoke: vi.fn().mockResolvedValue({ spaces: [
+            { spaceId: 'main', head: 10, readOffset: 0, unreadRoots: 3, unreadMentions: 1, threads: [{ rootMessageId: 'plain', readOffset: 0, lastReplyOffset: 10, unreadReplies: 2, unreadMentions: 1 }] },
+            { spaceId: 'dm0', head: 20, readOffset: 0, unreadRoots: 0, unreadMentions: 0, threads: [{ rootMessageId: 'dm-thread', readOffset: 0, lastReplyOffset: 20, unreadReplies: 4, unreadMentions: 0 }] },
+        ] }) })
+        await loadUnread(org.id, 'me')
+        const open = vi.fn()
+        const shown = { ...org, directs: org.directs.map((d) => ({ ...d, kind: 'direct' })) } as unknown as OrgWithSpaces
+        render(<SidebarProvider><ServerSpaceNavigation org={shown} spaceId="" onOpenSpace={vi.fn()} onOpenThreads={open} showDiscussions={false} /></SidebarProvider>)
+        const button = screen.getByRole('button', { name: /^Threads/ })
+        expect(button).toHaveAccessibleName('Threads 6 unread · 5 for you')
+        fireEvent.click(button)
+        expect(open).toHaveBeenCalledWith(org.id)
+        act(() => markThreadRead(org.id, 'dm0', 'dm-thread', 20, { sync: false }))
+        expect(button).toHaveAccessibleName('Threads 2 unread · 1 for you')
+    })
     it('lists only servers and opens each server using the shared landing destination', () => {
         vi.mocked(useSpacesOrgs).mockReturnValue({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
         const open = vi.fn()

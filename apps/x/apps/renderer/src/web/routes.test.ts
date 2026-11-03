@@ -25,6 +25,11 @@ describe('web routes', () => {
         expect(routePath('acme', { spaceId: 'S1', rail: { kind: 'file', assetId: 'A1' } })).toBe('/acme/s/S1/a/A1')
     })
 
+    it('round-trips a thread beside the workspace list', () => {
+        const target = { view: 'threads' as const, spaceId: 'dm/one', rail: { kind: 'thread' as const, rootMessageId: 'root one' } }
+        expect(parseRoute(routePath('acme', target))).toEqual({ orgKey: 'acme', ...target })
+        expect(parseRoute('/acme/threads')).toEqual({ orgKey: 'acme', view: 'threads', rail: { kind: 'general' } })
+    })
     it('names org-level surfaces and the org alone', () => {
         expect(routePath('acme', { view: 'activity' })).toBe('/acme/activity')
         expect(parseRoute('/acme/browse')).toEqual({ orgKey: 'acme', view: 'browse', rail: { kind: 'general' } })

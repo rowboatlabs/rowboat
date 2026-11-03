@@ -4676,6 +4676,10 @@ export const ipcSchemas = {
     res: z.custom<SpacesTypes.SpacesUnreadSnapshot>(),
   },
   // Activity (layer 3, 2026-09-10): the org's feed of everything involving the member.
+  'spaces:listThreads': {
+    req: z.object({ orgId: z.string(), filter: z.enum(['all', 'named', 'mine']).optional(), spaceId: z.string().optional(), participantId: z.string().optional(), archived: z.boolean().optional(), cursor: z.string().optional(), limit: z.number().optional() }),
+    res: z.custom<SpacesTypes.ThreadsPage>(),
+  },
   'spaces:getActivity': {
     req: z.object({
       orgId: z.string(),

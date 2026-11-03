@@ -4886,7 +4886,7 @@ function App() {
       case 'apps': return 'Apps'
       case 'spaces': {
         const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
-        if (org && currentViewState.view) return currentViewState.view === 'browse' ? 'Browse spaces' : currentViewState.view === 'agents' ? 'Agents' : 'Activity'
+        if (org && currentViewState.view) return currentViewState.view === 'threads' ? 'Threads' : currentViewState.view === 'browse' ? 'Browse spaces' : currentViewState.view === 'agents' ? 'Agents' : 'Activity'
         const space = org ? findSpace(org, currentViewState.spaceId) : undefined
         return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
@@ -5534,6 +5534,10 @@ function App() {
   /** The org's Activity surface (layer 3): everything that involves you, newest first. */
   const openBrowse = useCallback((orgId: string) => {
     void navigateToView({ type: 'spaces', orgId, view: 'browse' })
+  }, [navigateToView])
+
+  const openThreads = useCallback((orgId: string, spaceId?: string, rootMessageId?: string) => {
+    void navigateToView({ type: 'spaces', orgId, view: 'threads', ...(spaceId && rootMessageId ? { spaceId, rail: { kind: 'thread', rootMessageId } } : {}) })
   }, [navigateToView])
 
   const openActivity = useCallback((orgId: string) => {
@@ -7683,6 +7687,7 @@ function App() {
                     onOpenMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
                     onOpenBrowse={openBrowse}
                     onOpenAgents={openAgents}
+                    onOpenThreads={openThreads}
                     onOpenActivity={openActivity}
                     onOpenSession={openAssistantRun}
                   />

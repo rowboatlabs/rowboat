@@ -8,7 +8,7 @@ import { useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 /** Stable space/people navigation. Space contents live in the top strip. */
-export function SpaceRail({ org, spaceId, onOpenSpace, onOpenActivity, activityActive = false, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, open, onTogglePin, peekRef, edgeless = false }: {
+export function SpaceRail({ org, spaceId, onOpenSpace, onOpenActivity, activityActive = false, onOpenThreads, threadsActive = false, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, open, onTogglePin, peekRef, edgeless = false }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
@@ -18,6 +18,8 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenActivity, activityA
     agentsActive?: boolean
     onOpenActivity?: (orgId: string) => void
     activityActive?: boolean
+    onOpenThreads?: (orgId: string) => void
+    threadsActive?: boolean
     open: boolean
     onTogglePin: () => void
     peekRef?: RefObject<SecondaryRailPeek | null>
@@ -37,7 +39,7 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenActivity, activityA
             </div>
             {/* A column, so the navigation can pin its Invite row to the foot. */}
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2">
-                <ServerSpaceNavigation onOpenActivity={onOpenActivity} activityActive={activityActive} onOpenBrowse={onOpenBrowse} browseActive={browseActive}
+                <ServerSpaceNavigation onOpenThreads={onOpenThreads} threadsActive={threadsActive} onOpenActivity={onOpenActivity} activityActive={activityActive} onOpenBrowse={onOpenBrowse} browseActive={browseActive}
                     onOpenAgents={onOpenAgents} agentsActive={agentsActive} org={org} spaceId={spaceId} onOpenSpace={onOpenSpace} showDiscussions={false} />
             </div>
         </SpaceRailSections>}
