@@ -85,6 +85,13 @@ describe('the session cookie on an org', () => {
     expect(res.headers.get('cache-control')).toContain('immutable');
   });
 
+  it('serves a byte range from the stream, so a video seeks (2026-11-04)', async () => {
+    const res = await fetch(`${harbor.url}/v1/spaces/${spaceId}/blobs/${hash}`, { headers: { cookie, range: 'bytes=7-12' } });
+    expect(res.status).toBe(206);
+    expect(res.headers.get('content-range')).toBe('bytes 7-12/13');
+    expect(await res.text()).toBe('cookie');
+  });
+
   it('serves download=1 as an attachment with its name', async () => {
     const res = await fetch(`${harbor.url}/v1/spaces/${spaceId}/blobs/${hash}?name=note.txt&download=1`, { headers: { cookie } });
     expect(res.headers.get('content-disposition')).toBe('attachment; filename="note.txt"');

@@ -165,6 +165,22 @@ describe('Space file attachments', () => {
         expect(invoke).not.toHaveBeenCalled()
     })
 
+    it('plays a shared video in the message, named by the link or its text, with the file card under it (2026-11-04)', async () => {
+        render(<SpaceRefsProvider refs={refs}><SpaceNavProvider onOpenFile={vi.fn()} onOpenAttachment={vi.fn()}>
+            <SpaceMarkdown body={`Recording\n\n[Screen recording](${blobWireUrl(refs, firstHash, 'demo.mp4')})\n\n[clip.webm](${blobWireUrl(refs, secondHash)})\n\n[notes.txt](${blobWireUrl(refs, firstHash, 'notes.txt')})`} />
+        </SpaceNavProvider></SpaceRefsProvider>)
+        const demo = await screen.findByLabelText('demo.mp4')
+        expect(demo.tagName).toBe('VIDEO')
+        expect(demo).toHaveAttribute('src', expect.stringContaining(firstHash))
+        expect(screen.getByRole('button', { name: 'demo.mp4' })).toBeInTheDocument()
+        expect(screen.getByLabelText('clip.webm').tagName).toBe('VIDEO')
+        expect(document.querySelectorAll('video')).toHaveLength(2)
+        // A video the browser can't play leaves just its card.
+        fireEvent.error(demo)
+        expect(screen.queryByLabelText('demo.mp4')).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'demo.mp4' })).toBeInTheDocument()
+    })
+
     it('keeps a single uploaded image in the lightbox with save and download actions', async () => {
         const openAttachment = vi.fn()
         render(<SpaceRefsProvider refs={refs}><SpaceNavProvider onOpenFile={vi.fn()} onOpenAttachment={openAttachment}>
