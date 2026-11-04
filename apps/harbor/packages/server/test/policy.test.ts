@@ -245,7 +245,7 @@ describe('policy', () => {
     expect(canDecideSuperAgentRequest(admin, boss)).toMatchObject({ code: 'forbidden' });
   });
 
-  it('invocations: a shared space to invoke, three hops, the invoker cancels, invoker or admin stops when the connector can', () => {
+  it('invocations: a shared space to invoke, the hop limit, the invoker cancels, invoker or admin stops when the connector can', () => {
     const helper: Member = { id: 'helper', displayName: 'Helper', role: 'member', kind: 'agent', ownerId: 'harsh' };
     const byHarsh = { agent: helper, authorId: 'harsh' };
     expect(invocationRefusal(true, 0, byHarsh)).toBeNull();
