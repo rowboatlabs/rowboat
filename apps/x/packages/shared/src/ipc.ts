@@ -4029,7 +4029,8 @@ export const ipcSchemas = {
   // environment on Maritime and is kept nowhere; the `env` variables the same way.
   'spaces:managedAgentKinds': {
     req: z.object({ orgId: z.string() }),
-    res: z.object({ kinds: z.array(z.string()) }),
+    // `billed` (2026-11-04): what Harbor creates bills to its creator's Rowboat plan; `upgradeUrl` is where it changes.
+    res: z.object({ kinds: z.array(z.string()), billed: z.boolean().optional(), upgradeUrl: z.string().optional() }),
   },
   'spaces:createManagedAgent': {
     req: z.object({
@@ -4055,7 +4056,7 @@ export const ipcSchemas = {
   // Managing a managed agent's VM from its page (2026-10-27): one Harbor call each, the owner or an admin.
   'spaces:getHosting': {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
-    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), machine: z.custom<SpacesTypes.HostingMachine>().optional(), env: z.array(z.custom<SpacesTypes.HostingEnvVar>()), spend: z.custom<SpacesTypes.HostingSpend>().optional() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), machine: z.custom<SpacesTypes.HostingMachine>().optional(), env: z.array(z.custom<SpacesTypes.HostingEnvVar>()), spend: z.custom<SpacesTypes.HostingSpend>().optional(), usage: z.custom<SpacesTypes.HostingUsage>().optional() }),
   },
   'spaces:setHostingEnv': {
     req: z.object({ orgId: z.string(), agentId: z.string(), key: z.string(), value: z.string(), secret: z.boolean().optional() }),

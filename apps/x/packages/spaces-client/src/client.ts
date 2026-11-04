@@ -15,6 +15,7 @@ import {
   type AgentHosting,
   type HostingEnvVar,
   HostingSpend,
+  HostingUsage,
   LlmProvider,
   type HostingConsole,
   type HostingExecution,
@@ -439,9 +440,12 @@ export class SpacesClient {
     return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
   }
 
-  /** The kinds of agent this org's Harbor creates on Rowboat's own platform account (api.ts managedAgentKinds, 2026-10-26); none = no managed hosting. */
-  async managedAgentKinds(): Promise<string[]> {
-    return (await this.request('GET', routes.managedAgentKinds.path, routes.managedAgentKinds.response)).kinds;
+  /**
+   * The kinds of agent this org's Harbor creates on Rowboat's own platform account (api.ts managedAgentKinds,
+   * 2026-10-26); none = no managed hosting. `billed` (2026-11-04): they bill to their creator's Rowboat plan.
+   */
+  async managedAgentKinds(): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
+    return this.request('GET', routes.managedAgentKinds.path, routes.managedAgentKinds.response);
   }
 
   /** Create a managed agent (api.ts createManagedAgent): the member, its first key, and its hosting, `deploying` at first. */
@@ -464,7 +468,7 @@ export class SpacesClient {
   private hostingPath(agentId: string, rest = ''): string {
     return `/v1/agents/${encodeURIComponent(agentId)}/hosting${rest}`;
   }
-  async getHosting(agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend }> {
+  async getHosting(agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend; usage?: HostingUsage }> {
     return this.request('GET', this.hostingPath(agentId), routes.getHosting.response);
   }
   /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */

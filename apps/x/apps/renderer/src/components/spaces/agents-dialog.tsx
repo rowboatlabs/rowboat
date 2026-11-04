@@ -64,6 +64,12 @@ type Screen =
     | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string; instance?: string }
     | { name: 'agent'; agentId: string }
 
+/** Who pays for a managed agent of each kind on a Harbor that bills (2026-11-04): the machine is always the owner's plan, at cost. */
+function billingNote(kind: string): string {
+    if (kind === 'hermes') return 'Runs on your Rowboat credits: its model calls and its machine (at cost) come from the same plan as the desktop app.'
+    if (kind === 'codex') return 'Runs on your ChatGPT plan or OpenAI key, which you add on its page once it is ready. Its machine bills to your Rowboat plan, at cost.'
+    return 'Runs on your Anthropic key. Its machine bills to your Rowboat plan, at cost.'
+}
 function Header({ title, description, icon, onBack, large = false }: { title: string; description: string; icon?: ReactNode; onBack?: () => void; large?: boolean }) {
     return (
         <DialogHeader className={cn('gap-1 px-5 pt-5 text-left', large ? 'pb-1' : 'border-b border-border pb-4')}>
@@ -340,6 +346,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const [localPolicy, setLocalPolicy] = useState<spaces.SpacesLocalAgent['policy']>('yolo')
     // Create agent: the kinds this org's Harbor creates (none until loaded, or on a Harbor with no Maritime key), and the form.
     const [managedKinds, setManagedKinds] = useState<string[]>([])
+    // Billing (2026-11-04): what Harbor creates bills to its creator's Rowboat plan, and where that plan is upgraded.
+    const [managedBilling, setManagedBilling] = useState<{ upgradeUrl?: string } | null>(null)
     const [createKind, setCreateKind] = useState<string | null>(null)
     const [anthropicKey, setAnthropicKey] = useState('')
     const [envText, setEnvText] = useState('')
@@ -450,7 +458,13 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setAgents(null)
         void load()
         // An org whose Harbor creates no agents (no Maritime key, or older) just has no Create button.
-        window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
+        window.ipc
+            .invoke('spaces:managedAgentKinds', { orgId: org.id })
+            .then(({ kinds, billed, upgradeUrl }) => {
+                setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))
+                setManagedBilling(billed ? (upgradeUrl ? { upgradeUrl } : {}) : null)
+            })
+            .catch(() => setManagedKinds([]))
     })
     useEffect(() => {
         if (open) opened()
@@ -832,7 +846,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                     >
                         <Header
                             title="Create an agent"
-                            description="Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect. Hermes and Codex start on Rowboat's trial credit; add your own key on the agent's page any time, and the trial ends then."
+                            description={
+                                managedBilling
+                                    ? "Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect. It bills to your Rowboat plan."
+                                    : "Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect. Hermes and Codex start on Rowboat's trial credit; add your own key on the agent's page any time, and the trial ends then."
+                            }
                             onBack={back}
                         />
                         <Body>
@@ -841,7 +859,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     <KindTile
                                         key={m.kind}
                                         kind={m.kind}
-                                        description={m.description}
+                                        description={managedBilling ? m.billedDescription : m.description}
                                         selected={m.kind === chosenManaged}
                                         onSelect={() => {
                                             setCreateKind(m.kind)
@@ -850,6 +868,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     />
                                 ))}
                             </div>
+                            {managedBilling && <p className="mt-2 text-[11px] text-muted-foreground">{billingNote(chosenManaged)}</p>}
                             <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
@@ -932,6 +951,12 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                         </Body>
                         <Footer>
                             <Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button>
+                            {/* Past the plan's agents (2026-11-04): Harbor says so, and the way out is the upgrade. */}
+                            {managedBilling?.upgradeUrl && addError?.startsWith('Your Rowboat plan includes') && (
+                                <Button type="button" size="sm" variant="outline" onClick={() => window.open(managedBilling.upgradeUrl)}>
+                                    Upgrade
+                                </Button>
+                            )}
                             <Button type="submit" size="sm" disabled={!createReady || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
                                 Create agent

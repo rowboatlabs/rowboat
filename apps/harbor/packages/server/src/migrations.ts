@@ -1226,6 +1226,14 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists messages_archived_idx on messages (space_id) where archived`,
     ],
   },
+  {
+    // Billing for managed agents (2026-11-04): the Rowboat account (the
+    // owner's subject at the deployment's issuer) an agent bills to, kept on
+    // the row at creation so the worker and the connector never resolve it
+    // again; null on a deployment that does not bill, and on older rows.
+    id: '058-agent-hosting-billing',
+    statements: [`alter table agent_hosting add column if not exists billing_customer text`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

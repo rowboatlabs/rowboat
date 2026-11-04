@@ -246,6 +246,30 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
         await api.setSpendLimit(agentId, null);
         await reload();
       }),
+    // Rowboat's LLM gateway on the owner's Rowboat credits (2026-11-04): the gateway speaks OpenRouter's API, so
+    // Hermes takes it as its OpenRouter provider at the gateway's address (the turn script, runtimes.ts), with the
+    // key the gateway bills to the owner. The platform's proxy token goes as for an owner's key, so nothing is
+    // billed to Rowboat's platform account, and the cap is lifted for the same reason as there.
+    useGateway: ({ baseUrl, apiKey, model }) =>
+      refusing(async () => {
+        const put = await putter();
+        await put('OPENROUTER_API_KEY', apiKey, true);
+        await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
+        await put('ROWBOAT_LLM_PROVIDER', 'rowboat', false);
+        await put('ROWBOAT_LLM_BASE_URL', baseUrl, false);
+        await put('ROWBOAT_LLM_MODEL', model ?? '', false);
+        await api.setSpendLimit(agentId, null);
+        await reload();
+      }),
+    // An agent its owner funds (2026-11-04, Codex on a deployment that bills): no trial, so the platform's proxy
+    // token is a dud from the start and the agent runs once its owner signs in or adds a key.
+    withoutPlatformLlm: () =>
+      refusing(async () => {
+        const put = await putter();
+        await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
+        await api.setSpendLimit(agentId, null);
+        await reload();
+      }),
     stopFunding: () => refusing(() => api.setSpendLimit(agentId, 0)),
     liftCap: () => refusing(() => api.setSpendLimit(agentId, null)),
     // The owner's sign-in (2026-10-30): Codex says whether one is there; on it, the same setup as a key of another
@@ -316,7 +340,8 @@ export function maritimeProvisioner(options: MaritimeProvisionerOptions): Hostin
           ...(options.idleSeconds !== undefined && options.idleSeconds > 0 ? { idleSeconds: Math.round(options.idleSeconds) } : {}),
         }),
       );
-      if (options.llmCapCents !== undefined && options.llmCapCents > 0) {
+      // The cap is the trial's (2026-10-27); an agent billed to its owner has none (2026-11-04).
+      if (input.trial && options.llmCapCents !== undefined && options.llmCapCents > 0) {
         await api.setEndUserPolicy(input.externalUserId, { llm_spend_cap_cents_per_month: Math.round(options.llmCapCents) });
       }
       return { externalId: created.id };
@@ -341,6 +366,10 @@ export function maritimeProvisioner(options: MaritimeProvisionerOptions): Hostin
         if (err instanceof MaritimeError && err.rejectsKey) throw err;
         return false;
       }
+    },
+    async usage(externalUserId, from, to) {
+      const u = await api.usage({ externalUserId, from, to });
+      return { machineCents: u.hostingCostCents, llmCents: u.llmCostCents };
     },
     async deprovision(externalUserId) {
       await api.deleteEndUser(externalUserId);

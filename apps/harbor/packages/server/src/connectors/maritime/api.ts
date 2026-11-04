@@ -131,6 +131,17 @@ export interface MaritimeApi {
   setSpendLimit(agentId: string, monthlyLimitCents: number | null): Promise<void>;
   /** Delete the end user with its agents; the platform finishes in the background. 404 counts as done. */
   deleteEndUser(externalId: string): Promise<void>;
+  /**
+   * What an end user's agents cost over a range (`GET /api/v1/usage`, read 2026-11-04): the machine, metered per
+   * second or allocated from a seat plan as `hostingBasis` says, and the model calls the platform's proxy served.
+   */
+  usage(input: { externalUserId: string; from: string; to: string }): Promise<MaritimeUsage>;
+}
+
+export interface MaritimeUsage {
+  hostingCostCents: number;
+  llmCostCents: number;
+  hostingBasis?: string;
 }
 
 /** A minted end-user token, as `POST …/tokens` answers; `token` is shown once. */
@@ -353,6 +364,16 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     },
     async setSpendLimit(agentId, monthlyLimitCents) {
       await call<unknown>(`/api/agents/${id(agentId)}/llm-spend-limit`, { method: 'PUT', body: { monthlyLimitCents } });
+    },
+    async usage(input) {
+      const q = new URLSearchParams({ from: input.from, to: input.to, externalUserId: input.externalUserId });
+      const body = await call<Record<string, unknown>>(`/api/v1/usage?${q.toString()}`);
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+      return {
+        hostingCostCents: num(body.hostingCostCents),
+        llmCostCents: num(body.llmCostCents),
+        ...(typeof body.hostingBasis === 'string' ? { hostingBasis: body.hostingBasis } : {}),
+      };
     },
     async deleteEndUser(externalId) {
       try {

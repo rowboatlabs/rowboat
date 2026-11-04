@@ -3,6 +3,7 @@ import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
 import { AgentPresence } from './core/agent-presence.js';
 import { Hosting, type HostingHooks, type HostingProvider } from './core/hosting.js';
+import type { BillingAccounts } from './billing.js';
 import { Assets } from './core/assets.js';
 import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
@@ -128,7 +129,7 @@ export class HarborService {
   }
 
   /** Managed hosting (spec §8 Maritime, 2026-10-26): the platform Rowboat's own account creates agents on, when the deployment has its key (runtime.ts). */
-  attachHosting(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number } = {}): void {
+  attachHosting(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number; billing?: BillingAccounts; settleEveryMs?: number } = {}): void {
     this.hosting.attach(provider, hooks, options);
   }
   /** The hosting worker: follows each managed agent from creation to ready, and through deletion. */
@@ -231,8 +232,8 @@ export class HarborService {
     const hosting = await this.hosting.listFor(listing.map((l) => l.agent.id));
     return listing.map((l) => (hosting.has(l.agent.id) ? { ...l, hosting: hosting.get(l.agent.id)! } : l));
   }
-  /** The kinds of agent this Harbor creates on Rowboat's own platform account: none without the deployment's key. */
-  managedAgentKinds(ctx: ActorCtx): Promise<string[]> {
+  /** The kinds of agent this Harbor creates on Rowboat's own platform account: none without the deployment's key; and whether they bill (2026-11-04). */
+  managedAgentKinds(ctx: ActorCtx): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
     return this.hosting.kinds(ctx);
   }
   /** Create a managed agent on the platform Rowboat's account runs (spec §8 Maritime, 2026-10-26). */
@@ -264,6 +265,14 @@ export class HarborService {
   }
   closeHostingTrial(agentId: string, reason: 'exhausted' | 'expired') {
     return this.hosting.closeTrial(agentId, reason);
+  }
+  /** For a billed agent's connector before a turn (2026-11-04): its sentence when the owner has no credits left. */
+  hostingTurnRefusal(agentId: string) {
+    return this.hosting.turnRefusal(agentId);
+  }
+  /** For a billed agent's connector after a failed turn (2026-11-04): the reason said the owner's way. */
+  explainHostingFailure(agentId: string, failure: string, signIn?: 'chatgpt' | 'none') {
+    return this.hosting.explainFailure(agentId, failure, signIn);
   }
   setHostingEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean) {
     return this.hosting.setEnv(ctx, agentId, key, value, secret);

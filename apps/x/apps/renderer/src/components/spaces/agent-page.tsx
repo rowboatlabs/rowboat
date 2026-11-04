@@ -432,7 +432,11 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
     const ready = hosting.status === 'ready'
     const closed = hosting.funding === 'trial' ? hosting.trial?.closedReason : undefined
     const spend = state.spend
+    const usage = state.usage
     const info = LLM_PROVIDER_INFO[provider]
+    // Billed to the owner's Rowboat plan (2026-11-04): the machine at the platform's own cost, read back every hour.
+    const machinePays = hosting.billed ? 'your Rowboat plan pays for the machine at cost' : 'Rowboat pays for the machine'
+    const thisMonth = usage ? ` ${money(usage.machineCents + usage.llmCents)} of machine this month.` : ''
 
     const save = async () => {
         if (busy || apiKey.trim().length < 8) return
@@ -503,7 +507,7 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
             </div>
             <p className="text-[11px] text-muted-foreground">
                 The key goes to {agent.displayName}'s environment on Maritime and nowhere else; Rowboat keeps its last characters.{' '}
-                {hosting.funding === 'trial' ? 'The trial ends the moment it is saved.' : plan ? `${agent.displayName} is signed out of ChatGPT first; the key is what it runs on from then on.` : ''}
+                {hosting.funding === 'trial' ? 'The trial ends the moment it is saved.' : hosting.funding === 'credits' ? 'From then on the model is on your provider, not your Rowboat credits.' : plan ? `${agent.displayName} is signed out of ChatGPT first; the key is what it runs on from then on.` : ''}
             </p>
         </FormCard>
     )
@@ -518,9 +522,9 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                         </p>
                         <p className="text-[11px] text-muted-foreground">
                             {plan
-                                ? 'Signed in from the Terminal tab. Your plan covers the model; Rowboat pays for the machine.'
+                                ? `Signed in from the Terminal tab. Your plan covers the model; ${machinePays}.${thisMonth}`
                                 : llm
-                                  ? `${llm.model ? `Model ${llm.model}. ` : ''}You pay the provider; Rowboat pays for the machine.`
+                                  ? `${llm.model ? `Model ${llm.model}. ` : ''}You pay the provider; ${machinePays}.${thisMonth}`
                                   : `${agent.displayName} answers nothing until you add your own API key${signInKind ? ' or sign in with ChatGPT from the Terminal tab' : ''}.`}
                         </p>
                     </div>
@@ -531,6 +535,27 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                         </Button>
                     )}
                     {!canManage && !llm && <Tag tone="warn">owner needed</Tag>}
+                </div>
+                {form}
+            </div>
+        )
+    }
+
+    if (hosting.funding === 'credits') {
+        return (
+            <div role="group" aria-label="Model access" className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border p-3">
+                    <div className="min-w-0 flex-1 basis-56">
+                        <p className="text-sm font-semibold text-foreground">Runs on your Rowboat credits</p>
+                        <p className="text-[11px] text-muted-foreground">
+                            Model calls and the machine draw from your Rowboat plan, the same credits as the desktop app.{thisMonth} Add your own key and the model is on your provider instead.
+                        </p>
+                    </div>
+                    {canManage && !editing && (
+                        <Button size="sm" variant="outline" disabled={!ready} onClick={() => setEditing(true)}>
+                            <KeyRound className="size-3.5" /> Use your own key
+                        </Button>
+                    )}
                 </div>
                 {form}
             </div>

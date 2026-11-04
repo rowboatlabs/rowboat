@@ -363,7 +363,7 @@ describe('managed Maritime agents', () => {
     fake.nextTurn = hermesTurn('On my own key.');
     const { invocations } = await org.post(`${mention(agent)} hi`);
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
-    expect(fake.submits().at(-1)!.script).toContain('hermes config set model.provider "$ROWBOAT_LLM_PROVIDER"');
+    expect(fake.submits().at(-1)!.script).toContain('hermes config set model.provider "$HP"');
 
     // Codex takes OpenAI only, and gets OpenAI's address where the template had the platform's proxy.
     const codex = (await me.post('/v1/agents/managed', { displayName: 'Cx', kind: 'codex' })).body as { agent: Member };

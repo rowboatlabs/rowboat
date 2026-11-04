@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
+import { billingFromEnv, type BillingAccounts } from './billing.js';
 import type { BlobStore } from './blobs.js';
 import { HostedConnectors } from './connectors/host.js';
 import { jevApiKey } from './connectors/jev/index.js';
@@ -47,7 +48,7 @@ export interface OrgRuntimeInput {
   /** The Spaces web app, which an org link opened in a browser offers beside the desktop app (http.ts, the landings). */
   webAppUrl?: string;
   /** Managed hosting (spec §8 Maritime, 2026-10-26): a stand-in provider and tick in tests; absent = from HARBOR_MARITIME_API_KEY. */
-  hosting?: { provider: HostingProvider; tickMs?: number; trialMs?: number };
+  hosting?: { provider: HostingProvider; tickMs?: number; trialMs?: number; billing?: BillingAccounts; settleEveryMs?: number };
   /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
   agentPresenceGraceMs?: number;
 }
@@ -101,6 +102,8 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
   // Managed hosting (spec §8 Maritime, 2026-10-26): agents Rowboat's own account creates, when the deployment has its key.
   const provider = input.hosting?.provider ?? hostingFromEnv();
   if (provider) {
+    // Billing (2026-11-04): what managed agents cost goes to their owners' Rowboat accounts, when the deployment says where.
+    const billing = input.hosting ? input.hosting.billing : billingFromEnv();
     service.attachHosting(
       provider,
       {
@@ -108,7 +111,11 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
         added: (agent) => connectors.ensure(agent),
         stop: (agentId) => connectors.stop(agentId),
       },
-      input.hosting?.trialMs !== undefined ? { trialMs: input.hosting.trialMs } : {},
+      {
+        ...(input.hosting?.trialMs !== undefined ? { trialMs: input.hosting.trialMs } : {}),
+        ...(input.hosting?.settleEveryMs !== undefined ? { settleEveryMs: input.hosting.settleEveryMs } : {}),
+        ...(billing ? { billing } : {}),
+      },
     );
   }
   // Jev (spec §8 Jev, 2026-10-07): every org has it once the deployment has its key.
