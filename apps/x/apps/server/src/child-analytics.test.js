@@ -14,7 +14,11 @@ const execFileAsync = promisify(execFile);
 const analyticsDir = fileURLToPath(new URL('../../../packages/core/src/analytics/', import.meta.url));
 afterEach(() => vi.unstubAllEnvs());
 
-it.each([true, false])('packaged child delivers analytics without runtime credentials (enabled=%s)', async (enabled) => {
+it.each([
+  { enabled: true, analyticsEnabled: true },
+  { enabled: false, analyticsEnabled: true },
+  { enabled: true, analyticsEnabled: false },
+])('packaged child honours credentials and consent ($enabled, $analyticsEnabled)', async ({ enabled, analyticsEnabled }) => {
   const batches = [];
   const receiver = createServer(async (req, res) => {
     const chunks = [];
@@ -59,11 +63,12 @@ it.each([true, false])('packaged child delivers analytics without runtime creden
         setup(builder) {
           const fixtures = {
             './installation.js': "export const getInstallationId = () => 'test-installation';",
+            '../config/app_settings.js': `export const loadAppSettings = () => ({ analyticsEnabled: ${analyticsEnabled} }); export const saveAppSettings = () => {};`,
             '../config/env.js': "export const API_URL = 'https://api.example.test';",
             '../account/account.js': 'export const isSignedIn = async () => true;',
             '../billing/billing.js': "export const getBillingInfo = async () => ({ userId: 'test-user', userEmail: 'test@example.test' });",
           };
-          builder.onResolve({ filter: /(?:installation|env|account|billing)\.js$/ }, (args) =>
+          builder.onResolve({ filter: /(?:installation|app_settings|env|account|billing)\.js$/ }, (args) =>
             fixtures[args.path] ? { path: args.path, namespace: 'fixture' } : undefined);
           builder.onLoad({ filter: /.*/, namespace: 'fixture' }, (args) => ({ contents: fixtures[args.path] }));
         },
@@ -73,7 +78,7 @@ it.each([true, false])('packaged child delivers analytics without runtime creden
     for (const key of ['POSTHOG_KEY', 'POSTHOG_HOST', 'VITE_PUBLIC_POSTHOG_KEY', 'VITE_PUBLIC_POSTHOG_HOST', 'ROWBOAT_APP_VERSION', 'npm_package_version']) delete env[key];
     const { stderr } = await execFileAsync(process.execPath, [outfile], { env, timeout: 8000 });
     expect(stderr).toBe('');
-    if (!enabled) {
+    if (!enabled || !analyticsEnabled) {
       expect(batches).toEqual([]);
       return;
     }
