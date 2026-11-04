@@ -3,6 +3,7 @@ import { FileConflictNotice, useSpaceFileSave, type SavedSpaceFile } from './fil
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import type { spaces } from '@x/shared'
 import { BlobPreview } from '@/components/spaces/blob-preview'
+import { getViewerType } from '@/lib/file-types'
 import { Streamdown } from '@/components/streamdown'
 import { Eye, FileDown, FilePlus2, FileText, Loader2, MessageSquare, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -154,6 +155,49 @@ function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }
             </span>
             {writable && saveOpen && <SaveToSpaceDialog src={href} suggestedName={suggestedName} onClose={() => setSaveOpen(false)} />}
         </>
+    )
+}
+
+/** A blob link's file name: the link's ?name, else its text. */
+function blobLinkName(href: string, label?: string): string | undefined {
+    try {
+        const name = new URL(href).searchParams.get('name')
+        if (name) return name
+    } catch {
+        // fall through to the link text
+    }
+    return label || undefined
+}
+
+/** Whether a blob link names a video the page can play: by its file name, since the link carries no mime. */
+function isVideoBlobLink(href: string, label?: string): boolean {
+    const name = blobLinkName(href, label)
+    return !!name && getViewerType(name) === 'video'
+}
+
+/**
+ * A video shared in a message plays where it is (2026-11-04, Arjun: a
+ * screen recording had to be downloaded to watch), with the file's card
+ * under it for preview, save and download. A video the browser can't decode
+ * leaves only the card.
+ */
+function BlobVideo({ src, name }: { src: string; name: string }) {
+    const [failed, setFailed] = useState(false)
+    return (
+        <span className="my-1 flex max-w-xl flex-col items-start gap-1">
+            {!failed && (
+                <video
+                    src={src}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    aria-label={name}
+                    onError={() => setFailed(true)}
+                    className="max-h-[360px] w-full rounded-lg bg-black"
+                />
+            )}
+            <BlobLinkCard href={src}>{name}</BlobLinkCard>
+        </span>
     )
 }
 
@@ -589,6 +633,7 @@ const spaceComponents: StreamdownComponents = {
     img: ({ src, alt }) => {
         const url = typeof src === 'string' ? src : ''
         if (isBlobAppUrl(url)) {
+            if (isVideoBlobLink(url, alt)) return <BlobVideo src={url} name={blobLinkName(url, alt)!} />
             return <BlobImage src={url} alt={alt ?? ''} />
         }
         return <ExternalImage src={url} alt={alt ?? ''} />
@@ -816,6 +861,8 @@ function SpaceAnchor({ href, title, children }: ComponentProps<'a'>) {
         )
     }
     if (isBlobAppUrl(url)) {
+        const label = plainLabel(children) ?? undefined
+        if (isVideoBlobLink(url, label)) return <BlobVideo src={url} name={blobLinkName(url, label)!} />
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }
     const target = fileLinkTarget(url, refs, assets, nav)

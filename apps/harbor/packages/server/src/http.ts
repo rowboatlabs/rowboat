@@ -61,6 +61,50 @@ function bodyOf(result: { bytes?: Uint8Array; stream?: ReadableStream<Uint8Array
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
+// One `Range: bytes=…` request, served as 206 when Harbor serves the bytes
+// itself (2026-11-04: a video in a message plays inline, and seeking asks for
+// the bytes it jumps to; a presigned store answers ranges on its own).
+// Several ranges, or a header that doesn't parse, get the whole blob, as
+// RFC 9110 §14.2 allows.
+function parseByteRange(header: string | undefined, size: number): { start: number; end: number } | 'unsatisfiable' | null {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header?.trim() ?? '');
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  if (m[1] === '') {
+    const n = Number(m[2]);
+    return n === 0 || size === 0 ? 'unsatisfiable' : { start: Math.max(0, size - n), end: size - 1 };
+  }
+  const start = Number(m[1]);
+  const end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  if (start >= size) return 'unsatisfiable';
+  return end < start ? null : { start, end };
+}
+
+/** Bytes start..end (inclusive) of a body; a stream is read only as far as it needs. */
+function sliceBody(body: ArrayBuffer | ReadableStream<Uint8Array>, start: number, end: number): ArrayBuffer | ReadableStream<Uint8Array> {
+  if (body instanceof ArrayBuffer) return body.slice(start, end + 1);
+  const reader = body.getReader();
+  let offset = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return controller.close();
+        const from = Math.max(0, start - offset);
+        const to = Math.min(value.byteLength, end + 1 - offset);
+        offset += value.byteLength;
+        if (to > from) controller.enqueue(value.subarray(from, to));
+        if (offset > end) {
+          controller.close();
+          await reader.cancel();
+          return;
+        }
+        if (to > from) return;
+      }
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+}
+
 function actor(c: Context<Env>): { memberId: string; agent?: boolean } {
   return { memberId: c.get('memberId'), ...(c.get('agent') ? { agent: true } : {}) };
 }
@@ -851,11 +895,23 @@ export function buildHttpApp(deps: {
       return c.redirect(result.url, 302);
     }
     c.header('content-type', result.blob.mime);
-    c.header('content-length', String(result.blob.size));
     c.header('content-disposition', result.disposition);
     c.header('cache-control', 'private, max-age=31536000, immutable');
     c.header('x-content-type-options', 'nosniff');
     c.header('content-security-policy', "default-src 'none'");
+    c.header('accept-ranges', 'bytes');
+    const size = result.blob.size;
+    const range = parseByteRange(c.req.header('range'), size);
+    if (range === 'unsatisfiable') {
+      c.header('content-range', `bytes */${size}`);
+      return c.body(null, 416);
+    }
+    if (range) {
+      c.header('content-range', `bytes ${range.start}-${range.end}/${size}`);
+      c.header('content-length', String(range.end - range.start + 1));
+      return c.body(sliceBody(bodyOf(result), range.start, range.end), 206);
+    }
+    c.header('content-length', String(size));
     return c.body(bodyOf(result));
   });
 

@@ -25,6 +25,7 @@ import {
 } from "./ipc.js";
 import { disposeAllTerminals } from "@x/core/dist/terminal/terminal.js";
 import { stopLocalAgents } from "@x/core/dist/spaces/local-agents.js";
+import { rangedResponse } from "@x/core/dist/spaces/byte-range.js";
 import * as spaceBlobCache from "./spaces/blob-cache.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
@@ -322,7 +323,8 @@ function registerAppProtocol() {
           // Not an image — fall through to the full blob.
         }
         const blob = await spaceBlobCache.getBlob(orgId, spaceId, hash);
-        return new Response(new Uint8Array(blob.bytes), { headers: { ...headers, "content-type": blob.mime } });
+        // Byte ranges, so a video in a message seeks (2026-11-04).
+        return rangedResponse(blob.bytes, request.headers.get("range"), { ...headers, "content-type": blob.mime });
       } catch (err) {
         console.error("[space-blob] failed to serve", request.url, err);
         return new Response("Not Found", { status: 404 });
