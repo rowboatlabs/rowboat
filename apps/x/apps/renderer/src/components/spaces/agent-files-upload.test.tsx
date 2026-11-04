@@ -30,6 +30,7 @@ afterEach(cleanup)
 describe('managed agent file uploads', () => {
     it('uploads binary bytes into the displayed folder and refreshes the listing', async () => {
         await mount()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit path' }))
         fireEvent.change(screen.getByLabelText('Directory'), { target: { value: '/data/not-opened' } })
         fireEvent.change(screen.getByLabelText('Choose files to upload'), { target: { files: [localFile('image.png')] } })
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:uploadHostingFile', {
@@ -46,6 +47,7 @@ describe('managed agent file uploads', () => {
             return normal(channel, args)
         })
         await mount()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit path' }))
         fireEvent.change(screen.getByLabelText('Directory'), { target: { value: '/data/inbox' } })
         fireEvent.click(screen.getByRole('button', { name: 'Go' }))
         await waitFor(() => expect(screen.getByRole('button', { name: 'Upload files' })).toBeEnabled())
@@ -74,7 +76,7 @@ describe('managed agent file uploads', () => {
         const file = localFile('retry.pdf')
         fireEvent.change(picker, { target: { files: [file] } })
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:uploadHostingFile', expect.anything()))
-        expect(screen.getByRole('button', { name: 'Go' })).toBeDisabled()
+        expect(screen.getByRole('button', { name: 'Edit path' })).toBeDisabled()
         expect(screen.getByRole('status')).toHaveTextContent('Uploading 1 of 1: retry.pdf')
         reject(new Error('Network unavailable'))
         await waitFor(() => expect(screen.getByRole('button', { name: 'Upload files' })).toBeEnabled())
@@ -131,6 +133,7 @@ describe('managed file downloads and previews', () => {
 
     it('drops into the displayed directory and rejects folders', async () => {
         await mount()
+        fireEvent.click(screen.getByRole('button', { name: 'Edit path' }))
         fireEvent.change(screen.getByLabelText('Directory'), { target: { value: '/not-opened' } })
         fireEvent.drop(screen.getByLabelText('Agent files'), { dataTransfer: { files: [localFile('dropped.txt')], items: [] } })
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:uploadHostingFile', expect.objectContaining({ directory: '/data', name: 'dropped.txt' })))

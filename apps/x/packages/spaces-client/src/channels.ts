@@ -26,7 +26,7 @@ export type HarborChannel =
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
-  | 'spaces:listHostingFiles' | 'spaces:downloadHostingFile' | 'spaces:readHostingFile' | 'spaces:uploadHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
+  | 'spaces:listHostingFiles' | 'spaces:downloadHostingFile' | 'spaces:readHostingFile' | 'spaces:uploadHostingFile' | 'spaces:createHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
   | 'spaces:listHostingSkills' | 'spaces:installHostingSkill' | 'spaces:removeHostingSkill'
   | 'spaces:listHostingTriggers' | 'spaces:createHostingTrigger' | 'spaces:updateHostingTrigger' | 'spaces:deleteHostingTrigger'
   | 'spaces:createInvite' | 'spaces:resolveInvite' | 'spaces:acceptInvite'
@@ -174,6 +174,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:downloadHostingFile': async (args) => getClient(args.orgId).downloadHostingFile(args.agentId, args.path),
     'spaces:readHostingFile': async (args) => getClient(args.orgId).readHostingFile(args.agentId, args.path),
     'spaces:uploadHostingFile': async (args) => getClient(args.orgId).uploadHostingFile(args.agentId, args.directory, args.name, Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0))),
+    'spaces:createHostingFile': async (args) => getClient(args.orgId).createHostingFile(args.agentId, args.directory, args.name),
     'spaces:writeHostingFile': async (args) => {
       await getClient(args.orgId).writeHostingFile(args.agentId, args.path, args.content);
       return {};

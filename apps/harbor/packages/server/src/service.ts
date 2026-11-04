@@ -286,6 +286,9 @@ export class HarborService {
   uploadHostingFile(ctx: ActorCtx, agentId: string, input: { directory: string; name: string }, read: () => Promise<Uint8Array>) {
     return this.hosting.uploadFile(ctx, agentId, input, read);
   }
+  createHostingFile(ctx: ActorCtx, agentId: string, input: { directory: string; name: string }) {
+    return this.hosting.createFile(ctx, agentId, input);
+  }
   writeHostingFile(ctx: ActorCtx, agentId: string, path: string, content: string) {
     return this.hosting.writeFile(ctx, agentId, path, content);
   }

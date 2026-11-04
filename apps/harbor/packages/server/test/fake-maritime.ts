@@ -416,6 +416,13 @@ export class FakeMaritime {
         generation: 0,
       };
       this.executions.set(execution.executionId, execution);
+      if (Array.isArray(command) && command[0] === 'python3' && String(command[2]).includes('os.O_EXCL')) {
+        const path = String(command[3]);
+        const exists = this.files.has(path) || this.dirs.has(path);
+        if (!exists) this.files.set(path, '');
+        Object.assign(execution, { status: 'completed', exitCode: exists ? 17 : 0 });
+        return send(200, { executionId: execution.executionId, status: execution.status, exitCode: execution.exitCode });
+      }
       if (script.includes('/rowboat/models.json')) {
         if (!this.holdCatalog) Object.assign(execution, { status: 'completed', exitCode: 0 });
         return send(200, { executionId: execution.executionId, status: execution.status, exitCode: execution.exitCode });

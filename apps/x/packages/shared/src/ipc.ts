@@ -4114,6 +4114,10 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), directory: z.string(), name: z.string(), bytes: z.string() }),
     res: z.object({ path: z.string(), size: z.number() }),
   },
+  'spaces:createHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), directory: z.string(), name: z.string() }),
+    res: z.object({ path: z.string() }),
+  },
   'spaces:writeHostingFile': {
     req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string(), content: z.string() }),
     res: z.object({}),

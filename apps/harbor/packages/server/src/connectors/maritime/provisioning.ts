@@ -208,6 +208,13 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
     files: (path) => refusing(async () => shapeFiles(await api.listFiles(agentId, path), path)),
     downloadFile: (path) => refusing(() => api.downloadFile(agentId, path)),
     readFile: (path) => refusing(() => api.readFile(agentId, path)),
+    // Exclusive creation closes the check/write race, including existing symlinks (2026-11-04).
+    createFile: (path) => refusing(async () => {
+      const script = 'import os, sys\ntry:\n fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)\n os.close(fd)\nexcept FileExistsError:\n sys.exit(17)';
+      const result = await api.exec(agentId, ['python3', '-c', script, path], { detached: false, timeoutSeconds: 60 });
+      if (result.exitCode === 17) throw new PlatformRefusal('A file or folder with this name already exists. Choose another name.');
+      if (result.status !== 'completed' || result.exitCode !== 0) throw new PlatformRefusal('Could not create the file. Check the directory and permissions, then refresh before retrying.');
+    }),
     writeFile: (path, content) => refusing(() => api.writeFile(agentId, path, content)),
     mkdir: (path) => refusing(() => api.mkdir(agentId, path)),
     move: (from, to) => refusing(() => api.moveFile(agentId, from, to)),

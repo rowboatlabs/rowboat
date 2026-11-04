@@ -106,6 +106,7 @@ export interface HostingOps {
   downloadFile(path: string): Promise<Uint8Array | undefined>;
   readFile(path: string): Promise<string | undefined>;
   uploadFile(directory: string, name: string, bytes: Uint8Array): Promise<void>;
+  createFile(path: string): Promise<void>;
   writeFile(path: string, content: string): Promise<void>;
   mkdir(path: string): Promise<void>;
   move(from: string, to: string): Promise<void>;
@@ -602,6 +603,16 @@ export class Hosting {
     if (bytes.byteLength > MAX_HOSTING_UPLOAD_BYTES) throw new HarborError('payload_too_large', 'Files must be 100 MB or smaller');
     await this.platform(() => ops.uploadFile(directory, input.name, bytes));
     return { path: `${directory === '/' ? '' : directory}/${input.name}`, size: bytes.byteLength };
+  }
+
+  async createFile(ctx: ActorCtx, agentId: string, input: { directory: string; name: string }): Promise<{ path: string }> {
+    const { ops } = await this.managed(ctx, agentId);
+    this.k.guardWrite();
+    const parsed = routes.createHostingFile.request.safeParse(input);
+    if (!parsed.success) throw new HarborError('invalid_request', 'Choose a directory and a plain file name.');
+    const path = `${input.directory.replace(/\/+$/, '')}/${input.name}`;
+    await this.platform(() => ops.createFile(path));
+    return { path };
   }
 
   async writeFile(ctx: ActorCtx, agentId: string, path: string, content: string): Promise<void> {

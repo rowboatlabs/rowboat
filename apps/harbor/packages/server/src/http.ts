@@ -551,6 +551,11 @@ export function buildHttpApp(deps: {
     });
     return reply(c, routes.uploadHostingFile.response, result);
   });
+  app.post(routes.createHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.createHostingFile.params, c.req.param());
+    const input = await body(c, routes.createHostingFile.request);
+    return reply(c, routes.createHostingFile.response, await service.createHostingFile(actor(c), agentId, input));
+  });
   app.put(routes.writeHostingFile.path, async (c) => {
     const { agentId } = parseWith(routes.writeHostingFile.params, c.req.param());
     const input = await body(c, routes.writeHostingFile.request);

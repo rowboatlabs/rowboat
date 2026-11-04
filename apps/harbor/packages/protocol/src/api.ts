@@ -683,6 +683,16 @@ export const routes = {
     }),
     response: z.object({ path: z.string(), size: z.number().int().nonnegative() }),
   },
+  createHostingFile: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/files/create',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({
+      directory: z.string().min(1).max(2048).regex(/^\//).refine(v => !/[\x00-\x1f\x7f]/.test(v) && !v.split('/').includes('..'), 'invalid directory'),
+      name: z.string().min(1).max(255).refine(v => v.trim() === v && !/[\/\\\x00-\x1f\x7f]/.test(v) && v !== '.' && v !== '..', 'expected a file name, not a path'),
+    }),
+    response: z.object({ path: z.string() }),
+  },
   writeHostingFile: {
     method: 'PUT',
     path: '/v1/agents/:agentId/hosting/files/content',

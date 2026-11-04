@@ -425,6 +425,28 @@ describe('managed Maritime agents', () => {
     expect((await org.ended(back.invocations[0]!.id)).state).toBe('done');
   });
 
+  it('creates an empty file without replacing a concurrent creation and validates access and names', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'New files', kind: 'codex' })).body;
+    await org.hostingStatus(agent.id, 'ready');
+    const endpoint = `/v1/agents/${agent.id}/hosting/files/create`;
+    const input = { directory: '/data', name: 'new notes.txt' };
+    expect((await org.as('dev-harsh').post(endpoint, input)).status).toBe(403);
+    for (const name of ['../escape', 'a/b', '.', '..', '', ' padded ']) {
+      expect((await me.post(endpoint, { ...input, name })).status).toBe(400);
+    }
+    expect((await me.post(endpoint, { ...input, directory: '/data/../etc' })).status).toBe(400);
+    org.harbor.service.readOnly = true;
+    try { expect((await me.post(endpoint, input)).body.code).toBe('read_only_limit'); }
+    finally { org.harbor.service.readOnly = false; }
+    const results = await Promise.all([me.post(endpoint, input), me.post(endpoint, input)]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 400]);
+    expect(fake.files.get('/data/new notes.txt')).toBe('');
+    fake.files.set('/data/new notes.txt', 'keep this');
+    expect((await me.post(endpoint, input)).status).toBe(400);
+    expect(fake.files.get('/data/new notes.txt')).toBe('keep this');
+  });
+
   it('uploads binary files to the selected folder, refuses collisions and gates writes', async () => {
     const me = org.as('dev-ramnique');
     const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Uploads', kind: 'codex' })).body as { agent: Member };

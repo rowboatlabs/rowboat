@@ -36,3 +36,14 @@ it('downloads exact base64 bytes using an authenticated, encoded path', async ()
   expect(new URL(String(url)).searchParams.get('path')).toBe(result.path);
   expect(new Headers(init?.headers).get('authorization')).toBe('Bearer dev-owner');
 });
+
+it('creates a file using the exclusive-create endpoint and preserves the requested name', async () => {
+  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ path: '/data/notes & résumé.txt' })));
+  const client = new SpacesClient({ baseUrl: 'https://harbor.example', token: 'dev-owner', fetchImpl });
+  expect(await client.createHostingFile('agent', '/data', 'notes & résumé.txt')).toEqual({ path: '/data/notes & résumé.txt' });
+  const [url, init] = fetchImpl.mock.calls[0]!;
+  expect(new URL(String(url)).pathname).toBe('/v1/agents/agent/hosting/files/create');
+  expect(init?.method).toBe('POST');
+  expect(JSON.parse(String(init?.body))).toEqual({ directory: '/data', name: 'notes & résumé.txt' });
+  expect(new Headers(init?.headers).get('authorization')).toBe('Bearer dev-owner');
+});

@@ -1005,6 +1005,24 @@ describe('AgentsDialog', () => {
         expect(FakeSocket.instances[1]!.url).toBe('wss://api.maritime.sh/api/agents/agt-m1/terminal?token=eu_console_2')
     })
 
+    it('preserves file drafts across tabs and confirms before leaving the agent page', async () => {
+        await openJarvis()
+        fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
+        const files = await screen.findByRole('list', { name: 'Files' })
+        fireEvent.click(within(files).getByRole('button', { name: /^config\.yaml/ }))
+        fireEvent.change(await screen.findByLabelText('File content'), { target: { value: 'unsaved draft' } })
+        fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
+        fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
+        expect(screen.getByLabelText('File content')).toHaveValue('unsaved draft')
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+        expect(await screen.findByRole('alertdialog')).toHaveTextContent('Discard unsaved file changes?')
+        fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+        expect(screen.getByLabelText('File content')).toHaveValue('unsaved draft')
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }))
+        expect(screen.queryByLabelText('File content')).not.toBeInTheDocument()
+    })
+
     it('logs, files, skills and automations load when their tab is chosen; removing is on the Danger zone', async () => {
         await openJarvis()
         fireEvent.click(screen.getByRole('tab', { name: 'Logs' }))

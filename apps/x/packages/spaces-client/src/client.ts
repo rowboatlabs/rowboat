@@ -520,6 +520,9 @@ export class SpacesClient {
     const query = new URLSearchParams(routes.uploadHostingFile.query.parse({ directory, name }));
     return this.putBytes(this.hostingPath(agentId, `/files/upload?${query}`), routes.uploadHostingFile.response, bytes, { 'content-type': 'application/octet-stream' });
   }
+  async createHostingFile(agentId: string, directory: string, name: string): Promise<{ path: string }> {
+    return this.request('POST', this.hostingPath(agentId, '/files/create'), routes.createHostingFile.response, { directory, name });
+  }
   async writeHostingFile(agentId: string, path: string, content: string): Promise<void> {
     await this.request('PUT', this.hostingPath(agentId, '/files/content'), routes.writeHostingFile.response, { path, content });
   }
