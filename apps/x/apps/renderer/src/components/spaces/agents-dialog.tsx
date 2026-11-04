@@ -305,7 +305,9 @@ function KindChoice({ label, kinds, selected, onSelect, first = false }: { label
 /**
  * Where the dialog opens. The Agents page (2026-10-21) lists every agent
  * itself and opens this straight at adding one or at one agent's page; then
- * Back, Cancel and Done close the dialog instead of showing the list.
+ * Back, Cancel and Done close the dialog instead of showing the list. A DM
+ * with an agent opens its page the same way, from the conversation's menu
+ * (2026-10-30, spaces-view.tsx).
  */
 // `request` (2026-11-02): a super agent's setup card opens the form for what it asked, filled in, and completing it settles the card.
 export type AgentsDialogStart = { name: 'choose' } | { name: 'add'; bot: boolean } | { name: 'create' } | { name: 'agent'; agentId: string } | { name: 'request'; approval: spaces.Approval }
