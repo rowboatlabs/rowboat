@@ -47,7 +47,7 @@ describe('space cascade (migration 039)', () => {
       await migrate(db);
       // Step back below 039, as a database that predates it. Tables created
       // after 039 carry their constraint from birth and are not stepped back.
-      const after039 = new Set(['invite_spaces']);
+      const after039 = new Set(['invite_spaces', 'message_secrets']);
       for (const { table } of (await spaceKeyedTables(db)).filter((t) => !after039.has(t.table))) {
         await db.query(`alter table ${table} drop constraint ${table}_space_fk`);
       }

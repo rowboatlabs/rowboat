@@ -64,6 +64,23 @@ export function downloadLine(orgUrl: string, spaceId: string, a: Attachment): st
 }
 
 /**
+ * The secrets a message handed the agent (2026-11-04, "secrets card" in Main):
+ * where to read each on its own key, and that its value goes where it is
+ * used, never back into the thread, which the rest of the space reads.
+ */
+export function secretsSection(orgUrl: string, invocation: Invocation): string | undefined {
+  const names = invocation.trigger.secrets ?? [];
+  if (names.length === 0) return undefined;
+  const { spaceId } = invocation.conversation;
+  return [
+    'Secrets handed to you in this message, which no one else in the space can read. Read one when you need it with',
+    '`curl -fsSL -H "Authorization: Bearer $ROWBOAT_AGENT_KEY" <url>` (when this environment sets ROWBOAT_AGENT_KEY), straight into where it is used, such as an environment variable;',
+    'never write its value in the thread, in a file in the space, or in a commit:',
+    ...names.map((name) => `- ${name}: ${orgUrl}/v1/spaces/${spaceId}/messages/${invocation.trigger.messageId}/secrets/${name}`),
+  ].join('\n');
+}
+
+/**
  * Where any agent can read the rowboat-spaces skill without installing it (spec §8, 2026-10-08): the
  * copy on GitHub, the one place it is published. The standing paragraph points every turn here, so an
  * agent that cannot install skills still learns its setup, the tools and files from one page.
@@ -170,6 +187,8 @@ export function buildPrompt(input: {
       ].join('\n'),
     );
   }
+  const secrets = secretsSection(input.orgUrl, invocation);
+  if (secrets) parts.push(secrets);
   parts.push(standingParagraph(input));
   parts.push(requestMarker(invocation.trigger.messageId));
   return parts.join('\n\n');

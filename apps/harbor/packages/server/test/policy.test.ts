@@ -22,6 +22,8 @@ import {
   isGroupChat,
   canAddAgent,
   canReachPersonalAgent,
+  canHandSecret,
+  canReadSecret,
   canCreateAgentKey,
   canRenameAgent,
   canRevokeAgentKey,
@@ -301,5 +303,28 @@ describe('personal agents (2026-10-26)', () => {
     expect(canReachPersonalAgent('gagan', personal, 'message')).toMatchObject({ code: 'forbidden', message: expect.stringContaining('message it') });
     expect(canReachPersonalAgent('gagan', channel, 'add')).toBeNull();
     expect(canReachPersonalAgent('harsh', person, 'message')).toBeNull();
+  });
+});
+
+describe('secrets for an agent (2026-11-04)', () => {
+  const person: Member = { id: 'gagan', displayName: 'Gagan', role: 'admin', kind: 'human' };
+  const scout: Member = { id: 'scout', displayName: 'Scout', role: 'member', kind: 'agent', ownerId: 'harsh' };
+  const personal: Member = { ...scout, id: 'mine', personal: true };
+  const hand = (recipient: Member | undefined, over: Partial<{ inSpace: boolean; addressed: boolean; authorId: string }> = {}) =>
+    canHandSecret({ authorId: 'gagan', recipient, inSpace: true, addressed: true, ...over });
+  it('goes only to an agent of the space the message addresses, a personal one only from its owner', () => {
+    expect(hand(scout)).toBeNull();
+    expect(hand(scout, { addressed: false })).toMatchObject({ code: 'invalid_request', message: expect.stringContaining('mention Scout') });
+    expect(hand(scout, { inSpace: false })).toMatchObject({ code: 'invalid_request' });
+    expect(hand(person)).toMatchObject({ code: 'invalid_request' });
+    expect(hand(undefined)).toMatchObject({ code: 'invalid_request' });
+    expect(hand(scout, { authorId: 'scout' })).toMatchObject({ code: 'invalid_request' });
+    expect(hand(personal)).toMatchObject({ code: 'forbidden' });
+    expect(hand(personal, { authorId: 'harsh' })).toBeNull();
+  });
+  it('is read by its recipient alone, an admin and its author included', () => {
+    expect(canReadSecret('scout', { name: 'KEY', for: 'scout' })).toBeNull();
+    expect(canReadSecret('gagan', { name: 'KEY', for: 'scout' })).toMatchObject({ code: 'not_found' });
+    expect(canReadSecret('scout', undefined)).toMatchObject({ code: 'not_found' });
   });
 });

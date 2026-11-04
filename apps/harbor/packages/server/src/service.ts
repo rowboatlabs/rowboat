@@ -612,6 +612,9 @@ export class HarborService {
   postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     return this.feed.postMessage(ctx, spaceId, input);
   }
+  readMessageSecret(ctx: ActorCtx, spaceId: string, messageId: string, name: string): Promise<string> {
+    return this.feed.readMessageSecret(ctx, spaceId, messageId, name);
+  }
   /**
    * A connector's answer to one of its agent's invocations: posted in its
    * thread and marked done in one transaction, or not at all if the

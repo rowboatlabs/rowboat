@@ -4400,6 +4400,8 @@ export const ipcSchemas = {
       agentOptions: z.record(z.string(), z.record(z.string(), z.union([z.string(), z.boolean()]))).optional(),
       /** A thread reply for the people only: it follows up no agent (Harbor spec §8, 2026-10-27). */
       peopleOnly: z.boolean().optional(),
+      /** Secrets for agents the message addresses; only each agent reads its value (Harbor spec §8, 2026-11-04). */
+      secrets: z.array(z.object({ name: z.string(), for: z.string(), value: z.string() })).optional(),
     }),
     res: z.custom<SpacesPostResult>(),
   },

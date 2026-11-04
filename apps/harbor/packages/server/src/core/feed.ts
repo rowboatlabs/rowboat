@@ -12,6 +12,7 @@ import {
   type Poll,
   type ReactionGroup,
   type Routes,
+  type Space,
   type SearchKind,
   type SearchResults,
   type StreamEvent,
@@ -23,7 +24,8 @@ import type { z } from 'zod';
 import { HarborError } from '../errors.js';
 import { legacyToTokens } from '../mentions-backfill.js';
 import type { Notifier } from '../notify.js';
-import { enforce, isAuthor } from '../policy.js';
+import { canHandSecret, canReadSecret, enforce, isAuthor } from '../policy.js';
+import { assertSealingConfigured, seal, unseal } from '../sealing.js';
 import { parseSearchQuery } from '../search.js';
 import type { MessageWindow, StoredPollVote, StoredReaction } from '../store.js';
 import type { Assets } from './assets.js';
@@ -357,6 +359,7 @@ export class Feed {
     const author = this.k.attributionOf(ctx, input);
 
     const stamps = await this.stampsFor(spaceId, input.body);
+    const secrets = await this.secretsFor(ctx, space, input, stamps.members);
     // The agents this message invokes are decided in its transaction, so a
     // mention is never lost between the post and the queue (spec §8); their
     // frames leave with the rest, after the commit.
@@ -416,9 +419,11 @@ export class Feed {
           ...(poll ? { poll } : {}),
           ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request, opts.approval.action) } : {}),
           ...(input.peopleOnly ? { peopleOnly: true as const } : {}),
+          ...(secrets.length > 0 ? { secrets: secrets.map(({ name, for: to }) => ({ name, for: to })) } : {}),
           ...stampFields(stamps),
         };
         await this.k.store.appendMessage(message);
+        await this.sealSecrets(message, secrets);
         if (raising && message.approval) await this.invocations!.raiseWithin(raising, message.approval, outbox);
         await this.k.store.refreshReplyStats(spaceId, root.id);
         await this.k.append(spaceId, offset, at, { type: 'message', message });
@@ -470,9 +475,11 @@ export class Feed {
         ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
         reactions: [],
         ...(poll ? { poll } : {}),
+        ...(secrets.length > 0 ? { secrets: secrets.map(({ name, for: to }) => ({ name, for: to })) } : {}),
         ...stampFields(stamps),
       };
       await this.k.store.appendMessage(message);
+      await this.sealSecrets(message, secrets);
       await this.k.append(spaceId, offset, at, { type: 'message', message });
       // Posting directly reads the stream up to your own message (read state, 2026-09-09).
       if (author.actingMode === 'direct') await this.k.store.advanceStreamReadMark(spaceId, ctx.memberId, offset, at);
@@ -485,6 +492,58 @@ export class Feed {
     // the notifier logs its own failures.
     if (this.notifier) void this.notifier.onMessage(space, result.message);
     return result;
+  }
+
+  /**
+   * The secrets a new message hands over, checked before anything is written
+   * (2026-11-04, "secrets card" in Main): each to an agent the message
+   * addresses (policy.ts), once per name and agent, on a Harbor that can seal,
+   * and with its value nowhere in the text everyone reads.
+   */
+  private async secretsFor(ctx: ActorCtx, space: Space, input: NewMessage, mentions: readonly string[]): Promise<NonNullable<NewMessage['secrets']>> {
+    const secrets = input.secrets ?? [];
+    if (secrets.length === 0) return [];
+    assertSealingConfigured();
+    const seen = new Set<string>();
+    for (const secret of secrets) {
+      const key = `${secret.for}/${secret.name}`;
+      if (seen.has(key)) throw new HarborError('invalid_request', `${secret.name} is handed to the same agent twice`);
+      seen.add(key);
+      const recipient = await this.k.store.getMember(secret.for);
+      enforce(canHandSecret({
+        authorId: ctx.memberId,
+        recipient,
+        inSpace: (await this.k.store.getMembership(space.id, secret.for)) !== undefined,
+        addressed: mentions.includes(secret.for) || (space.kind === 'direct' && (space.participants ?? []).includes(secret.for)),
+      }));
+      if (input.body.includes(secret.value) || input.summary?.includes(secret.value)) {
+        throw new HarborError('invalid_request', `the message's text contains the value of ${secret.name}: take it out, so only the agent sees it`);
+      }
+    }
+    return secrets;
+  }
+
+  /** Seals each value apart from the message row and the log, bound to its message, recipient and name. */
+  private async sealSecrets(message: Message, secrets: NonNullable<NewMessage['secrets']>): Promise<void> {
+    if (secrets.length === 0) return;
+    await this.k.store.putMessageSecrets(
+      message.spaceId,
+      message.id,
+      secrets.map((x) => ({ name: x.name, recipientId: x.for, sealed: seal(x.value, message.spaceId, secretBinding(message.id, x.for, x.name)) })),
+    );
+  }
+
+  /**
+   * A secret a message handed the caller (2026-11-04): only its recipient
+   * reads it, and only while it can read the space and the message stands.
+   */
+  async readMessageSecret(ctx: ActorCtx, spaceId: string, messageId: string, name: string): Promise<string> {
+    await this.k.requireReadableSpace(ctx, spaceId);
+    const message = await this.k.store.getMessage(spaceId, messageId);
+    enforce(canReadSecret(ctx.memberId, message?.secrets?.find((x) => x.name === name && x.for === ctx.memberId)));
+    const sealed = await this.k.store.getMessageSecret(spaceId, messageId, ctx.memberId, name);
+    if (!sealed) throw new HarborError('not_found', 'no such secret for you');
+    return unseal(sealed, spaceId, secretBinding(messageId, ctx.memberId, name));
   }
 
   /**
@@ -1070,4 +1129,13 @@ function foldReactions(reactions: StoredReaction[]): ReactionGroup[] {
     groups.set(r.emoji, group);
   }
   return [...groups.values()];
+}
+
+/**
+ * What a message's sealed secret is bound to beside its space (sealing.ts): a
+ * value copied to another message, recipient or name does not open. Space ids
+ * are global, so the space stands in for the org (2026-11-04).
+ */
+function secretBinding(messageId: string, recipientId: string, name: string): string {
+  return `message-secret:${messageId}:${recipientId}:${name}`;
 }

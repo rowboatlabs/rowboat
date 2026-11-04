@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SpaceKind } from './core.js';
+import { SecretName, SpaceKind } from './core.js';
 import { MemberId, MessageId, SpaceId } from './ids.js';
 
 // The agent contracts (spec §8 Invoking agent members, 2026-09-30). Every
@@ -72,7 +72,13 @@ export const Invocation = z.object({
   /** The conversation: a thread. Each connector maps it to one session of its own. */
   conversation: z.object({ spaceId: SpaceId, threadRootId: MessageId }),
   /** The message that invoked the agent. Its author is the invoker. */
-  trigger: z.object({ messageId: MessageId, authorId: MemberId, body: z.string() }),
+  trigger: z.object({
+    messageId: MessageId,
+    authorId: MemberId,
+    body: z.string(),
+    /** The secrets the message hands to this agent, by name (2026-11-04): it reads each with readMessageSecret. */
+    secrets: z.array(SecretName).optional(),
+  }),
   /** Where it happened. A DM's name is a placeholder: label it by the other member. */
   where: z.object({ spaceKind: SpaceKind, spaceName: z.string() }),
   /** Agent hand-offs that led here: 0 for a person's mention. Harbor refuses past its limit. */

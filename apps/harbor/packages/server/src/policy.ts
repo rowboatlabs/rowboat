@@ -1,4 +1,4 @@
-import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, MessageSecret, Space } from '@rowboat/spaces-protocol';
 import { BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
@@ -366,6 +366,27 @@ export function canReachPersonalAgent(actorId: string, member: Member, act: 'add
       ? `${member.displayName} is a personal agent: only its owner can add it to a space`
       : `${member.displayName} is a personal agent: only its owner can message it`,
   };
+}
+
+/**
+ * Handing a secret to an agent in a message (2026-11-04, "secrets card" in
+ * Main): only to an agent of the space the message addresses, by a mention or
+ * as the agent of a DM, and to a personal agent only by its owner, since only
+ * its owner can ask it for anything.
+ */
+export function canHandSecret(input: { authorId: string; recipient: Member | undefined; inSpace: boolean; addressed: boolean }): Decision {
+  const { recipient } = input;
+  if (!recipient || recipient.kind !== 'agent' || !input.inSpace || recipient.id === input.authorId) {
+    return { code: 'invalid_request', message: 'a secret goes to an agent in this space' };
+  }
+  if (!input.addressed) return { code: 'invalid_request', message: `mention ${recipient.displayName} in the message to hand it a secret` };
+  return canReachPersonalAgent(input.authorId, recipient, 'message');
+}
+
+/** Reading a secret is its recipient's alone, the author and admins included; anyone else finds nothing (2026-11-04). */
+export function canReadSecret(actorId: string, secret: MessageSecret | undefined): Decision {
+  if (secret && secret.for === actorId) return null;
+  return { code: 'not_found', message: 'no such secret for you' };
 }
 
 /** The agents a member manages, and so sees on the Agents screen: an admin, every one; anyone else, their own. */

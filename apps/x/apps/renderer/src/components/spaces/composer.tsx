@@ -5,7 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Clock, Eye, FileText, Loader2, LoaderIcon, Mic, Paperclip, Plus, Route, Send, ShieldCheck, Sparkles, Square, Terminal, Type, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Clock, Eye, FileText, KeyRound, Loader2, LoaderIcon, Mic, Paperclip, Plus, Route, Send, ShieldCheck, Sparkles, Square, Terminal, Type, X as XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,6 +27,8 @@ import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress, mentionedMemberIds } from '@/lib/spaces-mentions'
 import { AgentOptionsStrip, type AgentOptionValues } from '@/components/spaces/agent-options-strip'
+import { AddSecretDialog, DraftSecretChips, type DraftSecret } from '@/components/spaces/message-secrets'
+import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import { mentionsAnyone } from '@x/shared/dist/spaces.js'
 import type { AutoRouteMode } from '@/lib/spaces-auto-route'
 import { draftStorageKey } from '@/lib/spaces-thread-draft'
@@ -70,6 +72,8 @@ export interface AgentOptions {
     codeMode?: 'claude' | 'codex'
     /** Options picked for agent members the text mentions, by agent id (Harbor spec §8, 2026-09-30). */
     members?: AgentOptionValues
+    /** Secrets for agents the text addresses (Harbor spec §8, 2026-11-04): only the agent reads the value. */
+    secrets?: DraftSecret[]
 }
 
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
@@ -458,6 +462,15 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         }
     }
 
+    // Secrets waiting to go with the message (2026-11-04): held in memory only, never in the saved draft.
+    const [secrets, setSecrets] = useState<DraftSecret[]>([])
+    const [secretOpen, setSecretOpen] = useState(false)
+    const { byId: profiles } = useSpaceProfiles()
+    const memberNames = useMemberNames()
+    /** The agents a text addresses, which are the ones Harbor lets it hand a secret to. */
+    const addressedAgents = (text: string) =>
+        [...new Set([...mentionedMemberIds(text), ...(refs?.directWith ? [refs.directWith] : [])])].filter((id) => profiles.get(id)?.kind === 'agent')
+
     const hasDoneAttachment = attachments.some((a) => a.status === 'done')
     const canSend = !busy && !uploading && (!!draft.trim() || hasDoneAttachment)
 
@@ -470,8 +483,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         // A follow-up reaches its agent without a mention: its picks go with it.
         if (followUpAgentId && !mentionsAnyone(text)) mentionedIds.add(followUpAgentId)
         const members = Object.fromEntries(Object.entries(memberOptions).filter(([id]) => mentionedIds.has(id)))
+        const addressed = new Set(addressedAgents(text))
+        const handing = secrets.filter((x) => addressed.has(x.for))
         const rowboat = containsRowboatAddress(text)
-        if (!rowboat && Object.keys(members).length === 0) return undefined
+        if (!rowboat && Object.keys(members).length === 0 && handing.length === 0) return undefined
         return {
             ...(rowboat
                 ? {
@@ -482,6 +497,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                   }
                 : {}),
             ...(Object.keys(members).length > 0 ? { members } : {}),
+            ...(handing.length > 0 ? { secrets: handing } : {}),
         }
     }
 
@@ -506,6 +522,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         const m = COMMAND_RE.exec(raw)
         if (m && allCommands.some((c) => c.name === m[1]!.toLowerCase())) {
             toast('Commands run now — schedule a plain message instead', 'info')
+            return
+        }
+        if (secrets.length > 0) {
+            toast('A message with a secret is sent now — remove the secret to schedule it', 'info')
             return
         }
         const body = buildBody(raw)
@@ -547,6 +567,11 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         // buildBody, shared with send-later.
         const body = buildBody(raw)
         if (!body) return
+        const lost = secrets.filter((x) => !addressedAgents(raw).includes(x.for))
+        if (lost.length > 0) {
+            toast(`Mention ${memberNames.get(lost[0]!.for) ?? 'the agent'} to hand it ${lost[0]!.name}, or remove the secret`, 'info')
+            return
+        }
         // From the text actually going out — an /ask rewrite mentions @rowboat
         // even though the draft it came from didn't.
         let result: void | 'keep'
@@ -561,6 +586,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
+        setSecrets([])
         mention.close()
     }
 
@@ -948,8 +974,9 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             <RichFormattingToolbar editor={editor} className="spaces-formatting" />
                         </div>
                     </div>
-                    {attachments.length > 0 && (
+                    {(attachments.length > 0 || secrets.length > 0) && (
                         <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
+                            <DraftSecretChips secrets={secrets} names={memberNames} onRemove={(gone) => setSecrets((all) => all.filter((x) => x !== gone))} />
                             {attachments.map((a) => (
                                 <span
                                     key={a.id}
@@ -1017,6 +1044,15 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                             <span className="flex flex-col">
                                                 <span>Attach files</span>
                                                 <span className="text-xs text-muted-foreground">or drop them anywhere</span>
+                                            </span>
+                                        </DropdownMenuItem>
+                                    )}
+                                    {refs && (
+                                        <DropdownMenuItem onSelect={() => setSecretOpen(true)} className="items-start">
+                                            <KeyRound className="mt-0.5" />
+                                            <span className="flex flex-col">
+                                                <span>Add a secret</span>
+                                                <span className="text-xs text-muted-foreground">only the agent you mention sees it</span>
                                             </span>
                                         </DropdownMenuItem>
                                     )}
@@ -1103,6 +1139,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             </>
                         )}
                         <AgentOptionsStrip draft={draft} values={memberOptions} onChange={setMemberOptions} {...(followUpAgentId && !mentionsAnyone(draft) ? { followUpAgentId } : {})} />
+                        <AddSecretDialog open={secretOpen} onOpenChange={setSecretOpen} agents={addressedAgents(draft)} names={memberNames}
+                            onAdd={(added) => setSecrets((all) => [...all.filter((x) => x.for !== added.for || x.name !== added.name), added])} />
                         {mentioned && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />

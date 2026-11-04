@@ -13,9 +13,15 @@ import { noteInvocations } from '@/hooks/use-space-invocations'
 /** Options picked in the composer for agent members a message mentions, by agent id (Harbor spec §8, 2026-09-30). */
 export type AgentMemberOptions = Record<string, Record<string, string | boolean>>
 
-/** The post payload's share of them: nothing when none were picked. */
-export function agentOptionsPayload(agent: { members?: AgentMemberOptions } | undefined): { agentOptions?: AgentMemberOptions } {
-    return agent?.members && Object.keys(agent.members).length > 0 ? { agentOptions: agent.members } : {}
+/** A secret for an agent the message addresses (Harbor spec §8, 2026-11-04). */
+export type MessageSecretInput = { name: string; for: string; value: string }
+
+/** The post payload's share of them, and of the secrets: nothing when none were picked. */
+export function agentOptionsPayload(agent: { members?: AgentMemberOptions; secrets?: MessageSecretInput[] } | undefined): { agentOptions?: AgentMemberOptions; secrets?: MessageSecretInput[] } {
+    return {
+        ...(agent?.members && Object.keys(agent.members).length > 0 ? { agentOptions: agent.members } : {}),
+        ...(agent?.secrets && agent.secrets.length > 0 ? { secrets: agent.secrets } : {}),
+    }
 }
 
 // Posting a ROOT to a space's stream, the optimistic way (standard team-chat
@@ -25,7 +31,7 @@ export function agentOptionsPayload(agent: { members?: AgentMemberOptions } | un
 // stream instead" lands exactly what the stream composer would have. Callers
 // on a detached window snap to the tail first (jumpToLatest), or the row has
 // no tail to land on.
-export function postStreamMessage(org: OrgWithSpaces, space: spaces.Space, body: string, agent?: RowboatTurnOptions & { members?: AgentMemberOptions }): void {
+export function postStreamMessage(org: OrgWithSpaces, space: spaces.Space, body: string, agent?: RowboatTurnOptions & { members?: AgentMemberOptions; secrets?: MessageSecretInput[] }): void {
     if (!canActInSpace(org.id, space.id)) return
     const pending = buildPendingMessage(space.id, org.memberId, body)
     ingestStreamMessage(org.id, space.id, pending)
@@ -54,7 +60,7 @@ export function postInlineReply(
     space: spaces.Space,
     thread: { rootMessageId: string; label: string },
     body: string,
-    agent?: RowboatTurnOptions & { members?: AgentMemberOptions },
+    agent?: RowboatTurnOptions & { members?: AgentMemberOptions; secrets?: MessageSecretInput[] },
     peopleOnly?: boolean,
 ): void {
     if (!canActInSpace(org.id, space.id)) return

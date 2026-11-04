@@ -1,4 +1,4 @@
-import { instructionsSection, mentionToken, relabelMentions, type Invocation, type Message } from '@rowboat/spaces-protocol';
+import { instructionsSection, mentionToken, relabelMentions, secretsSection, type Invocation, type Message } from '@rowboat/spaces-protocol';
 import { downloadLine, leadingMentionOf, namingAttachments, requestMarker, standingParagraph, type Attachment } from '../thread-prompt.js';
 
 // The input the Agent37 connector sends into a thread's session (spec §8
@@ -46,6 +46,8 @@ export function buildPrompt(input: {
       ].join('\n'),
     );
   }
+  const secrets = secretsSection(input.orgUrl, invocation);
+  if (secrets) parts.push(secrets);
   parts.push(standingParagraph(input));
   parts.push(requestMarker(invocation.trigger.messageId));
   return parts.join('\n\n');

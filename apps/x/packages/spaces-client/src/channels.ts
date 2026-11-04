@@ -331,6 +331,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
         ...(args.poll ? { poll: args.poll } : {}),
         ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
         ...(args.peopleOnly ? { peopleOnly: true } : {}),
+        ...(args.secrets && args.secrets.length > 0 ? { secrets: args.secrets } : {}),
         actingMode: 'direct',
       }),
 

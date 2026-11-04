@@ -412,6 +412,10 @@ export interface Store {
   listThread(spaceId: string, rootMessageId: string, opts?: MessageWindow): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;
   appendMessage(message: Message): Promise<void>;
+  /** A message's sealed secrets (2026-11-04), written with it; the message row keeps only names and recipients. */
+  putMessageSecrets(spaceId: string, messageId: string, secrets: Array<{ name: string; recipientId: string; sealed: string }>): Promise<void>;
+  /** One sealed secret, if the message still has it. */
+  getMessageSecret(spaceId: string, messageId: string, recipientId: string, name: string): Promise<string | undefined>;
   /**
    * Recompute a root's reply denorm (replyCount = live replies, lastReplyAt =
    * newest reply, replyAuthors = who replied) from the truth. Called inside the space lock whenever a
@@ -424,7 +428,7 @@ export interface Store {
   /** The space's archived roots, newest activity first. */
   listArchivedRoots(spaceId: string): Promise<Message[]>;
   /**
-   * Tombstone: blanks the row's body and summary and sets deletedAt — and redacts the
+   * Tombstone: blanks the row's body and summary, drops its secrets (2026-11-04), and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one
    * mutation the log allows: a deleted body must be unrecoverable, replay
    * included. The message_deleted event itself is appended by the service.
