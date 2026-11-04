@@ -3,7 +3,7 @@ import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, Sc
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
+import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SizeBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
 import { HOME, useHostingState, type HostingState } from '@/components/spaces/agent-hosting-state'
 import { TerminalScreen } from '@/components/spaces/agent-terminal'
 import { AccessChoice } from '@/components/spaces/agent-access'
@@ -392,6 +392,7 @@ function HostingOverview({ orgId, agent, hosting, canManage, state, onChanged }:
             <div className="flex flex-col gap-2">
                 <ScreenHeader title="Machine" note="Rowboat created this agent on its own Maritime account and runs each turn inside its VM, with the Spaces tools. Nothing to set up." />
                 {hosting.status === 'ready' && canManage && <MachineBlock orgId={orgId} agentId={agent.id} state={state} />}
+                {hosting.status === 'ready' && canManage && hosting.billed && <SizeBlock orgId={orgId} agentId={agent.id} />}
                 <p role="status" className={`text-[11px] ${hosting.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
                     {moving && <Loader2 className="mr-1 inline size-3 animate-spin align-[-2px]" />}
                     {hostingLine(hosting, agent.displayName)}

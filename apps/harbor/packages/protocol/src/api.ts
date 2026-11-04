@@ -23,7 +23,7 @@ import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, Agent
   HostingPowerAction,
   HostingSkill,
   HostingTrigger,
-  HostingSpend, HostingUsage, LlmProvider,
+  HostingSize, HostingSpend, HostingUsage, LlmProvider,
 } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
@@ -631,6 +631,27 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     request: z.object({ action: HostingPowerAction }),
     response: z.object({ machine: HostingMachine }),
+  },
+  /**
+   * The machine's size (2026-11-04): what it has, the memory sizes the platform
+   * allows with each one's estimated monthly cost, and the disk ceiling, all
+   * read from the platform. Setting it (the owner or an admin, on an agent
+   * that bills to its owner's plan) resizes the machine and restarts it, since
+   * a new size applies on the next boot; `invalid_request` with the reason
+   * when the plan or the platform refuses.
+   */
+  getHostingSize: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/size',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ size: HostingSize }),
+  },
+  setHostingSize: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/size',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ memMb: z.number().int().positive(), diskGb: z.number().int().positive() }),
+    response: z.object({ size: HostingSize }),
   },
   /** Run one shell command on the VM, detached: the answer is the execution to read until it ends. Not a shell: nothing persists between commands. */
   runHostingCommand: {

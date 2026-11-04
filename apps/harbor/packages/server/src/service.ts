@@ -274,6 +274,13 @@ export class HarborService {
   explainHostingFailure(agentId: string, failure: string, signIn?: 'chatgpt' | 'none') {
     return this.hosting.explainFailure(agentId, failure, signIn);
   }
+  /** A managed agent's machine size, and resizing it (2026-11-04). */
+  getHostingSize(ctx: ActorCtx, agentId: string) {
+    return this.hosting.size(ctx, agentId);
+  }
+  setHostingSize(ctx: ActorCtx, agentId: string, input: { memMb: number; diskGb: number }) {
+    return this.hosting.resize(ctx, agentId, input);
+  }
   setHostingEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean) {
     return this.hosting.setEnv(ctx, agentId, key, value, secret);
   }

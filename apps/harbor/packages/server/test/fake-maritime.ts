@@ -66,6 +66,11 @@ export class FakeMaritime {
   /** What each end user's agents cost (2026-11-04, `GET /api/v1/usage`), by external id; every read is kept. */
   readonly usage = new Map<string, { hosting: number; llm: number }>();
   readonly usageReads: Array<{ externalUserId: string; from: string; to: string }> = [];
+  /** Machine sizes (2026-11-04): each managed agent's, the account's limits and the agent box's list rate, as Maritime answers them (read live on 2026-11-04). */
+  readonly sizes = new Map<string, { memMb: number; diskMb: number; vcpus: number }>();
+  limits: Record<string, unknown> = { plan: 'starter', billingModel: 'usage', minMemMb: 512, maxMemMb: 8192, maxDiskGb: 100 };
+  agentBoxCentsPerHour = 0.136986301369863;
+  readonly resizes: Array<{ agentId: string; body: Record<string, unknown> | undefined }> = [];
   /** What the next submitted turn does (a one-line Hermes answer by default). */
   nextTurn: Turn | undefined;
   /** Hold catalogue maintenance independently of turns, to exercise reply latency (2026-11-01). */
@@ -142,6 +147,13 @@ export class FakeMaritime {
     if (req.headers.authorization !== `Bearer ${GOOD_KEY}`) return send(401, { detail: 'Invalid or expired API key' });
     if (this.refuse && (!this.refuse.paths || this.refuse.paths.test(path))) return send(this.refuse.status, this.refuse.body);
 
+    if (req.method === 'GET' && path === '/api/v1/account/limits') return send(200, { includedMachines: 2, machines: this.created.size, maxAwakeMachines: 5, awakeMachines: 0, ...this.limits });
+    if (req.method === 'GET' && path === '/api/billing/machine-types') {
+      return send(200, [
+        { type: 'persistent_sandbox', label: 'Agent box', group: 'Agent boxes', available: true, reason: null, centsPerHour: this.agentBoxCentsPerHour },
+        { type: 'computer', label: 'Linux desktop', group: 'Computers on demand', available: true, reason: null, centsPerHour: 12 },
+      ]);
+    }
     if (req.method === 'GET' && path === '/api/v1/usage') {
       const externalUserId = url.searchParams.get('externalUserId') ?? '';
       this.usageReads.push({ externalUserId, from: url.searchParams.get('from') ?? '', to: url.searchParams.get('to') ?? '' });
@@ -212,7 +224,7 @@ export class FakeMaritime {
       managed.reads++;
       if (managed.status === 'deploying' && managed.reads >= 2) managed.status = 'sleeping';
       const { reads: _reads, endUser: _endUser, ...shape } = managed;
-      return send(200, shape);
+      return send(200, { ...shape, ...(this.sizes.get(managed.id) ?? { memMb: 2048, diskMb: 5120, vcpus: 1 }) });
     }
     // --- the management area (2026-10-27) ---
     const record = managed ?? this.agent;
@@ -226,6 +238,13 @@ export class FakeMaritime {
       else setStatus('active');
       const { reads: _r, endUser: _e, ...shape } = managed ?? { ...this.agent, reads: 0, endUser: '' };
       return send(200, { ...shape, tier: 'always_on' });
+    }
+    if (req.method === 'POST' && rest === 'resize') {
+      this.resizes.push({ agentId: agentId!, body });
+      if (body?.always_on) return send(400, { detail: 'Always on is not sold on usage plans', code: 'always_on_not_sold' });
+      const was = this.sizes.get(agentId!) ?? { memMb: 2048, diskMb: 5120, vcpus: 1 };
+      this.sizes.set(agentId!, { ...was, ...(typeof body?.mem_mb === 'number' ? { memMb: body.mem_mb } : {}), ...(typeof body?.disk_gb === 'number' ? { diskMb: body.disk_gb * 1024 } : {}) });
+      return send(200, { ok: true });
     }
     // Rowboat's credit: the cap that applies to the agent and its spend this period; a PUT sets the agent's own cap.
     if (rest === 'llm-spend-limit') {

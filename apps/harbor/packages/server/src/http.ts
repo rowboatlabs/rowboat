@@ -479,6 +479,15 @@ export function buildHttpApp(deps: {
     const input = await body(c, routes.hostingPower.request);
     return reply(c, routes.hostingPower.response, { machine: await service.hostingPower(actor(c), agentId, input.action) });
   });
+  app.get(routes.getHostingSize.path, async (c) => {
+    const { agentId } = parseWith(routes.getHostingSize.params, c.req.param());
+    return reply(c, routes.getHostingSize.response, { size: await service.getHostingSize(actor(c), agentId) });
+  });
+  app.put(routes.setHostingSize.path, async (c) => {
+    const { agentId } = parseWith(routes.setHostingSize.params, c.req.param());
+    const input = await body(c, routes.setHostingSize.request);
+    return reply(c, routes.setHostingSize.response, { size: await service.setHostingSize(actor(c), agentId, input) });
+  });
   app.post(routes.runHostingCommand.path, async (c) => {
     const { agentId } = parseWith(routes.runHostingCommand.params, c.req.param());
     const input = await body(c, routes.runHostingCommand.request);

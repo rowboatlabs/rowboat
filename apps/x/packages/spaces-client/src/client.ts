@@ -16,6 +16,7 @@ import {
   type HostingEnvVar,
   HostingSpend,
   HostingUsage,
+  HostingSize,
   LlmProvider,
   type HostingConsole,
   type HostingExecution,
@@ -480,6 +481,14 @@ export class SpacesClient {
   }
   async deleteHostingEnv(agentId: string, key: string): Promise<HostingEnvVar[]> {
     return (await this.request('DELETE', this.hostingPath(agentId, `/env/${encodeURIComponent(key)}`), routes.deleteHostingEnv.response)).env;
+  }
+  /** The machine's size, the platform's range and estimate (api.ts getHostingSize, 2026-11-04). */
+  async getHostingSize(agentId: string): Promise<HostingSize> {
+    return (await this.request('GET', this.hostingPath(agentId, '/size'), routes.getHostingSize.response)).size;
+  }
+  /** Resize the machine; Harbor restarts it to apply (api.ts setHostingSize). */
+  async setHostingSize(agentId: string, input: { memMb: number; diskGb: number }): Promise<HostingSize> {
+    return (await this.request('PUT', this.hostingPath(agentId, '/size'), routes.setHostingSize.response, input)).size;
   }
   async hostingPower(agentId: string, action: HostingPowerAction): Promise<HostingMachine> {
     return (await this.request('POST', this.hostingPath(agentId, '/power'), routes.hostingPower.response, { action })).machine;

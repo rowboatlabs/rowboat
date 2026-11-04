@@ -86,6 +86,7 @@ let managedKinds: string[] = []
 // Billing (2026-11-04): what the stand-in Harbor says about who pays, and what a billed agent cost this month.
 let managedBilling: { billed?: boolean; upgradeUrl?: string } = {}
 let usage: spaces.HostingUsage | undefined
+let size: spaces.HostingSize | undefined
 const hosting = (status: spaces.AgentHosting['status'], extra: Partial<spaces.AgentHosting> = {}): spaces.AgentHosting =>
     ({ provider: 'maritime', status, externalId: 'agt-m1', funding: 'trial', trial: { endsAt: '2026-11-25T10:00:00Z' }, createdBy: 'me', createdAt: '2026-10-26T10:00:00Z', updatedAt: '2026-10-26T10:00:00Z', ...extra })
 // Rowboat's credit (2026-10-27): what the stand-in Harbor says a trial agent has drawn.
@@ -119,6 +120,14 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
                 { id: 'ef56gh78ij', name: 'coder', template: 'agent37-codex', status: 'running' },
             ] }
         case 'spaces:createSetupInstance': return { instance: { id: 'zz99', name: args.name, template: 'agent37-openclaw', status: 'running', kind: 'openclaw' } }
+        case 'spaces:getHostingSize':
+            if (!size) throw new Error('no size')
+            return { size }
+        case 'spaces:setHostingSize': {
+            const a = args as unknown as { memMb: number; diskGb: number }
+            size = { ...size!, memMb: a.memMb, diskGb: a.diskGb }
+            return { size }
+        }
         case 'spaces:managedAgentKinds': return { kinds: managedKinds, ...managedBilling }
         case 'spaces:setAgentPersonal': {
             const on = (args as unknown as { personal: boolean }).personal
@@ -223,6 +232,7 @@ beforeEach(() => {
     managedKinds = []
     managedBilling = {}
     usage = undefined
+    size = undefined
     machineStatus = 'active'
     spend = { spentCents: 120, limitCents: 500, limitReached: false, periodEnd: '2026-11-01T00:00:00Z' }
     envVars = [{ key: 'PATH', secret: false, value: '/opt/hermes/bin:/usr/bin' }]
@@ -1141,6 +1151,40 @@ describe('AgentsDialog', () => {
         expect(await within(access).findByText(/\$0\.42 of machine this month/)).toBeInTheDocument()
         fireEvent.click(within(access).getByRole('button', { name: 'Use your own key' }))
         expect(screen.getByText(/not your Rowboat credits/)).toBeInTheDocument()
+    })
+
+    it('a billed agent’s Size shows Maritime’s options with their estimates, and resizes on a paid plan (2026-11-04)', async () => {
+        listing = [{ agent: jarvis, keys: [key('k8', 'jv')], hosting: hosting('ready', { funding: 'credits', billed: true }) }]
+        spend = undefined
+        size = { memMb: 2048, diskGb: 5, vcpus: 1, maxDiskGb: 100, resizable: true, memOptions: [{ memMb: 2048, centsPerMonth: 100 }, { memMb: 4096, centsPerMonth: 200 }, { memMb: 8192, centsPerMonth: 400 }] }
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Jarvis/ }))
+        const group = await screen.findByRole('group', { name: 'Size' })
+        const memory = within(group).getByRole('radiogroup', { name: 'Memory' })
+        expect(within(memory).getAllByRole('radio').map((r) => r.textContent)).toEqual(['2 GB~$1.00/mo', '4 GB~$2.00/mo', '8 GB~$4.00/mo'])
+        const apply = within(group).getByRole('button', { name: 'Apply and restart' })
+        expect(apply).toBeDisabled()
+        fireEvent.click(within(memory).getByRole('radio', { name: /4 GB/ }))
+        fireEvent.change(within(group).getByLabelText('Disk in GB'), { target: { value: '20' } })
+        fireEvent.click(apply)
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setHostingSize', { orgId: 'org-1', agentId: 'jv', memMb: 4096, diskGb: 20 }))
+        expect(within(memory).getByRole('radio', { name: /4 GB/ })).toHaveAttribute('aria-checked', 'true')
+    })
+
+    it('on the free plan, Size says why it stays small and offers the upgrade', async () => {
+        listing = [{ agent: jarvis, keys: [key('k8', 'jv')], hosting: hosting('ready', { funding: 'credits', billed: true }) }]
+        spend = undefined
+        size = { memMb: 2048, diskGb: 5, resizable: false, reason: 'The free plan runs agents on the smallest machine. Upgrade for a bigger one.', upgradeUrl: 'https://app.rowboat.test?intent=upgrade', memOptions: [{ memMb: 2048, centsPerMonth: 100 }, { memMb: 4096, centsPerMonth: 200 }] }
+        const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Jarvis/ }))
+        const group = await screen.findByRole('group', { name: 'Size' })
+        expect(within(group).getByText(/free plan runs agents on the smallest machine/)).toBeInTheDocument()
+        expect(within(group).getByRole('radio', { name: /4 GB/ })).toBeDisabled()
+        expect(within(group).queryByRole('button', { name: 'Apply and restart' })).toBeNull()
+        fireEvent.click(within(group).getByRole('button', { name: 'Upgrade' }))
+        expect(open).toHaveBeenCalledWith('https://app.rowboat.test?intent=upgrade')
+        open.mockRestore()
     })
 
     it('a trial at its cap says so in red, with the same way out; a member without the agent sees why it is silent', async () => {
