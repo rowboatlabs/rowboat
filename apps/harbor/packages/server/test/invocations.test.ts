@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { routes, type Invocation, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
+import { AGENT_HOP_LIMIT } from '../src/policy.js';
 import type { RunningHarbor } from '../src/server.js';
 import { agentClient, liveClient, restClient, startTestHarbor, type LiveClient } from './helpers.js';
 
@@ -354,8 +355,8 @@ describe('who may invoke', () => {
     await hermes.report(allowed.id, { state: 'done' });
   });
 
-  it('lets agents hand work on three hops deep, then refuses the fourth', async () => {
-    const chain = await Promise.all(['A', 'B', 'C', 'D', 'E'].map(async (n) => {
+  it('lets agents hand work on up to the hop limit, then refuses the next', async () => {
+    const chain = await Promise.all(Array.from({ length: AGENT_HOP_LIMIT + 2 }, async (_, n) => {
       const { agent, key } = await addAgent('harsh', `Agent ${n}`);
       return Connector.start(agent, key);
     }));
@@ -363,7 +364,7 @@ describe('who may invoke', () => {
       const start = await post('dev-harsh', `${mention(chain[0]!.agent)} start`);
       const root = start.message.id;
       let invocation = start.invocations[0]!;
-      for (let hop = 0; hop < 4; hop += 1) {
+      for (let hop = 0; hop <= AGENT_HOP_LIMIT; hop += 1) {
         await chain[hop]!.ack(invocation.id);
         const handOff = await post(chain[hop]!.key, `${mention(chain[hop + 1]!.agent)} over to you`, { threadRoot: root });
         invocation = handOff.invocations[0]!;

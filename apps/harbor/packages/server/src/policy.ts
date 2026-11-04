@@ -396,8 +396,14 @@ export function agentsManagedBy(actor: Member): 'all' | 'owned' {
 
 // --- invoking agent members (spec §8 Invoking agent members, 2026-09-30) -----
 
-/** How many agent hand-offs may lead to an invocation. A person's mention is depth 0. */
-export const AGENT_HOP_LIMIT = 3;
+/**
+ * How many agent hand-offs may lead to an invocation. A person's mention is
+ * depth 0. Raised from 3 to 20 (2026-11-04, Arjun): agents working together in
+ * one thread ran out of hand-offs mid-review. The cap still ends a loop of
+ * agents mentioning each other; a guard against ping-pong is not built
+ * until loops show up.
+ */
+export const AGENT_HOP_LIMIT = 20;
 
 /**
  * Whether a mention may invoke an agent, or why not. A personal agent answers
