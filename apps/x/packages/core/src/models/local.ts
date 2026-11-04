@@ -1,4 +1,5 @@
 import { wrapLanguageModel, type LanguageModel } from "ai";
+import { LanguageModelV4Middleware, type JSONSchema7 } from "@ai-sdk/provider";
 import type { z } from "zod";
 import type { LlmProvider } from "@x/shared/dist/models.js";
 
@@ -171,3 +172,79 @@ export function makeOllamaThinkFetch(
         return res.ok ? res : rewrapErrorResponse(res);
     };
 }
+
+/**
+ * GBNF (used by llama.cpp for constrained decoding) does not support PCRE
+ * shorthand character classes (\d, \w, \s, \b, etc.). This function recursively
+ * sanitizes a JSON Schema by replacing PCRE shorthands in `pattern` properties
+ * with GBNF-safe equivalents.
+ *
+ * Replacements:
+ *   \d  -> [0-9]
+ *   \D  -> [^0-9]
+ *   \w  -> [A-Za-z0-9_]
+ *   \W  -> [^A-Za-z0-9_]
+ *   \s  -> [ \t\n\r]
+ *   \S  -> [^ \t\n\r]
+ *   \b  -> (removed - word boundary not representable in GBNF)
+ *   \B  -> (removed - non-word boundary not representable in GBNF)
+ */
+export function sanitizePatternsForGBNF(schema: unknown): unknown {
+    if (schema === null || typeof schema !== "object") {
+        return schema;
+    }
+
+    if (Array.isArray(schema)) {
+        return schema.map((item) => sanitizePatternsForGBNF(item));
+    }
+
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+        if (key === "pattern" && typeof value === "string") {
+            let sanitized = value;
+            sanitized = sanitized.replace(/\\d/g, "[0-9]");
+            sanitized = sanitized.replace(/\\D/g, "[^0-9]");
+            sanitized = sanitized.replace(/\\w/g, "[A-Za-z0-9_]");
+            sanitized = sanitized.replace(/\\W/g, "[^A-Za-z0-9_]");
+            sanitized = sanitized.replace(/\\s/g, "[ \\t\\n\\r]");
+            sanitized = sanitized.replace(/\\S/g, "[^ \\t\\n\\r]");
+            sanitized = sanitized.replace(/\\b/g, "");
+            sanitized = sanitized.replace(/\\B/g, "");
+            result[key] = sanitized;
+        } else {
+            result[key] = sanitizePatternsForGBNF(value);
+        }
+    }
+    return result;
+}
+
+/**
+ * Middleware to sanitize tool schemas for llama.cpp-backed OpenAI-compatible
+ * endpoints (e.g., LM Studio). Applied via wrapLanguageModel so every request
+ * with tools gets its JSON Schema patterns sanitized before being sent.
+ */
+export const gbnfPatternSanitizerMiddleware: LanguageModelV4Middleware = {
+    specificationVersion: "v4" as const,
+    transformParams: async ({ params }) => {
+        if (!params.tools || !Array.isArray(params.tools)) {
+            return params;
+        }
+
+        const sanitizedTools = params.tools.map((tool) => {
+            // Tool has inputSchema property (not parameters)
+            const toolWithSchema = tool as Record<string, unknown>;
+            if (!toolWithSchema.inputSchema || typeof toolWithSchema.inputSchema !== "object") {
+                return tool;
+            }
+            return {
+                ...tool,
+                inputSchema: sanitizePatternsForGBNF(toolWithSchema.inputSchema) as JSONSchema7,
+            };
+        });
+
+        return {
+            ...params,
+            tools: sanitizedTools,
+        };
+    },
+};
