@@ -21,6 +21,7 @@ import { EmojiPickerPopover } from '@/components/spaces/emoji-picker'
 import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
 import { ApprovalCard } from '@/components/spaces/approval-card'
 import { PollCard } from '@/components/spaces/poll-card'
+import { MessageSecretsCard } from '@/components/spaces/message-secrets'
 import { SpaceMarkdown, useSpaceRefs } from '@/components/spaces/space-markdown'
 import { isLongBody } from '@/lib/spaces-conventions'
 import { frequentEmoji, noteEmojiUsed } from '@/lib/emoji-data'
@@ -461,6 +462,7 @@ function MessageRowImpl({
                         {!collapsed && <MessageLinkPreview body={message.body} messageId={message.id} />}
                     </div>
                 )}
+                {!deleted && <MessageSecretsCard orgId={orgId} message={message} memberNames={memberNames} selfMemberId={selfMemberId} />}
                 {message.failed && (
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-destructive">
                         <span>Failed to send</span>

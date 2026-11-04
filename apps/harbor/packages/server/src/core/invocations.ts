@@ -122,11 +122,18 @@ export class Invocations {
       const now = this.k.now();
       // The owner's defaults fill what the invoker did not pick: a mention, a DM, an agent's hand-off alike.
       const options = { ...(await this.defaultsFor(agentId)), ...agentOptions?.[agentId] };
+      const secrets = message.secrets?.readers.includes(agentId) ? message.secrets.names : [];
       const invocation: Invocation = {
         id: this.k.ulid(),
         agentId,
         conversation: { spaceId: space.id, threadRootId },
-        trigger: { messageId: message.id, authorId: message.author.memberId, body: message.body },
+        trigger: {
+          messageId: message.id,
+          authorId: message.author.memberId,
+          body: message.body,
+          // Names only: the agent reads each value on its own key (2026-11-04).
+          ...(secrets.length > 0 ? { secrets } : {}),
+        },
         where: { spaceKind: space.kind, spaceName: space.name },
         depth,
         ...(options && Object.keys(options).length > 0 ? { options } : {}),

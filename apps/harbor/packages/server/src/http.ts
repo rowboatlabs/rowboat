@@ -935,6 +935,16 @@ export function buildHttpApp(deps: {
     return reply(c, routes.postMessage.response, await service.postMessage(actor(c), spaceId, input));
   });
 
+  // A secret goes to its recipient as text, never cached (2026-11-04): `curl` puts it straight where it is used.
+  app.get('/v1/spaces/:spaceId/messages/:messageId/secrets/:name', async (c) => {
+    const { spaceId, messageId, name } = parseWith(routes.readMessageSecret.params, c.req.param());
+    const value = await service.readMessageSecret(actor(c), spaceId, messageId, name);
+    c.header('content-type', 'text/plain; charset=utf-8');
+    c.header('cache-control', 'no-store');
+    c.header('x-content-type-options', 'nosniff');
+    return c.body(value);
+  });
+
   app.post('/v1/spaces/:spaceId/messages/:messageId/delete', async (c) => {
     const { spaceId, messageId } = parseWith(routes.deleteMessage.params, c.req.param());
     const input = await body(c, routes.deleteMessage.request);

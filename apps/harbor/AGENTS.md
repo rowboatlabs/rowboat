@@ -20,7 +20,7 @@ Two pnpm workspace packages under `packages/`:
 | `core/super-agents.ts` | super agents (spec §4 Agent members, 2026-11-02): a super agent's `create_agent` and `delete_agent`, at once, as an approval card Harbor raises on its turn and applies once its owner allows it, or as a setup card its owner completes by adding the agent with the card as `request` |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
 | `core/images.ts` | profile images: a member's avatar and the org's logo, the org-wide image registry (`org_images`) and its read gate |
-| `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill |
+| `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill, and the secrets a message shares with the members it mentions (sealed apart from the log, read only by those readers, 2026-11-04) |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
 | `service.ts` | `HarborService`, the facade: one delegate per public method, `org` / `readOnly` accessors |
 | `policy.ts` | who may do what — pure decisions over facts the core loads; `enforce` throws |
@@ -50,7 +50,7 @@ Two pnpm workspace packages under `packages/`:
 - **The log is append-only, with two named exceptions.** Message deletion and message editing redact the stored event, because replay must never resurrect the text. Nothing else edits a stored event.
 - **Migrations are append-only.** One concern per entry, never edit an applied one, arbitrary SQL is fine from 002. Generated columns belong to Postgres; code never writes them.
 - **One store driver.** Tests and `pnpm dev` run the production SQL on PGlite. Do not add an in-memory store.
-- **Parity.** Every member operation exists on both the render face and the agent face; `reason` is required on the agent face's file operations. `mcp-parity.test.ts` is where a new tool proves itself. The one exception is agent keys (2026-09-29): a secret never passes through a tool, so they are managed on the render face only.
+- **Parity.** Every member operation exists on both the render face and the agent face; `reason` is required on the agent face's file operations. `mcp-parity.test.ts` is where a new tool proves itself. The one exception is secrets (2026-09-29): a secret never passes through a tool, so agent keys are managed, and a message's secrets handed over and read (2026-11-04), on the render face only.
 - **Attribution is universal.** Every act is a member's, built by `k.attributionOf(ctx, input)`; `actingMode` records how, never who else. Author-only checks compare member ids, not modes: a member's agent counts as the member.
 - **Org-scoped everything.** Member ids are org-scoped and every member-keyed table carries `org_id`; space ids are global ULIDs, so space-keyed tables need no org column and one hub serves every org.
 - **Every space-keyed table cascades from its space (2026-10-13, migration 039, spec §6).** A new table with a `space_id` gets `foreign key (space_id) references spaces(id) on delete cascade` in the migration that creates it; `space-cascade.test.ts` fails otherwise, because deleting a space is one statement and a table without the cascade would keep rows for a space that no longer exists.
