@@ -487,7 +487,7 @@ export class SpacesClient {
     return (await this.request('GET', this.hostingPath(agentId, '/size'), routes.getHostingSize.response)).size;
   }
   /** Resize the machine; Harbor restarts it to apply (api.ts setHostingSize). */
-  async setHostingSize(agentId: string, input: { memMb: number; diskGb: number }): Promise<HostingSize> {
+  async setHostingSize(agentId: string, input: { memMb?: number; diskGb?: number; idleSeconds?: number }): Promise<HostingSize> {
     return (await this.request('PUT', this.hostingPath(agentId, '/size'), routes.setHostingSize.response, input)).size;
   }
   async hostingPower(agentId: string, action: HostingPowerAction): Promise<HostingMachine> {

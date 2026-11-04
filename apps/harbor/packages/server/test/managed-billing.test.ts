@@ -265,6 +265,8 @@ describe('managed agents on a deployment that bills', () => {
       { memMb: 6144, centsPerMonth: 300 },
       { memMb: 8192, centsPerMonth: 400 },
     ]);
+    expect(r.body.size).toMatchObject({ idleSeconds: 300, maxAwakeMachines: 5 });
+    expect(r.body.size.idleOptions).toContain(300);
     const refused = await as('dev-harsh').put(`/v1/agents/${free.id}/hosting/size`, { memMb: 4096, diskGb: 5 });
     expect(refused).toMatchObject({ status: 400, body: { message: expect.stringMatching(/free plan/) } });
     expect(fake.resizes).toHaveLength(0);
@@ -288,6 +290,16 @@ describe('managed agents on a deployment that bills', () => {
     expect(fake.power.filter((p) => p.agentId === codex.agentInstance && p.action === 'restart').length).toBe(powerBefore + 1);
     expect(await as('dev-ramnique').put(`/v1/agents/${codex.id}/hosting/size`, { memMb: 3000, diskGb: 20 })).toMatchObject({ status: 400, body: { message: expect.stringMatching(/memory must be one of/) } });
     expect(await as('dev-ramnique').put(`/v1/agents/${codex.id}/hosting/size`, { memMb: 4096, diskGb: 500 })).toMatchObject({ status: 400, body: { message: expect.stringMatching(/at most 100 GB/) } });
+    // Staying awake longer is the end user's policy, at once and with no restart; what else the policy held is kept.
+    const ref = [...fake.endUsers].find(([, rec]) => rec.agentId === codex.agentInstance)![0];
+    fake.endUsers.set(ref, { ...fake.endUsers.get(ref)!, policy: { wakes_per_hour: 60 } });
+    const restarts = fake.power.filter((p) => p.agentId === codex.agentInstance && p.action === 'restart').length;
+    const awake = await as('dev-ramnique').put(`/v1/agents/${codex.id}/hosting/size`, { idleSeconds: 3600 });
+    expect(awake.status).toBe(200);
+    expect(awake.body.size).toMatchObject({ idleSeconds: 3600, memMb: 4096 });
+    expect(fake.endUsers.get(ref)!.policy).toEqual({ wakes_per_hour: 60, idle_sleep_seconds: 3600 });
+    expect(fake.power.filter((p) => p.agentId === codex.agentInstance && p.action === 'restart').length).toBe(restarts);
+    expect(await as('dev-ramnique').put(`/v1/agents/${codex.id}/hosting/size`, { idleSeconds: 7 })).toMatchObject({ status: 400, body: { message: expect.stringMatching(/stay awake for one of/) } });
     // Someone who neither owns it nor administers the org may read nothing of it.
     expect((await as('dev-harsh').put(`/v1/agents/${codex.id}/hosting/size`, { memMb: 2048, diskGb: 20 })).status).toBe(403);
   });

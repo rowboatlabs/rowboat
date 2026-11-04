@@ -139,9 +139,11 @@ export interface HostingOps {
   /** Nothing on the platform's own model credit (2026-11-04): the agent runs on what its owner brings. */
   withoutPlatformLlm(): Promise<void>;
   /** The machine's size, the platform's range and its estimated cost per memory size (2026-11-04). */
-  size(): Promise<Omit<HostingSize, 'resizable' | 'reason' | 'upgradeUrl'>>;
+  size(): Promise<Omit<HostingSize, 'resizable' | 'reason' | 'upgradeUrl' | 'idleOptions'>>;
   /** A new size, applied by restarting the machine. */
   resize(input: { memMb: number; diskGb: number }): Promise<void>;
+  /** How long the machine stays awake after its last activity, applied at once (2026-11-04). */
+  setIdle(seconds: number): Promise<void>;
   /** A trial over with no key: the platform's cap for this agent goes to zero, for good; the platform then keeps it asleep. */
   stopFunding(): Promise<void>;
   /** The platform's cap for this agent lifted, so it may wake: for a check on an agent a closed trial holds asleep. */
@@ -198,6 +200,14 @@ const SETTLE_EVERY_MS = 60 * 60_000;
 /** A month's last hour is reported again for this long into the next month, so nothing billed at its end is missed. */
 const SETTLE_LOOKBACK_MS = 2 * 24 * 60 * 60_000;
 
+/**
+ * How long an owner may keep their agent awake after its last activity
+ * (2026-11-04): Rowboat's choice of steps, since the platform publishes none
+ * and sells no always on. An agent box costs the same awake or asleep; what an
+ * awake one holds is one of the account's awake-at-once places.
+ */
+const STAY_AWAKE_SECONDS = [5 * 60, 15 * 60, 60 * 60, 4 * 60 * 60, 8 * 60 * 60, 24 * 60 * 60];
+
 /** How long a trial lasts if nothing closes it first. */
 const TRIAL_MS = 30 * 24 * 60 * 60_000;
 
@@ -217,6 +227,11 @@ const COMMAND_TIMEOUT_S = 600;
 const CONSOLE_TTL_S = 900;
 /** The kinds whose VM has skills and triggers the platform manages (Hermes's gateway runs both). */
 const SKILLED_KINDS: ReadonlySet<string> = new Set(['hermes']);
+
+/** The stay-awake steps, with the machine's own setting among them when it is something else. */
+function idleOptions(current: number | undefined): number[] {
+  return [...new Set([...STAY_AWAKE_SECONDS, ...(current ? [current] : [])])].sort((a, b) => a - b);
+}
 
 function publicShape(row: StoredAgentHosting): AgentHosting {
   return {
@@ -685,20 +700,27 @@ export class Hosting {
   async size(ctx: ActorCtx, agentId: string): Promise<HostingSize> {
     const { row, ops } = await this.managed(ctx, agentId);
     const size = await this.platform(() => ops.size());
-    return { ...size, ...(await this.resizeRefusal(row)) };
+    return { ...size, idleOptions: idleOptions(size.idleSeconds), ...(await this.resizeRefusal(row)) };
   }
 
   /** Resize the machine (2026-11-04): within the platform's range and the owner's plan; it restarts to apply. */
-  async resize(ctx: ActorCtx, agentId: string, input: { memMb: number; diskGb: number }): Promise<HostingSize> {
+  async resize(ctx: ActorCtx, agentId: string, input: { memMb?: number; diskGb?: number; idleSeconds?: number }): Promise<HostingSize> {
     const { row, ops } = await this.managed(ctx, agentId);
     const current = await this.platform(() => ops.size());
     const refusal = await this.resizeRefusal(row);
     if (!refusal.resizable) throw new HarborError('invalid_request', refusal.reason ?? 'this agent cannot be resized');
-    if (!current.memOptions.some((o) => o.memMb === input.memMb)) throw new HarborError('invalid_request', `memory must be one of ${current.memOptions.map((o) => `${o.memMb} MB`).join(', ')}`);
-    if (current.maxDiskGb !== undefined && input.diskGb > current.maxDiskGb) throw new HarborError('invalid_request', `disk can be at most ${current.maxDiskGb} GB`);
+    const memMb = input.memMb ?? current.memMb;
+    const diskGb = input.diskGb ?? current.diskGb;
+    const sizing = (input.memMb !== undefined && input.memMb !== current.memMb) || (input.diskGb !== undefined && input.diskGb !== current.diskGb);
+    if (sizing && (memMb === undefined || diskGb === undefined)) throw new HarborError('invalid_request', 'the platform did not say the machine’s size; name both memory and disk');
+    if (sizing && !current.memOptions.some((o) => o.memMb === memMb)) throw new HarborError('invalid_request', `memory must be one of ${current.memOptions.map((o) => `${o.memMb} MB`).join(', ')}`);
+    if (sizing && current.maxDiskGb !== undefined && diskGb! > current.maxDiskGb) throw new HarborError('invalid_request', `disk can be at most ${current.maxDiskGb} GB`);
+    if (input.idleSeconds !== undefined && !idleOptions(current.idleSeconds).includes(input.idleSeconds)) throw new HarborError('invalid_request', `stay awake for one of ${idleOptions(current.idleSeconds).join(', ')} seconds`);
     this.k.guardWrite();
-    await this.platform(() => ops.resize(input));
-    return { ...(await this.platform(() => ops.size())), ...refusal };
+    if (input.idleSeconds !== undefined && input.idleSeconds !== current.idleSeconds) await this.platform(() => ops.setIdle(input.idleSeconds!));
+    if (sizing) await this.platform(() => ops.resize({ memMb: memMb!, diskGb: diskGb! }));
+    const after = await this.platform(() => ops.size());
+    return { ...after, idleOptions: idleOptions(after.idleSeconds), ...refusal };
   }
 
   private async resizeRefusal(row: StoredAgentHosting): Promise<Pick<HostingSize, 'resizable' | 'reason' | 'upgradeUrl'>> {
@@ -706,7 +728,7 @@ export class Hosting {
     const plan = await this.billing.planOf(row.billingCustomer).catch(() => undefined);
     if (plan === undefined || plan === 'free') {
       const upgradeUrl = await this.billing.upgradeUrl();
-      return { resizable: false, reason: 'The free plan runs agents on the smallest machine. Upgrade for a bigger one.', ...(upgradeUrl ? { upgradeUrl } : {}) };
+      return { resizable: false, reason: 'The free plan runs agents on the smallest machine, asleep soon after each turn. Upgrade for a bigger one that stays awake longer.', ...(upgradeUrl ? { upgradeUrl } : {}) };
     }
     return { resizable: true };
   }

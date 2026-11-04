@@ -637,8 +637,9 @@ export const routes = {
    * allows with each one's estimated monthly cost, and the disk ceiling, all
    * read from the platform. Setting it (the owner or an admin, on an agent
    * that bills to its owner's plan) resizes the machine and restarts it, since
-   * a new size applies on the next boot; `invalid_request` with the reason
-   * when the plan or the platform refuses.
+   * a new size applies on the next boot; `idleSeconds` alone (2026-11-04) sets
+   * how long it stays awake, at once, with no restart. `invalid_request` with
+   * the reason when the plan or the platform refuses.
    */
   getHostingSize: {
     method: 'GET',
@@ -650,7 +651,7 @@ export const routes = {
     method: 'PUT',
     path: '/v1/agents/:agentId/hosting/size',
     params: z.object({ agentId: MemberId }),
-    request: z.object({ memMb: z.number().int().positive(), diskGb: z.number().int().positive() }),
+    request: z.object({ memMb: z.number().int().positive().optional(), diskGb: z.number().int().positive().optional(), idleSeconds: z.number().int().positive().optional() }),
     response: z.object({ size: HostingSize }),
   },
   /** Run one shell command on the VM, detached: the answer is the execution to read until it ends. Not a shell: nothing persists between commands. */

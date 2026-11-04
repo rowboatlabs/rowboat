@@ -124,8 +124,8 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
             if (!size) throw new Error('no size')
             return { size }
         case 'spaces:setHostingSize': {
-            const a = args as unknown as { memMb: number; diskGb: number }
-            size = { ...size!, memMb: a.memMb, diskGb: a.diskGb }
+            const a = args as unknown as { memMb?: number; diskGb?: number; idleSeconds?: number }
+            size = { ...size!, ...(a.memMb !== undefined ? { memMb: a.memMb } : {}), ...(a.diskGb !== undefined ? { diskGb: a.diskGb } : {}), ...(a.idleSeconds !== undefined ? { idleSeconds: a.idleSeconds } : {}) }
             return { size }
         }
         case 'spaces:managedAgentKinds': return { kinds: managedKinds, ...managedBilling }
@@ -1156,7 +1156,7 @@ describe('AgentsDialog', () => {
     it('a billed agent’s Size shows Maritime’s options with their estimates, and resizes on a paid plan (2026-11-04)', async () => {
         listing = [{ agent: jarvis, keys: [key('k8', 'jv')], hosting: hosting('ready', { funding: 'credits', billed: true }) }]
         spend = undefined
-        size = { memMb: 2048, diskGb: 5, vcpus: 1, maxDiskGb: 100, resizable: true, memOptions: [{ memMb: 2048, centsPerMonth: 100 }, { memMb: 4096, centsPerMonth: 200 }, { memMb: 8192, centsPerMonth: 400 }] }
+        size = { memMb: 2048, diskGb: 5, vcpus: 1, maxDiskGb: 100, resizable: true, idleSeconds: 300, idleOptions: [300, 3600, 28800], maxAwakeMachines: 5, memOptions: [{ memMb: 2048, centsPerMonth: 100 }, { memMb: 4096, centsPerMonth: 200 }, { memMb: 8192, centsPerMonth: 400 }] }
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         fireEvent.click(await screen.findByRole('button', { name: /Jarvis/ }))
         const group = await screen.findByRole('group', { name: 'Size' })
@@ -1169,18 +1169,26 @@ describe('AgentsDialog', () => {
         fireEvent.click(apply)
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setHostingSize', { orgId: 'org-1', agentId: 'jv', memMb: 4096, diskGb: 20 }))
         expect(within(memory).getByRole('radio', { name: /4 GB/ })).toHaveAttribute('aria-checked', 'true')
+        // Stay awake applies on its own, with no restart: no memory or disk travels with it.
+        const awake = within(group).getByRole('combobox', { name: 'Stay awake for' })
+        expect(within(awake).getAllByRole('option').map((o) => o.textContent)).toEqual(['5 minutes', '1 hour', '8 hours'])
+        expect(within(group).getByText(/at most 5 agents awake at once/)).toBeInTheDocument()
+        fireEvent.change(awake, { target: { value: '3600' } })
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setHostingSize', { orgId: 'org-1', agentId: 'jv', idleSeconds: 3600 }))
+        await waitFor(() => expect(awake).toHaveValue('3600'))
     })
 
     it('on the free plan, Size says why it stays small and offers the upgrade', async () => {
         listing = [{ agent: jarvis, keys: [key('k8', 'jv')], hosting: hosting('ready', { funding: 'credits', billed: true }) }]
         spend = undefined
-        size = { memMb: 2048, diskGb: 5, resizable: false, reason: 'The free plan runs agents on the smallest machine. Upgrade for a bigger one.', upgradeUrl: 'https://app.rowboat.test?intent=upgrade', memOptions: [{ memMb: 2048, centsPerMonth: 100 }, { memMb: 4096, centsPerMonth: 200 }] }
+        size = { memMb: 2048, diskGb: 5, idleSeconds: 300, idleOptions: [300, 3600], resizable: false, reason: 'The free plan runs agents on the smallest machine. Upgrade for a bigger one.', upgradeUrl: 'https://app.rowboat.test?intent=upgrade', memOptions: [{ memMb: 2048, centsPerMonth: 100 }, { memMb: 4096, centsPerMonth: 200 }] }
         const open = vi.spyOn(window, 'open').mockImplementation(() => null)
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         fireEvent.click(await screen.findByRole('button', { name: /Jarvis/ }))
         const group = await screen.findByRole('group', { name: 'Size' })
         expect(within(group).getByText(/free plan runs agents on the smallest machine/)).toBeInTheDocument()
         expect(within(group).getByRole('radio', { name: /4 GB/ })).toBeDisabled()
+        expect(within(group).getByRole('combobox', { name: 'Stay awake for' })).toBeDisabled()
         expect(within(group).queryByRole('button', { name: 'Apply and restart' })).toBeNull()
         fireEvent.click(within(group).getByRole('button', { name: 'Upgrade' }))
         expect(open).toHaveBeenCalledWith('https://app.rowboat.test?intent=upgrade')

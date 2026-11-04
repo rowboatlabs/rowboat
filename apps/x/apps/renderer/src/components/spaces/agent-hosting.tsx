@@ -66,6 +66,7 @@ export function MachineBlock({ orgId, agentId, state }: { orgId: string; agentId
 
 const gb = (memMb: number) => `${Number.isInteger(memMb / 1024) ? memMb / 1024 : (memMb / 1024).toFixed(1)} GB`
 const perMonth = (cents: number) => `~$${(cents / 100).toFixed(2)}/mo`
+const duration = (seconds: number) => (seconds % 3600 === 0 ? `${seconds / 3600} hour${seconds === 3600 ? '' : 's'}` : seconds % 60 === 0 ? `${seconds / 60} minutes` : `${seconds} seconds`)
 
 /**
  * The machine's size (2026-11-04): memory and disk within what Maritime
@@ -78,6 +79,7 @@ export function SizeBlock({ orgId, agentId }: { orgId: string; agentId: string }
     const [memMb, setMemMb] = useState<number | undefined>(undefined)
     const [diskGb, setDiskGb] = useState('')
     const [busy, setBusy] = useState(false)
+    const [idleBusy, setIdleBusy] = useState(false)
     const show = useCallback((s: spaces.HostingSize) => {
         setSize(s)
         setMemMb(s.memMb ?? s.memOptions[0]?.memMb)
@@ -102,6 +104,18 @@ export function SizeBlock({ orgId, agentId }: { orgId: string; agentId: string }
             fail(err, 'Could not resize')
         } finally {
             setBusy(false)
+        }
+    }
+    // Stay awake (2026-11-04): applied at once, no restart; Maritime sells no always on.
+    const stayAwake = async (idleSeconds: number) => {
+        setIdleBusy(true)
+        try {
+            show((await window.ipc.invoke('spaces:setHostingSize', { orgId, agentId, idleSeconds })).size)
+            toast(`Stays awake ${duration(idleSeconds)} after each turn`, 'success')
+        } catch (err) {
+            fail(err, 'Could not change how long it stays awake')
+        } finally {
+            setIdleBusy(false)
         }
     }
     return (
@@ -130,6 +144,24 @@ export function SizeBlock({ orgId, agentId }: { orgId: string; agentId: string }
                 Disk
                 <Input type="number" min={1} {...(size.maxDiskGb !== undefined ? { max: size.maxDiskGb } : {})} value={diskGb} disabled={!size.resizable || busy} onChange={(e) => setDiskGb(e.target.value)} aria-label="Disk in GB" className="h-8 w-20 text-xs" />
                 <span className="text-muted-foreground">GB{size.maxDiskGb !== undefined ? ` (up to ${size.maxDiskGb})` : ''}</span>
+            </label>
+            <label className="flex flex-wrap items-center gap-2 text-xs text-foreground">
+                Stay awake for
+                <select
+                    aria-label="Stay awake for"
+                    value={size.idleSeconds ?? ''}
+                    disabled={!size.resizable || idleBusy}
+                    onChange={(e) => void stayAwake(Number(e.target.value))}
+                    className="h-8 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-60"
+                >
+                    {size.idleSeconds === undefined && <option value="">Maritime's default</option>}
+                    {size.idleOptions.map((s) => (
+                        <option key={s} value={s}>{duration(s)}</option>
+                    ))}
+                </select>
+                <span className="text-muted-foreground">
+                    after each turn, then it sleeps and wakes on the next mention. No extra cost{size.maxAwakeMachines !== undefined ? `; Rowboat runs at most ${size.maxAwakeMachines} agents awake at once` : ''}.
+                </span>
             </label>
             {size.resizable ? (
                 <div className="flex items-center justify-between gap-2">

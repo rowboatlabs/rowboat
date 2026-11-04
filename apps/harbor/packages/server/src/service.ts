@@ -278,7 +278,7 @@ export class HarborService {
   getHostingSize(ctx: ActorCtx, agentId: string) {
     return this.hosting.size(ctx, agentId);
   }
-  setHostingSize(ctx: ActorCtx, agentId: string, input: { memMb: number; diskGb: number }) {
+  setHostingSize(ctx: ActorCtx, agentId: string, input: { memMb?: number; diskGb?: number; idleSeconds?: number }) {
     return this.hosting.resize(ctx, agentId, input);
   }
   setHostingEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean) {

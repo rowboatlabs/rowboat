@@ -166,7 +166,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:setHostingEnv': async (args) => ({ env: await getClient(args.orgId).setHostingEnv(args.agentId, args.key, args.value, args.secret ?? false) }),
     'spaces:deleteHostingEnv': async (args) => ({ env: await getClient(args.orgId).deleteHostingEnv(args.agentId, args.key) }),
     'spaces:getHostingSize': async (args) => ({ size: await getClient(args.orgId).getHostingSize(args.agentId) }),
-    'spaces:setHostingSize': async (args) => ({ size: await getClient(args.orgId).setHostingSize(args.agentId, { memMb: args.memMb, diskGb: args.diskGb }) }),
+    'spaces:setHostingSize': async (args) => ({ size: await getClient(args.orgId).setHostingSize(args.agentId, { ...(args.memMb !== undefined ? { memMb: args.memMb } : {}), ...(args.diskGb !== undefined ? { diskGb: args.diskGb } : {}), ...(args.idleSeconds !== undefined ? { idleSeconds: args.idleSeconds } : {}) }) }),
     'spaces:hostingPower': async (args) => ({ machine: await getClient(args.orgId).hostingPower(args.agentId, args.action) }),
     'spaces:runHostingCommand': async (args) => ({ execution: await getClient(args.orgId).runHostingCommand(args.agentId, args.command, args.timeoutSeconds) }),
     'spaces:getHostingCommand': async (args) => ({ execution: await getClient(args.orgId).getHostingCommand(args.agentId, args.executionId) }),
