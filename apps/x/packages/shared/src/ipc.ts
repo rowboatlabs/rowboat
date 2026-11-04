@@ -4251,7 +4251,7 @@ export const ipcSchemas = {
   'spaces:listOrgMembers': {
     req: z.object({ orgId: z.string() }),
     // `online`: the agents connected now (local agents, 2026-10-28); absent from older servers.
-    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()), online: z.array(z.string()).optional() }),
+    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()), online: z.array(z.string()).optional(), onlinePeople: z.array(z.string()).optional() }),
   },
   // An invite to the org (2026-10-19): it lists spaces the caller is in, or
   // none, and accepting also joins the org's default spaces.

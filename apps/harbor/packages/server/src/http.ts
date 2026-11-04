@@ -331,7 +331,7 @@ export function buildHttpApp(deps: {
 
   app.get(routes.listOrgMembers.path, async (c) => {
     const members = await service.listOrgMembers(actor(c));
-    return reply(c, routes.listOrgMembers.response, { members, online: service.onlineAgents(members) });
+    return reply(c, routes.listOrgMembers.response, { members, online: service.onlineAgents(members), onlinePeople: service.onlinePeople(members) });
   });
 
   app.post('/v1/spaces/:spaceId/leave', async (c) => {

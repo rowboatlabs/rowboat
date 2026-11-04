@@ -243,3 +243,17 @@ it('delivers profile updates on the member channel without a space subscription'
   off();
   live.close();
 });
+
+it('delivers human presence without a space subscription', async () => {
+  const live = makeLive();
+  const handler = vi.fn();
+  const off = live.onMemberFrame(handler);
+  await settle();
+  const socket = FakeWebSocket.instances[0]!;
+  socket.open();
+  const frame = { kind: 'member_presence', memberId: 'person', online: true, at: new Date().toISOString() };
+  socket.emit('message', { data: JSON.stringify(frame) });
+  expect(handler).toHaveBeenCalledWith(frame);
+  off();
+  live.close();
+});

@@ -149,6 +149,7 @@ async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promis
         lastLoadedAt.set(k, Date.now())
         if (!membersDirty.has(k)) setMembers(k, res.members)
         if (res.online) setAgentsOnline(orgId, res.online)
+        if (!membersDirty.has(k)) setPeopleOnline(orgId, res.onlinePeople ?? [])
     } catch {
         // Org unreachable, or an older org without the route: the per-space
         // rosters the app has already fetched stand in for the directory.
@@ -303,4 +304,33 @@ export function useAgentsOnline(orgId: string): ReadonlySet<string> | null {
 /** Whether a local agent is offline: its owner's computer isn't running it now. False when unknown. */
 export function isAgentOffline(member: Pick<spaces.Member, 'id' | 'kind' | 'agentConnection'>, online: ReadonlySet<string> | null): boolean {
     return member.kind === 'agent' && member.agentConnection === 'local' && online !== null && !online.has(member.id)
+}
+
+// Human online dots use org connections, independent of the space being viewed (2026-11-04).
+let peopleOnlineState: ReadonlyMap<string, ReadonlySet<string>> = new Map()
+const peopleOnlineListeners = new Set<() => void>()
+const EMPTY_ONLINE: ReadonlySet<string> = new Set()
+
+function setPeopleOnline(orgId: string, ids: readonly string[]): void {
+    peopleOnlineState = new Map(peopleOnlineState).set(orgId, new Set(ids))
+    for (const listener of peopleOnlineListeners) listener()
+}
+
+export function applyMemberPresence(orgId: string, memberId: string, online: boolean): void {
+    if (membersLoading.has(orgKey(orgId))) membersDirty.add(orgKey(orgId))
+    const next = new Set(peopleOnlineState.get(orgId) ?? [])
+    if (online) next.add(memberId)
+    else next.delete(memberId)
+    setPeopleOnline(orgId, [...next])
+}
+
+export function usePeopleOnline(orgId: string): ReadonlySet<string> {
+    const state = useSyncExternalStore(
+        (listener) => {
+            peopleOnlineListeners.add(listener)
+            return () => peopleOnlineListeners.delete(listener)
+        },
+        () => peopleOnlineState,
+    )
+    return state.get(orgId) ?? EMPTY_ONLINE
 }

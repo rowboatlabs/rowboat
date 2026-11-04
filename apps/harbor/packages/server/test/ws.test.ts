@@ -84,7 +84,7 @@ describe('live face', () => {
     client.send({ kind: 'subscribe', spaceId, afterOffset: 0 });
     await client.until((fs) => eventFrames(fs).length >= 3, 'replay of seeded events');
 
-    expect(client.frames[0]).toMatchObject({ kind: 'subscribed', spaceId, fromOffset: 0 });
+    expect(client.frames.filter(f => 'spaceId' in f && f.spaceId === spaceId)[0]).toMatchObject({ kind: 'subscribed', spaceId, fromOffset: 0 });
     const events = eventFrames(client.frames);
     // Seed produced: ramnique joined, gagan joined, then the README change —
     // the stream is not an object, so nothing else is born with a space.
@@ -97,7 +97,7 @@ describe('live face', () => {
     const client = await connect('dev-ramnique');
     client.send({ kind: 'subscribe', spaceId });
     await client.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'subscribed ack');
-    const head = (client.frames[0] as Extract<ServerFrame, { kind: 'subscribed' }>).fromOffset;
+    const head = client.frames.find((f): f is Extract<ServerFrame, { kind: 'subscribed' }> => f.kind === 'subscribed')!.fromOffset;
     expect(head).toBeGreaterThanOrEqual(2);
     expect(eventFrames(client.frames)).toHaveLength(0);
 

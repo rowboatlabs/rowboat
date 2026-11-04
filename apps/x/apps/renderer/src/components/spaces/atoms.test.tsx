@@ -51,3 +51,12 @@ describe('agent marking', () => {
         expect(screen.getByText('Agent')).toBeInTheDocument()
     })
 })
+
+it('shows an accessible green dot only while online, retaining the avatar', () => {
+    const { rerender } = render(<MemberAvatar id={ram.id} name="Ramnique" size="sm" online />)
+    expect(screen.getByRole('img', { name: 'Online' })).toHaveClass('bg-emerald-500')
+    expect(screen.getByTitle('Ramnique')).toBeInTheDocument()
+    rerender(<MemberAvatar id={ram.id} name="Ramnique" size="sm" online={false} />)
+    expect(screen.queryByRole('img', { name: 'Online' })).toBeNull()
+    expect(screen.getByTitle('Ramnique')).toBeInTheDocument()
+})

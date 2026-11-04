@@ -450,6 +450,10 @@ export class HarborService {
     return this.spaces.listOrgMembers(ctx);
   }
   /** Of these members, the agents whose connector is connected now (local agents, 2026-10-28). */
+  onlinePeople(members: readonly Member[]): string[] {
+    return this.presence.onlinePeople(members);
+  }
+
   onlineAgents(members: readonly Member[]): string[] {
     return this.presence.online(members);
   }

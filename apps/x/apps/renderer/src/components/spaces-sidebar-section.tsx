@@ -22,7 +22,7 @@ import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { InviteDialog } from '@/components/spaces/invite-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
-import { prefetchMembers, useOrgRoster, useSelfDisplayName } from '@/hooks/use-space-members'
+import { prefetchMembers, useOrgRoster, useSelfDisplayName, usePeopleOnline } from '@/hooks/use-space-members'
 import { canInvite, useOrgSettings } from '@/hooks/use-org-settings'
 import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import type { RailSelection } from '@/lib/spaces-selection'
@@ -145,6 +145,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
     // Under an admins-only invite policy (2026-10-19) a member's invite is refused, so Invite hides.
     const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
     const profileRoster = useOrgRoster(org.id, orgSpaceIds)
+    const peopleOnline = usePeopleOnline(org.id)
     const selfIsAdmin = profileRoster.find((m) => m.id === org.memberId)?.role === 'admin'
     const mayInvite = canInvite(useOrgSettings(org.id), selfIsAdmin)
     // A dead OAuth session shows as a gentle "Sign in again" (org.authError, from core);
@@ -420,7 +421,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                                     }}
                                     className="spaces-rail-row"
                                 >
-                                    <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === other)?.avatarUrl} id={other} name={label} size="sm" />
+                                    <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === other)?.avatarUrl} id={other} name={label} size="sm" online={peopleOnline.has(other)} />
                                     <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-semibold text-foreground')}>
                                         {label}
                                         {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
@@ -440,7 +441,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                                     ? `Notes to self need a newer server — ${org.name} hasn't been updated yet`
                                     : 'Notes to self — only you (and your agent) can see this'}
                             >
-                                <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === org.memberId)?.avatarUrl} id={org.memberId} name={selfName} size="sm" />
+                                <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === org.memberId)?.avatarUrl} id={org.memberId} name={selfName} size="sm" online={peopleOnline.has(org.memberId)} />
                                 <span className="flex-1 truncate">
                                     {selfName}
                                     <span className="ml-1.5 font-normal text-muted-foreground">{openingSelf ? 'opening…' : 'you'}</span>

@@ -1066,6 +1066,8 @@ export const routes = {
        * Absent from servers before it.
        */
       online: z.array(MemberId).optional(),
+      /** People with a live connection (2026-11-04); member_presence keeps this fresh. */
+      onlinePeople: z.array(MemberId).optional(),
     }),
   },
   /**
