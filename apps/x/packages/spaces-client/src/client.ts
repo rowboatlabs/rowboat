@@ -657,7 +657,7 @@ export class SpacesClient {
   }
 
   /** The roster with the agents connected now (`online`, local agents 2026-10-28; absent from older servers). */
-  async orgRoster(): Promise<{ members: Member[]; online?: string[] }> {
+  async orgRoster(): Promise<{ members: Member[]; online?: string[]; onlinePeople?: string[] }> {
     return this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response);
   }
 

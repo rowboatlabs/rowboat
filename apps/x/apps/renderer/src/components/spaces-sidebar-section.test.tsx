@@ -40,13 +40,13 @@ vi.mock('@/hooks/use-space-chat', async () => {
         },
     }
 })
-vi.mock('@/hooks/use-space-members', () => ({ prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me', useOrgRoster: () => [] }))
+vi.mock('@/hooks/use-space-members', () => ({ prefetchMembers: vi.fn(), usePeopleOnline: () => new Set(['dm0']), useSelfDisplayName: () => 'Me', useOrgRoster: () => [] }))
 vi.mock('@/hooks/use-org-settings', () => ({ useOrgSettings: () => ({ invitePolicy: 'members' }), canInvite: () => true }))
 vi.mock('@/components/spaces-view', () => ({ OrgMonogram: () => null }))
-vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null, OrgMonogram: () => null }))
+vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: ({ name, online }: { name: string; online?: boolean }) => <span data-testid={`avatar-${name}`} data-online={online} />, OrgMonogram: () => null }))
 vi.mock('@/components/spaces/new-direct-dialog', () => ({ NewDirectDialog: () => null }))
 vi.mock('@/lib/spaces-direct', () => ({
-    directAvatarId: () => '', isSelfDirect: () => false, isSelfDirectUnsupported: () => false,
+    directAvatarId: (dm: { id: string }) => dm.id, isSelfDirect: () => false, isSelfDirectUnsupported: () => false,
     markSelfDirectUnsupported: vi.fn(), selfDirectFailureMessage: () => '', selfDirectRefused: () => false,
     spaceDisplayName: (_org: unknown, dm: { name: string }) => dm.name,
 }))
@@ -314,4 +314,11 @@ it('shows archived discussions alongside live discussions, then hides only archi
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide archived' }))
     expect(screen.queryByText('Archived discussion')).toBeNull()
     expect(screen.getByText('Discussion 0')).toBeTruthy()
+})
+
+it('marks the online DM participant while leaving offline participants unmarked', () => {
+    render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main"
+        onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+    expect(screen.getByTestId('avatar-Person 0')).toHaveAttribute('data-online', 'true')
+    expect(screen.getByTestId('avatar-Person 1')).toHaveAttribute('data-online', 'false')
 })

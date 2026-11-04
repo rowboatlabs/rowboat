@@ -4,7 +4,7 @@ import { invalidateSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
-import { applyAgentPresence, applyProfileUpdate, refreshOrgRoster } from '@/hooks/use-space-members'
+import { applyMemberPresence, applyAgentPresence, applyProfileUpdate, refreshOrgRoster } from '@/hooks/use-space-members'
 import { refreshOrgSettings } from '@/hooks/use-org-settings'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
 import { getSpaceReadState, loadUnread, dropSpaceReadState } from '@/lib/spaces-read-state'
@@ -465,6 +465,10 @@ function wireFeedBus(): void {
                 }
             })().catch(() => {})
             void refreshSpacesOrgs()
+            return
+        }
+        if (frame.kind === 'member_presence') {
+            applyMemberPresence(event.orgId, frame.memberId, frame.online)
             return
         }
         if (frame.kind === 'agent_presence') {
