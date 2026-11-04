@@ -27,6 +27,8 @@ export const providerDisplayNames: Record<string, string> = {
   ollama: 'Ollama',
   openrouter: 'OpenRouter',
   aigateway: 'AI Gateway',
+  // The provider's own name is its domain; keep it verbatim.
+  aimlapi: 'aimlapi.com',
   'openai-compatible': 'OpenAI-Compatible',
   rowboat: 'Rowboat',
   // Matches what other subscription clients call this provider; the auth
