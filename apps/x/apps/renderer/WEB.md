@@ -43,7 +43,7 @@ Against a deployment, with real sign-in: set `VITE_SPACES_APEX_URL` (default pro
   - the install and build commands, as `scripts/vercel-install.sh` and `scripts/vercel-build.sh`, because Vercel caps a command at 256 characters (Harbor's protocol package first, then the renderer's workspace dependencies)
   - the rewrite of every path to `web.html`
   - the Content Security Policy. Tokens sit in page storage, so no inline or foreign script may run, and `components/streamdown.tsx` sanitizes every Markdown it renders.
-- **Environment:** `VITE_SPACES_APEX_URL` for the deployment it serves. Two Vercel projects, one per deployment:
+- **Environment:** `VITE_SPACES_APEX_URL` for the deployment it serves, and `VITE_ROWBOAT_ACCOUNT_URL` for the Rowboat account app the account menu's **Plan & usage** opens (2026-11-04; default production, `https://app.x.rowboatlabs.com`). Two Vercel projects, one per deployment:
   - staging: `https://staging.spaces.rowboatlabs.com`, with `VITE_SPACES_APEX_URL=https://spaces.staging.x.rowboatlabs.com`
   - production: `https://spaces.rowboatlabs.com`, with the default apex
 - **The deploy build doesn't typecheck.** `build:web` is `vite build` only, because CI typechecks every PR. A web-only install has no Electron types, and the renderer's `tsc -b` reaches into the desktop's main process. pnpm is pinned with `npx pnpm@10`, because this workspace's lockfile is not in the Vercel project's root directory, so Vercel can't pick the pnpm version from it.
