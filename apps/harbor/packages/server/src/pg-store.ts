@@ -25,7 +25,7 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import { sortActivity } from './activity-sort.js';
-import { extractSearchText, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
+import { extractSearchText, searchTextFor, snippetAround, toPathPatterns, toTsQueryParams, tsquerySql, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
 import {
   type MessageWindow, type PushLevel,
@@ -324,6 +324,12 @@ interface MessageRow {
 }
 
 /** What search indexes for a message: its summary (2026-10-25) and its body. */
+/** The two parameters tsquerySql reads, in its placeholder order. */
+function tsqueryArgs(query: SearchQuery): [string[], string[]] {
+  const { groups, wholes } = toTsQueryParams(query);
+  return [groups, wholes];
+}
+
 function withSummary(body: string, summary: string | undefined): string {
   return summary ? `${summary}\n${body}` : body;
 }
@@ -1174,15 +1180,15 @@ export class PgStore implements Store {
   // --- search ----------------------------------------------------------------
   // The three GIN lookups (migration 012). Tombstones can't match (blank body
   // → empty tsv); deleted assets are filtered here, never de-indexed. Query
-  // strings arrive pre-quoted from toTsQueryString — no user text ever
+  // strings arrive pre-quoted from toTsQueryParams — no user text ever
   // reaches tsquery syntax.
 
   async searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]> {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<MessageRow>(
-      `select * from messages where space_id = $1 and body_tsv @@ to_tsquery('simple', $2)
-       order by stream_offset desc limit $3`,
-      [spaceId, toTsQueryString(query), limit],
+      `select * from messages where space_id = $1 and body_tsv @@ ${tsquerySql('$2', '$3')}
+       order by stream_offset desc limit $4`,
+      [spaceId, ...tsqueryArgs(query), limit],
     );
     return rows.map((r) => ({ message: rowToMessage(r), snippet: snippetAround(r.body, query) }));
   }
@@ -1190,9 +1196,9 @@ export class PgStore implements Store {
   async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<TopicRow>(
-      `${TOPIC_SELECT} where t.space_id = $1 and t.title_tsv @@ to_tsquery('simple', $2)
-       order by ts_rank(t.title_tsv, to_tsquery('simple', $2)) desc, t.created_at desc, t.id desc limit $3`,
-      [spaceId, toTsQueryString(query), limit],
+      `${TOPIC_SELECT} where t.space_id = $1 and t.title_tsv @@ ${tsquerySql('$2', '$3')}
+       order by ts_rank(t.title_tsv, ${tsquerySql('$2', '$3')}) desc, t.created_at desc, t.id desc limit $4`,
+      [spaceId, ...tsqueryArgs(query), limit],
     );
     return rows.map(rowToTopic);
   }
@@ -1201,18 +1207,18 @@ export class PgStore implements Store {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<AssetRow & { extracted: string | null; content_hit: boolean; path_hit: boolean }>(
       `select a.id, a.path, a.version, a.updated_at, a.state, v.blob, s.extracted,
-              coalesce(s.tsv @@ to_tsquery('simple', $2), false) as content_hit,
-              (a.path ilike all($3::text[])) as path_hit
+              coalesce(s.tsv @@ ${tsquerySql('$2', '$3')}, false) as content_hit,
+              (a.path ilike all($4::text[])) as path_hit
        from assets a
        join asset_versions v on v.space_id = a.space_id and v.asset_id = a.id and v.version = a.version
        left join asset_search s on s.space_id = a.space_id and s.asset_id = a.id
        where a.space_id = $1 and a.state = 'live'
-         and (coalesce(s.tsv @@ to_tsquery('simple', $2), false) or a.path ilike all($3::text[]))
-       order by (a.path ilike all($3::text[])) desc,
-                coalesce(ts_rank(s.tsv, to_tsquery('simple', $2)), 0) desc,
+         and (coalesce(s.tsv @@ ${tsquerySql('$2', '$3')}, false) or a.path ilike all($4::text[]))
+       order by (a.path ilike all($4::text[])) desc,
+                coalesce(ts_rank(s.tsv, ${tsquerySql('$2', '$3')}), 0) desc,
                 a.updated_at desc
-       limit $4`,
-      [spaceId, toTsQueryString(query), toPathPatterns(query), limit],
+       limit $5`,
+      [spaceId, ...tsqueryArgs(query), toPathPatterns(query), limit],
     );
     return rows.map((r) => ({
       record: this.assetRow(r),
