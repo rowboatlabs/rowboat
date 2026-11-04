@@ -51,6 +51,15 @@ afterAll(async () => {
 describe('harborChannelHandlers', () => {
   let spaceId: string;
 
+  it('serves workspace thread filters through the shared host table', async () => {
+    const { space } = await table['spaces:createSpace']({ orgId, name: 'Threads source' });
+    const { message: root } = await table['spaces:postMessage']({ orgId, spaceId: space.id, body: 'Workspace thread' });
+    await table['spaces:postMessage']({ orgId, spaceId: space.id, body: 'Reply', threadRoot: root.id });
+    const page = await table['spaces:listThreads']({ orgId, filter: 'mine', spaceId: space.id, participantId: 'ramnique', limit: 1 });
+    expect(page.items.map((r) => r.root.id)).toEqual([root.id]);
+    expect(page.items[0]?.space.id).toBe(space.id);
+  });
+
   it('creates and lists a space', async () => {
     const { space } = await table['spaces:createSpace']({ orgId, name: 'Channels' });
     spaceId = space.id;

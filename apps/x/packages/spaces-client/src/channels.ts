@@ -38,7 +38,7 @@ export type HarborChannel =
   | 'spaces:listInvocations' | 'spaces:cancelInvocation' | 'spaces:getAgentCapabilities' | 'spaces:setAgentOptionDefaults'
   | 'spaces:decideApproval'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
-  | 'spaces:markRead' | 'spaces:followThread' | 'spaces:getUnread' | 'spaces:getActivity' | 'spaces:markActivitySeen'
+  | 'spaces:markRead' | 'spaces:followThread' | 'spaces:getUnread' | 'spaces:listThreads' | 'spaces:getActivity' | 'spaces:markActivitySeen'
   | 'spaces:readAll';
 
 export type HarborChannelHandlers = {
@@ -416,6 +416,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:followThread': async (args) => getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
 
     'spaces:getUnread': async (args) => getClient(args.orgId).unread(),
+    'spaces:listThreads': async ({ orgId, ...query }) => getClient(orgId).listThreads(query),
     'spaces:getActivity': async ({ orgId, ...query }) => getClient(orgId).activity(query),
     'spaces:markActivitySeen': async (args) => getClient(args.orgId).markActivitySeen(args.at),
     'spaces:readAll': async (args) => getClient(args.orgId).readAll(args.spaceId !== undefined ? { spaceId: args.spaceId } : {}),

@@ -512,6 +512,10 @@ The client-side notification-level module that predated this (a per-install scan
 
 Wire shape: [CONTRACT.md](./CONTRACT.md) — the notifications and push bullets.
 
+### Workspace Threads — **Decided** *(added 2026-11-03)*
+
+**Workspace Threads (2026-11-03).** Alongside Activity, Threads gathers conversations from all channels and DMs the member belongs to in the current workspace. It offers source, participant, All / Named / By me, and active/archived filters. Rows retain their source and open in a side pane while the list stays available; narrow screens return to the list on close. Filters and scroll positions persist locally. Unread counts use the same followed-thread read marks as channel/DM badges; merely viewing the list does not mark conversations read. The channel's own Threads tab remains scoped to that channel.
+
 ### Activity — **Decided** *(added 2026-09-10; amended 2026-09-11, 2026-09-15)*
 
 Everything that involves a member across every space and DM they are in, newest first, is a **query over facts the org already keeps** — the stamped mentions, the follow rows, the DM kind, the reactions — never an inbox table fanned out on write. Slack, Discord, and GitHub materialize; Zulip's Mentions and Inbox views query, and at per-org scale so do we: edits, deletes, and backfills stay consistent for free, and the read marks remain the one source of truth for unread. A message resolves to one kind by priority — mention > here > dm > reply in a followed thread; reactions fold per (message, emoji) with reactors newest first; the member's own posts never appear.

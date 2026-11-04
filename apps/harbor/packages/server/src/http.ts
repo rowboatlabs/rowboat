@@ -999,6 +999,11 @@ export function buildHttpApp(deps: {
 
   app.get(routes.unread.path, async (c) => reply(c, routes.unread.response, await service.unread(actor(c))));
 
+  app.get(routes.listThreads.path, async (c) => {
+    const q = parseWith(routes.listThreads.query, c.req.query());
+    return reply(c, routes.listThreads.response, await service.listThreads(actor(c), q));
+  });
+
   app.get(routes.activity.path, async (c) => {
     const q = parseWith(routes.activity.query, {
       ...(c.req.query('kinds') !== undefined ? { kinds: c.req.query('kinds') } : {}),

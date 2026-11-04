@@ -24,6 +24,7 @@ import type {
   Space,
   SpaceEvent,
   Topic,
+  ThreadsQuery,
 } from '@rowboat/spaces-protocol';
 import type { SearchQuery } from './search.js';
 
@@ -48,6 +49,14 @@ import type { SearchQuery } from './search.js';
  * `limit` rows. Both exclusive. The service composes an "around" window
  * from one of each.
  */
+export type WorkspaceThreadsQuery = Omit<ThreadsQuery, 'cursor' | 'limit'> & {
+  spaceIds: string[];
+  memberId: string;
+  before?: { at: string; id: string };
+  limit: number;
+};
+export type WorkspaceThreadRow = { root: Message; topic: Topic | null; lastActivityAt: string };
+
 export interface MessageWindow {
   beforeOffset?: number;
   afterOffset?: number;
@@ -398,6 +407,7 @@ export interface Store {
   setTopicDocument(spaceId: string, topicId: string, assetId: string | null): Promise<void>;
   /** "Convert back to thread": the row goes, the messages never knew it existed. */
   deleteTopic(spaceId: string, topicId: string): Promise<void>;
+  listWorkspaceThreads(query: WorkspaceThreadsQuery): Promise<WorkspaceThreadRow[]>;
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;
   getMessage(spaceId: string, messageId: string): Promise<Message | undefined>;
   /**

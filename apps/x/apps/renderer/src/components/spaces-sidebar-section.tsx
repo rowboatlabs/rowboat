@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { type SpaceSelection } from '@/components/spaces-view'
 import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
-import { NO_BADGE, streamBadge, threadBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
+import { NO_BADGE, streamBadge, threadBadge, threadsBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
 import { MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
@@ -110,7 +110,7 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace, onOpenS
     </SidebarNavSection>
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenThreads, threadsActive = false, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
     unread: Map<string, SpaceBadge>
@@ -126,10 +126,17 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
     agentsActive?: boolean
     onOpenActivity?: (orgId: string) => void
     activityActive?: boolean
+    onOpenThreads?: (orgId: string) => void
+    threadsActive?: boolean
     onChanged: () => void
 }) {
     // The Activity row's number: everything for me across the org's spaces —
     // the same "for you" the space rows show, summed.
+    useReadStateVersion()
+    const threadUnread = [...org.spaces, ...org.directs].reduce<SpaceBadge>((total, space) => {
+        const badge = threadsBadge(org.id, space.id, space.kind === 'direct')
+        return { unread: total.unread + badge.unread, forYou: total.forYou + badge.forYou }
+    }, { unread: 0, forYou: 0 })
     let forYou = 0
     for (const [key, badge] of unread) if (key.startsWith(`${org.id}/`)) forYou += badge.forYou
     const [creating, setCreating] = useState(false)
@@ -316,7 +323,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
         )
     }
 
-    const navRows = !!(onOpenActivity || onOpenAgents || onOpenBrowse || needsSignIn || org.error)
+    const navRows = !!(onOpenThreads || onOpenActivity || onOpenAgents || onOpenBrowse || needsSignIn || org.error)
     return (
         <>
             {/* Spaces redesign (2026-10-21): Activity is a nav row like Agents and
@@ -348,6 +355,13 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                         </SidebarMenuButton>
                     </SidebarMenuItem>
                 )}
+                {onOpenThreads && <SidebarMenuItem>
+                    <SidebarMenuButton isActive={threadsActive} onClick={() => onOpenThreads(org.id)} className="spaces-rail-row">
+                        <ChatsCircle className="size-4 shrink-0 text-muted-foreground" />
+                        <span className={cn('flex-1 truncate', threadUnread.unread > 0 && 'font-semibold text-foreground')}>Threads</span>{' '}
+                        <UnreadBadge badge={threadUnread} />
+                    </SidebarMenuButton>
+                </SidebarMenuItem>}
                 {onOpenAgents && (
                     <SidebarMenuItem>
                         <SidebarMenuButton isActive={agentsActive} onClick={() => onOpenAgents(org.id)} className="spaces-rail-row">
@@ -516,7 +530,7 @@ function RailCollapse({ id, open, children }: { id?: string, open: boolean, chil
 }
 
 /** Space and DM destinations; nested discussions are optional for legacy consumers. */
-export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
+export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, onOpenThreads, threadsActive = false, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
@@ -527,6 +541,8 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivit
     agentsActive?: boolean
     onOpenActivity?: (orgId: string) => void
     activityActive?: boolean
+    onOpenThreads?: (orgId: string) => void
+    threadsActive?: boolean
     onOpenDiscussion?: (spaceId: string, selection: RailSelection) => void
     renderActiveDiscussions?: (limit: number) => ReactNode
     activeDiscussionCount?: number
@@ -539,7 +555,7 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivit
     // A column that fills its scroller, so the Invite row can sit at the foot.
     return <div className="spaces-rail-nav flex min-h-full flex-1 flex-col">
         <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
-            onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
+            onOpenSpace={onOpenSpace} onOpenThreads={onOpenThreads} threadsActive={threadsActive} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
             renderDiscussions={showDiscussions && renderActiveDiscussions ? (id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}
                 onSelect={(selection) => onOpenDiscussion?.(id, selection)} /> : undefined} />

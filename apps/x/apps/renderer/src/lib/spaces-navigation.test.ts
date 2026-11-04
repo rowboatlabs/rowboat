@@ -89,6 +89,10 @@ describe('returning to Spaces', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: '', view: 'activity' }))
             .toEqual({ orgId: 'second', spaceId: '', view: 'activity' })
     })
+    it('restores a selected thread inside workspace Threads', () => {
+        const saved = { orgId: 'second', spaceId: 'dm', view: 'threads', rail: { kind: 'thread', rootMessageId: 'msg1' } }
+        expect(resolveSpacesLocation(orgs, saved)).toEqual(saved)
+    })
     it('falls back to a space when the Activity surface names a server that is gone', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'removed', spaceId: '', view: 'activity' }))
             .toEqual({ orgId: 'first', spaceId: 'main' })

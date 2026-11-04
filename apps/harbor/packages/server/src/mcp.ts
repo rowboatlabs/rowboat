@@ -1,3 +1,4 @@
+import type { ThreadsQuery } from '@rowboat/spaces-protocol';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -276,6 +277,7 @@ async function dispatch(
       const spaceNames = await spaceNamesFor(service, ctx);
       return { root: relabel(root, names, spaceNames), topic, messages: messages.map((m) => relabel(m, names, spaceNames)), truncated: hasMore, truncatedAfter: hasMoreAfter };
     }
+    case 'list_threads': return service.listThreads(ctx, args as ThreadsQuery);
     case 'read_activity': {
       const a = args as { kinds?: ActivityKind[]; spaceId?: string; unread?: boolean; cursor?: string; limit?: number };
       const page = await service.activity(ctx, {

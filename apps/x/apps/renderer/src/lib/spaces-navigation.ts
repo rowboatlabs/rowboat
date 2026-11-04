@@ -12,12 +12,12 @@ export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
  */
 /**
  * The org-level surfaces that replace a space in the pane: Activity, Browse
- * spaces, and Agents (2026-10-21, every agent in the org).
+ * spaces, Agents, and Threads (2026-11-03, across joined channels and DMs).
  */
-export type OrgView = 'activity' | 'browse' | 'agents'
+export type OrgView = 'activity' | 'browse' | 'agents' | 'threads'
 
 export function isOrgView(value: unknown): value is OrgView {
-    return value === 'activity' || value === 'browse' || value === 'agents'
+    return value === 'threads' || value === 'activity' || value === 'browse' || value === 'agents'
 }
 
 export type SpaceLocation = {
@@ -46,9 +46,9 @@ export function serverLandingSpaceId(org: Pick<OrgWithSpaces, 'id' | 'spaces' | 
 export function resolveSpacesLocation(orgs: OrgWithSpaces[], previous: unknown): SpaceLocation | null {
     const saved = readLocation(previous)
     const previousOrg = saved ? orgs.find((org) => org.id === saved.orgId) : undefined
-    // An org-level surface has no space to validate against — the server being
-    // there is the whole of it.
-    if (previousOrg && saved?.view) return { orgId: previousOrg.id, spaceId: '', view: saved.view }
+    // Threads keeps its selected conversation inside the org-level view
+    // (2026-11-03); the view checks its source against current memberships.
+    if (previousOrg && saved?.view) return { orgId: previousOrg.id, spaceId: saved.view === 'threads' ? saved.spaceId : '', view: saved.view, ...(saved.view === 'threads' && saved.rail ? { rail: saved.rail } : {}) }
     if (previousOrg && saved && saved.spaceId) {
         // A missing membership may mean an open preview, so preserve its content target.
         return { orgId: previousOrg.id, spaceId: saved.spaceId, ...(saved.rail ? { rail: saved.rail } : {}) }

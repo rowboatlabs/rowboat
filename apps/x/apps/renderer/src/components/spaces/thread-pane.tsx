@@ -66,7 +66,7 @@ const NEW_FADE_MS = 800
 
 export function ThreadPane({
     org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, memberNames, refreshTick,
-    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, onOpenThread, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
+    showBack, onBack, listLabel = 'Messages', expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, onOpenThread, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -82,6 +82,7 @@ export function ThreadPane({
     refreshTick: number
     showBack: boolean
     onBack: () => void
+    listLabel?: string
     expanded?: boolean
     onToggleExpanded?: () => void
     /** Set while a doc column sits beside the chat: closes the chat column, the doc takes the width. */
@@ -1014,8 +1015,8 @@ export function ThreadPane({
             <div className="spaces-pane-header flex shrink-0 items-center gap-1.5 border-b border-border">
                 {showBack && (
                     <>
-                        <Button variant="ghost" size="xs" className="gap-1 bg-primary/10 px-2 font-semibold text-primary hover:bg-primary/15 hover:text-primary" onClick={onBack} title="Back to Messages (Esc)" aria-label="Back to messages">
-                            <ArrowLeft className="size-3.5" /> Messages
+                        <Button variant="ghost" size="xs" className="gap-1 bg-primary/10 px-2 font-semibold text-primary hover:bg-primary/15 hover:text-primary" onClick={onBack} title={`Back to ${listLabel} (Esc)`} aria-label={`Back to ${listLabel.toLowerCase()}`}>
+                            <ArrowLeft className="size-3.5" /> {listLabel}
                         </Button>
                         <span className="h-4 w-px shrink-0 bg-border" />
                     </>
@@ -1137,8 +1138,8 @@ export function ThreadPane({
                         size="icon"
                         className="size-8 shrink-0 text-muted-foreground"
                         onClick={onToggleExpanded}
-                        aria-label={expanded ? 'Show alongside Messages' : 'Expand thread'}
-                        title={expanded ? 'Show alongside Messages' : 'Expand thread'}
+                        aria-label={expanded ? `Show alongside ${listLabel}` : 'Expand thread'}
+                        title={expanded ? `Show alongside ${listLabel}` : 'Expand thread'}
                     >
                         {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                     </Button>

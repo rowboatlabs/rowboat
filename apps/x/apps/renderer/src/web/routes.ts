@@ -8,7 +8,8 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // /s/<space>/a/<asset>), under the org's slug.
 //
 //   /<org>                      the org (its first space opens)
-//   /<org>/activity | /browse | /agents   an org-level surface
+//   /<org>/activity | /browse | /agents | /threads   an org-level surface
+//   /<org>/threads/<space>/t/<root>   a thread beside the workspace list
 //   /<org>/s/<space>            the stream
 //   …/discussions | …/files     the space's lists
 //   …/discussions/t/<root>      a thread beside the Threads list (2026-11-03)
@@ -31,6 +32,7 @@ export function parseRoute(pathname: string): WebRoute {
     const parts = pathname.split('/').filter(Boolean).map(decodeURIComponent)
     const [orgKey, section, spaceId, kind, id] = parts
     if (!orgKey) return { rail: GENERAL }
+    if (section === 'threads' && spaceId && kind === 't' && id) return { orgKey, view: 'threads', spaceId, rail: { kind: 'thread', rootMessageId: id } }
     if (isOrgView(section)) return { orgKey, view: section, rail: GENERAL }
     if (section !== 's' || !spaceId) return { orgKey, rail: GENERAL }
     const rail: RailSelection =
@@ -45,6 +47,7 @@ export function parseRoute(pathname: string): WebRoute {
 
 export function routePath(orgKey: string, target: { spaceId?: string; view?: OrgView; rail?: RailSelection }): string {
     const org = `/${encodeURIComponent(orgKey)}`
+    if (target.view === 'threads' && target.spaceId && target.rail?.kind === 'thread') return `${org}/threads/${encodeURIComponent(target.spaceId)}/t/${encodeURIComponent(target.rail.rootMessageId)}`
     if (target.view) return `${org}/${target.view}`
     if (!target.spaceId) return org
     const space = `${org}/s/${encodeURIComponent(target.spaceId)}`

@@ -48,6 +48,9 @@ vi.mock('@/components/spaces/invite-link', () => ({ InviteLinkPanel: () => null 
 vi.mock('@/components/spaces/selection-copy', () => ({ SelectionCopy: () => null }))
 vi.mock('@/components/spaces/server-switcher', () => ({ ServerSwitcher: () => null }))
 vi.mock('@/components/spaces/activity-view', () => ({ ActivityView: () => null }))
+vi.mock('@/components/spaces/workspace-threads-view', () => ({ WorkspaceThreadsView: ({ selectedSpaceId, selectedRootId, onOpenThread, onCloseThread }: { selectedSpaceId?: string; selectedRootId?: string; onOpenThread: (spaceId: string, rootId: string) => void; onCloseThread: () => void }) =>
+    <div data-testid="workspace-threads">{selectedSpaceId}/{selectedRootId}<button onClick={() => onOpenThread('dm', 'two')}>Open another source</button><button onClick={onCloseThread}>Close workspace thread</button></div>,
+}))
 vi.mock('@/components/spaces/space-rail', () => ({ OrgRail: () => null, SpaceRail: () => null }))
 vi.mock('@/components/spaces/space-files-view', () => ({ SpaceFilesView: () => null }))
 vi.mock('@/components/spaces/space-search', () => ({ SpaceSearch: () => null }))
@@ -79,6 +82,16 @@ beforeEach(() => {
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('Threads list and pane navigation', () => {
+    it('keeps an org-level Threads selection out of the channel stream', () => {
+        const open = vi.fn()
+        render(<SpacesView selection={{ orgId: 'org', spaceId: 'space', view: 'threads' }} railSelection={{ kind: 'thread', rootMessageId: 'one' }} onOpenThreads={open} onRailSelect={vi.fn()} onSelect={vi.fn()} onSwitchSpace={vi.fn()} />)
+        expect(screen.getByTestId('workspace-threads')).toHaveTextContent('space/one')
+        expect(screen.queryByTestId('stream')).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Open another source' }))
+        expect(open).toHaveBeenLastCalledWith('org', 'dm', 'two')
+        fireEvent.click(screen.getByRole('button', { name: 'Close workspace thread' }))
+        expect(open).toHaveBeenLastCalledWith('org')
+    })
     it.each([false, true])('keeps the filtered list mounted beside successive threads (inline=%s)', async (inline) => {
         fixture.inline = inline
         render(<App />)

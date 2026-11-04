@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MENTION_GRAMMAR } from './mentions.js';
-import { ActivityKind, NewPoll } from './api.js';
+import { ActivityKind, NewPoll, ThreadsQuery, ThreadsPage } from './api.js';
 import {
   Asset,
   ChangeSet,
@@ -753,6 +753,13 @@ export const diff = tool({
   output: z.object({ unified: z.string() }),
 });
 
+export const listThreads = tool({
+  name: 'list_threads',
+  description: 'List named and unnamed threads across your joined channels and DMs, newest activity first. Filter by space, participant, named threads, or roots you authored (mine). Archived threads are opt-in. Pass nextCursor as cursor to continue.',
+  input: ThreadsQuery,
+  output: ThreadsPage,
+});
+
 /**
  * Activity (2026-09-10): the one call behind "what's new for me?". Everything
  * that involves the person across every space and DM, newest first, with the
@@ -880,6 +887,7 @@ export const mcpTools = [
   readStream,
   readThread,
   readActivity,
+  listThreads,
   markAllRead,
   searchSpace,
   postMessage,
@@ -924,6 +932,7 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   readStream.name,
   readThread.name,
   readActivity.name,
+  listThreads.name,
   searchSpace.name,
   listTopics.name,
   listArchivedThreads.name,
