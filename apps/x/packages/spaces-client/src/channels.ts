@@ -158,7 +158,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:setAgentSuper': async (args) => ({ agent: await getClient(args.orgId).setAgentSuper(args.agentId, args.superAgent) }),
     'spaces:setupInstances': async (args) => ({ instances: await getClient(args.orgId).setupInstances(args.connection, args.key) }),
     'spaces:createSetupInstance': async ({ orgId, connection, ...input }) => ({ instance: await getClient(orgId).createSetupInstance(connection, input) }),
-    'spaces:managedAgentKinds': async (args) => ({ kinds: await getClient(args.orgId).managedAgentKinds() }),
+    'spaces:managedAgentKinds': async (args) => getClient(args.orgId).managedAgentKinds(),
     'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
     'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),
     'spaces:setHostingLlm': async ({ orgId, agentId, ...input }) => ({ hosting: await getClient(orgId).setHostingLlm(agentId, input) }),

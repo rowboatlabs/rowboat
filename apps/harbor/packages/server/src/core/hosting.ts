@@ -16,9 +16,11 @@ import {
   type HostingSkill,
   type HostingSpend,
   type HostingTrigger,
+  type HostingUsage,
   type LlmProvider,
   type Member,
 } from '@rowboat/spaces-protocol';
+import type { BillingAccounts } from '../billing.js';
 import { HarborError } from '../errors.js';
 import { canAddAgent, canRevokeAgentKey, canSuperAgentCreate, canSuperAgentDelete, enforce } from '../policy.js';
 import { credentialHint } from '../sealing.js';
@@ -56,6 +58,15 @@ import type { Spaces } from './spaces.js';
 // whether a sign-in is there; found, the agent runs on it from then on, the
 // trial closed `sign_in`, and the turn script forces Codex's own provider
 // (it asks before every turn not on a key, so the record follows the VM).
+//
+// Billing (2026-11-04, "billing" in Main): on a deployment that bills, there
+// is no trial. An agent bills to its creator's Rowboat account, the one the
+// desktop app bills to: created only if the creator's plan has room (the
+// free plan has one), its machine billed at the platform's own cost, read
+// back per agent every hour, and a Hermes's model calls through Rowboat's LLM
+// gateway on its owner's credits. Codex runs on its owner's ChatGPT plan or
+// OpenAI key and Claude Code on its owner's Anthropic key, as before. Before
+// a turn, an owner without credits gets the agent's sentence, not a turn.
 
 export interface ProvisionInput {
   hostingId: string;
@@ -65,6 +76,8 @@ export interface ProvisionInput {
   kind: string;
   anthropicApiKey?: string;
   env: Array<{ key: string; value: string; secret?: boolean }>;
+  /** On Rowboat's trial credit, so under the deployment's cap; false for an agent its owner's plan or keys pay for. */
+  trial: boolean;
 }
 
 export interface HostingProvider {
@@ -76,6 +89,8 @@ export interface HostingProvider {
   check(externalId: string): Promise<boolean>;
   /** Remove the agent and its end user from the platform; done when absent. */
   deprovision(externalUserId: string): Promise<void>;
+  /** What the end user's agent cost the platform account over a range: its machine, and model calls the platform served. */
+  usage(externalUserId: string, from: string, to: string): Promise<{ machineCents: number; llmCents: number }>;
   /** The platform credential the agent's connector presents: the deployment's own key. */
   credential(): string;
   /** The management calls on one agent's VM, by the platform's id for it. */
@@ -118,6 +133,10 @@ export interface HostingOps {
   spend(): Promise<HostingSpend>;
   /** The owner's own key into the agent's environment, with what its runtime needs to use it, applied. */
   setLlm(input: { kind: string; provider: LlmProvider; apiKey: string; model?: string }): Promise<void>;
+  /** Rowboat's LLM gateway on a key billed to the owner (2026-11-04), with what the runtime needs to use it, applied. */
+  useGateway(input: { kind: string; baseUrl: string; apiKey: string; model?: string }): Promise<void>;
+  /** Nothing on the platform's own model credit (2026-11-04): the agent runs on what its owner brings. */
+  withoutPlatformLlm(): Promise<void>;
   /** A trial over with no key: the platform's cap for this agent goes to zero, for good; the platform then keeps it asleep. */
   stopFunding(): Promise<void>;
   /** The platform's cap for this agent lifted, so it may wake: for a check on an agent a closed trial holds asleep. */
@@ -159,6 +178,21 @@ export const SIGN_IN_GONE_MESSAGE = "My owner's ChatGPT sign-in is gone. Sign in
 /** The kinds whose owner can sign in to a plan from the Terminal (2026-10-30): Codex's `codex login`. */
 const SIGN_IN_KINDS: ReadonlySet<string> = new Set(['codex']);
 
+/** What a billed Codex answers, as a failed turn, until its owner signs it in or adds a key (2026-11-04). */
+export const NEEDS_OWN_LLM_MESSAGE = 'I run on my owner\'s ChatGPT plan or OpenAI key. My owner needs to sign me in from my Terminal tab (`codex login --device-auth`), or add an OpenAI key on my page.';
+/** What a billed agent answers, as a failed turn, when its owner's Rowboat plan has no credits left (2026-11-04). */
+export function outOfCreditsMessage(upgradeUrl: string | undefined): string {
+  return `My owner's Rowboat plan is out of credits. ${upgradeUrl ? `They can upgrade at ${upgradeUrl}` : 'They can upgrade their plan'}, or add their own API key on my page.`;
+}
+/** The gateway's refusals, as Hermes passes them on in a failed turn: the same news, said the agent's way. */
+const GATEWAY_REFUSAL = /not enough credits|upgrade required|subscription not active/i;
+/** The model the gateway serves a Hermes by default: its own choice, as for the desktop app's "Auto" (2026-11-04). */
+const GATEWAY_MODEL = 'Auto';
+/** How often each billed agent's machine cost is read from the platform and reported (2026-11-04). */
+const SETTLE_EVERY_MS = 60 * 60_000;
+/** A month's last hour is reported again for this long into the next month, so nothing billed at its end is missed. */
+const SETTLE_LOOKBACK_MS = 2 * 24 * 60 * 60_000;
+
 /** How long a trial lasts if nothing closes it first. */
 const TRIAL_MS = 30 * 24 * 60 * 60_000;
 
@@ -189,6 +223,7 @@ function publicShape(row: StoredAgentHosting): AgentHosting {
     ...(row.trial ? { trial: row.trial } : {}),
     ...(row.llm ? { llm: row.llm } : {}),
     createdBy: row.createdBy,
+    ...(row.billingCustomer ? { billed: true as const } : {}),
     ...(row.requestedBy ? { requestedBy: row.requestedBy } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -201,6 +236,9 @@ export class Hosting {
   private timer: NodeJS.Timeout | undefined;
   private ticking: Promise<void> | undefined;
   private trialMs = TRIAL_MS;
+  private billing: BillingAccounts | undefined;
+  private settledAt = 0;
+  private settleEveryMs = SETTLE_EVERY_MS;
 
   constructor(
     private readonly k: Kernel,
@@ -209,10 +247,12 @@ export class Hosting {
   ) {}
 
   /** Absent = this Harbor runs no managed hosting (no platform key in the deployment). */
-  attach(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number } = {}): void {
+  attach(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number; billing?: BillingAccounts; settleEveryMs?: number } = {}): void {
     this.provider = provider;
     this.hooks = hooks;
     if (options.trialMs !== undefined) this.trialMs = options.trialMs;
+    if (options.settleEveryMs !== undefined) this.settleEveryMs = options.settleEveryMs;
+    this.billing = options.billing;
   }
 
   get available(): boolean {
@@ -233,10 +273,13 @@ export class Hosting {
   }
 
   /** The kinds this Harbor creates, for a member: the platform's when a provider is attached, none otherwise. */
-  async kinds(ctx: ActorCtx): Promise<string[]> {
+  async kinds(ctx: ActorCtx): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
     const actor = await this.k.store.getMember(ctx.memberId);
     if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
-    return this.provider ? [...MARITIME_AGENTS] : [];
+    if (!this.provider) return { kinds: [] };
+    if (!this.billing) return { kinds: [...MARITIME_AGENTS] };
+    const upgradeUrl = await this.billing.upgradeUrl();
+    return { kinds: [...MARITIME_AGENTS], billed: true, ...(upgradeUrl ? { upgradeUrl } : {}) };
   }
 
   /** A managed agent's hosting, for each of these agents, as its owner sees it. */
@@ -288,13 +331,20 @@ export class Hosting {
     const displayName = input.displayName.trim();
     if (!displayName) throw new HarborError('invalid_request', 'an agent needs a name');
     this.k.guardWrite();
+    const billing = this.billing;
+    // On a deployment that bills (2026-11-04), the agent bills to its owner's Rowboat account: their subject at the issuer.
+    const billingCustomer = billing ? billing.accountFor(await this.k.store.listIdentitiesOf(ownerId)) : undefined;
+    if (billing && !billingCustomer) throw new HarborError('invalid_request', 'An agent Rowboat runs bills to its owner\'s Rowboat account, and its owner has none here');
 
     const id = this.k.ulid();
     const now = this.k.now();
-    // Claude Code runs on the key it was given from the start; the rest on Rowboat's trial credit, for a while.
+    // Claude Code runs on the key it was given from the start. Without billing, the rest on Rowboat's trial credit, for a
+    // while; with it (2026-11-04), Hermes on its owner's Rowboat credits and Codex on its owner's ChatGPT plan or key.
     const funding: Pick<StoredAgentHosting, 'funding' | 'trial' | 'llm'> = input.anthropicApiKey
       ? { funding: 'own', llm: { provider: 'anthropic', keyHint: credentialHint(input.anthropicApiKey), setBy: ownerId, setAt: now } }
-      : { funding: 'trial', trial: { endsAt: new Date(Date.parse(now) + this.trialMs).toISOString() } };
+      : billing
+        ? { funding: input.kind === 'hermes' ? 'credits' : 'own' }
+        : { funding: 'trial', trial: { endsAt: new Date(Date.parse(now) + this.trialMs).toISOString() } };
     let row: StoredAgentHosting = {
       id,
       provider: 'maritime',
@@ -305,10 +355,29 @@ export class Hosting {
       ...funding,
       createdBy: ownerId,
       ...(requestedBy ? { requestedBy } : {}),
+      ...(billingCustomer ? { billingCustomer } : {}),
       createdAt: now,
       updatedAt: now,
     };
     await this.k.store.putHosting(row);
+
+    // The plan has room, or nothing is created (2026-11-04): the free plan has one managed agent, a paid plan any number.
+    if (billing && billingCustomer) {
+      let registered: { ok: true } | { ok: false; limit: number };
+      try {
+        registered = await billing.registerAgent(billingCustomer, { ref: row.externalUserId, kind: input.kind, name: displayName });
+      } catch (err) {
+        const message = `Rowboat billing: ${(err as Error).message}`.slice(0, 1000);
+        await this.k.store.putHosting({ ...row, status: 'failed', error: message, updatedAt: this.k.now() });
+        throw new HarborError('invalid_request', message);
+      }
+      if (!registered.ok) {
+        const upgrade = await billing.upgradeUrl();
+        const message = `Your Rowboat plan includes ${registered.limit} agent${registered.limit === 1 ? '' : 's'} Rowboat runs. ${upgrade ? `Upgrade at ${upgrade} to create more.` : 'Upgrade your plan to create more.'}`;
+        await this.k.store.putHosting({ ...row, status: 'failed', error: message, updatedAt: this.k.now() });
+        throw new HarborError('invalid_request', message);
+      }
+    }
 
     let externalId: string;
     try {
@@ -319,10 +388,12 @@ export class Hosting {
         kind: input.kind,
         ...(input.anthropicApiKey ? { anthropicApiKey: input.anthropicApiKey } : {}),
         env: input.env ?? [],
+        trial: row.funding === 'trial',
       }));
     } catch (err) {
       const message = (err as Error).message.slice(0, 1000);
       await this.k.store.putHosting({ ...row, status: 'failed', error: message, updatedAt: this.k.now() });
+      if (billing && billingCustomer) await billing.unregisterAgent(billingCustomer, row.externalUserId).catch((e) => console.log('[harbor] hosting: could not unregister a failed creation', { id, error: (e as Error).message }));
       throw new HarborError('invalid_request', `Maritime: ${message}`);
     }
 
@@ -366,6 +437,10 @@ export class Hosting {
     this.k.guardWrite();
     const at = this.k.now();
     for (const key of await this.k.store.listAgentKeys([agentId])) if (!key.revokedAt) await this.k.store.revokeAgentKey(key.id, at);
+    // The gateway key goes now too (2026-11-04); the worker revokes it again before the platform is told, should this fail.
+    if (this.billing && row.billingCustomer) {
+      await this.billing.revokeGatewayKey(row.billingCustomer, row.externalUserId).catch((err) => console.log('[harbor] hosting: gateway key not revoked yet', { id: row.id, error: (err as Error).message }));
+    }
     await this.hooks?.stop(agentId);
     const next: StoredAgentHosting = { ...row, status: 'deleting', updatedAt: at };
     delete next.error;
@@ -412,14 +487,27 @@ export class Hosting {
    * what it has drawn so far. A trial the platform reports at its cap is
    * closed here and now, so the page says so and nothing renews.
    */
-  async get(ctx: ActorCtx, agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend }> {
+  async get(ctx: ActorCtx, agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend; usage?: HostingUsage }> {
     const { row, ops } = await this.managed(ctx, agentId);
-    const [machine, env, spend] = await this.platform(() =>
-      Promise.all([ops.machine().catch(() => undefined), ops.env(), row.funding === 'trial' ? ops.spend().catch(() => undefined) : Promise.resolve(undefined)]),
+    const [machine, env, spend, usage] = await this.platform(() =>
+      Promise.all([
+        ops.machine().catch(() => undefined),
+        ops.env(),
+        row.funding === 'trial' ? ops.spend().catch(() => undefined) : Promise.resolve(undefined),
+        row.billingCustomer ? this.monthUsage(row).catch(() => undefined) : Promise.resolve(undefined),
+      ]),
     );
     let hosting = row;
     if (spend?.limitReached && row.funding === 'trial' && !row.trial?.closedAt) hosting = await this.endTrial(row, ops, 'exhausted');
-    return { hosting: publicShape(hosting), ...(machine ? { machine } : {}), env, ...(spend ? { spend } : {}) };
+    return { hosting: publicShape(hosting), ...(machine ? { machine } : {}), env, ...(spend ? { spend } : {}), ...(usage ? { usage } : {}) };
+  }
+
+  /** What a billed agent has cost the platform account this calendar month, for its page (2026-11-04). */
+  private async monthUsage(row: StoredAgentHosting): Promise<HostingUsage> {
+    const now = new Date();
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+    const u = await this.provider!.usage(row.externalUserId, start, now.toISOString());
+    return { periodStart: start, machineCents: u.machineCents, llmCents: u.llmCents };
   }
 
   /**
@@ -441,6 +529,8 @@ export class Hosting {
     // Codex honours a ChatGPT sign-in over a key on its built-in provider: the sign-in goes first, so the key is what it runs on.
     if (row.llm?.provider === 'chatgpt') await this.platform(() => ops.signOut(row.kind));
     await this.platform(() => ops.setLlm({ kind: row.kind, provider: input.provider, apiKey, ...(model ? { model } : {}) }));
+    // Off Rowboat's credits (2026-11-04): the gateway key is revoked before the record says `own`, so a failure leaves a retry to do both.
+    if (row.funding === 'credits' && this.billing && row.billingCustomer) await this.billing.revokeGatewayKey(row.billingCustomer, row.externalUserId);
     const at = this.k.now();
     const next: StoredAgentHosting = {
       ...row,
@@ -459,6 +549,39 @@ export class Hosting {
     if (!row || row.status !== 'ready') return undefined;
     const reason = row.trial?.closedReason;
     return { funding: row.funding, ...(row.funding === 'trial' && (reason === 'exhausted' || reason === 'expired') ? { trialOver: reason } : {}) };
+  }
+
+  /**
+   * For the agent's connector before a turn (2026-11-04): on a deployment that
+   * bills, the agent's sentence when its owner's plan has no credits left, so
+   * the VM is not woken for a turn that cannot be paid for. A billing outage
+   * lets the turn through: the gateway still refuses a model call without
+   * credits, and an outage must not stop every agent.
+   */
+  async turnRefusal(agentId: string): Promise<string | undefined> {
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row || !this.billing || !row.billingCustomer) return undefined;
+    try {
+      const answer = await this.billing.authorize(row.billingCustomer);
+      if (answer.ok) return undefined;
+    } catch (err) {
+      console.log('[harbor] hosting: billing did not answer before a turn; letting it run', { id: row.id, error: (err as Error).message });
+      return undefined;
+    }
+    return outOfCreditsMessage(await this.billing.upgradeUrl());
+  }
+
+  /**
+   * A failed turn's reason, said the owner's way (2026-11-04): the gateway's
+   * refusal for want of credits, and a billed Codex that has nothing to run
+   * on yet. Anything else is the runtime's own reason, unchanged.
+   */
+  async explainFailure(agentId: string, failure: string, signIn?: 'chatgpt' | 'none'): Promise<string> {
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row || !this.billing || !row.billingCustomer) return failure;
+    if (row.funding === 'credits' && GATEWAY_REFUSAL.test(failure)) return outOfCreditsMessage(await this.billing.upgradeUrl());
+    if (row.kind === 'codex' && row.funding === 'own' && !row.llm && signIn !== 'chatgpt') return NEEDS_OWN_LLM_MESSAGE;
+    return failure;
   }
 
   /** The connector saw the platform at the cap: the trial is over, for good. */
@@ -701,6 +824,18 @@ export class Hosting {
         console.log('[harbor] hosting: step failed', { id: row.id, status: row.status, error: (err as Error).message });
       }
     }
+    // Billed machines (2026-11-04): every agent the platform may still be charging for, once an hour.
+    if (this.billing && Date.now() - this.settledAt >= this.settleEveryMs) {
+      this.settledAt = Date.now();
+      for (const row of await this.k.store.listHostingsByStatus(['deploying', 'checking', 'ready', 'failed'])) {
+        if (!row.billingCustomer || !row.externalId) continue;
+        try {
+          await this.settle(provider, row, this.billing, row.billingCustomer);
+        } catch (err) {
+          console.log('[harbor] hosting: machine cost not reported', { id: row.id, error: (err as Error).message });
+        }
+      }
+    }
     // A trial that ran out of time, with credit left or not, is over.
     for (const row of await this.k.store.listHostingsByStatus(['ready'])) {
       if (row.funding !== 'trial' || !row.trial || row.trial.closedAt || !row.externalId || Date.parse(row.trial.endsAt) > Date.now()) continue;
@@ -730,6 +865,7 @@ export class Hosting {
     }
     if (row.status === 'checking') {
       if (await provider.check(row.externalId!)) {
+        await this.fundOnReady(provider, row);
         await this.move(row, 'ready');
         const agent = row.agentId ? await this.k.store.getMember(row.agentId) : undefined;
         if (agent) this.hooks?.added(agent);
@@ -739,8 +875,55 @@ export class Hosting {
       return;
     }
     if (row.status === 'deleting') {
+      // Billed (2026-11-04): the machine's last cost reported while the platform still has it, the gateway key
+      // revoked, then the agent off the platform and out of its owner's plan. Each is safe to repeat on a retry.
+      const billing = this.billing && row.billingCustomer ? { accounts: this.billing, customer: row.billingCustomer } : undefined;
+      if (billing && row.externalId) {
+        await this.settle(provider, row, billing.accounts, billing.customer).catch((err) => console.log('[harbor] hosting: last machine cost not reported', { id: row.id, error: (err as Error).message }));
+      }
+      if (billing) await billing.accounts.revokeGatewayKey(billing.customer, row.externalUserId);
       await provider.deprovision(row.externalUserId);
+      if (billing) await billing.accounts.unregisterAgent(billing.customer, row.externalUserId);
       await this.move(row, 'deleted');
+    }
+  }
+
+  /**
+   * A billed agent's model access once its machine answers (2026-11-04): a
+   * Hermes on Rowboat's gateway with a key minted now for its owner (a retry
+   * mints again, and the backend revokes the earlier key), a Codex with the
+   * platform's own model credit taken away until its owner brings theirs.
+   * Done before `ready`, so no turn runs on the platform's credit.
+   */
+  private async fundOnReady(provider: HostingProvider, row: StoredAgentHosting): Promise<void> {
+    if (!this.billing || !row.billingCustomer || !row.externalId) return;
+    const ops = provider.manage(row.externalId, row.externalUserId);
+    if (row.funding === 'credits') {
+      const { key } = await this.billing.mintGatewayKey(row.billingCustomer, { ref: row.externalUserId, name: row.displayName });
+      await ops.useGateway({ kind: row.kind, baseUrl: this.billing.gatewayUrl, apiKey: key, model: GATEWAY_MODEL });
+    } else if (!row.llm) {
+      await ops.withoutPlatformLlm();
+    }
+  }
+
+  /**
+   * Report a billed agent's machine cost (2026-11-04): the platform's own
+   * running total for the calendar month (UTC), at cost, which the backend
+   * debits only for what is new. In a month's first days the month before is
+   * reported once more, so its last hour is not lost. The platform's model
+   * spend is added: a billed agent should have none, and whatever there is
+   * was spent on the owner's behalf.
+   */
+  private async settle(provider: HostingProvider, row: StoredAgentHosting, billing: BillingAccounts, customer: string): Promise<void> {
+    const now = new Date();
+    const month = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    const periods: Array<[number, number]> = [[month, now.getTime()]];
+    if (now.getTime() - month < SETTLE_LOOKBACK_MS) periods.unshift([Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1), month]);
+    for (const [start, end] of periods) {
+      if (end <= Date.parse(row.createdAt)) continue;
+      const periodStart = new Date(start).toISOString();
+      const usage = await provider.usage(row.externalUserId, periodStart, new Date(end).toISOString());
+      await billing.reportHosting(customer, { ref: row.externalUserId, periodStart, totalCents: usage.machineCents + usage.llmCents });
     }
   }
 

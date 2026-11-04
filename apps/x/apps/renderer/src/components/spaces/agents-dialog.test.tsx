@@ -83,6 +83,9 @@ const joinedSpaces = new Set<string>()
 let listing: spaces.AgentListing[]
 // Create agent (2026-10-26): the kinds this org's Harbor creates; none = no Create button.
 let managedKinds: string[] = []
+// Billing (2026-11-04): what the stand-in Harbor says about who pays, and what a billed agent cost this month.
+let managedBilling: { billed?: boolean; upgradeUrl?: string } = {}
+let usage: spaces.HostingUsage | undefined
 const hosting = (status: spaces.AgentHosting['status'], extra: Partial<spaces.AgentHosting> = {}): spaces.AgentHosting =>
     ({ provider: 'maritime', status, externalId: 'agt-m1', funding: 'trial', trial: { endsAt: '2026-11-25T10:00:00Z' }, createdBy: 'me', createdAt: '2026-10-26T10:00:00Z', updatedAt: '2026-10-26T10:00:00Z', ...extra })
 // Rowboat's credit (2026-10-27): what the stand-in Harbor says a trial agent has drawn.
@@ -116,20 +119,21 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
                 { id: 'ef56gh78ij', name: 'coder', template: 'agent37-codex', status: 'running' },
             ] }
         case 'spaces:createSetupInstance': return { instance: { id: 'zz99', name: args.name, template: 'agent37-openclaw', status: 'running', kind: 'openclaw' } }
-        case 'spaces:managedAgentKinds': return { kinds: managedKinds }
+        case 'spaces:managedAgentKinds': return { kinds: managedKinds, ...managedBilling }
         case 'spaces:setAgentPersonal': {
             const on = (args as unknown as { personal: boolean }).personal
             listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, agent: { ...l.agent, personal: on } } : l))
             return { agent: listing.find((l) => l.agent.id === args.agentId)!.agent }
         }
         case 'spaces:createManagedAgent': {
+            if (args.displayName === 'Second') throw new Error('Your Rowboat plan includes 1 agent Rowboat runs. Upgrade at https://app.rowboat.test?intent=upgrade to create more.')
             if (args.displayName === 'Over') throw new Error('Maritime: You are on the free plan, which includes 3 agents (you have 3). Upgrade to a paid plan to create more.')
             const agent = { ...hermes, id: 'new', displayName: args.displayName, agentKind: args.kind, agentConnection: 'maritime', agentInstance: 'agt-m1' } as spaces.Member
             // The listing shows it deploying from here on, as Harbor's would.
             listing = [...listing, { agent, keys: [key('k9', 'new')], credential: { hint: '…rbmk', setBy: 'me', setAt: '2026-10-26T10:00:00Z' }, hosting: hosting('deploying') }]
             return { agent, key: { ...key('k9', 'new'), secret: NEW_KEY }, hosting: hosting('deploying') }
         }
-        case 'spaces:getHosting': return { hosting: listing.find((l) => l.agent.id === args.agentId)?.hosting ?? hosting('ready'), machine: { status: machineStatus, tier: 'always_on' }, env: envVars, ...(spend ? { spend } : {}) }
+        case 'spaces:getHosting': return { hosting: listing.find((l) => l.agent.id === args.agentId)?.hosting ?? hosting('ready'), machine: { status: machineStatus, tier: 'always_on' }, env: envVars, ...(spend ? { spend } : {}), ...(usage ? { usage } : {}) }
         case 'spaces:setHostingLlm': {
             const own = hosting('ready', { funding: 'own', trial: { endsAt: '2026-11-25T10:00:00Z', closedAt: '2026-10-27T10:00:00Z', closedReason: 'own_key' }, llm: { provider: args.provider as spaces.LlmProvider, keyHint: `…${args.apiKey!.slice(-4)}`, ...(args.model ? { model: args.model } : {}), setBy: 'me', setAt: '2026-10-27T10:00:00Z' } })
             listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, hosting: own } : l))
@@ -217,6 +221,8 @@ beforeEach(() => {
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh')]
     managedKinds = []
+    managedBilling = {}
+    usage = undefined
     machineStatus = 'active'
     spend = { spentCents: 120, limitCents: 500, limitReached: false, periodEnd: '2026-11-01T00:00:00Z' }
     envVars = [{ key: 'PATH', secret: false, value: '/opt/hermes/bin:/usr/bin' }]
@@ -922,6 +928,27 @@ describe('AgentsDialog', () => {
         expect(invoke).not.toHaveBeenCalledWith('spaces:addMembers', expect.anything())
     })
 
+    it('on a Harbor that bills, says who pays for each kind, and past the plan’s agents offers the upgrade (2026-11-04)', async () => {
+        managedKinds = ['hermes', 'claude-code', 'codex']
+        managedBilling = { billed: true, upgradeUrl: 'https://app.rowboat.test?intent=upgrade' }
+        const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await newAgent('rowboat')
+        expect(screen.getByText(/It bills to your Rowboat plan\./)).toBeInTheDocument()
+        expect(screen.queryByText(/trial credit/)).toBeNull()
+        expect(screen.getByText(/Runs on your Rowboat credits: its model calls and its machine \(at cost\)/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('radio', { name: /Codex/ }))
+        expect(screen.getByText(/Runs on your ChatGPT plan or OpenAI key/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('radio', { name: /Hermes/ }))
+        expect(screen.queryByRole('button', { name: 'Upgrade' })).toBeNull()
+        fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Second' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Create agent' }))
+        expect(await screen.findByRole('alert')).toHaveTextContent('Your Rowboat plan includes 1 agent Rowboat runs.')
+        fireEvent.click(screen.getByRole('button', { name: 'Upgrade' }))
+        expect(open).toHaveBeenCalledWith('https://app.rowboat.test?intent=upgrade')
+        open.mockRestore()
+    })
+
     it('deletes a managed agent from Maritime on a second click; an admin may, a member may not', async () => {
         const scoutM = { ...scout, id: 'sm', displayName: 'Scout', agentKind: 'codex', agentConnection: 'maritime', agentInstance: 'agt-m1' } as spaces.Member
         listing = [{ agent: scoutM, keys: [key('k7', 'sm')], hosting: hosting('ready') }]
@@ -1101,6 +1128,19 @@ describe('AgentsDialog', () => {
         expect(screen.getByText(/Model claude-sonnet-4-5/)).toBeInTheDocument()
         expect(screen.queryByText(/trial credit/)).toBeNull()
         expect(screen.getByRole('button', { name: 'Replace key' })).toBeInTheDocument()
+    })
+
+    it('an agent on its owner’s Rowboat credits says so, with this month’s machine, and can move to the owner’s key (2026-11-04)', async () => {
+        listing = [{ agent: jarvis, keys: [key('k8', 'jv')], hosting: hosting('ready', { funding: 'credits', billed: true }) }]
+        spend = undefined
+        usage = { periodStart: '2026-11-01T00:00:00.000Z', machineCents: 42, llmCents: 0 }
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Jarvis/ }))
+        const access = await screen.findByRole('group', { name: 'Model access' })
+        expect(within(access).getByText('Runs on your Rowboat credits')).toBeInTheDocument()
+        expect(await within(access).findByText(/\$0\.42 of machine this month/)).toBeInTheDocument()
+        fireEvent.click(within(access).getByRole('button', { name: 'Use your own key' }))
+        expect(screen.getByText(/not your Rowboat credits/)).toBeInTheDocument()
     })
 
     it('a trial at its cap says so in red, with the same way out; a member without the agent sees why it is silent', async () => {

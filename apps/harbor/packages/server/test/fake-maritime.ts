@@ -63,6 +63,9 @@ export class FakeMaritime {
   readonly signIns = new Set<string>();
   /** End users by external id, with what was last put and whether a policy was set. */
   readonly endUsers = new Map<string, { body: Record<string, unknown>; policy?: Record<string, unknown>; agentId?: string }>();
+  /** What each end user's agents cost (2026-11-04, `GET /api/v1/usage`), by external id; every read is kept. */
+  readonly usage = new Map<string, { hosting: number; llm: number }>();
+  readonly usageReads: Array<{ externalUserId: string; from: string; to: string }> = [];
   /** What the next submitted turn does (a one-line Hermes answer by default). */
   nextTurn: Turn | undefined;
   /** Hold catalogue maintenance independently of turns, to exercise reply latency (2026-11-01). */
@@ -138,6 +141,13 @@ export class FakeMaritime {
     };
     if (req.headers.authorization !== `Bearer ${GOOD_KEY}`) return send(401, { detail: 'Invalid or expired API key' });
     if (this.refuse && (!this.refuse.paths || this.refuse.paths.test(path))) return send(this.refuse.status, this.refuse.body);
+
+    if (req.method === 'GET' && path === '/api/v1/usage') {
+      const externalUserId = url.searchParams.get('externalUserId') ?? '';
+      this.usageReads.push({ externalUserId, from: url.searchParams.get('from') ?? '', to: url.searchParams.get('to') ?? '' });
+      const u = this.usage.get(externalUserId) ?? { hosting: 0, llm: 0 };
+      return send(200, { periodStart: url.searchParams.get('from'), periodEnd: url.searchParams.get('to'), hostingBasis: 'metered', plan: 'starter', computeMinutes: 0, hostingCostCents: u.hosting, llmCostCents: u.llm, totalCostCents: u.hosting + u.llm, agents: [] });
+    }
 
     const endUser = path.match(/^\/api\/v1\/end-users\/([^/]+)(?:\/(agents|policy|tokens))?$/);
     if (endUser) {

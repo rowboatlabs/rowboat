@@ -23,7 +23,7 @@ import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, Agent
   HostingPowerAction,
   HostingSkill,
   HostingTrigger,
-  HostingSpend, LlmProvider,
+  HostingSpend, HostingUsage, LlmProvider,
 } from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
@@ -539,7 +539,8 @@ export const routes = {
   managedAgentKinds: {
     method: 'GET',
     path: '/v1/agents/managed',
-    response: z.object({ kinds: z.array(z.string()) }),
+    /** `billed` (2026-11-04): what it creates bills to its creator's Rowboat plan; `upgradeUrl` is where that plan is changed. */
+    response: z.object({ kinds: z.array(z.string()), billed: z.literal(true).optional(), upgradeUrl: z.url().optional() }),
   },
   /**
    * Create a managed agent (spec §8 Maritime, 2026-10-26): Rowboat's own
@@ -592,7 +593,7 @@ export const routes = {
     method: 'GET',
     path: '/v1/agents/:agentId/hosting',
     params: z.object({ agentId: MemberId }),
-    response: z.object({ hosting: AgentHosting, machine: HostingMachine.optional(), env: z.array(HostingEnvVar), spend: HostingSpend.optional() }),
+    response: z.object({ hosting: AgentHosting, machine: HostingMachine.optional(), env: z.array(HostingEnvVar), spend: HostingSpend.optional(), usage: HostingUsage.optional() }),
   },
   /**
    * The owner's own provider key for a managed agent (2026-10-27): the end of

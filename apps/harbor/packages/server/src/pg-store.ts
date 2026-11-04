@@ -145,6 +145,7 @@ interface AgentHostingRow {
   llm_set_at: string | null;
   created_by: string;
   requested_by: string | null;
+  billing_customer: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -181,13 +182,14 @@ function rowToAgentHosting(r: AgentHostingRow): StoredAgentHosting {
     ...(llm ? { llm } : {}),
     createdBy: r.created_by,
     ...(r.requested_by !== null ? { requestedBy: r.requested_by } : {}),
+    ...(r.billing_customer !== null ? { billingCustomer: r.billing_customer } : {}),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
 const HOSTING_COLUMNS =
-  'id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at, created_by, requested_by, created_at, updated_at';
+  'id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at, created_by, requested_by, billing_customer, created_at, updated_at';
 
 function rowToMember(r: MemberRow): Member {
   return {
@@ -547,6 +549,11 @@ export class PgStore implements Store {
       [this.orgId, iss, sub],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
+  }
+
+  async listIdentitiesOf(memberId: string): Promise<Array<{ iss: string; sub: string }>> {
+    const rows = await this.sql.query<{ iss: string; sub: string }>('select iss, sub from member_identities where org_id = $1 and member_id = $2 order by iss, sub', [this.orgId, memberId]);
+    return rows.map((r) => ({ iss: r.iss, sub: r.sub }));
   }
 
   async putIdentity(iss: string, sub: string, memberId: string): Promise<void> {
@@ -2124,16 +2131,17 @@ export class PgStore implements Store {
   async putHosting(h: StoredAgentHosting): Promise<void> {
     await this.sql.query(
       `insert into agent_hosting (org_id, id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at,
-         funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at, requested_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+         funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at, requested_by, billing_customer)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
        on conflict (org_id, id) do update set agent_id = excluded.agent_id, status = excluded.status, external_id = excluded.external_id,
          display_name = excluded.display_name, error = excluded.error, updated_at = excluded.updated_at,
          funding = excluded.funding, trial_ends_at = excluded.trial_ends_at, trial_closed_at = excluded.trial_closed_at, trial_closed_reason = excluded.trial_closed_reason,
-         llm_provider = excluded.llm_provider, llm_key_hint = excluded.llm_key_hint, llm_model = excluded.llm_model, llm_set_by = excluded.llm_set_by, llm_set_at = excluded.llm_set_at`,
+         llm_provider = excluded.llm_provider, llm_key_hint = excluded.llm_key_hint, llm_model = excluded.llm_model, llm_set_by = excluded.llm_set_by, llm_set_at = excluded.llm_set_at,
+         billing_customer = excluded.billing_customer`,
       [
         this.orgId, h.id, h.agentId ?? null, h.provider, h.status, h.externalId ?? null, h.externalUserId, h.kind, h.displayName, h.error ?? null, h.createdBy, h.createdAt, h.updatedAt,
         h.funding, h.trial?.endsAt ?? null, h.trial?.closedAt ?? null, h.trial?.closedReason ?? null, h.llm?.provider ?? null, h.llm?.keyHint ?? null, h.llm?.model ?? null, h.llm?.setBy ?? null, h.llm?.setAt ?? null,
-        h.requestedBy ?? null,
+        h.requestedBy ?? null, h.billingCustomer ?? null,
       ],
     );
   }

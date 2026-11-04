@@ -311,9 +311,12 @@ export type HostingStatus = z.infer<typeof HostingStatus>;
  * Rowboat's trial credit on the platform, there to try the agent, or the
  * owner's own provider key, where every agent is meant to end up. The trial
  * is one-shot: it closes when its cap is reached, when it expires, or the
- * moment a key is added, and never reopens.
+ * moment a key is added, and never reopens. `credits` (2026-11-04, billing
+ * for managed agents): on a deployment that bills, Hermes calls the model
+ * through Rowboat's LLM gateway on its owner's Rowboat credits, as the
+ * desktop app does; there is no trial there.
  */
-export const HostingFunding = z.enum(['trial', 'own']);
+export const HostingFunding = z.enum(['trial', 'own', 'credits']);
 export type HostingFunding = z.infer<typeof HostingFunding>;
 /** Where an agent's model access is from: a provider its owner holds a key for, or `chatgpt`, the ChatGPT plan its owner signed Codex in to from the Terminal (2026-10-30; no key, so `keyHint` is empty). */
 export const LlmProvider = z.enum(['openai', 'anthropic', 'openrouter', 'chatgpt']);
@@ -346,6 +349,19 @@ export const HostingSpend = z.object({
 });
 export type HostingSpend = z.infer<typeof HostingSpend>;
 
+/**
+ * What a billed agent has cost this calendar month (UTC), as the platform
+ * counts it (2026-11-04): the machine, and any model calls the platform
+ * itself served. Model calls through Rowboat's gateway are on the owner's
+ * Rowboat usage instead.
+ */
+export const HostingUsage = z.object({
+  periodStart: z.iso.datetime(),
+  machineCents: z.number(),
+  llmCents: z.number(),
+});
+export type HostingUsage = z.infer<typeof HostingUsage>;
+
 export const AgentHosting = z.object({
   provider: z.literal('maritime'),
   status: HostingStatus,
@@ -357,6 +373,12 @@ export const AgentHosting = z.object({
   trial: HostingTrial.optional(),
   /** The owner's key, once the agent runs on one. */
   llm: HostingLlm.optional(),
+  /**
+   * The agent bills to its owner's Rowboat plan (2026-11-04): its machine at
+   * the platform's own cost, and on `credits` its model calls too. Absent on a
+   * deployment that does not bill.
+   */
+  billed: z.literal(true).optional(),
   createdBy: MemberId,
   /** The super agent that asked for it (2026-11-02), when one did; `createdBy` is then that agent's owner. */
   requestedBy: MemberId.optional(),

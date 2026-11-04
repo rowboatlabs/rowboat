@@ -432,7 +432,7 @@ export function buildHttpApp(deps: {
   });
 
   // Managed agents (spec §8 Maritime, 2026-10-26): created on the platform Rowboat's own account runs.
-  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, { kinds: await service.managedAgentKinds(actor(c)) }));
+  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, await service.managedAgentKinds(actor(c))));
 
   app.post(routes.createManagedAgent.path, async (c) => {
     const input = await body(c, routes.createManagedAgent.request);

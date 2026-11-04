@@ -150,6 +150,8 @@ export interface StoredAgentHosting extends AgentHosting {
   externalUserId: string;
   kind: string;
   displayName: string;
+  /** The Rowboat account the agent bills to (2026-11-04), when the deployment bills: its owner's subject at the issuer. */
+  billingCustomer?: string;
 }
 
 /** An alert hook as stored (spec §8 Alerts, 2026-10-03): what its owner sees, plus the hash of its secret. */
@@ -267,6 +269,8 @@ export interface Store {
   // WHO; this table says which member that is). Written only by the invite
   // ceremony (and seeding); the oidc auth driver reads, never creates.
   getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined>;
+  /** The identities that resolve to a member (2026-11-04: billing finds the owner's Rowboat account by its subject). */
+  listIdentitiesOf(memberId: string): Promise<Array<{ iss: string; sub: string }>>;
   putIdentity(iss: string, sub: string, memberId: string): Promise<void>;
   /**
    * Account deletion (2026-10-08, revised 2026-10-13): the person behind a
