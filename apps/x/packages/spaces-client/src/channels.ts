@@ -33,7 +33,7 @@ export type HarborChannel =
   | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset' | 'spaces:deleteAsset' | 'spaces:restoreAsset'
   | 'spaces:readAsset' | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff'
   | 'spaces:listTopics' | 'spaces:createTopic' | 'spaces:manageTopic' | 'spaces:archiveThread' | 'spaces:listArchivedThreads' | 'spaces:search'
-  | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:listThread' | 'spaces:postMessage'
+  | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:readMessageSecret' | 'spaces:listThread' | 'spaces:postMessage'
   | 'spaces:reactToMessage' | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:listInvocations' | 'spaces:cancelInvocation' | 'spaces:getAgentCapabilities' | 'spaces:setAgentOptionDefaults'
   | 'spaces:decideApproval'
@@ -310,6 +310,10 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
         ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
         ...(args.limit !== undefined ? { limit: args.limit } : {}),
       }),
+
+    'spaces:readMessageSecret': async (args) => ({
+      value: await getClient(args.orgId).readMessageSecret(args.spaceId, args.messageId, args.name),
+    }),
 
     'spaces:getMessage': async (args) => ({
       message: await getClient(args.orgId).getMessage(args.spaceId, args.messageId),

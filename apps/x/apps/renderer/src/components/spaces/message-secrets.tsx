@@ -1,81 +1,74 @@
 import { useState } from 'react'
-import { KeyRound, X as XIcon } from 'lucide-react'
+import { Copy, Eye, EyeOff, KeyRound, Loader2, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
+import { toast } from '@/lib/toast'
 
-// Secrets for an agent in a thread (Harbor spec §8, 2026-11-04, "secrets card"
-// in Main): a person hands an agent the message addresses an API key, and the
-// rest of the space sees only the card, never the value. Harbor checks every
-// rule; the composer offers only the agents its draft addresses so a send is
-// rarely refused.
+// Secrets in a thread (Harbor spec §8, 2026-11-04, "secrets card" in Main): a
+// person shares an API key with the people and agents a message mentions, and
+// the rest of the space sees only the card, never the value. Harbor decides
+// the readers from the mentions when the message is posted; the composer shows
+// the same list first, so a stray mention is seen before it is sent.
 
 /** A secret waiting in the composer, value and all, until the message is sent. */
 export interface DraftSecret {
     name: string
-    for: string
     value: string
 }
 
 /** The wire's name rule (protocol SecretName): an environment variable's. */
 const SECRET_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
 
-export function AddSecretDialog({ open, onOpenChange, agents, names, onAdd }: {
+/** "Harsh, Gagan and Scout". */
+function readersLabel(readers: string[], names: ReadonlyMap<string, string>, selfMemberId?: string): string {
+    const labels = readers.map((id) => (id === selfMemberId ? 'you' : names.get(id) ?? 'a member'))
+    return labels.length <= 1 ? labels.join('') : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`
+}
+
+export function AddSecretDialog({ open, onOpenChange, readers, names, onAdd }: {
     open: boolean
     onOpenChange: (open: boolean) => void
-    /** The agents the draft addresses, by member id. */
-    agents: string[]
+    /** Who the draft mentions, who will read it. */
+    readers: string[]
     names: ReadonlyMap<string, string>
     onAdd: (secret: DraftSecret) => void
 }) {
     return <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-md">
             {/* Mounted per opening, so each one starts empty. */}
-            <SecretForm agents={agents} names={names} onAdd={onAdd} onClose={() => onOpenChange(false)} />
+            <SecretForm readers={readers} names={names} onAdd={onAdd} onClose={() => onOpenChange(false)} />
         </DialogContent>
     </Dialog>
 }
 
-function SecretForm({ agents, names, onAdd, onClose }: {
-    agents: string[]
+function SecretForm({ readers, names, onAdd, onClose }: {
+    readers: string[]
     names: ReadonlyMap<string, string>
     onAdd: (secret: DraftSecret) => void
     onClose: () => void
 }) {
-    const [picked, setPicked] = useState<string | undefined>(undefined)
     const [name, setName] = useState('')
     const [value, setValue] = useState('')
-    const recipient = picked && agents.includes(picked) ? picked : agents[0] ?? ''
     const nameOk = SECRET_NAME_RE.test(name)
-    const ready = recipient !== '' && nameOk && value.length > 0
+    const ready = readers.length > 0 && nameOk && value.length > 0
     const add = () => {
         if (!ready) return
-        onAdd({ name, for: recipient, value })
+        onAdd({ name, value })
         onClose()
     }
     return <>
         <DialogHeader>
             <DialogTitle>Add a secret</DialogTitle>
             <DialogDescription>
-                {agents.length === 0
-                    ? 'Mention the agent you want to give it to first.'
-                    : 'Only the agent can read it. Everyone else in the thread sees its name, not its value.'}
+                {readers.length === 0
+                    ? 'Mention who should read it first: the people and agents your message mentions can read it.'
+                    : `Readable by ${readersLabel(readers, names)}. Everyone else sees its name, not its value.`}
             </DialogDescription>
         </DialogHeader>
-        {agents.length > 0 && (
+        {readers.length > 0 && (
             <div className="flex flex-col gap-3">
-                {agents.length > 1 && (
-                    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="For">
-                        {agents.map((id) => (
-                            <button key={id} type="button" role="radio" aria-checked={recipient === id} onClick={() => setPicked(id)}
-                                className={cn('rounded-full border px-2.5 py-1 text-xs', recipient === id ? 'border-foreground bg-muted' : 'border-border text-muted-foreground hover:bg-muted')}>
-                                {names.get(id) ?? 'Agent'}
-                            </button>
-                        ))}
-                    </div>
-                )}
                 <Input autoFocus aria-label="Name" placeholder="OPENAI_API_KEY" value={name} spellCheck={false}
                     onChange={(e) => setName(e.target.value.trim())} />
                 {name && !nameOk && <span className="-mt-2 text-xs text-destructive">Letters, digits and underscores, not starting with a digit.</span>}
@@ -86,52 +79,103 @@ function SecretForm({ agents, names, onAdd, onClose }: {
         )}
         <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={add} disabled={!ready}>Add for {names.get(recipient) ?? 'the agent'}</Button>
+            <Button onClick={add} disabled={!ready}>Add secret</Button>
         </div>
     </>
 }
 
-/** The composer's chips: what this message will hand over, by name, removable before sending. */
-export function DraftSecretChips({ secrets, names, onRemove }: {
+/** The composer's chips: what this message will share, and with whom, removable before sending. */
+export function DraftSecretChips({ secrets, readers, names, onRemove }: {
     secrets: DraftSecret[]
+    readers: string[]
     names: ReadonlyMap<string, string>
     onRemove: (secret: DraftSecret) => void
 }) {
+    if (secrets.length === 0) return null
     return <>
         {secrets.map((s) => (
-            <span key={`${s.for}/${s.name}`} data-draft-secret={s.name}
+            <span key={s.name} data-draft-secret={s.name}
                 className="inline-flex max-w-56 items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs text-foreground/90">
                 <KeyRound className="size-3 shrink-0 text-muted-foreground" />
                 <span className="truncate font-mono">{s.name}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">for {names.get(s.for) ?? 'agent'}</span>
                 <button type="button" onClick={() => onRemove(s)} aria-label={`Remove ${s.name}`}
                     className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
                     <XIcon className="size-3" />
                 </button>
             </span>
         ))}
+        <span data-draft-secret-readers className={readers.length === 0 ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+            {readers.length === 0 ? 'Mention who should read it' : `Readable by ${readersLabel(readers, names)}`}
+        </span>
     </>
 }
 
-/** The card on a posted message: which secret went to which agent. The value never reaches this client. */
-export function MessageSecretsCard({ secrets, memberNames }: {
-    secrets: spaces.Message['secrets']
+/**
+ * The card on a posted message: its secrets' names and readers. A reader who
+ * is a person reveals a value here, fetched on demand and never kept; the
+ * value never reaches anyone else's client.
+ */
+export function MessageSecretsCard({ orgId, message, memberNames, selfMemberId }: {
+    orgId?: string
+    message: Pick<spaces.Message, 'id' | 'spaceId' | 'secrets'>
     memberNames: ReadonlyMap<string, string>
+    selfMemberId?: string
 }) {
-    if (!secrets || secrets.length === 0) return null
+    const secrets = message.secrets
+    if (!secrets) return null
+    const reader = orgId !== undefined && selfMemberId !== undefined && secrets.readers.includes(selfMemberId)
     return (
-        <div className="mt-1 flex flex-wrap gap-1.5" data-message-secrets>
-            {secrets.map((s) => {
-                const agent = memberNames.get(s.for) ?? 'the agent'
-                return (
-                    <span key={`${s.for}/${s.name}`} title={`Only ${agent} can read this secret`}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2 py-1 text-xs">
-                        <KeyRound className="size-3 shrink-0 text-muted-foreground" />
-                        <span className="font-mono">{s.name}</span>
-                        <span className="text-muted-foreground">for {agent} only</span>
-                    </span>
-                )
-            })}
+        <div className="mt-1 flex flex-col gap-1" data-message-secrets>
+            {secrets.names.map((name) => (
+                <SecretRow key={name} name={name} reveal={reader ? { orgId: orgId!, spaceId: message.spaceId, messageId: message.id } : undefined} />
+            ))}
+            <span className="text-xs text-muted-foreground">Readable by {readersLabel(secrets.readers, memberNames, selfMemberId)} only</span>
         </div>
+    )
+}
+
+function SecretRow({ name, reveal }: { name: string; reveal?: { orgId: string; spaceId: string; messageId: string } }) {
+    const [value, setValue] = useState<string | null>(null)
+    const [loading, setLoading] = useState(false)
+    const show = async () => {
+        if (!reveal || loading) return
+        setLoading(true)
+        try {
+            setValue((await window.ipc.invoke('spaces:readMessageSecret', { ...reveal, name })).value)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not read the secret', 'error')
+        } finally {
+            setLoading(false)
+        }
+    }
+    const copy = async () => {
+        if (value === null) return
+        await navigator.clipboard.writeText(value)
+        toast(`${name} copied`, 'success')
+    }
+    return (
+        <span className="inline-flex w-fit max-w-full items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2 py-1 text-xs">
+            <KeyRound className="size-3 shrink-0 text-muted-foreground" />
+            <span className="font-mono">{name}</span>
+            {value !== null && <span data-secret-value className="truncate font-mono text-foreground/90">{value}</span>}
+            {reveal && (value === null ? (
+                <button type="button" onClick={() => void show()} aria-label={`Reveal ${name}`}
+                    className="inline-flex items-center gap-1 rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+                    {loading ? <Loader2 className="size-3 animate-spin" /> : <Eye className="size-3" />}
+                    <span>Reveal</span>
+                </button>
+            ) : (
+                <>
+                    <button type="button" onClick={() => void copy()} aria-label={`Copy ${name}`}
+                        className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                        <Copy className="size-3" />
+                    </button>
+                    <button type="button" onClick={() => setValue(null)} aria-label={`Hide ${name}`}
+                        className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                        <EyeOff className="size-3" />
+                    </button>
+                </>
+            ))}
+        </span>
     )
 }

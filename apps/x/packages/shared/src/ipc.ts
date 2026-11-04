@@ -4368,6 +4368,11 @@ export const ipcSchemas = {
   // One flat thread: root + topic annotation (null = plain thread) + windowed
   // replies. A reply id resolves to its root on the org.
   /** One message by id — what a message link resolves through (a reply names its thread root). */
+  // A secret a message shared with the caller (Harbor spec §8, 2026-11-04): readers only, on reveal.
+  'spaces:readMessageSecret': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string(), name: z.string() }),
+    res: z.object({ value: z.string() }),
+  },
   'spaces:getMessage': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string() }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
@@ -4400,8 +4405,8 @@ export const ipcSchemas = {
       agentOptions: z.record(z.string(), z.record(z.string(), z.union([z.string(), z.boolean()]))).optional(),
       /** A thread reply for the people only: it follows up no agent (Harbor spec §8, 2026-10-27). */
       peopleOnly: z.boolean().optional(),
-      /** Secrets for agents the message addresses; only each agent reads its value (Harbor spec §8, 2026-11-04). */
-      secrets: z.array(z.object({ name: z.string(), for: z.string(), value: z.string() })).optional(),
+      /** Secrets for the members the message mentions, its readers (Harbor spec §8, 2026-11-04). */
+      secrets: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
     }),
     res: z.custom<SpacesPostResult>(),
   },

@@ -796,6 +796,20 @@ export class SpacesClient {
     };
   }
 
+  /** A secret a message shared with the caller, as text (2026-11-04): Harbor answers its readers only. */
+  async readMessageSecret(spaceId: string, messageId: string, name: string): Promise<string> {
+    const res = await this.authorizedFetch(`${this.baseUrl}${this.space(spaceId, `/messages/${messageId}/secrets/${encodeURIComponent(name)}`)}`);
+    if (!res.ok) {
+      const parsed = ((await res.json().catch(() => undefined)) ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? `secret read failed with ${res.status}`,
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    return res.text();
+  }
+
   // --- feed -----------------------------------------------------------------
 
   async listTopics(spaceId: string, includeArchived = false): Promise<TopicListing[]> {

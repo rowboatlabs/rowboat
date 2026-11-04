@@ -13,8 +13,8 @@ import { noteInvocations } from '@/hooks/use-space-invocations'
 /** Options picked in the composer for agent members a message mentions, by agent id (Harbor spec §8, 2026-09-30). */
 export type AgentMemberOptions = Record<string, Record<string, string | boolean>>
 
-/** A secret for an agent the message addresses (Harbor spec §8, 2026-11-04). */
-export type MessageSecretInput = { name: string; for: string; value: string }
+/** A secret for the members the message mentions (Harbor spec §8, 2026-11-04). */
+export type MessageSecretInput = { name: string; value: string }
 
 /** The post payload's share of them, and of the secrets: nothing when none were picked. */
 export function agentOptionsPayload(agent: { members?: AgentMemberOptions; secrets?: MessageSecretInput[] } | undefined): { agentOptions?: AgentMemberOptions; secrets?: MessageSecretInput[] } {

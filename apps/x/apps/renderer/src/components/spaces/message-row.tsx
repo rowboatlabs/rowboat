@@ -462,7 +462,7 @@ function MessageRowImpl({
                         {!collapsed && <MessageLinkPreview body={message.body} messageId={message.id} />}
                     </div>
                 )}
-                {!deleted && <MessageSecretsCard secrets={message.secrets} memberNames={memberNames} />}
+                {!deleted && <MessageSecretsCard orgId={orgId} message={message} memberNames={memberNames} selfMemberId={selfMemberId} />}
                 {message.failed && (
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-destructive">
                         <span>Failed to send</span>

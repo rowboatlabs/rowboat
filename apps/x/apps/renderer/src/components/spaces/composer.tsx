@@ -28,7 +28,7 @@ import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '
 import { containsRowboatAddress, mentionedMemberIds } from '@/lib/spaces-mentions'
 import { AgentOptionsStrip, type AgentOptionValues } from '@/components/spaces/agent-options-strip'
 import { AddSecretDialog, DraftSecretChips, type DraftSecret } from '@/components/spaces/message-secrets'
-import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
+import { useMemberNames } from '@/components/spaces/member-text'
 import { mentionsAnyone } from '@x/shared/dist/spaces.js'
 import type { AutoRouteMode } from '@/lib/spaces-auto-route'
 import { draftStorageKey } from '@/lib/spaces-thread-draft'
@@ -72,7 +72,7 @@ export interface AgentOptions {
     codeMode?: 'claude' | 'codex'
     /** Options picked for agent members the text mentions, by agent id (Harbor spec §8, 2026-09-30). */
     members?: AgentOptionValues
-    /** Secrets for agents the text addresses (Harbor spec §8, 2026-11-04): only the agent reads the value. */
+    /** Secrets for the members the text mentions (Harbor spec §8, 2026-11-04): only they read the values. */
     secrets?: DraftSecret[]
 }
 
@@ -465,11 +465,9 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // Secrets waiting to go with the message (2026-11-04): held in memory only, never in the saved draft.
     const [secrets, setSecrets] = useState<DraftSecret[]>([])
     const [secretOpen, setSecretOpen] = useState(false)
-    const { byId: profiles } = useSpaceProfiles()
     const memberNames = useMemberNames()
-    /** The agents a text addresses, which are the ones Harbor lets it hand a secret to. */
-    const addressedAgents = (text: string) =>
-        [...new Set([...mentionedMemberIds(text), ...(refs?.directWith ? [refs.directWith] : [])])].filter((id) => profiles.get(id)?.kind === 'agent')
+    /** Who a text's secrets go to, as Harbor decides it at post: the members it mentions, and in a DM the other member. */
+    const secretReaders = (text: string) => [...new Set([...mentionedMemberIds(text), ...(refs?.directWith ? [refs.directWith] : [])])]
 
     const hasDoneAttachment = attachments.some((a) => a.status === 'done')
     const canSend = !busy && !uploading && (!!draft.trim() || hasDoneAttachment)
@@ -483,8 +481,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         // A follow-up reaches its agent without a mention: its picks go with it.
         if (followUpAgentId && !mentionsAnyone(text)) mentionedIds.add(followUpAgentId)
         const members = Object.fromEntries(Object.entries(memberOptions).filter(([id]) => mentionedIds.has(id)))
-        const addressed = new Set(addressedAgents(text))
-        const handing = secrets.filter((x) => addressed.has(x.for))
+        const handing = secrets
         const rowboat = containsRowboatAddress(text)
         if (!rowboat && Object.keys(members).length === 0 && handing.length === 0) return undefined
         return {
@@ -567,9 +564,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         // buildBody, shared with send-later.
         const body = buildBody(raw)
         if (!body) return
-        const lost = secrets.filter((x) => !addressedAgents(raw).includes(x.for))
-        if (lost.length > 0) {
-            toast(`Mention ${memberNames.get(lost[0]!.for) ?? 'the agent'} to hand it ${lost[0]!.name}, or remove the secret`, 'info')
+        if (secrets.length > 0 && secretReaders(raw).length === 0) {
+            toast('Mention who should read the secret, or remove it', 'info')
             return
         }
         // From the text actually going out — an /ask rewrite mentions @rowboat
@@ -976,7 +972,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     </div>
                     {(attachments.length > 0 || secrets.length > 0) && (
                         <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
-                            <DraftSecretChips secrets={secrets} names={memberNames} onRemove={(gone) => setSecrets((all) => all.filter((x) => x !== gone))} />
+                            <DraftSecretChips secrets={secrets} readers={secretReaders(draft)} names={memberNames} onRemove={(gone) => setSecrets((all) => all.filter((x) => x !== gone))} />
                             {attachments.map((a) => (
                                 <span
                                     key={a.id}
@@ -1052,7 +1048,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                             <KeyRound className="mt-0.5" />
                                             <span className="flex flex-col">
                                                 <span>Add a secret</span>
-                                                <span className="text-xs text-muted-foreground">only the agent you mention sees it</span>
+                                                <span className="text-xs text-muted-foreground">only the people and agents you mention see it</span>
                                             </span>
                                         </DropdownMenuItem>
                                     )}
@@ -1139,8 +1135,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             </>
                         )}
                         <AgentOptionsStrip draft={draft} values={memberOptions} onChange={setMemberOptions} {...(followUpAgentId && !mentionsAnyone(draft) ? { followUpAgentId } : {})} />
-                        <AddSecretDialog open={secretOpen} onOpenChange={setSecretOpen} agents={addressedAgents(draft)} names={memberNames}
-                            onAdd={(added) => setSecrets((all) => [...all.filter((x) => x.for !== added.for || x.name !== added.name), added])} />
+                        <AddSecretDialog open={secretOpen} onOpenChange={setSecretOpen} readers={secretReaders(draft)} names={memberNames}
+                            onAdd={(added) => setSecrets((all) => [...all.filter((x) => x.name !== added.name), added])} />
                         {mentioned && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />

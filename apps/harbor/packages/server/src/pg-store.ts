@@ -19,7 +19,7 @@ import type {
   Membership,
   MentionStamps,
   Message,
-  MessageSecret,
+  MessageSecrets,
   Poll,
   Space,
   Topic,
@@ -322,7 +322,7 @@ interface MessageRow {
   summary?: string | null;
   people_only?: boolean | null;
   archived?: boolean | null;
-  secrets?: MessageSecret[] | null;
+  secrets?: MessageSecrets | null;
 }
 
 /** What search indexes for a message: its summary (2026-10-25) and its body. */
@@ -354,7 +354,7 @@ function rowToMessage(r: MessageRow): Message {
     // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
     ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
     ...(r.people_only ? { peopleOnly: true as const } : {}),
-    ...(r.secrets && r.secrets.length > 0 ? { secrets: r.secrets } : {}),
+    ...(r.secrets ? { secrets: r.secrets } : {}),
     ...(r.archived ? { archived: true as const } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
@@ -1251,19 +1251,16 @@ export class PgStore implements Store {
     );
   }
 
-  async putMessageSecrets(spaceId: string, messageId: string, secrets: Array<{ name: string; recipientId: string; sealed: string }>): Promise<void> {
+  async putMessageSecrets(spaceId: string, messageId: string, secrets: Array<{ name: string; sealed: string }>): Promise<void> {
     for (const x of secrets) {
-      await this.sql.query(
-        'insert into message_secrets (space_id, message_id, recipient_id, name, sealed) values ($1, $2, $3, $4, $5)',
-        [spaceId, messageId, x.recipientId, x.name, x.sealed],
-      );
+      await this.sql.query('insert into message_secrets (space_id, message_id, name, sealed) values ($1, $2, $3, $4)', [spaceId, messageId, x.name, x.sealed]);
     }
   }
 
-  async getMessageSecret(spaceId: string, messageId: string, recipientId: string, name: string): Promise<string | undefined> {
+  async getMessageSecret(spaceId: string, messageId: string, name: string): Promise<string | undefined> {
     const rows = await this.sql.query<{ sealed: string }>(
-      'select sealed from message_secrets where space_id = $1 and message_id = $2 and recipient_id = $3 and name = $4',
-      [spaceId, messageId, recipientId, name],
+      'select sealed from message_secrets where space_id = $1 and message_id = $2 and name = $3',
+      [spaceId, messageId, name],
     );
     return rows[0]?.sealed;
   }

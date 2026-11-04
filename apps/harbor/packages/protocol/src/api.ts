@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, MessageSecret, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, SecretName, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
   HostingConsole,
@@ -64,12 +64,12 @@ export const NewPoll = z.object({
 });
 
 /**
- * A secret handed to an agent the message addresses (2026-11-04): the value
- * is sealed apart from the message and the log, and only the recipient reads
- * it back (`readMessageSecret`). Neither the body nor the summary may contain
- * it, so a value pasted into the text too is refused rather than shown.
+ * A secret for the members the message mentions (2026-11-04): the value is
+ * sealed apart from the message and the log, and only they read it back
+ * (`readMessageSecret`). Neither the body nor the summary may contain it, so
+ * a value pasted into the text too is refused rather than shown.
  */
-export const NewMessageSecret = MessageSecret.extend({ value: z.string().min(1).max(8_192) });
+export const NewMessageSecret = z.object({ name: SecretName, value: z.string().min(1).max(8_192) });
 
 const NewMessage = z.object({
   /**
@@ -104,9 +104,9 @@ const NewMessage = z.object({
    */
   peopleOnly: z.boolean().optional(),
   /**
-   * Secrets for agents this message addresses (2026-11-04): each recipient is
-   * an agent member of the space the message mentions, or the agent of a DM.
-   * Names are unique per message and recipient. Immutable once posted.
+   * Secrets for the members this message mentions (2026-11-04), who are its
+   * readers from then on (Message.secrets). A message that mentions no one
+   * (outside a DM) cannot carry one. Names are unique. Immutable once posted.
    */
   secrets: z.array(NewMessageSecret).max(10).optional(),
 });
@@ -1392,10 +1392,10 @@ export const routes = {
     response: z.object({ message: Message, invocations: z.array(Invocation).default([]) }),
   },
   /**
-   * A secret a message handed to the caller (2026-11-04): the value as
-   * `text/plain`, `cache-control: no-store`, only to the agent it is for
-   * (anyone else, the author included, gets not_found, so its existence
-   * leaks no further than the card). Gone once the message is deleted.
+   * A secret a message handed the caller (2026-11-04): the value as
+   * `text/plain`, `cache-control: no-store`, only to its readers (anyone
+   * else, the author included, gets not_found). Gone once the message is
+   * deleted.
    */
   readMessageSecret: {
     method: 'GET',

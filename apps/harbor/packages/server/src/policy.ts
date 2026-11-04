@@ -1,4 +1,4 @@
-import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, MessageSecret, Space } from '@rowboat/spaces-protocol';
+import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, MessageSecrets, Space } from '@rowboat/spaces-protocol';
 import { BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
@@ -369,23 +369,23 @@ export function canReachPersonalAgent(actorId: string, member: Member, act: 'add
 }
 
 /**
- * Handing a secret to an agent in a message (2026-11-04, "secrets card" in
- * Main): only to an agent of the space the message addresses, by a mention or
- * as the agent of a DM, and to a personal agent only by its owner, since only
- * its owner can ask it for anything.
+ * Handing secrets in a message (2026-11-04, "secrets card" in Main): to the
+ * members it mentions, its readers, so a message that mentions no one carries
+ * none. A personal agent only from its owner, since only its owner can ask it
+ * for anything.
  */
-export function canHandSecret(input: { authorId: string; recipient: Member | undefined; inSpace: boolean; addressed: boolean }): Decision {
-  const { recipient } = input;
-  if (!recipient || recipient.kind !== 'agent' || !input.inSpace || recipient.id === input.authorId) {
-    return { code: 'invalid_request', message: 'a secret goes to an agent in this space' };
+export function canHandSecrets(authorId: string, readers: Member[]): Decision {
+  if (readers.length === 0) return { code: 'invalid_request', message: 'mention who should read the secret' };
+  for (const reader of readers) {
+    const refused = canReachPersonalAgent(authorId, reader, 'message');
+    if (refused) return refused;
   }
-  if (!input.addressed) return { code: 'invalid_request', message: `mention ${recipient.displayName} in the message to hand it a secret` };
-  return canReachPersonalAgent(input.authorId, recipient, 'message');
+  return null;
 }
 
-/** Reading a secret is its recipient's alone, the author and admins included; anyone else finds nothing (2026-11-04). */
-export function canReadSecret(actorId: string, secret: MessageSecret | undefined): Decision {
-  if (secret && secret.for === actorId) return null;
+/** Reading a secret is its readers' alone, the author and admins included; anyone else finds nothing (2026-11-04). */
+export function canReadSecret(actorId: string, secrets: MessageSecrets | undefined, name: string): Decision {
+  if (secrets && secrets.names.includes(name) && secrets.readers.includes(actorId)) return null;
   return { code: 'not_found', message: 'no such secret for you' };
 }
 

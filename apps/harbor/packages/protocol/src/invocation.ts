@@ -76,7 +76,7 @@ export const Invocation = z.object({
     messageId: MessageId,
     authorId: MemberId,
     body: z.string(),
-    /** The secrets the message hands to this agent, by name (2026-11-04): it reads each with readMessageSecret. */
+    /** The secrets the message hands this agent among its readers, by name (2026-11-04): it reads each with readMessageSecret. */
     secrets: z.array(SecretName).optional(),
   }),
   /** Where it happened. A DM's name is a placeholder: label it by the other member. */

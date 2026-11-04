@@ -20,7 +20,7 @@ Two pnpm workspace packages under `packages/`:
 | `core/super-agents.ts` | super agents (spec §4 Agent members, 2026-11-02): a super agent's `create_agent` and `delete_agent`, at once, as an approval card Harbor raises on its turn and applies once its owner allows it, or as a setup card its owner completes by adding the agent with the card as `request` |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
 | `core/images.ts` | profile images: a member's avatar and the org's logo, the org-wide image registry (`org_images`) and its read gate |
-| `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill, and the secrets a message hands an agent (sealed apart from the log, read only by their recipient, 2026-11-04) |
+| `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill, and the secrets a message shares with the members it mentions (sealed apart from the log, read only by those readers, 2026-11-04) |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
 | `service.ts` | `HarborService`, the facade: one delegate per public method, `org` / `readOnly` accessors |
 | `policy.ts` | who may do what — pure decisions over facts the core loads; `enforce` throws |

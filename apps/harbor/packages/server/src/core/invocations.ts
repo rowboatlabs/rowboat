@@ -122,7 +122,7 @@ export class Invocations {
       const now = this.k.now();
       // The owner's defaults fill what the invoker did not pick: a mention, a DM, an agent's hand-off alike.
       const options = { ...(await this.defaultsFor(agentId)), ...agentOptions?.[agentId] };
-      const secrets = (message.secrets ?? []).filter((x) => x.for === agentId).map((x) => x.name);
+      const secrets = message.secrets?.readers.includes(agentId) ? message.secrets.names : [];
       const invocation: Invocation = {
         id: this.k.ulid(),
         agentId,

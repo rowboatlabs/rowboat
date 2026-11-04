@@ -73,7 +73,7 @@ export function secretsSection(orgUrl: string, invocation: Invocation): string |
   if (names.length === 0) return undefined;
   const { spaceId } = invocation.conversation;
   return [
-    'Secrets handed to you in this message, which no one else in the space can read. Read one when you need it with',
+    'Secrets handed to you in this message, which only the members it mentions can read. Read one when you need it with',
     '`curl -fsSL -H "Authorization: Bearer $ROWBOAT_AGENT_KEY" <url>` (when this environment sets ROWBOAT_AGENT_KEY), straight into where it is used, such as an environment variable;',
     'never write its value in the thread, in a file in the space, or in a commit:',
     ...names.map((name) => `- ${name}: ${orgUrl}/v1/spaces/${spaceId}/messages/${invocation.trigger.messageId}/secrets/${name}`),
