@@ -402,6 +402,10 @@ export type AgentHosting = z.infer<typeof AgentHosting>;
  * that; a billed agent pays the platform's exact cost for what it ran.
  * `resizable` is false, with `reason`, when the owner may not change it (a
  * plan without bigger machines, a deployment that does not bill).
+ * `idleSeconds` (2026-11-04) is how long the machine stays awake after its
+ * last activity before it sleeps, the platform's nearest thing to always on
+ * (which it does not sell): an agent box costs the same awake or asleep, but
+ * each awake machine holds one of the account's `maxAwakeMachines`.
  */
 export const HostingSize = z.object({
   memMb: z.number().int().optional(),
@@ -409,6 +413,9 @@ export const HostingSize = z.object({
   vcpus: z.number().optional(),
   memOptions: z.array(z.object({ memMb: z.number().int(), centsPerMonth: z.number().optional() })).max(64),
   maxDiskGb: z.number().optional(),
+  idleSeconds: z.number().int().optional(),
+  idleOptions: z.array(z.number().int().positive()).max(32),
+  maxAwakeMachines: z.number().int().optional(),
   resizable: z.boolean(),
   reason: z.string().max(300).optional(),
   upgradeUrl: z.url().optional(),

@@ -72,6 +72,8 @@ export interface MaritimeAgent {
   memMb?: number;
   diskMb?: number;
   vcpus?: number;
+  /** How long it stays awake after its last activity before it sleeps (2026-11-04). */
+  idleTtlSeconds?: number;
 }
 
 /** The account's plan and its per-agent size ceilings (`GET /api/v1/account/limits`, read 2026-11-04). */
@@ -81,6 +83,7 @@ export interface MaritimeLimits {
   minMemMb?: number;
   maxMemMb?: number;
   maxDiskGb?: number;
+  maxAwakeMachines?: number;
 }
 
 /** One machine type and its list rate (`GET /api/billing/machine-types`, read 2026-11-04). */
@@ -142,6 +145,8 @@ export interface MaritimeApi {
   createEndUserAgent(externalId: string, input: CreateAgentInput): Promise<MaritimeAgent>;
   /** Replace the end user's policy (caps and sizing), applied to every agent it owns. */
   setEndUserPolicy(externalId: string, policy: Record<string, number>): Promise<void>;
+  /** The end user's policy, or none (`GET /api/v1/end-users/{id}/policy`). */
+  endUserPolicy(externalId: string): Promise<Record<string, number>>;
   /** A short-lived token the end user's own client opens one of its agents with (`POST /api/v1/end-users/{id}/tokens`): `console` opens the terminal socket and `/exec`. */
   mintEndUserToken(externalId: string, input: { agentId: string; scopes: string[]; ttlSeconds: number }): Promise<MaritimeEndUserToken>;
   /** Where the API is, for the sockets that hang off it. */
@@ -238,6 +243,7 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     ...(typeof a.memMb === 'number' ? { memMb: a.memMb } : {}),
     ...(typeof a.diskMb === 'number' ? { diskMb: a.diskMb } : {}),
     ...(typeof a.vcpus === 'number' ? { vcpus: a.vcpus } : {}),
+    ...(typeof a.idleTtlSeconds === 'number' ? { idleTtlSeconds: a.idleTtlSeconds } : {}),
   });
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
@@ -373,6 +379,10 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     async setEndUserPolicy(externalId, policy) {
       await call<unknown>(`/api/v1/end-users/${id(externalId)}/policy`, { method: 'PUT', body: { policy } });
     },
+    async endUserPolicy(externalId) {
+      const b = await call<{ policy?: Record<string, unknown> | null }>(`/api/v1/end-users/${id(externalId)}/policy`);
+      return Object.fromEntries(Object.entries(b.policy ?? {}).filter(([, v]) => typeof v === 'number')) as Record<string, number>;
+    },
     async mintEndUserToken(externalId, input) {
       const body = await call<Record<string, unknown>>(`/api/v1/end-users/${id(externalId)}/tokens`, {
         method: 'POST',
@@ -402,6 +412,7 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
         ...(num(b.minMemMb) !== undefined ? { minMemMb: num(b.minMemMb)! } : {}),
         ...(num(b.maxMemMb) !== undefined ? { maxMemMb: num(b.maxMemMb)! } : {}),
         ...(num(b.maxDiskGb) !== undefined ? { maxDiskGb: num(b.maxDiskGb)! } : {}),
+        ...(num(b.maxAwakeMachines) !== undefined ? { maxAwakeMachines: num(b.maxAwakeMachines)! } : {}),
       };
     },
     async machineTypes() {

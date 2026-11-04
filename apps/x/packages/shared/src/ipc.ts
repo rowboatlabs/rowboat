@@ -4076,7 +4076,7 @@ export const ipcSchemas = {
     res: z.object({ size: z.custom<SpacesTypes.HostingSize>() }),
   },
   'spaces:setHostingSize': {
-    req: z.object({ orgId: z.string(), agentId: z.string(), memMb: z.number(), diskGb: z.number() }),
+    req: z.object({ orgId: z.string(), agentId: z.string(), memMb: z.number().optional(), diskGb: z.number().optional(), idleSeconds: z.number().optional() }),
     res: z.object({ size: z.custom<SpacesTypes.HostingSize>() }),
   },
   'spaces:runHostingCommand': {

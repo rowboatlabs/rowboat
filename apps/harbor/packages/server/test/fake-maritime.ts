@@ -70,6 +70,8 @@ export class FakeMaritime {
   readonly sizes = new Map<string, { memMb: number; diskMb: number; vcpus: number }>();
   limits: Record<string, unknown> = { plan: 'starter', billingModel: 'usage', minMemMb: 512, maxMemMb: 8192, maxDiskGb: 100 };
   agentBoxCentsPerHour = 0.136986301369863;
+  /** Each managed agent's idle timeout, as its record says; its end user's policy sets it. */
+  readonly idle = new Map<string, number>();
   readonly resizes: Array<{ agentId: string; body: Record<string, unknown> | undefined }> = [];
   /** What the next submitted turn does (a one-line Hermes answer by default). */
   nextTurn: Turn | undefined;
@@ -197,8 +199,11 @@ export class FakeMaritime {
         const ttl = typeof body?.ttlSeconds === 'number' ? body.ttlSeconds : 900;
         return send(201, { token: `eu_${externalId}_${++this.sequence}`, agentId, scopes, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() });
       }
+      if (req.method === 'GET' && what === 'policy') return send(200, { policy: record?.policy ?? null, appliedToAgents: record?.agentId ? 1 : 0 });
       if (req.method === 'PUT' && what === 'policy') {
         this.endUsers.set(externalId!, { ...(record ?? { body: {} }), policy: (body?.policy as Record<string, unknown>) ?? {} });
+        const idle = (body?.policy as Record<string, unknown> | undefined)?.idle_sleep_seconds;
+        if (record?.agentId && typeof idle === 'number') this.idle.set(record.agentId, idle);
         return send(200, { policy: body?.policy ?? null, appliedToAgents: record?.agentId ? 1 : 0 });
       }
       if (req.method === 'DELETE' && !what) {
@@ -224,7 +229,7 @@ export class FakeMaritime {
       managed.reads++;
       if (managed.status === 'deploying' && managed.reads >= 2) managed.status = 'sleeping';
       const { reads: _reads, endUser: _endUser, ...shape } = managed;
-      return send(200, { ...shape, ...(this.sizes.get(managed.id) ?? { memMb: 2048, diskMb: 5120, vcpus: 1 }) });
+      return send(200, { ...shape, ...(this.sizes.get(managed.id) ?? { memMb: 2048, diskMb: 5120, vcpus: 1 }), idleTtlSeconds: this.idle.get(managed.id) ?? 300 });
     }
     // --- the management area (2026-10-27) ---
     const record = managed ?? this.agent;

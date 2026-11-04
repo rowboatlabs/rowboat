@@ -301,12 +301,21 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
           ...(agent.vcpus ? { vcpus: agent.vcpus } : {}),
           memOptions,
           ...(limits.maxDiskGb ? { maxDiskGb: limits.maxDiskGb } : {}),
+          ...(agent.idleTtlSeconds ? { idleSeconds: agent.idleTtlSeconds } : {}),
+          ...(limits.maxAwakeMachines !== undefined ? { maxAwakeMachines: limits.maxAwakeMachines } : {}),
         };
       }),
     resize: (input) =>
       refusing(async () => {
         await api.resize(agentId, input);
         await api.restart(agentId);
+      }),
+    // How long it stays awake (2026-11-04): the end user's policy, which Maritime applies to its one agent at once.
+    // The policy is replaced whole, so what else it holds (a trial's cap) is read and kept.
+    setIdle: (seconds) =>
+      refusing(async () => {
+        const policy = await api.endUserPolicy(externalUserId).catch(() => ({}));
+        await api.setEndUserPolicy(externalUserId, { ...policy, idle_sleep_seconds: seconds });
       }),
     stopFunding: () => refusing(() => api.setSpendLimit(agentId, 0)),
     liftCap: () => refusing(() => api.setSpendLimit(agentId, null)),
