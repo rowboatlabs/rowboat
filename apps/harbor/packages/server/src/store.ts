@@ -4,6 +4,7 @@ import type {
   AgentHook,
   AgentHosting,
   AgentKey,
+  SuperAgent,
   Attribution,
   ConnectorCapabilities,
   Approval,
@@ -149,6 +150,8 @@ export interface StoredAgentHosting extends AgentHosting {
   externalUserId: string;
   kind: string;
   displayName: string;
+  /** The Rowboat account the agent bills to (2026-11-04), when the deployment bills: its owner's subject at the issuer. */
+  billingCustomer?: string;
 }
 
 /** An alert hook as stored (spec §8 Alerts, 2026-10-03): what its owner sees, plus the hash of its secret. */
@@ -247,6 +250,8 @@ export interface Store {
   putMember(member: Member): Promise<void>;
   /** Switch an agent between channel and personal (2026-10-27): the one write of the flag after creation. */
   setAgentPersonal(id: string, personal: boolean): Promise<void>;
+  /** Make an agent a super agent or an ordinary one again (2026-11-02): the one write of the setting. */
+  setAgentSuper(id: string, superAgent: SuperAgent | null): Promise<void>;
   /** An agent's description (its title) and instructions, both whole: null clears one (2026-10-29). */
   setAgentProfile(id: string, profile: { title: string | null; instructions: string | null }): Promise<void>;
   /** The whole org roster — operator-side reads only (the mentions backfill). */
@@ -264,6 +269,8 @@ export interface Store {
   // WHO; this table says which member that is). Written only by the invite
   // ceremony (and seeding); the oidc auth driver reads, never creates.
   getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined>;
+  /** The identities that resolve to a member (2026-11-04: billing finds the owner's Rowboat account by its subject). */
+  listIdentitiesOf(memberId: string): Promise<Array<{ iss: string; sub: string }>>;
   putIdentity(iss: string, sub: string, memberId: string): Promise<void>;
   /**
    * Account deletion (2026-10-08, revised 2026-10-13): the person behind a
@@ -412,6 +419,10 @@ export interface Store {
    * and replays can't drift it.
    */
   refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void>;
+  /** A plain thread's archive flag (archiveThread, 2026-11-03) on its root. */
+  setThreadArchived(spaceId: string, rootMessageId: string, archived: boolean): Promise<void>;
+  /** The space's archived roots, newest activity first. */
+  listArchivedRoots(spaceId: string): Promise<Message[]>;
   /**
    * Tombstone: blanks the row's body and summary and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one
@@ -594,9 +605,9 @@ export interface Store {
   putApproval(approval: Approval): Promise<void>;
   getApproval(id: string): Promise<Approval | undefined>;
   getApprovalByRequest(invocationId: string, requestKey: string): Promise<Approval | undefined>;
-  /** An invocation's approvals in the given states, oldest first. */
+  /** An invocation's approvals from its connector in the given states, oldest first: not a super agent's requests (2026-11-02). */
   listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]>;
-  /** One agent's decided approvals its connector has not confirmed applying, oldest first. */
+  /** One agent's decided connector approvals its connector has not confirmed applying, oldest first. */
   listUnappliedDecisions(agentId: string): Promise<Approval[]>;
   /** The approvals riding on these messages (their cards). */
   listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]>;

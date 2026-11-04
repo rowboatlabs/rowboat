@@ -16,6 +16,8 @@ import {
   type AgentHosting,
   type HostingEnvVar,
   HostingSpend,
+  HostingUsage,
+  HostingSize,
   LlmProvider,
   type HostingConsole,
   type HostingExecution,
@@ -36,6 +38,8 @@ import {
   type ApprovalClose,
   type InvitePolicy,
   type Member,
+  type SuperAgent,
+  type PlatformInstance,
   type MemberRole,
   type OrgSettings,
   type Membership,
@@ -438,9 +442,12 @@ export class SpacesClient {
     return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
   }
 
-  /** The kinds of agent this org's Harbor creates on Rowboat's own platform account (api.ts managedAgentKinds, 2026-10-26); none = no managed hosting. */
-  async managedAgentKinds(): Promise<string[]> {
-    return (await this.request('GET', routes.managedAgentKinds.path, routes.managedAgentKinds.response)).kinds;
+  /**
+   * The kinds of agent this org's Harbor creates on Rowboat's own platform account (api.ts managedAgentKinds,
+   * 2026-10-26); none = no managed hosting. `billed` (2026-11-04): they bill to their creator's Rowboat plan.
+   */
+  async managedAgentKinds(): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
+    return this.request('GET', routes.managedAgentKinds.path, routes.managedAgentKinds.response);
   }
 
   /** Create a managed agent (api.ts createManagedAgent): the member, its first key, and its hosting, `deploying` at first. */
@@ -463,7 +470,7 @@ export class SpacesClient {
   private hostingPath(agentId: string, rest = ''): string {
     return `/v1/agents/${encodeURIComponent(agentId)}/hosting${rest}`;
   }
-  async getHosting(agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend }> {
+  async getHosting(agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend; usage?: HostingUsage }> {
     return this.request('GET', this.hostingPath(agentId), routes.getHosting.response);
   }
   /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */
@@ -475,6 +482,14 @@ export class SpacesClient {
   }
   async deleteHostingEnv(agentId: string, key: string): Promise<HostingEnvVar[]> {
     return (await this.request('DELETE', this.hostingPath(agentId, `/env/${encodeURIComponent(key)}`), routes.deleteHostingEnv.response)).env;
+  }
+  /** The machine's size, the platform's range and estimate (api.ts getHostingSize, 2026-11-04). */
+  async getHostingSize(agentId: string): Promise<HostingSize> {
+    return (await this.request('GET', this.hostingPath(agentId, '/size'), routes.getHostingSize.response)).size;
+  }
+  /** Resize the machine; Harbor restarts it to apply (api.ts setHostingSize). */
+  async setHostingSize(agentId: string, input: { memMb: number; diskGb: number }): Promise<HostingSize> {
+    return (await this.request('PUT', this.hostingPath(agentId, '/size'), routes.setHostingSize.response, input)).size;
   }
   async hostingPower(agentId: string, action: HostingPowerAction): Promise<HostingMachine> {
     return (await this.request('POST', this.hostingPath(agentId, '/power'), routes.hostingPower.response, { action })).machine;
@@ -583,6 +598,19 @@ export class SpacesClient {
   /** Set an agent's description and instructions: its owner only; a field left out is left alone, an empty one clears it (api.ts setAgentProfile, 2026-10-29). */
   async setAgentProfile(agentId: string, profile: { title?: string; instructions?: string }): Promise<Member> {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/profile`, routes.setAgentProfile.response, profile)).agent;
+  }
+
+  /** The Add flow's platform setup through Harbor (api.ts listSetupInstances / createSetupInstance, 2026-11-02): the key is not kept. */
+  async setupInstances(connection: string, key: string): Promise<PlatformInstance[]> {
+    return (await this.request('POST', `/v1/setup/${encodeURIComponent(connection)}/instances`, routes.listSetupInstances.response, { key })).instances;
+  }
+  async createSetupInstance(connection: string, input: { key: string; kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<PlatformInstance> {
+    return (await this.request('POST', `/v1/setup/${encodeURIComponent(connection)}/instances/new`, routes.createSetupInstance.response, input)).instance;
+  }
+
+  /** Make an agent a super agent, or ordinary again with null (api.ts setAgentSuper, 2026-11-02): admins only. */
+  async setAgentSuper(agentId: string, superAgent: SuperAgent | null): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/super`, routes.setAgentSuper.response, { superAgent })).agent;
   }
 
   /** Switch an agent this member owns between channel and personal (api.ts setAgentPersonal, 2026-10-27). */
@@ -1004,6 +1032,21 @@ export class SpacesClient {
         input,
       )
     ).message;
+  }
+
+  async archiveThread(spaceId: string, rootMessageId: string, archived: boolean): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}/archive`),
+        routes.archiveThread.response,
+        { archived, actingMode: 'direct' },
+      )
+    ).root;
+  }
+
+  async listArchivedThreads(spaceId: string): Promise<Message[]> {
+    return (await this.request('GET', this.space(spaceId, '/archived-threads'), routes.listArchivedThreads.response)).threads;
   }
 
   async manageTopic(spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {

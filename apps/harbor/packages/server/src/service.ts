@@ -3,6 +3,7 @@ import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
 import { AgentPresence } from './core/agent-presence.js';
 import { Hosting, type HostingHooks, type HostingProvider } from './core/hosting.js';
+import type { BillingAccounts } from './billing.js';
 import { Assets } from './core/assets.js';
 import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
@@ -11,8 +12,9 @@ import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
+import { SuperAgents } from './core/super-agents.js';
 import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetDefaultSpaceInput, SetMemberRoleInput, SetSpaceVisibilityInput, UpdateOrgSettingsInput } from './core/spaces.js';
-import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
+import type { ArchiveThreadInput, CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
 import type { Notifier } from './notify.js';
@@ -61,6 +63,9 @@ import type {
   SearchKind,
   SearchResults,
   Space,
+  PlatformInstance,
+  SuperAgent,
+  SuperAgentResult,
   Topic,
   TopicListing,
 } from '@rowboat/spaces-protocol';
@@ -87,6 +92,7 @@ export class HarborService {
   private readonly hosting: Hosting;
   private readonly invocations: Invocations;
   private readonly presence: AgentPresence;
+  private readonly superAgents: SuperAgents;
 
   constructor(
     store: Store,
@@ -109,6 +115,7 @@ export class HarborService {
     this.agents = new Agents(this.k, this.spaces);
     this.hosting = new Hosting(this.k, this.spaces, this.agents);
     this.presence = new AgentPresence(this.k, options.presenceGraceMs);
+    this.superAgents = new SuperAgents(this.k, this.hosting, this.spaces, this.feed, this.invocations);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
@@ -122,7 +129,7 @@ export class HarborService {
   }
 
   /** Managed hosting (spec §8 Maritime, 2026-10-26): the platform Rowboat's own account creates agents on, when the deployment has its key (runtime.ts). */
-  attachHosting(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number } = {}): void {
+  attachHosting(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number; billing?: BillingAccounts; settleEveryMs?: number } = {}): void {
     this.hosting.attach(provider, hooks, options);
   }
   /** The hosting worker: follows each managed agent from creation to ready, and through deletion. */
@@ -189,6 +196,22 @@ export class HarborService {
   setAgentPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
     return this.agents.setPersonal(ctx, agentId, input);
   }
+  listSetupInstances(ctx: ActorCtx, connection: string, key: string): Promise<PlatformInstance[]> {
+    return this.agents.listSetupInstances(ctx, connection, key);
+  }
+  createSetupInstance(ctx: ActorCtx, connection: string, input: { key: string; kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<PlatformInstance> {
+    return this.agents.createSetupInstance(ctx, connection, input);
+  }
+  setAgentSuper(ctx: ActorCtx, agentId: string, input: { superAgent: SuperAgent | null }): Promise<Member> {
+    return this.agents.setSuper(ctx, agentId, input);
+  }
+  /** A super agent's create_agent and delete_agent (spec §4 Agent members, 2026-11-02). */
+  superAgentCreate(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string }): Promise<SuperAgentResult> {
+    return this.superAgents.create(ctx, input);
+  }
+  superAgentDelete(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; agentId: string; reason: string }): Promise<SuperAgentResult> {
+    return this.superAgents.delete(ctx, input);
+  }
 
   setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
     return this.agents.setOptionDefaults(ctx, agentId, defaults);
@@ -209,16 +232,20 @@ export class HarborService {
     const hosting = await this.hosting.listFor(listing.map((l) => l.agent.id));
     return listing.map((l) => (hosting.has(l.agent.id) ? { ...l, hosting: hosting.get(l.agent.id)! } : l));
   }
-  /** The kinds of agent this Harbor creates on Rowboat's own platform account: none without the deployment's key. */
-  managedAgentKinds(ctx: ActorCtx): Promise<string[]> {
+  /** The kinds of agent this Harbor creates on Rowboat's own platform account: none without the deployment's key; and whether they bill (2026-11-04). */
+  managedAgentKinds(ctx: ActorCtx): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
     return this.hosting.kinds(ctx);
   }
   /** Create a managed agent on the platform Rowboat's account runs (spec §8 Maritime, 2026-10-26). */
-  createManagedAgent(
+  async createManagedAgent(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean; request?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
-    return this.hosting.createManaged(ctx, input);
+    const { request: requestId, ...rest } = input;
+    const request = requestId ? await this.superAgents.assertSetup(ctx, requestId, undefined) : undefined;
+    const created = await this.hosting.createManaged(ctx, rest, request?.agentId);
+    if (request) await this.superAgents.completeSetup(ctx, request, created.agent);
+    return created;
   }
   /** Delete a managed agent's hosting: the owner or an admin; its keys go now, the platform's resources in the background. */
   deleteManagedAgent(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
@@ -238,6 +265,21 @@ export class HarborService {
   }
   closeHostingTrial(agentId: string, reason: 'exhausted' | 'expired') {
     return this.hosting.closeTrial(agentId, reason);
+  }
+  /** For a billed agent's connector before a turn (2026-11-04): its sentence when the owner has no credits left. */
+  hostingTurnRefusal(agentId: string) {
+    return this.hosting.turnRefusal(agentId);
+  }
+  /** For a billed agent's connector after a failed turn (2026-11-04): the reason said the owner's way. */
+  explainHostingFailure(agentId: string, failure: string, signIn?: 'chatgpt' | 'none') {
+    return this.hosting.explainFailure(agentId, failure, signIn);
+  }
+  /** A managed agent's machine size, and resizing it (2026-11-04). */
+  getHostingSize(ctx: ActorCtx, agentId: string) {
+    return this.hosting.size(ctx, agentId);
+  }
+  setHostingSize(ctx: ActorCtx, agentId: string, input: { memMb: number; diskGb: number }) {
+    return this.hosting.resize(ctx, agentId, input);
   }
   setHostingEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean) {
     return this.hosting.setEnv(ctx, agentId, key, value, secret);
@@ -322,11 +364,16 @@ export class HarborService {
   deleteHostingTrigger(ctx: ActorCtx, agentId: string, triggerId: string) {
     return this.hosting.deleteTrigger(ctx, agentId, triggerId);
   }
-  addAgent(
+  async addAgent(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean; request?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
-    return this.agents.add(ctx, input);
+    // Completing a super agent's setup card (2026-11-02): checked before the agent exists, recorded once it does.
+    const { request: requestId, ...rest } = input;
+    const request = requestId ? await this.superAgents.assertSetup(ctx, requestId, input.connection) : undefined;
+    const added = await this.agents.add(ctx, rest);
+    if (request) await this.superAgents.completeSetup(ctx, request, added.agent);
+    return added;
   }
   setAgentCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
     return this.agents.setCredential(ctx, agentId, secret);
@@ -633,8 +680,9 @@ export class HarborService {
       throw err;
     }
   }
-  decideApproval(ctx: ActorCtx, spaceId: string, approvalId: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
-    return this.invocations.decideApproval(ctx, spaceId, approvalId, input);
+  async decideApproval(ctx: ActorCtx, spaceId: string, approvalId: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
+    // A super agent's request is applied by Harbor once decided (2026-11-02); any other goes to its connector.
+    return this.superAgents.apply(await this.invocations.decideApproval(ctx, spaceId, approvalId, input));
   }
   closeApproval(ctx: ActorCtx, approvalId: string, close: ApprovalClose): Promise<Approval> {
     return this.invocations.closeApproval(ctx, approvalId, close);
@@ -682,6 +730,14 @@ export class HarborService {
   }
   manageTopic(ctx: ActorCtx, spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {
     return this.feed.manageTopic(ctx, spaceId, topicId, action);
+  }
+
+  archiveThread(ctx: ActorCtx, spaceId: string, rootMessageId: string, input: ArchiveThreadInput): Promise<Message> {
+    return this.feed.archiveThread(ctx, spaceId, rootMessageId, input);
+  }
+
+  listArchivedThreads(ctx: ActorCtx, spaceId: string): Promise<Message[]> {
+    return this.feed.listArchivedThreads(ctx, spaceId);
   }
   search(
     ctx: ActorCtx,

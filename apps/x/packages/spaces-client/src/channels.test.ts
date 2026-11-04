@@ -109,10 +109,10 @@ describe('harborChannelHandlers', () => {
     expect(await table['spaces:removeMember']({ orgId, spaceId: space.id, memberId: 'gagan' })).toEqual({ removed: true });
     expect((await table['spaces:setMemberRole']({ orgId, memberId: 'gagan', role: 'admin' })).member.role).toBe('admin');
     expect((await table['spaces:setMemberRole']({ orgId, memberId: 'gagan', role: 'member' })).member.role).toBe('member');
-    expect((await table['spaces:getOrgSettings']({ orgId })).settings).toEqual({ invitePolicy: 'members', jevEnabled: true });
-    expect((await table['spaces:setJevEnabled']({ orgId, jevEnabled: false })).settings).toEqual({ invitePolicy: 'members', jevEnabled: false });
-    await table['spaces:setJevEnabled']({ orgId, jevEnabled: true });
-    expect((await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'admins' })).settings).toEqual({ invitePolicy: 'admins', jevEnabled: true });
+    expect((await table['spaces:getOrgSettings']({ orgId })).settings).toEqual({ invitePolicy: 'members', jevEnabled: false });
+    expect((await table['spaces:setJevEnabled']({ orgId, jevEnabled: true })).settings).toEqual({ invitePolicy: 'members', jevEnabled: true });
+    await table['spaces:setJevEnabled']({ orgId, jevEnabled: false });
+    expect((await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'admins' })).settings).toEqual({ invitePolicy: 'admins', jevEnabled: false });
     await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'members' });
     expect((await table['spaces:removeOrgMember']({ orgId, memberId: 'gagan' })).member.removedAt).toEqual(expect.any(String));
   });

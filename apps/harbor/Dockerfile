@@ -20,6 +20,14 @@
 #     through OpenRouter's ~typesafe/jev-latest — with it every org
 #     gets Jev, the built-in agent that tags whoever a message needs; without
 #     it, no Jev is created and an existing one stays idle)
+#   HARBOR_MARITIME_API_KEY (optional; Rowboat's Maritime key — with it the
+#     app offers agents Rowboat runs) HARBOR_MARITIME_LLM_CAP_CENTS (the
+#     trial's monthly cap) HARBOR_MARITIME_IDLE_SECONDS (how long a VM stays awake)
+#   HARBOR_BILLING_URL and HARBOR_BILLING_KEY (optional, both or neither;
+#     rowboatx-backend's origin and internal key — with them agents Rowboat
+#     runs bill to their owners' Rowboat plans and there is no trial)
+#     HARBOR_BILLING_ISSUER (the issuer whose subjects are Rowboat accounts)
+#     HARBOR_BILLING_UPGRADE_URL (else the backend's own app address)
 
 FROM node:22-slim AS build
 RUN corepack enable

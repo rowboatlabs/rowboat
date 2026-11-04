@@ -336,7 +336,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
     const [filesLoaded, setFilesLoaded] = useState(false)
     const [filesError, setFilesError] = useState<string | null>(null)
-    const collectionOpen = selection.kind === 'discussions' || selection.kind === 'files'
+    // 2026-11-03: Threads uses the stream's side-pane layout and keeps its list in place.
+    const threadsListOpen = selection.kind === 'discussions'
+    const collectionOpen = selection.kind === 'files'
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     // The org listing (module store): resolves a canonical link's org address
     // + space to an org this install is in.
@@ -533,8 +535,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // the doc shows when open; both = two columns. Narrow: one column — the
     // doc if open, else the chat.
     const twoFits = paneWidth >= SPLIT_FLOOR
-    const docOpen = docKey !== null
-    const showChat = twoFits ? chatOpen || !docOpen : !docOpen
+    const docOpen = !threadsListOpen && docKey !== null
+    const showChat = threadsListOpen || (twoFits ? chatOpen || !docOpen : !docOpen)
     const showDoc = docOpen
     const split = showChat && showDoc
     const railOpen = railPinned
@@ -640,7 +642,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const docAnim = anim?.column === 'doc' ? anim : null
     // What is in the tree: the logical state, plus whatever is still sliding out
     // (or, narrow, the chat being pushed out by an entering doc).
-    const docRender = docKey ?? (docAnim?.phase === 'exit' ? docAnim.docKey : null)
+    const docRender = threadsListOpen ? null : docKey ?? (docAnim?.phase === 'exit' ? docAnim.docKey : null)
     const chatRender = showChat || chatAnim?.phase === 'exit' || docAnim?.phase === 'enter'
     const columnStyle = (a: ColumnAnim): React.CSSProperties => ({
         ['--rb-col-w' as string]: `${a.width}px`,
@@ -903,6 +905,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // the last chat selection sticks until the user picks another.
     const chatContextRef = useRef<string | null>(null)
     if (selection.kind === 'thread') chatContextRef.current = selection.rootMessageId
+    else if (selection.kind === 'discussions') chatContextRef.current = selection.rootMessageId ?? null
     else if (selection.kind === 'general') chatContextRef.current = null
     else if ((selection.kind === 'file' || selection.kind === 'attachment') && selection.fromThreadRootId) chatContextRef.current = selection.fromThreadRootId
     const chatRootId = chatContextRef.current
@@ -1151,7 +1154,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     </PopoverContent>
                 </Popover>
 
-                <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect} topics={feed.topics}
+                <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect}
                     entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} />
 
                 <div className="min-w-0 flex-1" />
@@ -1252,18 +1255,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     edgeless
                 />
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
-                    {selection.kind === 'discussions' && <SpaceThreadsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
-                        selfMemberId={org.memberId} topics={feed.topics} roots={stream.messages} hasMore={stream.hasMore} loadingOlder={stream.loadingOlder}
-                        onLoadOlder={() => void loadOlderStreamMessages(org.id, space.id)} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
-                        presence={presence} inline={streamView === 'inline'}
-                        onOpen={(rootMessageId) => {
-                            // Inline (2026-10-25): the row does both — the stream lands on the
-                            // conversation's first message, and the conversation opens beside it
-                            // to focus on. (A narrow window shows the pane first; the stream
-                            // scrolls when it is back.) The quote line above a reply only scrolls.
-                            if (streamView === 'inline') requestJump({ topicId: STREAM_READ_KEY, messageId: rootMessageId })
-                            select({ kind: 'thread', rootMessageId })
-                        }} />}
                     {selection.kind === 'files' && <>
                         {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">
                             Could not refresh files. <button type="button" className="underline" onClick={() => setRefreshTick((tick) => tick + 1)}>Retry</button>
@@ -1291,20 +1282,29 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 >
                 <div style={chatAnim ? { width: chatAnim.width } : undefined} className={cn('flex min-w-0 min-h-0', chatAnim ? 'shrink-0' : 'flex-1')}>
                     <div className={cn('flex-1 min-w-0 min-h-0', chatRootId && !threadBesideStream ? 'hidden' : 'flex')}>
-                        <GeneralStream
-                            org={org}
-                            space={space}
-                            stream={stream}
-                            presence={presence}
-                            memberNames={memberNames}
-                            onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
-                            openThreadId={chatRootId}
-                            onOpenSession={onOpenSession}
-                            onClose={split ? closeChat : undefined}
-                            visible={active && !collectionOpen && showChat && (!chatRootId || threadBesideStream)}
-                            composeActive={!chatRootId}
-                            showHeader={threadBesideStream || split || !!stream.error}
-                        />
+                        <div className={cn('min-w-0 min-h-0 flex-1', threadsListOpen ? 'flex' : 'hidden')}>
+                            {selection.kind === 'discussions' && <SpaceThreadsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
+                                selfMemberId={org.memberId} topics={feed.topics} roots={stream.messages} hasMore={stream.hasMore} loadingOlder={stream.loadingOlder}
+                                onLoadOlder={() => void loadOlderStreamMessages(org.id, space.id)} direct={isDirect} loaded={feed.loaded && stream.ready} memberNames={memberNames} spaceNames={spaceNames}
+                                presence={presence} inline={streamView === 'inline'} selectedRootMessageId={chatRootId}
+                                onOpen={(rootMessageId) => select({ kind: 'discussions', rootMessageId })} />}
+                        </div>
+                        <div className={cn('min-w-0 min-h-0 flex-1', threadsListOpen ? 'hidden' : 'flex')}>
+                            <GeneralStream
+                                org={org}
+                                space={space}
+                                stream={stream}
+                                presence={presence}
+                                memberNames={memberNames}
+                                onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                                openThreadId={chatRootId}
+                                onOpenSession={onOpenSession}
+                                onClose={split ? closeChat : undefined}
+                                visible={active && !collectionOpen && !threadsListOpen && showChat && (!chatRootId || threadBesideStream)}
+                                composeActive={!chatRootId}
+                                showHeader={threadBesideStream || split || !!stream.error}
+                            />
+                        </div>
                     </div>
                     {threadBesideStream && (
                         <ThreadResizeHandle
@@ -1331,14 +1331,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 showBack={!threadBesideStream}
                                 expanded={threadExpanded}
                                 onToggleExpanded={!docOpen && (conversationWidth >= 840 || threadExpanded) ? toggleThreadExpanded : undefined}
-                                onBack={() => select({ kind: 'general' })}
+                                onBack={() => select(threadsListOpen ? { kind: 'discussions' } : { kind: 'general' })}
                                 onCloseColumn={split ? closeChat : undefined}
                                 onOpenFile={openFileFromThread(chatRootId)}
                                 onOpenSession={onOpenSession}
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
-                                onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                                onOpenThread={(id) => select({ kind: threadsListOpen ? 'discussions' : 'thread', rootMessageId: id })}
                                 visible={active && !collectionOpen && showChat}
                             />
                         </section>

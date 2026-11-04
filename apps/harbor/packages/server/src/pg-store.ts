@@ -3,6 +3,7 @@ import type { ActivityQuery, ActivityRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   AgentKey,
+  SuperAgent,
   BlobInfo,
   ConnectorCapabilities,
   Approval,
@@ -24,7 +25,7 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import { sortActivity } from './activity-sort.js';
-import { extractSearchText, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
+import { extractSearchText, searchTextFor, snippetAround, toPathPatterns, toTsQueryParams, tsquerySql, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
 import {
   type MessageWindow, type PushLevel,
@@ -73,6 +74,7 @@ interface MemberRow {
   agent_connection: string | null;
   agent_instance: string | null;
   personal: boolean;
+  super_agent: SuperAgent | null;
   instructions: string | null;
   deactivated_at: string | null;
   removed_at: string | null;
@@ -142,6 +144,8 @@ interface AgentHostingRow {
   llm_set_by: string | null;
   llm_set_at: string | null;
   created_by: string;
+  requested_by: string | null;
+  billing_customer: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -177,13 +181,15 @@ function rowToAgentHosting(r: AgentHostingRow): StoredAgentHosting {
     ...(trial ? { trial } : {}),
     ...(llm ? { llm } : {}),
     createdBy: r.created_by,
+    ...(r.requested_by !== null ? { requestedBy: r.requested_by } : {}),
+    ...(r.billing_customer !== null ? { billingCustomer: r.billing_customer } : {}),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
 const HOSTING_COLUMNS =
-  'id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at, created_by, created_at, updated_at';
+  'id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at, created_by, requested_by, billing_customer, created_at, updated_at';
 
 function rowToMember(r: MemberRow): Member {
   return {
@@ -198,6 +204,7 @@ function rowToMember(r: MemberRow): Member {
     ...(r.agent_connection !== null ? { agentConnection: r.agent_connection } : {}),
     ...(r.agent_instance !== null ? { agentInstance: r.agent_instance } : {}),
     ...(r.personal ? { personal: true } : {}),
+    ...(r.super_agent ? { superAgent: r.super_agent } : {}),
     ...(r.instructions !== null ? { instructions: r.instructions } : {}),
     ...(r.deactivated_at !== null ? { deactivatedAt: r.deactivated_at } : {}),
     ...(r.removed_at !== null ? { removedAt: r.removed_at } : {}),
@@ -313,9 +320,16 @@ interface MessageRow {
   mentions_rowboat: boolean | null;
   summary?: string | null;
   people_only?: boolean | null;
+  archived?: boolean | null;
 }
 
 /** What search indexes for a message: its summary (2026-10-25) and its body. */
+/** The two parameters tsquerySql reads, in its placeholder order. */
+function tsqueryArgs(query: SearchQuery): [string[], string[]] {
+  const { groups, wholes } = toTsQueryParams(query);
+  return [groups, wholes];
+}
+
 function withSummary(body: string, summary: string | undefined): string {
   return summary ? `${summary}\n${body}` : body;
 }
@@ -344,6 +358,7 @@ function rowToMessage(r: MessageRow): Message {
     // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
     ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
     ...(r.people_only ? { peopleOnly: true as const } : {}),
+    ...(r.archived ? { archived: true as const } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
     mentionsRowboat: r.mentions_rowboat ?? false,
@@ -481,7 +496,7 @@ export class PgStore implements Store {
 
   async getMember(id: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, instructions, deactivated_at, removed_at from members where org_id = $1 and id = $2',
+      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, super_agent, instructions, deactivated_at, removed_at from members where org_id = $1 and id = $2',
       [this.orgId, id],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
@@ -489,7 +504,7 @@ export class PgStore implements Store {
 
   async listAllMembers(): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, instructions, deactivated_at, removed_at from members where org_id = $1 order by id',
+      'select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, super_agent, instructions, deactivated_at, removed_at from members where org_id = $1 order by id',
       [this.orgId],
     );
     return rows.map(rowToMember);
@@ -497,7 +512,7 @@ export class PgStore implements Store {
 
   async listSpaceMembers(spaceId: string): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.personal, m.instructions, m.deactivated_at, m.removed_at from memberships ms
+      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.personal, m.super_agent, m.instructions, m.deactivated_at, m.removed_at from memberships ms
        join members m on m.org_id = $1 and m.id = ms.member_id
        where ms.space_id = $2
        order by ms.joined_at, ms.member_id`,
@@ -528,14 +543,23 @@ export class PgStore implements Store {
     await this.sql.query(`update members set personal = $3 where org_id = $1 and id = $2 and kind = 'agent'`, [this.orgId, id, personal]);
   }
 
+  async setAgentSuper(id: string, superAgent: SuperAgent | null): Promise<void> {
+    await this.sql.query(`update members set super_agent = $3 where org_id = $1 and id = $2 and kind = 'agent'`, [this.orgId, id, superAgent ? JSON.stringify(superAgent) : null]);
+  }
+
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.personal, m.instructions, m.deactivated_at, m.removed_at from member_identities mi
+      `select m.id, m.display_name, m.title, m.avatar_url, m.role, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.personal, m.super_agent, m.instructions, m.deactivated_at, m.removed_at from member_identities mi
        join members m on m.org_id = mi.org_id and m.id = mi.member_id
        where mi.org_id = $1 and mi.iss = $2 and mi.sub = $3`,
       [this.orgId, iss, sub],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
+  }
+
+  async listIdentitiesOf(memberId: string): Promise<Array<{ iss: string; sub: string }>> {
+    const rows = await this.sql.query<{ iss: string; sub: string }>('select iss, sub from member_identities where org_id = $1 and member_id = $2 order by iss, sub', [this.orgId, memberId]);
+    return rows.map((r) => ({ iss: r.iss, sub: r.sub }));
   }
 
   async putIdentity(iss: string, sub: string, memberId: string): Promise<void> {
@@ -605,7 +629,7 @@ export class PgStore implements Store {
       'select invite_policy, jev_enabled from org_settings where org_id = $1',
       [this.orgId],
     );
-    return { invitePolicy: rows[0]?.invite_policy ?? 'members', jevEnabled: rows[0]?.jev_enabled ?? true };
+    return { invitePolicy: rows[0]?.invite_policy ?? 'members', jevEnabled: rows[0]?.jev_enabled ?? false };
   }
 
   async setJevEnabled(enabled: boolean, by: string, at: string): Promise<void> {
@@ -1156,15 +1180,15 @@ export class PgStore implements Store {
   // --- search ----------------------------------------------------------------
   // The three GIN lookups (migration 012). Tombstones can't match (blank body
   // → empty tsv); deleted assets are filtered here, never de-indexed. Query
-  // strings arrive pre-quoted from toTsQueryString — no user text ever
+  // strings arrive pre-quoted from toTsQueryParams — no user text ever
   // reaches tsquery syntax.
 
   async searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]> {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<MessageRow>(
-      `select * from messages where space_id = $1 and body_tsv @@ to_tsquery('simple', $2)
-       order by stream_offset desc limit $3`,
-      [spaceId, toTsQueryString(query), limit],
+      `select * from messages where space_id = $1 and body_tsv @@ ${tsquerySql('$2', '$3')}
+       order by stream_offset desc limit $4`,
+      [spaceId, ...tsqueryArgs(query), limit],
     );
     return rows.map((r) => ({ message: rowToMessage(r), snippet: snippetAround(r.body, query) }));
   }
@@ -1172,9 +1196,9 @@ export class PgStore implements Store {
   async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<TopicRow>(
-      `${TOPIC_SELECT} where t.space_id = $1 and t.title_tsv @@ to_tsquery('simple', $2)
-       order by ts_rank(t.title_tsv, to_tsquery('simple', $2)) desc, t.created_at desc, t.id desc limit $3`,
-      [spaceId, toTsQueryString(query), limit],
+      `${TOPIC_SELECT} where t.space_id = $1 and t.title_tsv @@ ${tsquerySql('$2', '$3')}
+       order by ts_rank(t.title_tsv, ${tsquerySql('$2', '$3')}) desc, t.created_at desc, t.id desc limit $4`,
+      [spaceId, ...tsqueryArgs(query), limit],
     );
     return rows.map(rowToTopic);
   }
@@ -1183,18 +1207,18 @@ export class PgStore implements Store {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<AssetRow & { extracted: string | null; content_hit: boolean; path_hit: boolean }>(
       `select a.id, a.path, a.version, a.updated_at, a.state, v.blob, s.extracted,
-              coalesce(s.tsv @@ to_tsquery('simple', $2), false) as content_hit,
-              (a.path ilike all($3::text[])) as path_hit
+              coalesce(s.tsv @@ ${tsquerySql('$2', '$3')}, false) as content_hit,
+              (a.path ilike all($4::text[])) as path_hit
        from assets a
        join asset_versions v on v.space_id = a.space_id and v.asset_id = a.id and v.version = a.version
        left join asset_search s on s.space_id = a.space_id and s.asset_id = a.id
        where a.space_id = $1 and a.state = 'live'
-         and (coalesce(s.tsv @@ to_tsquery('simple', $2), false) or a.path ilike all($3::text[]))
-       order by (a.path ilike all($3::text[])) desc,
-                coalesce(ts_rank(s.tsv, to_tsquery('simple', $2)), 0) desc,
+         and (coalesce(s.tsv @@ ${tsquerySql('$2', '$3')}, false) or a.path ilike all($4::text[]))
+       order by (a.path ilike all($4::text[])) desc,
+                coalesce(ts_rank(s.tsv, ${tsquerySql('$2', '$3')}), 0) desc,
                 a.updated_at desc
-       limit $4`,
-      [spaceId, toTsQueryString(query), toPathPatterns(query), limit],
+       limit $5`,
+      [spaceId, ...tsqueryArgs(query), toPathPatterns(query), limit],
     );
     return rows.map((r) => ({
       record: this.assetRow(r),
@@ -1227,6 +1251,19 @@ export class PgStore implements Store {
         message.peopleOnly === true,
       ],
     );
+  }
+
+  async setThreadArchived(spaceId: string, rootMessageId: string, archived: boolean): Promise<void> {
+    await this.sql.query('update messages set archived = $3 where space_id = $1 and id = $2', [spaceId, rootMessageId, archived]);
+  }
+
+  async listArchivedRoots(spaceId: string): Promise<Message[]> {
+    const rows = await this.sql.query<MessageRow>(
+      `select * from messages where space_id = $1 and archived
+       order by coalesce(last_reply_offset, stream_offset) desc`,
+      [spaceId],
+    );
+    return rows.map(rowToMessage);
   }
 
   async refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void> {
@@ -1749,7 +1786,7 @@ export class PgStore implements Store {
 
   async listAgents(ownerId: string | null): Promise<Member[]> {
     const rows = await this.sql.query<MemberRow>(
-      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, instructions, deactivated_at, removed_at from members
+      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, super_agent, instructions, deactivated_at, removed_at from members
        where org_id = $1 and kind = 'agent' and ($2::text is null or owner_id = $2)
        order by lower(display_name), id`,
       [this.orgId, ownerId],
@@ -1907,7 +1944,9 @@ export class PgStore implements Store {
 
   async listInvocationApprovals(invocationId: string, states: ApprovalState[]): Promise<Approval[]> {
     const rows = await this.sql.query<{ data: Approval }>(
-      'select data from approvals where org_id = $1 and invocation_id = $2 and state = any($3::text[]) order by created_at, id',
+      // A super agent's request is Harbor's to apply, not the connector's, and holds no turn (2026-11-02).
+      `select data from approvals where org_id = $1 and invocation_id = $2 and state = any($3::text[]) and not (data ? 'action')
+       order by created_at, id`,
       [this.orgId, invocationId, states],
     );
     return rows.map((r) => r.data);
@@ -1915,7 +1954,7 @@ export class PgStore implements Store {
 
   async listUnappliedDecisions(agentId: string): Promise<Approval[]> {
     const rows = await this.sql.query<{ data: Approval }>(
-      `select data from approvals where org_id = $1 and agent_id = $2 and state in ('allowed', 'denied') and not applied
+      `select data from approvals where org_id = $1 and agent_id = $2 and state in ('allowed', 'denied') and not applied and not (data ? 'action')
        order by created_at, id`,
       [this.orgId, agentId],
     );
@@ -1996,7 +2035,7 @@ export class PgStore implements Store {
   async listAgentsByConnection(connections: readonly string[]): Promise<Member[]> {
     if (connections.length === 0) return [];
     const rows = await this.sql.query<MemberRow>(
-      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, instructions, deactivated_at, removed_at from members
+      `select id, display_name, title, avatar_url, role, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, super_agent, instructions, deactivated_at, removed_at from members
        where org_id = $1 and kind = 'agent' and removed_at is null and agent_connection = any($2::text[]) order by id`,
       [this.orgId, [...connections]],
     );
@@ -2098,15 +2137,17 @@ export class PgStore implements Store {
   async putHosting(h: StoredAgentHosting): Promise<void> {
     await this.sql.query(
       `insert into agent_hosting (org_id, id, agent_id, provider, status, external_id, external_user_id, kind, display_name, error, created_by, created_at, updated_at,
-         funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+         funding, trial_ends_at, trial_closed_at, trial_closed_reason, llm_provider, llm_key_hint, llm_model, llm_set_by, llm_set_at, requested_by, billing_customer)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
        on conflict (org_id, id) do update set agent_id = excluded.agent_id, status = excluded.status, external_id = excluded.external_id,
          display_name = excluded.display_name, error = excluded.error, updated_at = excluded.updated_at,
          funding = excluded.funding, trial_ends_at = excluded.trial_ends_at, trial_closed_at = excluded.trial_closed_at, trial_closed_reason = excluded.trial_closed_reason,
-         llm_provider = excluded.llm_provider, llm_key_hint = excluded.llm_key_hint, llm_model = excluded.llm_model, llm_set_by = excluded.llm_set_by, llm_set_at = excluded.llm_set_at`,
+         llm_provider = excluded.llm_provider, llm_key_hint = excluded.llm_key_hint, llm_model = excluded.llm_model, llm_set_by = excluded.llm_set_by, llm_set_at = excluded.llm_set_at,
+         billing_customer = excluded.billing_customer`,
       [
         this.orgId, h.id, h.agentId ?? null, h.provider, h.status, h.externalId ?? null, h.externalUserId, h.kind, h.displayName, h.error ?? null, h.createdBy, h.createdAt, h.updatedAt,
         h.funding, h.trial?.endsAt ?? null, h.trial?.closedAt ?? null, h.trial?.closedReason ?? null, h.llm?.provider ?? null, h.llm?.keyHint ?? null, h.llm?.model ?? null, h.llm?.setBy ?? null, h.llm?.setAt ?? null,
+        h.requestedBy ?? null, h.billingCustomer ?? null,
       ],
     );
   }

@@ -1,4 +1,4 @@
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import { Pressable, Text, View } from 'react-native';
 
 import { isNetworkError, friendlyError } from '@/lib/spaces/errors';

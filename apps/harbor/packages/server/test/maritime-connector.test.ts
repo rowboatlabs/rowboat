@@ -175,7 +175,7 @@ describe('the Maritime connector with Hermes', () => {
 
     const reply = (await org.thread(message.id)).find((m) => m.author.memberId === scout.id)!;
     expect(reply.body).toBe('The deploy is green.');
-    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([expect.objectContaining({ emoji: '✅', memberIds: [scout.id] })]));
+    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([]));
   });
 
   it('answers and accepts a follow-up while the catalogue is stalled, then publishes the refreshed choices', async () => {
@@ -195,6 +195,7 @@ describe('the Maritime connector with Hermes', () => {
       const { message, invocations } = await org.post(`${mention(scout)} check the deploy`);
       const catalog = await until(async () => fake.catalogs().slice(before).find((e) => e.status === 'running'), 'stalled catalogue');
       expect((await org.invocation(invocations[0]!.id))?.state).toBe('done');
+      expect(await org.reactions(message.id)).toEqual([]);
       expect((await org.thread(message.id)).map((m) => m.body)).toEqual(['Ready before the catalogue.']);
       const submission = fake.received.find((r) => r.path.endsWith('/exec') && JSON.stringify(r.body?.command).includes('/rowboat/models.json'))!;
       expect(submission.body).toMatchObject({ detached: true, timeout: 45 });
@@ -243,18 +244,27 @@ describe('the Maritime connector with Hermes', () => {
     }
   });
 
-  it('settles a follow-up reaction on its trigger and preserves other members’ reactions', async () => {
+  it.each([false, true])('clears the working reaction and preserves deliberate reactions (agent completion: %s)', async (completed) => {
     const root = await org.post('A job for Scout');
     fake.nextTurn = { lines: [], hold: true };
     const { message, invocations } = await org.post(`${mention(scout)} run it`, { threadRoot: root.message.id });
     await until(async () => (await org.invocation(invocations[0]!.id))?.activity === 'Working on Maritime', 'the connector to follow');
     await org.as('dev-harsh').post(`/v1/spaces/${org.spaceId}/messages/${message.id}/reactions`, { emoji: '👀', action: 'add', actingMode: 'direct' });
+    if (completed) {
+      const key = fake.submits().at(-1)!.script.match(/ROWBOAT_AGENT_KEY='(rbk_[^']+)'/)![1]!;
+      const result = await org.as(key).post(`/v1/spaces/${org.spaceId}/messages/${message.id}/reactions`, { emoji: '✅', action: 'add', actingMode: 'direct' });
+      expect(result.status).toBe(200);
+    }
     await fake.play(fake.submits().at(-1)!, hermesTurn('Finished.'));
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
-    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ emoji: '👀', memberIds: ['harsh'] }),
-      expect.objectContaining({ emoji: '✅', memberIds: [scout.id] }),
-    ])));
+    await vi.waitFor(async () => {
+      const reactions = await org.reactions(message.id);
+      expect(reactions).toHaveLength(completed ? 2 : 1);
+      expect(reactions).toEqual(expect.arrayContaining([
+        expect.objectContaining({ emoji: '👀', memberIds: ['harsh'] }),
+        ...(completed ? [expect.objectContaining({ emoji: '✅', memberIds: [scout.id] })] : []),
+      ]));
+    });
     expect(await org.reactions(root.message.id)).toEqual([]);
   });
 
@@ -266,7 +276,7 @@ describe('the Maritime connector with Hermes', () => {
     try {
       await fake.play(fake.submits().at(-1)!, hermesTurn('The answer still arrives.'));
       expect((await org.ended(invocations[0]!.id)).state).toBe('done');
-      await vi.waitFor(() => expect(reactions).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(reactions).toHaveBeenCalledTimes(1));
       expect((await org.thread(message.id)).filter((m) => m.author.memberId === scout.id).map((m) => m.body)).toEqual(['The answer still arrives.']);
     } finally {
       reactions.mockRestore();
@@ -403,7 +413,7 @@ describe('the Maritime connector with the coding agents', () => {
     expect(fake.catalogs().at(-1)!.script).toContain('cp "$CODEX_HOME/models_cache.json" /data/rowboat/models.json');
     expect(fake.submits().at(-1)!.files.prompt).toBe(`/data/rowboat/${invocations[0]!.id}.prompt`);
     expect((await org.thread(message.id)).find((m) => m.author.memberId === codex.id)!.body).toBe('Tests pass.');
-    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([expect.objectContaining({ emoji: '✅', memberIds: [codex.id] })]));
+    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([]));
     expect(reports.mock.calls.map(([, , u]) => ('activity' in u ? u.activity : undefined))).toContain('is running `npm test`');
     reports.mockRestore();
 
@@ -458,7 +468,7 @@ describe('the Maritime connector after a restart', () => {
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     expect((await org.thread(message.id)).filter((m) => m.author.memberId === scout.id).map((m) => m.body)).toEqual(['Done while you were away.']);
     expect(fake.submits()).toHaveLength(submits);
-    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([expect.objectContaining({ emoji: '✅', memberIds: [scout.id] })]));
+    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([]));
     await org.harbor.close();
     await store.db.close();
   });
@@ -483,7 +493,7 @@ describe('the Maritime connector after a restart', () => {
     await org.start();
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     expect((await org.thread(message.id)).filter((m) => m.author.memberId === scout.id).map((m) => m.body)).toEqual(['Finished, then forgotten.']);
-    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([expect.objectContaining({ emoji: '✅', memberIds: [scout.id] })]));
+    await vi.waitFor(async () => expect(await org.reactions(message.id)).toEqual([]));
     await org.harbor.close();
     await store.db.close();
   });

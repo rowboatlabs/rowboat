@@ -3,6 +3,7 @@ import {
   stampsEqual,
   type Attribution,
   type Approval,
+  type ApprovalAction,
   type ApprovalRequest,
   type Invocation,
   type MembershipEvent,
@@ -48,6 +49,8 @@ export type PageOpts = { beforeOffset?: number; afterOffset?: number; aroundOffs
 type PageSpan = { after: number; upTo: number | null };
 
 export type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
+
+export type ArchiveThreadInput = z.infer<Routes['archiveThread']['request']>;
 
 export type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 
@@ -337,7 +340,8 @@ export class Feed {
    * answer to that invocation, which is marked done in the same transaction,
    * or nothing is posted (spec §8 Connectors, 2026-09-30). `approval`
    * (in-process only): this message is the agent's approval card, and the
-   * approval rides on it, raised in the same transaction (spec §8 part 4).
+   * approval rides on it, raised in the same transaction (spec §8 part 4);
+   * with an `action`, Harbor's own for a super agent's request (2026-11-02).
    * `relayOf` (in-process only): this message is Jev's tags for that one,
    * and the agents it mentions take that message's hand-off depth (spec §8
    * Jev, 2026-10-07).
@@ -346,7 +350,7 @@ export class Feed {
     ctx: ActorCtx,
     spaceId: string,
     input: NewMessage,
-    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest }; relayOf?: string } = {},
+    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest; action?: ApprovalAction }; relayOf?: string } = {},
   ): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
@@ -410,7 +414,7 @@ export class Feed {
           replyAuthors: [],
           reactions: [],
           ...(poll ? { poll } : {}),
-          ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request) } : {}),
+          ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request, opts.approval.action) } : {}),
           ...(input.peopleOnly ? { peopleOnly: true as const } : {}),
           ...stampFields(stamps),
         };
@@ -438,6 +442,10 @@ export class Feed {
           const revived: Topic = { ...topic, archived: false };
           await this.k.store.putTopic(revived);
           await this.k.append(spaceId, offset + 1, at, { type: 'topic', topic: revived, action: 'unarchived', by: author });
+        } else if (root.archived) {
+          // The same rule for a plain archived thread (2026-11-03).
+          await this.k.store.setThreadArchived(spaceId, root.id, false);
+          await this.k.append(spaceId, offset + 1, at, { type: 'thread_archive', rootMessageId: root.id, action: 'unarchived', by: author });
         }
         return invoke(message);
       }
@@ -509,6 +517,15 @@ export class Feed {
           throw new HarborError('invalid_request', `this thread already has a topic (${claimed.id})`);
         }
         root = message;
+        // One archive flag per thread (2026-11-03): naming an archived plain
+        // thread is deliberate attention, so it comes back active, like a reply.
+        if (root.archived) {
+          await this.k.store.setThreadArchived(spaceId, root.id, false);
+          await this.k.append(spaceId, offset, at, { type: 'thread_archive', rootMessageId: root.id, action: 'unarchived', by });
+          offset += 1;
+          const { archived: _cleared, ...active } = root;
+          root = active;
+        }
       } else {
         const stamps = await this.stampsFor(spaceId, input.body!);
         root = {
@@ -852,6 +869,42 @@ export class Feed {
       });
       return this.foldLive(spaceId, { ...message, poll: { ...poll, endedAt: at } });
     });
+  }
+
+  /**
+   * Archive or unarchive a plain thread (2026-11-03, "archive threads" in
+   * Main) without naming it. A discussion keeps its archive on the topic row,
+   * so a root with one is refused here: one flag per thread.
+   */
+  async archiveThread(ctx: ActorCtx, spaceId: string, rootMessageId: string, input: ArchiveThreadInput): Promise<Message> {
+    await this.k.requireMember(ctx, spaceId);
+    this.k.guardWrite();
+    const by = this.k.attributionOf(ctx, input);
+
+    return this.k.lockedAs(ctx, spaceId, async () => {
+      const root = await this.k.store.getMessage(spaceId, rootMessageId);
+      if (!root) throw new HarborError('not_found', 'no such message');
+      if (root.threadRoot !== undefined) {
+        throw new HarborError('invalid_request', `this is a reply — archive the thread's root (${root.threadRoot})`);
+      }
+      const topic = await this.k.store.getTopicByRoot(spaceId, root.id);
+      if (topic) throw new HarborError('invalid_request', `this thread has a topic — archive it with manageTopic (${topic.id})`);
+      if ((root.archived ?? false) === input.archived) return this.foldLive(spaceId, root); // idempotent, no event
+      await this.k.store.setThreadArchived(spaceId, root.id, input.archived);
+      await this.k.appendNext(spaceId, this.k.now(), {
+        type: 'thread_archive',
+        rootMessageId: root.id,
+        action: input.archived ? 'archived' : 'unarchived',
+        by,
+      });
+      const { archived: _was, ...rest } = root;
+      return this.foldLive(spaceId, input.archived ? { ...rest, archived: true } : rest);
+    });
+  }
+
+  async listArchivedThreads(ctx: ActorCtx, spaceId: string): Promise<Message[]> {
+    await this.k.requireReadableSpace(ctx, spaceId);
+    return this.foldPage(spaceId, await this.k.store.listArchivedRoots(spaceId));
   }
 
   /**

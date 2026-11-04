@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import Constants from 'expo-constants';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState, type ReactNode } from 'react';

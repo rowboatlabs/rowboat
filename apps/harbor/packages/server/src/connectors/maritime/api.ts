@@ -70,6 +70,27 @@ export interface MaritimeAgent {
   status: string;
   /** Maritime's billing tier (`always_on`, …), when the record says. */
   tier?: string;
+  /** The machine's size, when the record says (2026-11-04). */
+  memMb?: number;
+  diskMb?: number;
+  vcpus?: number;
+}
+
+/** The account's plan and its per-agent size ceilings (`GET /api/v1/account/limits`, read 2026-11-04). */
+export interface MaritimeLimits {
+  plan?: string;
+  billingModel?: string;
+  minMemMb?: number;
+  maxMemMb?: number;
+  maxDiskGb?: number;
+}
+
+/** One machine type and its list rate (`GET /api/billing/machine-types`, read 2026-11-04). */
+export interface MaritimeMachineType {
+  type: string;
+  label: string;
+  available: boolean;
+  centsPerHour?: number;
 }
 
 /** One execution (`POST /exec` with `detached`), as submitted, polled and cancelled. */
@@ -137,6 +158,21 @@ export interface MaritimeApi {
   setSpendLimit(agentId: string, monthlyLimitCents: number | null): Promise<void>;
   /** Delete the end user with its agents; the platform finishes in the background. 404 counts as done. */
   deleteEndUser(externalId: string): Promise<void>;
+  /**
+   * What an end user's agents cost over a range (`GET /api/v1/usage`, read 2026-11-04): the machine, metered per
+   * second or allocated from a seat plan as `hostingBasis` says, and the model calls the platform's proxy served.
+   */
+  usage(input: { externalUserId: string; from: string; to: string }): Promise<MaritimeUsage>;
+  accountLimits(): Promise<MaritimeLimits>;
+  machineTypes(): Promise<MaritimeMachineType[]>;
+  /** A new size for the agent (`POST /api/agents/{id}/resize`); it applies on the next restart. */
+  resize(agentId: string, input: { memMb: number; diskGb: number }): Promise<void>;
+}
+
+export interface MaritimeUsage {
+  hostingCostCents: number;
+  llmCostCents: number;
+  hostingBasis?: string;
 }
 
 /** A minted end-user token, as `POST …/tokens` answers; `token` is shown once. */
@@ -223,7 +259,11 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     templateId: typeof a.templateId === 'string' ? a.templateId : null,
     status: String(a.status ?? ''),
     ...(typeof a.tier === 'string' ? { tier: a.tier } : {}),
+    ...(typeof a.memMb === 'number' ? { memMb: a.memMb } : {}),
+    ...(typeof a.diskMb === 'number' ? { diskMb: a.diskMb } : {}),
+    ...(typeof a.vcpus === 'number' ? { vcpus: a.vcpus } : {}),
   });
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
   return {
     base,
@@ -391,6 +431,37 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     },
     async setSpendLimit(agentId, monthlyLimitCents) {
       await call<unknown>(`/api/agents/${id(agentId)}/llm-spend-limit`, { method: 'PUT', body: { monthlyLimitCents } });
+    },
+    async accountLimits() {
+      const b = await call<Record<string, unknown>>('/api/v1/account/limits');
+      return {
+        ...(typeof b.plan === 'string' ? { plan: b.plan } : {}),
+        ...(typeof b.billingModel === 'string' ? { billingModel: b.billingModel } : {}),
+        ...(num(b.minMemMb) !== undefined ? { minMemMb: num(b.minMemMb)! } : {}),
+        ...(num(b.maxMemMb) !== undefined ? { maxMemMb: num(b.maxMemMb)! } : {}),
+        ...(num(b.maxDiskGb) !== undefined ? { maxDiskGb: num(b.maxDiskGb)! } : {}),
+      };
+    },
+    async machineTypes() {
+      const rows = await call<unknown>('/api/billing/machine-types');
+      return (Array.isArray(rows) ? rows : []).flatMap((r: Record<string, unknown>) =>
+        typeof r?.type === 'string'
+          ? [{ type: r.type, label: String(r.label ?? r.type), available: r.available !== false, ...(num(r.centsPerHour) !== undefined ? { centsPerHour: num(r.centsPerHour)! } : {}) }]
+          : [],
+      );
+    },
+    async resize(agentId, input) {
+      await call<unknown>(`/api/agents/${id(agentId)}/resize`, { method: 'POST', body: { mem_mb: input.memMb, disk_gb: input.diskGb } });
+    },
+    async usage(input) {
+      const q = new URLSearchParams({ from: input.from, to: input.to, externalUserId: input.externalUserId });
+      const body = await call<Record<string, unknown>>(`/api/v1/usage?${q.toString()}`);
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+      return {
+        hostingCostCents: num(body.hostingCostCents),
+        llmCostCents: num(body.llmCostCents),
+        ...(typeof body.hostingBasis === 'string' ? { hostingBasis: body.hostingBasis } : {}),
+      };
     },
     async deleteEndUser(externalId) {
       try {

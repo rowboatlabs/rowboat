@@ -39,7 +39,7 @@ import { AutoBanner } from '@/components/spaces/auto-banner'
 import { FindBanner } from '@/components/spaces/find-banner'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
 import { toast as notify } from 'sonner'
-import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
+import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf, withArchived } from '@/lib/spaces-conventions'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
@@ -869,10 +869,24 @@ export function ThreadPane({
         try {
             const res = await invokeSpace('spaces:createTopic', { orgId: org.id, spaceId: space.id, rootMessageId, title: trimmed })
             setTopic(res.topic)
+            // Naming unarchives an archived root on the server (2026-11-03).
+            setRoot((prev) => (prev?.archived ? withArchived(prev, false) : prev))
             ingestTopic(org.id, space.id, res.topic)
             analytics.spacesTopicStarted()
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not create the discussion', 'error')
+        }
+    }
+
+    // An unnamed thread archives on its root (harbor archiveThread, 2026-11-03),
+    // so archiving never names it.
+    const archiveThread = async (archived: boolean) => {
+        try {
+            const res = await invokeSpace('spaces:archiveThread', { orgId: org.id, spaceId: space.id, rootMessageId, archived })
+            setRoot(res.root)
+            updateStreamMessage(org.id, space.id, res.root)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not archive the thread', 'error')
         }
     }
 
@@ -1065,7 +1079,7 @@ export function ThreadPane({
                         {following ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />} {following ? 'Following' : 'Follow'}
                     </Button>
                 )}
-                {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
+                {(topic ? topic.archived : root?.archived) && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" aria-label="Thread options" className="size-8 shrink-0 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
@@ -1098,9 +1112,16 @@ export function ThreadPane({
                                 </DropdownMenuItem>
                             </>
                         ) : (
-                            <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle('')}>
-                                <Tag className="size-3.5 mr-2" /> Make this a discussion…
-                            </DropdownMenuItem>
+                            <>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle('')}>
+                                    <Tag className="size-3.5 mr-2" /> Make this a discussion…
+                                </DropdownMenuItem>
+                                {root?.archived ? (
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void archiveThread(false)}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
+                                ) : (
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void archiveThread(true)}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
+                                )}
+                            </>
                         )}
                         {!showBack && (
                             <>
@@ -1410,7 +1431,9 @@ export function ThreadPane({
                                   ? { name: 'unarchive', hint: 'Unarchive this discussion', run: () => void manage({ action: 'unarchive' }) }
                                   : { name: 'archive', hint: 'Archive this discussion — it leaves the rail until a new reply revives it', run: () => void manage({ action: 'archive' }) },
                           ]
-                        : []),
+                        : [root?.archived
+                              ? { name: 'unarchive', hint: 'Unarchive this thread', run: () => void archiveThread(false) }
+                              : { name: 'archive', hint: 'Archive this thread — it leaves the thread lists until a new reply revives it', run: () => void archiveThread(true) }]),
                     // Scheduled sends live on the desktop (core's scheduler), so the browser has no /remind.
                     ...(LOCAL_RUNTIME ? [{
                         name: 'remind',

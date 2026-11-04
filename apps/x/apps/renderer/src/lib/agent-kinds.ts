@@ -86,12 +86,13 @@ export const LOCAL_CONNECTION = 'local'
 /**
  * Managed agents (2026-10-26): the kinds Rowboat creates on its own Maritime account,
  * one line each for the Create screen. The order is the Create screen's; the org's
- * Harbor says which of them it offers (none without Rowboat's Maritime key).
+ * Harbor says which of them it offers (none without Rowboat's Maritime key). On a Harbor that
+ * bills (2026-11-04) there is no trial, so the line says what each runs on instead.
  */
-export const MANAGED_KINDS: ReadonlyArray<{ kind: string; description: string }> = [
-    { kind: 'hermes', description: 'A general agent with tools, memory and skills. Starts on Rowboat’s trial credit; add your own key on its page.' },
-    { kind: 'claude-code', description: 'Anthropic’s coding agent, on your Anthropic API key' },
-    { kind: 'codex', description: 'OpenAI’s coding agent. Starts on Rowboat’s trial credit; add your OpenAI key on its page.' },
+export const MANAGED_KINDS: ReadonlyArray<{ kind: string; description: string; billedDescription: string }> = [
+    { kind: 'hermes', description: 'A general agent with tools, memory and skills. Starts on Rowboat’s trial credit; add your own key on its page.', billedDescription: 'A general agent with tools, memory and skills, on your Rowboat credits' },
+    { kind: 'claude-code', description: 'Anthropic’s coding agent, on your Anthropic API key', billedDescription: 'Anthropic’s coding agent, on your Anthropic API key' },
+    { kind: 'codex', description: 'OpenAI’s coding agent. Starts on Rowboat’s trial credit; add your OpenAI key on its page.', billedDescription: 'OpenAI’s coding agent, on your ChatGPT plan or OpenAI key' },
 ]
 
 /**

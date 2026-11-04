@@ -112,6 +112,60 @@ describe('todo list files', () => {
         expect(screen.queryByText('Their Claude')).not.toBeInTheDocument()
     })
 
+    it('shows an item’s details collapsed, and saves an edit to them under the item (2026-11-03)', async () => {
+        asset = { ...asset, content: original.replace('- [ ] Fix replicas\n', '- [ ] Fix replicas\n  Repro: open the **pane**.\n') }
+        render(column())
+        const toggle = await screen.findByRole('button', { name: 'Show details' })
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('pane')).not.toBeInTheDocument()
+        // Only the item that has details gets the toggle.
+        expect(screen.getAllByRole('button', { name: 'Show details' })).toHaveLength(1)
+        fireEvent.click(toggle)
+        expect(screen.getByRole('button', { name: 'Hide details' })).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.doubleClick(await screen.findByText('pane'))
+        const box = screen.getByRole('textbox', { name: 'Item details' })
+        expect(box).toHaveValue('Repro: open the **pane**.')
+        fireEvent.change(box, { target: { value: 'Repro: open the pane.\n\nAcceptance: it opens.' } })
+        fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: 'org', spaceId: 'space',
+            input: { assetId: 'list', baseVersion: 3, newContent: original.replace('- [ ] Fix replicas\n', '- [ ] Fix replicas\n  Repro: open the pane.\n\n  Acceptance: it opens.\n') },
+        }))
+    })
+
+    it('previews folded details in the document, and opens a board card to read and edit them (2026-11-04)', async () => {
+        asset = { ...asset, content: original.replace('- [ ] Fix replicas\n', '- [ ] Fix replicas\n  Repro: open the **pane**.\n') }
+        render(column())
+        expect(await screen.findByRole('button', { name: 'Repro: open the pane.' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('radio', { name: /Board/ }))
+        expect(screen.getAllByRole('img', { name: 'Has details' })).toHaveLength(1)
+        fireEvent.click(screen.getByRole('button', { name: 'Fix replicas' }))
+        await screen.findByRole('dialog')
+        expect(screen.getByRole('button', { name: 'Section: Backlog' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+        const box = screen.getByRole('textbox', { name: 'Item details' })
+        fireEvent.change(box, { target: { value: 'Acceptance: it opens.' } })
+        fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: 'org', spaceId: 'space',
+            input: { assetId: 'list', baseVersion: 3, newContent: original.replace('- [ ] Fix replicas\n', '- [ ] Fix replicas\n  Acceptance: it opens.\n') },
+        }))
+    })
+
+    it('resizes a board column per reader, without touching the file (2026-11-04)', async () => {
+        localStorage.setItem('spaces:todo-view:org/space/list', 'board')
+        render(column())
+        const handle = await screen.findByRole('separator', { name: 'Resize Doing' })
+        expect(handle).toHaveAttribute('aria-valuenow', '272')
+        fireEvent.keyDown(handle, { key: 'ArrowRight', shiftKey: true })
+        expect(handle).toHaveAttribute('aria-valuenow', '312')
+        expect(handle.parentElement).toHaveStyle({ width: '312px' })
+        expect(JSON.parse(localStorage.getItem('spaces:todo-columns:org/space/list')!)).toEqual({ Doing: 312 })
+        fireEvent.doubleClick(handle)
+        expect(handle).toHaveAttribute('aria-valuenow', '272')
+        expect(invoke).not.toHaveBeenCalledWith('spaces:proposeChange', expect.anything())
+    })
+
     it('remembers the board view per reader, without touching the file', async () => {
         render(column())
         fireEvent.click(await screen.findByRole('radio', { name: /Board/ }))

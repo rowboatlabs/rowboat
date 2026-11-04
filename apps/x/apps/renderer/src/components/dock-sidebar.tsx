@@ -76,7 +76,6 @@ import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { ProfileSettings } from "@/components/spaces/profile-settings"
 import { SettingsDialog } from "@/components/settings-dialog"
-import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import { OrgMonogram, type SpaceSelection } from "@/components/spaces-view"
 import { openServerDialog } from "@/lib/server-dialog"
@@ -1583,20 +1582,6 @@ export function DockSidebar({
             </div>
           </div>
         </div>
-      )}
-
-      {/* First-time-action credit rewards (feature-flagged, signed-in only).
-          The expanded panel carries its own copy, so dock mode only. */}
-      {!switcherOnly && (
-      <div className="titlebar-no-drag fixed bottom-2 z-30 w-60" style={{ left: DOCK_GUTTER_PX }}>
-        <SidebarCreditRewards
-          onOpenEmail={onOpenEmail}
-          onOpenMeetings={onOpenMeetings}
-          onOpenAgents={onOpenBgTasks}
-          onOpenApps={onOpenApps}
-          onConnectAccounts={() => setConnectionsSettingsOpen(true)}
-        />
-      </div>
       )}
 
       {/* Chat pending delete confirmation */}

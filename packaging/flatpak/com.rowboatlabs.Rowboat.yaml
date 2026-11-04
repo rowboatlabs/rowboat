@@ -1,0 +1,44 @@
+app-id: com.rowboatlabs.Rowboat
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: rowboat
+
+finish-args:
+  # Display servers
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Audio
+  - --socket=pulseaudio
+  # IPC & Networking
+  - --share=ipc
+  - --share=network
+  # GPU acceleration
+  - --device=dri
+  # Desktop notifications & secret portal
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.freedesktop.secrets
+  # File access for document analysis & downloads
+  - --filesystem=xdg-download
+  - --filesystem=xdg-documents
+  # App data & config storage
+  - --filesystem=~/.rowboat:create
+
+modules:
+  - name: rowboat
+    buildsystem: simple
+    build-commands:
+      # Install application files
+      - install -d /app/lib/rowboat
+      - cp -r apps/x/apps/main/out/Rowboat-linux-x64/* /app/lib/rowboat/
+      
+      # Install launcher
+      - install -D -m 755 packaging/flatpak/rowboat-launcher.sh /app/bin/rowboat
+      
+      # Install desktop file & icons
+      - install -D -m 644 packaging/flatpak/com.rowboatlabs.Rowboat.desktop /app/share/applications/com.rowboatlabs.Rowboat.desktop
+      - install -D -m 644 packaging/flatpak/com.rowboatlabs.Rowboat.metainfo.xml /app/share/metainfo/com.rowboatlabs.Rowboat.metainfo.xml
+      - install -D -m 644 packaging/flatpak/icon-512.png /app/share/icons/hicolor/512x512/apps/com.rowboatlabs.Rowboat.png
+    sources:
+      - type: dir
+        path: ../..

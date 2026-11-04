@@ -1,6 +1,6 @@
 import type { DrawerContentComponentProps } from 'expo-router/drawer';
 import { router, usePathname, type Href } from 'expo-router';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';

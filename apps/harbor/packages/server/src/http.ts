@@ -426,12 +426,13 @@ export function buildHttpApp(deps: {
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
         ...(input.instance !== undefined ? { instance: input.instance } : {}),
         personal: input.personal,
+        ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
   });
 
   // Managed agents (spec §8 Maritime, 2026-10-26): created on the platform Rowboat's own account runs.
-  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, { kinds: await service.managedAgentKinds(actor(c)) }));
+  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, await service.managedAgentKinds(actor(c))));
 
   app.post(routes.createManagedAgent.path, async (c) => {
     const input = await body(c, routes.createManagedAgent.request);
@@ -444,6 +445,7 @@ export function buildHttpApp(deps: {
         ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
         ...(input.env !== undefined ? { env: input.env } : {}),
         personal: input.personal,
+        ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
   });
@@ -476,6 +478,15 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.hostingPower.params, c.req.param());
     const input = await body(c, routes.hostingPower.request);
     return reply(c, routes.hostingPower.response, { machine: await service.hostingPower(actor(c), agentId, input.action) });
+  });
+  app.get(routes.getHostingSize.path, async (c) => {
+    const { agentId } = parseWith(routes.getHostingSize.params, c.req.param());
+    return reply(c, routes.getHostingSize.response, { size: await service.getHostingSize(actor(c), agentId) });
+  });
+  app.put(routes.setHostingSize.path, async (c) => {
+    const { agentId } = parseWith(routes.setHostingSize.params, c.req.param());
+    const input = await body(c, routes.setHostingSize.request);
+    return reply(c, routes.setHostingSize.response, { size: await service.setHostingSize(actor(c), agentId, input) });
   });
   app.post(routes.runHostingCommand.path, async (c) => {
     const { agentId } = parseWith(routes.runHostingCommand.params, c.req.param());
@@ -635,6 +646,24 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.setAgentPersonal.params, c.req.param());
     const input = await body(c, routes.setAgentPersonal.request);
     return reply(c, routes.setAgentPersonal.response, { agent: await service.setAgentPersonal(actor(c), agentId, input) });
+  });
+
+  app.post(routes.listSetupInstances.path, async (c) => {
+    const { connection } = parseWith(routes.listSetupInstances.params, c.req.param());
+    const { key } = await body(c, routes.listSetupInstances.request);
+    return reply(c, routes.listSetupInstances.response, { instances: await service.listSetupInstances(actor(c), connection, key) });
+  });
+
+  app.post(routes.createSetupInstance.path, async (c) => {
+    const { connection } = parseWith(routes.createSetupInstance.params, c.req.param());
+    const input = await body(c, routes.createSetupInstance.request);
+    return reply(c, routes.createSetupInstance.response, { instance: await service.createSetupInstance(actor(c), connection, input) });
+  });
+
+  app.put(routes.setAgentSuper.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentSuper.params, c.req.param());
+    const input = await body(c, routes.setAgentSuper.request);
+    return reply(c, routes.setAgentSuper.response, { agent: await service.setAgentSuper(actor(c), agentId, input) });
   });
 
   app.put(routes.setAgentOptionDefaults.path, async (c) => {
@@ -985,6 +1014,17 @@ export function buildHttpApp(deps: {
     const input = await body(c, routes.manageTopic.request);
     const topic = await service.manageTopic(actor(c), spaceId, topicId, input);
     return reply(c, routes.manageTopic.response, { topic });
+  });
+
+  app.post('/v1/spaces/:spaceId/threads/:rootMessageId/archive', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.archiveThread.params, c.req.param());
+    const input = await body(c, routes.archiveThread.request);
+    return reply(c, routes.archiveThread.response, { root: await service.archiveThread(actor(c), spaceId, rootMessageId, input) });
+  });
+
+  app.get('/v1/spaces/:spaceId/archived-threads', async (c) => {
+    const { spaceId } = parseWith(routes.listArchivedThreads.params, c.req.param());
+    return reply(c, routes.listArchivedThreads.response, { threads: await service.listArchivedThreads(actor(c), spaceId) });
   });
 
   // --- read state ------------------------------------------------------------

@@ -22,9 +22,9 @@ export type HarborChannel =
   | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy' | 'spaces:setJevEnabled'
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
-  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentProfile'
+  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
-  | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower'
+  | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower' | 'spaces:getHostingSize' | 'spaces:setHostingSize'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
   | 'spaces:listHostingFiles' | 'spaces:downloadHostingFile' | 'spaces:readHostingFile' | 'spaces:uploadHostingFile' | 'spaces:createHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
   | 'spaces:listHostingSkills' | 'spaces:installHostingSkill' | 'spaces:removeHostingSkill'
@@ -32,7 +32,7 @@ export type HarborChannel =
   | 'spaces:createInvite' | 'spaces:resolveInvite' | 'spaces:acceptInvite'
   | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset' | 'spaces:deleteAsset' | 'spaces:restoreAsset'
   | 'spaces:readAsset' | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff'
-  | 'spaces:listTopics' | 'spaces:createTopic' | 'spaces:manageTopic' | 'spaces:search'
+  | 'spaces:listTopics' | 'spaces:createTopic' | 'spaces:manageTopic' | 'spaces:archiveThread' | 'spaces:listArchivedThreads' | 'spaces:search'
   | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:listThread' | 'spaces:postMessage'
   | 'spaces:reactToMessage' | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:listInvocations' | 'spaces:cancelInvocation' | 'spaces:getAgentCapabilities' | 'spaces:setAgentOptionDefaults'
@@ -155,13 +155,18 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
     'spaces:renameAgent': async (args) => ({ agent: await getClient(args.orgId).renameAgent(args.agentId, args.displayName) }),
     'spaces:setAgentProfile': async ({ orgId, agentId, ...profile }) => ({ agent: await getClient(orgId).setAgentProfile(agentId, profile) }),
     'spaces:setAgentPersonal': async (args) => ({ agent: await getClient(args.orgId).setAgentPersonal(args.agentId, args.personal) }),
-    'spaces:managedAgentKinds': async (args) => ({ kinds: await getClient(args.orgId).managedAgentKinds() }),
+    'spaces:setAgentSuper': async (args) => ({ agent: await getClient(args.orgId).setAgentSuper(args.agentId, args.superAgent) }),
+    'spaces:setupInstances': async (args) => ({ instances: await getClient(args.orgId).setupInstances(args.connection, args.key) }),
+    'spaces:createSetupInstance': async ({ orgId, connection, ...input }) => ({ instance: await getClient(orgId).createSetupInstance(connection, input) }),
+    'spaces:managedAgentKinds': async (args) => getClient(args.orgId).managedAgentKinds(),
     'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
     'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),
     'spaces:setHostingLlm': async ({ orgId, agentId, ...input }) => ({ hosting: await getClient(orgId).setHostingLlm(agentId, input) }),
     'spaces:getHosting': async (args) => getClient(args.orgId).getHosting(args.agentId),
     'spaces:setHostingEnv': async (args) => ({ env: await getClient(args.orgId).setHostingEnv(args.agentId, args.key, args.value, args.secret ?? false) }),
     'spaces:deleteHostingEnv': async (args) => ({ env: await getClient(args.orgId).deleteHostingEnv(args.agentId, args.key) }),
+    'spaces:getHostingSize': async (args) => ({ size: await getClient(args.orgId).getHostingSize(args.agentId) }),
+    'spaces:setHostingSize': async (args) => ({ size: await getClient(args.orgId).setHostingSize(args.agentId, { memMb: args.memMb, diskGb: args.diskGb }) }),
     'spaces:hostingPower': async (args) => ({ machine: await getClient(args.orgId).hostingPower(args.agentId, args.action) }),
     'spaces:runHostingCommand': async (args) => ({ execution: await getClient(args.orgId).runHostingCommand(args.agentId, args.command, args.timeoutSeconds) }),
     'spaces:getHostingCommand': async (args) => ({ execution: await getClient(args.orgId).getHostingCommand(args.agentId, args.executionId) }),
@@ -285,6 +290,14 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
 
     'spaces:manageTopic': async (args) => ({
       topic: await getClient(args.orgId).manageTopic(args.spaceId, args.topicId, { ...args.action, actingMode: 'direct' }),
+    }),
+
+    'spaces:archiveThread': async (args) => ({
+      root: await getClient(args.orgId).archiveThread(args.spaceId, args.rootMessageId, args.archived),
+    }),
+
+    'spaces:listArchivedThreads': async (args) => ({
+      threads: await getClient(args.orgId).listArchivedThreads(args.spaceId),
     }),
 
     'spaces:search': async (args) =>

@@ -1190,6 +1190,50 @@ export const MIGRATIONS: Migration[] = [
     id: '053-org-settings-jev-enabled',
     statements: [`alter table org_settings add column if not exists jev_enabled boolean not null default true`],
   },
+  {
+    // Super agents (spec §4 Agent members, 2026-11-02): what an admin lets an
+    // agent do about other agents; null = an ordinary agent.
+    id: '054-agent-super',
+    statements: [
+      `alter table members add column if not exists super_agent jsonb`,
+      `alter table members add constraint members_super_agent_check check (kind = 'agent' or super_agent is null)`,
+    ],
+  },
+  {
+    // The super agent that asked for a managed agent (2026-11-02): what lets it delete only its own.
+    id: '055-agent-hosting-requested-by',
+    statements: [`alter table agent_hosting add column if not exists requested_by text`],
+  },
+  {
+    // Ro off by default (spec §8 Jev, 2026-11-03, Arjun's call): every org
+    // starts without it, and an admin turns it on. Orgs that had it on from
+    // 053's default are switched off once, since the column cannot tell that
+    // default from an admin's choice.
+    id: '056-org-settings-jev-off',
+    statements: [
+      `alter table org_settings alter column jev_enabled set default false`,
+      `update org_settings set jev_enabled = false where jev_enabled`,
+    ],
+  },
+  {
+    // Archiving a plain thread (2026-11-03, "archive threads" in Main): the
+    // flag sits on its root, so every read of the root carries it and naming
+    // the thread is not needed to archive it. The partial index serves the
+    // Archived list.
+    id: '057-message-archived',
+    statements: [
+      `alter table messages add column if not exists archived boolean not null default false`,
+      `create index if not exists messages_archived_idx on messages (space_id) where archived`,
+    ],
+  },
+  {
+    // Billing for managed agents (2026-11-04): the Rowboat account (the
+    // owner's subject at the deployment's issuer) an agent bills to, kept on
+    // the row at creation so the worker and the connector never resolve it
+    // again; null on a deployment that does not bill, and on older rows.
+    id: '058-agent-hosting-billing',
+    statements: [`alter table agent_hosting add column if not exists billing_customer text`],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

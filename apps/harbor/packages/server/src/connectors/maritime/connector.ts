@@ -201,6 +201,12 @@ export class MaritimeConnector implements RunningConnector {
    * it. An agent Rowboat does not host, or one on its owner's key, just runs.
    */
   private async fundedForTurn(invocation: Invocation): Promise<boolean> {
+    // Billed to its owner (2026-11-04): no credits left is the agent's sentence, before the VM is woken.
+    const refusal = await this.safe(() => this.env.service.hostingTurnRefusal(this.env.agent.id), undefined);
+    if (refusal) {
+      await this.fail(invocation, refusal);
+      return false;
+    }
     const funding = await this.safe(() => this.env.service.hostingFundingOf(this.env.agent.id), undefined);
     if (!funding || funding.funding !== 'trial') return true;
     let over = funding.trialOver;
@@ -368,6 +374,12 @@ export class MaritimeConnector implements RunningConnector {
       const moved = await this.safe(() => this.env.service.noteHostingSignIn(this.env.agent.id, state), undefined);
       if (moved === 'dropped' && reading.failure) reading = { ...reading, failure: SIGN_IN_GONE_MESSAGE };
     }
+    if (reading.failure) {
+      // Billed (2026-11-04): the gateway out of credits, or a Codex with nothing of its owner's yet, said the owner's way.
+      const failure = reading.failure;
+      const said = await this.safe(() => this.env.service.explainHostingFailure(this.env.agent.id, failure, reading.signIn), failure);
+      reading = { ...reading, failure: said };
+    }
     const { spaceId, threadRootId } = invocation.conversation;
     const next: ThreadRecord = { ...record, ...(reading.session ? { session: reading.session } : {}) };
     let posted: Message | undefined;
@@ -379,7 +391,6 @@ export class MaritimeConnector implements RunningConnector {
       try {
         posted = (await this.env.service.answerInvocation(this.env.ctx, invocation.id, body)).message;
         await this.react(invocation, '👀', 'remove');
-        await this.react(invocation, '✅');
       } catch (err) {
         if (!(err instanceof HarborError)) throw err; // already finished: a replay posts nothing
       }

@@ -23,6 +23,12 @@ export function threadLabelOf(rootBody: string, max = 80): string {
     return label.length > max ? `${label.slice(0, max - 1)}…` : label
 }
 
+/** A root with its plain-thread archive flag set or cleared (harbor archiveThread, 2026-11-03). */
+export function withArchived(root: spaces.Message, archived: boolean): spaces.Message {
+    const { archived: _was, ...rest } = root
+    return archived ? { ...rest, archived: true } : rest
+}
+
 // ---------------------------------------------------------------------------
 // Artifacts — change-sets made from a thread carry its root id at the end of
 // the reason ("· thread:<id>"; the legacy spelling "topic:<id>" still parses).

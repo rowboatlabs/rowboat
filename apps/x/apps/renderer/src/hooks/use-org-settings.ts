@@ -7,7 +7,7 @@ import type { spaces } from '@x/shared'
 // while it is off; an admin sets them. Refetched on `org_changed`
 // (use-spaces.ts), which an admin's change sends to every member.
 
-const DEFAULTS: spaces.OrgSettings = { invitePolicy: 'members', jevEnabled: true }
+const DEFAULTS: spaces.OrgSettings = { invitePolicy: 'members', jevEnabled: false }
 let state: ReadonlyMap<string, spaces.OrgSettings> = new Map()
 const listeners = new Set<() => void>()
 const loading = new Set<string>()

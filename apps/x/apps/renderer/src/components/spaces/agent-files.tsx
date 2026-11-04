@@ -385,4 +385,3 @@ export function FilesScreen({ orgId, agentId, home, onDirtyChange }: { orgId: st
         </div>
     )
 }
-

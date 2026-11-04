@@ -1,5 +1,5 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View } from 'react-native';
@@ -38,7 +38,8 @@ export default function SpaceThreadScreen() {
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   // The header is see-through (soft scroll edge): content insets itself.
-  const headerHeight = useHeaderHeight();
+  // Android's header is solid (spaces/_layout.tsx), so content already starts below it.
+  const headerHeight = useHeaderHeight() * (process.env.EXPO_OS === 'android' ? 0 : 1);
   const account = useSpacesAccount();
   const params = useLocalSearchParams<{ org: string; space: string; root: string; title: string; me: string; focus?: string }>();
   const { org, space, root, me } = params;
@@ -544,6 +545,7 @@ export default function SpaceThreadScreen() {
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
           onDraftChange={(draft) => setDraftMentions(spaces.mentionsAnyone(draft))}
+          draftKey={`${org}:${space}:${root}`}
         />
       </View>
 

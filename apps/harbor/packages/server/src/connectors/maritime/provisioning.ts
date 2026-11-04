@@ -25,6 +25,15 @@ export const LLM_SETUP: Record<'openai' | 'anthropic' | 'openrouter', { keyVar: 
   openrouter: { keyVar: 'OPENROUTER_API_KEY', baseUrl: 'https://openrouter.ai/api/v1' },
 };
 
+// Machine sizes (2026-11-04): the range and the rate are Maritime's, read live (account limits,
+// machine types). Two facts are only in its billing docs (maritime.sh/docs/billing, read
+// 2026-11-04), not its API: an agent box's memory is billed in 2 GB blocks, rounded up, and its
+// rate is per block; a month is 730 hours. They shape the options and the estimate only. What
+// an owner pays is the platform's own per-agent cost (core/hosting.ts settle).
+const MEM_BLOCK_MB = 2048;
+const HOURS_PER_MONTH = 730;
+const AGENT_BOX = 'persistent_sandbox';
+
 /** What takes the platform's proxy token's place when the owner's key is for another provider, or the owner signed in to a plan: a value the proxy refuses. */
 export const PROXY_TOKEN_DUD = 'disabled-by-rowboat-owner-key';
 
@@ -257,6 +266,59 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
         await api.setSpendLimit(agentId, null);
         await reload();
       }),
+    // Rowboat's LLM gateway on the owner's Rowboat credits (2026-11-04): the gateway speaks OpenRouter's API, so
+    // Hermes takes it as its OpenRouter provider at the gateway's address (the turn script, runtimes.ts), with the
+    // key the gateway bills to the owner. The platform's proxy token goes as for an owner's key, so nothing is
+    // billed to Rowboat's platform account, and the cap is lifted for the same reason as there.
+    useGateway: ({ baseUrl, apiKey, model }) =>
+      refusing(async () => {
+        const put = await putter();
+        await put('OPENROUTER_API_KEY', apiKey, true);
+        await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
+        await put('ROWBOAT_LLM_PROVIDER', 'rowboat', false);
+        await put('ROWBOAT_LLM_BASE_URL', baseUrl, false);
+        await put('ROWBOAT_LLM_MODEL', model ?? '', false);
+        await api.setSpendLimit(agentId, null);
+        await reload();
+      }),
+    // An agent its owner funds (2026-11-04, Codex on a deployment that bills): no trial, so the platform's proxy
+    // token is a dud from the start and the agent runs once its owner signs in or adds a key.
+    withoutPlatformLlm: () =>
+      refusing(async () => {
+        const put = await putter();
+        await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
+        await api.setSpendLimit(agentId, null);
+        await reload();
+      }),
+    size: () =>
+      refusing(async () => {
+        const [agent, limits, types] = await Promise.all([api.agent(agentId), api.accountLimits(), api.machineTypes().catch(() => [])]);
+        const rate = types.find((t) => t.type === AGENT_BOX)?.centsPerHour;
+        const blocks = (memMb: number) => Math.max(1, Math.ceil(memMb / MEM_BLOCK_MB));
+        // A wallet account is never billed for a resize (Maritime's resize docs), so every size costs the base.
+        const estimate = (memMb: number) => (rate === undefined ? undefined : rate * HOURS_PER_MONTH * (limits.billingModel === 'wallet' ? 1 : blocks(memMb)));
+        const lo = blocks(limits.minMemMb ?? MEM_BLOCK_MB) * MEM_BLOCK_MB;
+        const hi = Math.floor((limits.maxMemMb ?? agent.memMb ?? MEM_BLOCK_MB) / MEM_BLOCK_MB) * MEM_BLOCK_MB;
+        const sizes = new Set<number>();
+        for (let m = lo; m <= hi; m += MEM_BLOCK_MB) sizes.add(m);
+        if (agent.memMb) sizes.add(agent.memMb);
+        const memOptions = [...sizes].sort((a, b) => a - b).map((memMb) => {
+          const cents = estimate(memMb);
+          return { memMb, ...(cents !== undefined ? { centsPerMonth: Math.round(cents * 100) / 100 } : {}) };
+        });
+        return {
+          ...(agent.memMb ? { memMb: agent.memMb } : {}),
+          ...(agent.diskMb ? { diskGb: Math.round(agent.diskMb / 1024) } : {}),
+          ...(agent.vcpus ? { vcpus: agent.vcpus } : {}),
+          memOptions,
+          ...(limits.maxDiskGb ? { maxDiskGb: limits.maxDiskGb } : {}),
+        };
+      }),
+    resize: (input) =>
+      refusing(async () => {
+        await api.resize(agentId, input);
+        await api.restart(agentId);
+      }),
     stopFunding: () => refusing(() => api.setSpendLimit(agentId, 0)),
     liftCap: () => refusing(() => api.setSpendLimit(agentId, null)),
     // The owner's sign-in (2026-10-30): Codex says whether one is there; on it, the same setup as a key of another
@@ -327,7 +389,8 @@ export function maritimeProvisioner(options: MaritimeProvisionerOptions): Hostin
           ...(options.idleSeconds !== undefined && options.idleSeconds > 0 ? { idleSeconds: Math.round(options.idleSeconds) } : {}),
         }),
       );
-      if (options.llmCapCents !== undefined && options.llmCapCents > 0) {
+      // The cap is the trial's (2026-10-27); an agent billed to its owner has none (2026-11-04).
+      if (input.trial && options.llmCapCents !== undefined && options.llmCapCents > 0) {
         await api.setEndUserPolicy(input.externalUserId, { llm_spend_cap_cents_per_month: Math.round(options.llmCapCents) });
       }
       return { externalId: created.id };
@@ -352,6 +415,10 @@ export function maritimeProvisioner(options: MaritimeProvisionerOptions): Hostin
         if (err instanceof MaritimeError && err.rejectsKey) throw err;
         return false;
       }
+    },
+    async usage(externalUserId, from, to) {
+      const u = await api.usage({ externalUserId, from, to });
+      return { machineCents: u.hostingCostCents, llmCents: u.llmCostCents };
     },
     async deprovision(externalUserId) {
       await api.deleteEndUser(externalUserId);

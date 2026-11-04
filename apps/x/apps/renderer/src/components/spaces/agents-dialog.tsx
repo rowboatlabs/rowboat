@@ -1,5 +1,5 @@
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
 import { BotIcon, ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
 import type { spaces } from '@x/shared'
@@ -65,6 +65,12 @@ type Screen =
     | { name: 'connect'; agentId: string; agentName: string; secret: string; setupId: string; kind: string; instance?: string }
     | { name: 'agent'; agentId: string }
 
+/** Who pays for a managed agent of each kind on a Harbor that bills (2026-11-04): the machine is always the owner's plan, at cost. */
+function billingNote(kind: string): string {
+    if (kind === 'hermes') return 'Runs on your Rowboat credits: its model calls and its machine (at cost) come from the same plan as the desktop app.'
+    if (kind === 'codex') return 'Runs on your ChatGPT plan or OpenAI key, which you add on its page once it is ready. Its machine bills to your Rowboat plan, at cost.'
+    return 'Runs on your Anthropic key. Its machine bills to your Rowboat plan, at cost.'
+}
 function Header({ title, description, icon, onBack, large = false }: { title: string; description: string; icon?: ReactNode; onBack?: () => void; large?: boolean }) {
     return (
         <DialogHeader className={cn('gap-1 px-5 pt-5 text-left', large ? 'pb-1' : 'border-b border-border pb-4')}>
@@ -302,7 +308,8 @@ function KindChoice({ label, kinds, selected, onSelect, first = false }: { label
  * itself and opens this straight at adding one or at one agent's page; then
  * Back, Cancel and Done close the dialog instead of showing the list.
  */
-export type AgentsDialogStart = { name: 'choose' } | { name: 'add'; bot: boolean } | { name: 'create' } | { name: 'agent'; agentId: string }
+// `request` (2026-11-02): a super agent's setup card opens the form for what it asked, filled in, and completing it settles the card.
+export type AgentsDialogStart = { name: 'choose' } | { name: 'add'; bot: boolean } | { name: 'create' } | { name: 'agent'; agentId: string } | { name: 'request'; approval: spaces.Approval }
 
 export function AgentsDialog({ org, open, onOpenChange, start }: {
     org: OrgWithSpaces
@@ -329,6 +336,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const [withDirect, setWithDirect] = useState(true)
     const [personal, setPersonal] = useState(false)
     const [progress, setProgress] = useState<string | null>(null)
+    // The super agent's setup card this completes, when the card opened the form (2026-11-02).
+    const [request, setRequest] = useState<{ id: string; connection?: string } | null>(null)
     // Its description and personality (2026-10-29): optional, saved right after it is added.
     const [profileTitle, setProfileTitle] = useState('')
     const [profileInstructions, setProfileInstructions] = useState('')
@@ -338,6 +347,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const [localPolicy, setLocalPolicy] = useState<spaces.SpacesLocalAgent['policy']>('yolo')
     // Create agent: the kinds this org's Harbor creates (none until loaded, or on a Harbor with no Maritime key), and the form.
     const [managedKinds, setManagedKinds] = useState<string[]>([])
+    // Billing (2026-11-04): what Harbor creates bills to its creator's Rowboat plan, and where that plan is upgraded.
+    const [managedBilling, setManagedBilling] = useState<{ upgradeUrl?: string } | null>(null)
     const [createKind, setCreateKind] = useState<string | null>(null)
     const [anthropicKey, setAnthropicKey] = useState('')
     const [envText, setEnvText] = useState('')
@@ -346,7 +357,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const addingBot = screen.name === 'add' && screen.bot
     // On this computer is its own path from the chooser (2026-10-28); Connect offers everything else you run.
     const addingLocal = screen.name === 'add' && screen.local === true && LOCAL_RUNTIME
-    const offered = AGENT_SETUPS.filter((k) => (addingBot ? k.bot === true : addingLocal ? k.local === true : !k.bot && !k.local))
+    // A setup card asks for one way of reaching it: only that one is offered.
+    const offered = AGENT_SETUPS.filter((k) => (request?.connection ? k.connection === request.connection : addingBot ? k.bot === true : addingLocal ? k.local === true : !k.bot && !k.local))
     const setup = offered.find((k) => k.id === chosen) ?? offered[0]!
     // An agent that is one platform instance (Agent37) runs whatever its instance runs.
     const kind = setup.bindsInstance ? instance?.kind ?? setup.kinds[0]! : chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
@@ -409,20 +421,55 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setScreen({ name: 'create' })
     }, [])
 
+    // What the super agent asked for, filled in: the kind and name, its one space, no DM; the owner gives the rest.
+    const startRequest = useCallback((approval: spaces.Approval) => {
+        const action = approval.action
+        if (action?.kind !== 'create_agent') return
+        const setupOf = action.connection ? AGENT_SETUPS.find((k) => k.connection === action.connection) : undefined
+        if (setupOf) {
+            startAdding(setupOf.bot === true)
+            setChosen(setupOf.id)
+            setChosenKind(action.agentKind)
+        } else startCreating()
+        if (!setupOf) setCreateKind(action.agentKind)
+        setName(action.displayName)
+        setNameEdited(true)
+        setSkippedSpaces(new Set(org.spaces.filter((space) => space.id !== approval.conversation.spaceId).map((space) => space.id)))
+        setWithDirect(false)
+        setRequest({ id: approval.id, ...(action.connection ? { connection: action.connection } : {}) })
+    }, [org.spaces, startAdding, startCreating])
+
     const startName = start?.name
     const startBot = start?.name === 'add' && start.bot
     const startAgentId = start?.name === 'agent' ? start.agentId : undefined
-    useEffect(() => {
-        if (!open) return
-        if (startName === 'add') startAdding(startBot)
+    const startApproval = start?.name === 'request' ? start.approval : undefined
+    const startApprovalId = startApproval?.id
+    // Opening resets the dialog, so it runs only when the dialog opens or is
+    // pointed somewhere new (2026-11-03). It used to run again whenever a
+    // callback it used changed identity: startRequest follows org.spaces, a
+    // new array on every listing refetch (focus, reconnect), and that blanked
+    // the open agent's page, reloaded it and put it back on Overview.
+    const opened = useEffectEvent(() => {
+        setRequest(null)
+        if (startApproval) startRequest(startApproval)
+        else if (startName === 'add') startAdding(startBot)
         else if (startName === 'create') startCreating()
         else if (startName === 'choose') setScreen({ name: 'choose' })
         else setScreen(startAgentId ? { name: 'agent', agentId: startAgentId } : { name: 'list' })
         setAgents(null)
         void load()
         // An org whose Harbor creates no agents (no Maritime key, or older) just has no Create button.
-        window.ipc.invoke('spaces:managedAgentKinds', { orgId: org.id }).then(({ kinds }) => setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))).catch(() => setManagedKinds([]))
-    }, [open, load, startAdding, startCreating, startName, startBot, startAgentId, org.id])
+        window.ipc
+            .invoke('spaces:managedAgentKinds', { orgId: org.id })
+            .then(({ kinds, billed, upgradeUrl }) => {
+                setManagedKinds(kinds.filter((k) => MANAGED_KINDS.some((m) => m.kind === k)))
+                setManagedBilling(billed ? (upgradeUrl ? { upgradeUrl } : {}) : null)
+            })
+            .catch(() => setManagedKinds([]))
+    })
+    useEffect(() => {
+        if (open) opened()
+    }, [open, startName, startBot, startAgentId, startApprovalId, org.id])
 
     // Back to the chooser from one of its paths, else to the list, or out of the dialog when it was opened past the list.
     const [filesDirty, setFilesDirty] = useState(false)
@@ -481,6 +528,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 ...(chosenManaged === 'claude-code' ? { anthropicApiKey: anthropicKey.trim() } : {}),
                 ...(parsedEnv.env.length > 0 ? { env: parsedEnv.env } : {}),
                 ...(personal ? { personal: true } : {}),
+                ...(request ? { request: request.id } : {}),
             })
             setAnthropicKey('')
             setEnvText('')
@@ -524,7 +572,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
             let instanceId: string | undefined
             if (setup.id === 'agent37' && instance?.type === 'new') {
                 setProgress('Creating the Agent37 instance… this can take a few minutes.')
-                const { instance: created } = await window.ipc.invoke('spaces:agent37CreateInstance', {
+                const { instance: created } = await window.ipc.invoke('spaces:createSetupInstance', {
+                    orgId: org.id,
+                    connection: 'agent37',
                     key: credential.trim(),
                     kind: instance.kind,
                     name: `rowboat-${shownName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'agent'}`,
@@ -546,6 +596,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 ...(setup.credential ? { credential: credential.trim() } : {}),
                 ...(instanceId ? { instance: instanceId } : {}),
                 ...(personal ? { personal: true } : {}),
+                ...(request ? { request: request.id } : {}),
             })
             setCredential('')
             setInstance(null)
@@ -774,8 +825,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 </label>
                             )}
                             {setup.local && <LocalAgentFields cwd={shownCwd} onCwd={setLocalCwd} policy={localPolicy} onPolicy={setLocalPolicy} />}
-                            {setup.id === 'agent37' && <InstancePicker credential={credential} choice={instance} onChoice={setInstance} />}
-                            {setup.id === 'maritime' && <MaritimeAgentPicker credential={credential} choice={instance} onChoice={setInstance} />}
+                            {setup.id === 'agent37' && <InstancePicker orgId={org.id} credential={credential} choice={instance} onChoice={setInstance} />}
+                            {setup.id === 'maritime' && <MaritimeAgentPicker orgId={org.id} credential={credential} choice={instance} onChoice={setInstance} />}
                             <SpacePicker
                                 spaces={org.spaces}
                                 skipped={skippedSpaces}
@@ -807,7 +858,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                     >
                         <Header
                             title="Create an agent"
-                            description="Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect. Hermes and Codex start on Rowboat's trial credit; add your own key on the agent's page any time, and the trial ends then."
+                            description={
+                                managedBilling
+                                    ? "Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect. It bills to your Rowboat plan."
+                                    : "Rowboat runs it for you, on Maritime. Pick what it runs and a name; it's ready in a minute or two, with nothing to connect. Hermes and Codex start on Rowboat's trial credit; add your own key on the agent's page any time, and the trial ends then."
+                            }
                             onBack={back}
                         />
                         <Body>
@@ -816,7 +871,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     <KindTile
                                         key={m.kind}
                                         kind={m.kind}
-                                        description={m.description}
+                                        description={managedBilling ? m.billedDescription : m.description}
                                         selected={m.kind === chosenManaged}
                                         onSelect={() => {
                                             setCreateKind(m.kind)
@@ -825,6 +880,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     />
                                 ))}
                             </div>
+                            {managedBilling && <p className="mt-2 text-[11px] text-muted-foreground">{billingNote(chosenManaged)}</p>}
                             <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
@@ -907,6 +963,12 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                         </Body>
                         <Footer>
                             <Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button>
+                            {/* Past the plan's agents (2026-11-04): Harbor says so, and the way out is the upgrade. */}
+                            {managedBilling?.upgradeUrl && addError?.startsWith('Your Rowboat plan includes') && (
+                                <Button type="button" size="sm" variant="outline" onClick={() => window.open(managedBilling.upgradeUrl)}>
+                                    Upgrade
+                                </Button>
+                            )}
                             <Button type="submit" size="sm" disabled={!createReady || busy}>
                                 {busy && <Loader2 className="size-3.5 animate-spin" />}
                                 Create agent

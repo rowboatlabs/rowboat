@@ -108,6 +108,30 @@ describe('message search', () => {
     const topicHits = await service.search(ram, spaceId, 'kickoff');
     expect(topicHits.topics.map((t) => t.topic.title)).toContain('Q3 Kickoff');
   });
+
+  it('finds a pasted URL, domain or file name, which Postgres indexes whole', async () => {
+    const root = await service.postMessage(ram, spaceId, { body: 'Release notes thread', actingMode: 'direct' });
+    const reply = await service.postMessage(harsh, spaceId, {
+      threadRoot: root.message.id,
+      body: 'see https://github.com/rowboatlabs/rowboat/pull/1297 and search.ts',
+      actingMode: 'direct',
+    });
+    const ids = async (q: string) => (await service.search(ram, spaceId, q)).messages.map((m) => m.messageId);
+
+    expect(await ids('https://github.com/rowboatlabs/rowboat/pull/1297')).toEqual([reply.message.id]);
+    expect(await ids('github.com/rowboatlabs/rowboat/pull/1297')).toEqual([reply.message.id]);
+    expect(await ids('github.com')).toEqual([reply.message.id]);
+    expect(await ids('search.ts')).toEqual([reply.message.id]);
+    // Other words still AND with the whole chunk.
+    expect(await ids('see github.com')).toEqual([reply.message.id]);
+    expect(await ids('lunch github.com')).toEqual([]);
+    // A different URL on the same host doesn't match.
+    expect(await ids('https://github.com/rowboatlabs/rowboat/pull/1')).toEqual([]);
+    // A path fragment alone still can't reach the whole lexeme (needs an index-side change).
+    expect(await ids('rowboatlabs')).toEqual([]);
+    // Punctuation-only chunks and quotes stay inert.
+    expect(await ids("-- o'neil.com")).toEqual([]);
+  });
 });
 
 describe('asset search', () => {

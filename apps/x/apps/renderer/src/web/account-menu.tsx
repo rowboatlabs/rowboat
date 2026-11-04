@@ -2,7 +2,7 @@ import { ProfileSettings } from '@/components/spaces/profile-settings'
 import { useOrgRosters } from '@/hooks/use-space-members'
 import { useProfileImage } from '@/hooks/use-profile-image'
 import type { spaces } from '@x/shared'
-import { Bell, Download, LogOut } from 'lucide-react'
+import { Bell, CreditCard, Download, LogOut } from 'lucide-react'
 import { useState, useSyncExternalStore } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
@@ -10,7 +10,7 @@ import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { avatarColorClass, initials } from '@/lib/spaces-presentation'
 import { cn } from '@/lib/utils'
 import { sessionEmail, signOut } from './account'
-import { DEV_HARBOR } from './config'
+import { ACCOUNT_URL, DEV_HARBOR } from './config'
 import { notificationState, subscribeNotificationState, turnOffNotifications, turnOnNotifications } from './notifications'
 
 // The web app's own chrome (2026-10-13): a slim rail beside Spaces, as
@@ -114,6 +114,11 @@ export function WebRail() {
                     <div className="border-t border-border p-1">
                         <button type="button" className={ROW} onClick={() => setEditing(true)}>Edit Spaces profile</button>
                         <NotificationsRow />
+                        {/* Plan and credits (2026-11-04): agents Rowboat runs bill to them, and the web app has no settings of its
+                            own yet, so this opens the account app, the same page the desktop's "Manage" and an agent's Upgrade open. */}
+                        <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className={ROW}>
+                            <CreditCard className="size-4 text-muted-foreground" /> Plan &amp; usage
+                        </a>
                         <a href={DOWNLOAD_URL} target="_blank" rel="noreferrer" className={ROW}>
                             <Download className="size-4 text-muted-foreground" /> Get the desktop app
                         </a>

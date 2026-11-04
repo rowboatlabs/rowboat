@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { mcpTools } from '@rowboat/spaces-protocol';
+import { agentOnlyMcpToolNames, mcpTools } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { startTestHarbor } from './helpers.js';
 
@@ -51,6 +51,7 @@ describe('agent face (MCP)', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       'add_members',
       'archive_space',
+      'archive_thread',
       'asset_history',
       'browse_spaces',
       'create_asset',
@@ -67,6 +68,7 @@ describe('agent face (MCP)', () => {
       'get_org_settings',
       'join_space',
       'leave_space',
+      'list_archived_threads',
       'list_assets',
       'list_members',
       'list_spaces',
@@ -98,7 +100,8 @@ describe('agent face (MCP)', () => {
       'vote_poll',
       'whoami',
     ]);
-    expect(tools.map((t) => t.name).sort()).toEqual([...mcpTools].map((t) => t.name).sort());
+    // A person's assistant is not shown the agent-only tools (super agents, 2026-11-02).
+    expect(tools.map((t) => t.name).sort()).toEqual([...mcpTools].map((t) => t.name).filter((n) => !agentOnlyMcpToolNames.has(n)).sort());
     const propose = tools.find((t) => t.name === 'propose_change')!;
     expect(propose.inputSchema.required).toContain('reason'); // required on this face only
     expect(propose.inputSchema.required).toContain('assetId'); // files are named by id, never by path

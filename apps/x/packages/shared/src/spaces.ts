@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { JEV_KIND, addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
-export { hostingExecutionFailure, LLM_PROVIDERS, MAX_HOSTING_UPLOAD_BYTES } from '@rowboat/spaces-protocol';
+export { hostingExecutionFailure, LLM_PROVIDERS, MAX_HOSTING_UPLOAD_BYTES, ownerSetsUp } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
   AgentCredential,
   AgentHook,
   AgentHosting,
+  PlatformInstance,
   HostingEnvVar,
   HostingConsole,
   HostingExecution,
@@ -18,6 +19,8 @@ import type {
   HostingFunding,
   HostingLlm,
   HostingSpend,
+  HostingUsage,
+  HostingSize,
   HostingTrial,
   LlmProvider,
   AgentKey,
@@ -85,6 +88,7 @@ export type {
   AgentCredential,
   AgentHook,
   AgentHosting,
+  PlatformInstance,
   HostingEnvVar,
   HostingConsole,
   HostingExecution,
@@ -97,6 +101,8 @@ export type {
   HostingFunding,
   HostingLlm,
   HostingSpend,
+  HostingUsage,
+  HostingSize,
   HostingTrial,
   LlmProvider,
   AgentKey,

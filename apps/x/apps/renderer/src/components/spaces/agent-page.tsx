@@ -3,7 +3,7 @@ import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, Sc
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
+import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SizeBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
 import { HOME, useHostingState, type HostingState } from '@/components/spaces/agent-hosting-state'
 import { TerminalScreen } from '@/components/spaces/agent-terminal'
 import { AccessChoice } from '@/components/spaces/agent-access'
@@ -13,6 +13,7 @@ import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
 import { PersonalitySection } from '@/components/spaces/agent-personality'
+import { SuperAgentSection } from '@/components/spaces/agent-super'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, LOCAL_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
@@ -144,6 +145,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged, onFilesDirtyChange
                     {agent.ownerId && <PersonalitySection key={`${agent.title ?? ''}|${agent.instructions ?? ''}`} orgId={org.id} agent={agent} canEdit={mine} onSaved={onChanged} />}
                     {isLocal && <LocalAgentSection orgId={org.id} agent={agent} mine={mine} ownerName={ownerName} />}
                     {agent.ownerId && !isLocal && <AccessSection orgId={org.id} agent={agent} canSwitch={mine} onChanged={onChanged} />}
+                    {agent.ownerId && <SuperAgentSection orgId={org.id} agent={agent} isAdmin={isAdmin} ownerName={ownerName} onChanged={onChanged} />}
                     {isLocal && (
                         <div className="flex flex-col gap-0.5">
                             <h3 className="text-sm font-semibold text-foreground">Who can use it</h3>
@@ -391,6 +393,7 @@ function HostingOverview({ orgId, agent, hosting, canManage, state, onChanged }:
             <div className="flex flex-col gap-2">
                 <ScreenHeader title="Machine" note="Rowboat created this agent on its own Maritime account and runs each turn inside its VM, with the Spaces tools. Nothing to set up." />
                 {hosting.status === 'ready' && canManage && <MachineBlock orgId={orgId} agentId={agent.id} state={state} />}
+                {hosting.status === 'ready' && canManage && hosting.billed && <SizeBlock orgId={orgId} agentId={agent.id} />}
                 <p role="status" className={`text-[11px] ${hosting.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
                     {moving && <Loader2 className="mr-1 inline size-3 animate-spin align-[-2px]" />}
                     {hostingLine(hosting, agent.displayName)}
@@ -431,7 +434,11 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
     const ready = hosting.status === 'ready'
     const closed = hosting.funding === 'trial' ? hosting.trial?.closedReason : undefined
     const spend = state.spend
+    const usage = state.usage
     const info = LLM_PROVIDER_INFO[provider]
+    // Billed to the owner's Rowboat plan (2026-11-04): the machine at the platform's own cost, read back every hour.
+    const machinePays = hosting.billed ? 'your Rowboat plan pays for the machine at cost' : 'Rowboat pays for the machine'
+    const thisMonth = usage ? ` ${money(usage.machineCents + usage.llmCents)} of machine this month.` : ''
 
     const save = async () => {
         if (busy || apiKey.trim().length < 8) return
@@ -502,7 +509,7 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
             </div>
             <p className="text-[11px] text-muted-foreground">
                 The key goes to {agent.displayName}'s environment on Maritime and nowhere else; Rowboat keeps its last characters.{' '}
-                {hosting.funding === 'trial' ? 'The trial ends the moment it is saved.' : plan ? `${agent.displayName} is signed out of ChatGPT first; the key is what it runs on from then on.` : ''}
+                {hosting.funding === 'trial' ? 'The trial ends the moment it is saved.' : hosting.funding === 'credits' ? 'From then on the model is on your provider, not your Rowboat credits.' : plan ? `${agent.displayName} is signed out of ChatGPT first; the key is what it runs on from then on.` : ''}
             </p>
         </FormCard>
     )
@@ -517,9 +524,9 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                         </p>
                         <p className="text-[11px] text-muted-foreground">
                             {plan
-                                ? 'Your plan covers the model; Rowboat pays for the machine.'
+                                ? `Signed in from the Terminal tab. Your plan covers the model; ${machinePays}.${thisMonth}`
                                 : llm
-                                  ? `${llm.model ? `Model ${llm.model}. ` : ''}You pay the provider; Rowboat pays for the machine.`
+                                  ? `${llm.model ? `Model ${llm.model}. ` : ''}You pay the provider; ${machinePays}.${thisMonth}`
                                   : `${agent.displayName} answers nothing until you add your own API key${signInKind ? ' or sign in with ChatGPT from the Terminal tab' : ''}.`}
                         </p>
                     </div>
@@ -530,6 +537,27 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                         </Button>
                     )}
                     {!canManage && !llm && <Tag tone="warn">owner needed</Tag>}
+                </div>
+                {form}
+            </div>
+        )
+    }
+
+    if (hosting.funding === 'credits') {
+        return (
+            <div role="group" aria-label="Model access" className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border p-3">
+                    <div className="min-w-0 flex-1 basis-56">
+                        <p className="text-sm font-semibold text-foreground">Runs on your Rowboat credits</p>
+                        <p className="text-[11px] text-muted-foreground">
+                            Model calls and the machine draw from your Rowboat plan, the same credits as the desktop app.{thisMonth} Add your own key and the model is on your provider instead.
+                        </p>
+                    </div>
+                    {canManage && !editing && (
+                        <Button size="sm" variant="outline" disabled={!ready} onClick={() => setEditing(true)}>
+                            <KeyRound className="size-3.5" /> Use your own key
+                        </Button>
+                    )}
                 </div>
                 {form}
             </div>

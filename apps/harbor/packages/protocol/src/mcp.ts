@@ -11,7 +11,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { Attribution, InvitePolicy, Member, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
@@ -585,6 +585,29 @@ export const manageTopic = tool({
   output: z.object({ topic: Topic }),
 });
 
+export const archiveThread = tool({
+  name: 'archive_thread',
+  description:
+    'Archive a thread that has no topic, taking it off the active thread lists without naming it ' +
+    '(archived: false brings it back). A new reply also brings it back. A thread with a topic ' +
+    'archives through manage_topic. Only when your person asked for it.',
+  input: z.object({
+    spaceId: SpaceId,
+    rootMessageId: MessageId,
+    archived: z.boolean().optional(),
+  }),
+  output: z.object({ root: Message }),
+});
+
+export const listArchivedThreads = tool({
+  name: 'list_archived_threads',
+  description:
+    "The space's archived threads that have no topic: their root messages, newest activity first. " +
+    'Archived topics are in list_topics with includeArchived. Read one via read_thread.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ threads: z.array(Message) }),
+});
+
 // --- files --------------------------------------------------------------------
 // Files are addressed by id (2026-09-14): every tool here takes the assetId
 // from list_spaces (each space's `assets`), search_space, or a link. The path
@@ -793,6 +816,42 @@ export const markAllRead = tool({
   }),
 });
 
+// --- super agents (spec §4 Agent members, 2026-11-02) ---------------------------
+
+export const createAgent = tool({
+  name: 'create_agent',
+  description:
+    'Create an agent you can hand work to: only for a super agent, an agent an admin allowed to. It belongs to ' +
+    'your owner, joins the space you name, and is a channel agent, so you can mention it once it is ready. Leave ' +
+    'out `connection` for one Rowboat runs: hermes or codex start on Rowboat\'s trial credit, claude-code needs ' +
+    'your owner\'s Anthropic key. Or name how it is reached, as the Agents page offers: hermes/plugin, ' +
+    'custom/contract, a coding agent on replicas or conductor, hermes or openclaw on agent37, hermes, claude-code ' +
+    'or codex on maritime, or a bot (posthog, cal, attio). Ask your person in the thread for the name, kind and ' +
+    'where it runs first; never ask for keys. Pass the thread you are working in: anything needing your owner\'s ' +
+    'details (a key, an instance, setting it up where it runs) becomes a setup card there that only they fill in, ' +
+    'and the result is "pending" — say so and end your turn, and read the thread for the outcome when asked again. ' +
+    'Only when the work needs another agent.',
+  input: z.object({
+    spaceId: SpaceId,
+    threadRootId: MessageId,
+    displayName: z.string().trim().min(1).max(128),
+    kind: z.string().min(1).max(32),
+    connection: z.string().min(1).max(32).optional(),
+    reason: z.string().min(1).max(1000),
+  }),
+  output: SuperAgentResult,
+});
+
+export const deleteAgent = tool({
+  name: 'delete_agent',
+  description:
+    'Delete an agent Rowboat runs that you created (only for a super agent; never any other). Its keys stop at ' +
+    'once and its machine is removed. Pass the thread you are working in, as with create_agent: when your ' +
+    'owner must approve, the card goes there and the result is "pending".',
+  input: z.object({ spaceId: SpaceId, threadRootId: MessageId, agentId: MemberId, reason: z.string().min(1).max(1000) }),
+  output: SuperAgentResult,
+});
+
 export const mcpTools = [
   whoami,
   updateProfile,
@@ -834,6 +893,8 @@ export const mcpTools = [
   listTopics,
   createTopic,
   manageTopic,
+  archiveThread,
+  listArchivedThreads,
   createAsset,
   readAsset,
   proposeChange,
@@ -842,7 +903,16 @@ export const mcpTools = [
   restoreAsset,
   assetHistory,
   diff,
+  createAgent,
+  deleteAgent,
 ] as const;
+
+/**
+ * Tools only an agent member on its own key can use (super agents,
+ * 2026-11-02): Harbor lists them to agents only, and a person's own
+ * assistant (the desktop's projection) leaves them out.
+ */
+export const agentOnlyMcpToolNames: ReadonlySet<string> = new Set([createAgent.name, deleteAgent.name]);
 
 /** Tool names whose only effect is reading — no event is appended, nothing is written. */
 export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
@@ -856,6 +926,7 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   readActivity.name,
   searchSpace.name,
   listTopics.name,
+  listArchivedThreads.name,
   readAsset.name,
   assetHistory.name,
   diff.name,
