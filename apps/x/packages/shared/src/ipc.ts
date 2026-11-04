@@ -4070,6 +4070,15 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), action: z.enum(['restart', 'sleep', 'wake', 'reload']) }),
     res: z.object({ machine: z.custom<SpacesTypes.HostingMachine>() }),
   },
+  // A managed agent's machine size (2026-11-04): the platform's range and estimate, and resizing it, which restarts it.
+  'spaces:getHostingSize': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ size: z.custom<SpacesTypes.HostingSize>() }),
+  },
+  'spaces:setHostingSize': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), memMb: z.number(), diskGb: z.number() }),
+    res: z.object({ size: z.custom<SpacesTypes.HostingSize>() }),
+  },
   'spaces:runHostingCommand': {
     req: z.object({ orgId: z.string(), agentId: z.string(), command: z.string(), timeoutSeconds: z.number().optional() }),
     res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),

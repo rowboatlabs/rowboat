@@ -25,6 +25,15 @@ export const LLM_SETUP: Record<'openai' | 'anthropic' | 'openrouter', { keyVar: 
   openrouter: { keyVar: 'OPENROUTER_API_KEY', baseUrl: 'https://openrouter.ai/api/v1' },
 };
 
+// Machine sizes (2026-11-04): the range and the rate are Maritime's, read live (account limits,
+// machine types). Two facts are only in its billing docs (maritime.sh/docs/billing, read
+// 2026-11-04), not its API: an agent box's memory is billed in 2 GB blocks, rounded up, and its
+// rate is per block; a month is 730 hours. They shape the options and the estimate only. What
+// an owner pays is the platform's own per-agent cost (core/hosting.ts settle).
+const MEM_BLOCK_MB = 2048;
+const HOURS_PER_MONTH = 730;
+const AGENT_BOX = 'persistent_sandbox';
+
 /** What takes the platform's proxy token's place when the owner's key is for another provider, or the owner signed in to a plan: a value the proxy refuses. */
 export const PROXY_TOKEN_DUD = 'disabled-by-rowboat-owner-key';
 
@@ -269,6 +278,35 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
         await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
         await api.setSpendLimit(agentId, null);
         await reload();
+      }),
+    size: () =>
+      refusing(async () => {
+        const [agent, limits, types] = await Promise.all([api.agent(agentId), api.accountLimits(), api.machineTypes().catch(() => [])]);
+        const rate = types.find((t) => t.type === AGENT_BOX)?.centsPerHour;
+        const blocks = (memMb: number) => Math.max(1, Math.ceil(memMb / MEM_BLOCK_MB));
+        // A wallet account is never billed for a resize (Maritime's resize docs), so every size costs the base.
+        const estimate = (memMb: number) => (rate === undefined ? undefined : rate * HOURS_PER_MONTH * (limits.billingModel === 'wallet' ? 1 : blocks(memMb)));
+        const lo = blocks(limits.minMemMb ?? MEM_BLOCK_MB) * MEM_BLOCK_MB;
+        const hi = Math.floor((limits.maxMemMb ?? agent.memMb ?? MEM_BLOCK_MB) / MEM_BLOCK_MB) * MEM_BLOCK_MB;
+        const sizes = new Set<number>();
+        for (let m = lo; m <= hi; m += MEM_BLOCK_MB) sizes.add(m);
+        if (agent.memMb) sizes.add(agent.memMb);
+        const memOptions = [...sizes].sort((a, b) => a - b).map((memMb) => {
+          const cents = estimate(memMb);
+          return { memMb, ...(cents !== undefined ? { centsPerMonth: Math.round(cents * 100) / 100 } : {}) };
+        });
+        return {
+          ...(agent.memMb ? { memMb: agent.memMb } : {}),
+          ...(agent.diskMb ? { diskGb: Math.round(agent.diskMb / 1024) } : {}),
+          ...(agent.vcpus ? { vcpus: agent.vcpus } : {}),
+          memOptions,
+          ...(limits.maxDiskGb ? { maxDiskGb: limits.maxDiskGb } : {}),
+        };
+      }),
+    resize: (input) =>
+      refusing(async () => {
+        await api.resize(agentId, input);
+        await api.restart(agentId);
       }),
     stopFunding: () => refusing(() => api.setSpendLimit(agentId, 0)),
     liftCap: () => refusing(() => api.setSpendLimit(agentId, null)),

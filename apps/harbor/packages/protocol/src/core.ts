@@ -394,6 +394,27 @@ export type AgentHosting = z.infer<typeof AgentHosting>;
  * owner or an admin, render face only, through Harbor with the deployment's
  * own platform key. Shapes are Harbor's, not the platform's, kept small.
  */
+/**
+ * A managed agent's machine size (2026-11-04, "billing" in Main): what it has,
+ * what the platform lets it have, and what each memory size is estimated to
+ * cost. Every number is the platform's own, read live: the range from its
+ * account limits, the estimate from its published rate. The estimate is only
+ * that; a billed agent pays the platform's exact cost for what it ran.
+ * `resizable` is false, with `reason`, when the owner may not change it (a
+ * plan without bigger machines, a deployment that does not bill).
+ */
+export const HostingSize = z.object({
+  memMb: z.number().int().optional(),
+  diskGb: z.number().optional(),
+  vcpus: z.number().optional(),
+  memOptions: z.array(z.object({ memMb: z.number().int(), centsPerMonth: z.number().optional() })).max(64),
+  maxDiskGb: z.number().optional(),
+  resizable: z.boolean(),
+  reason: z.string().max(300).optional(),
+  upgradeUrl: z.url().optional(),
+});
+export type HostingSize = z.infer<typeof HostingSize>;
+
 export const HostingMachine = z.object({
   /** The platform's word: `sleeping`, `active`, `deploying`, `error`, `stopped`, … */
   status: z.string().max(32),

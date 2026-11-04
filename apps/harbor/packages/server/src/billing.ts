@@ -41,6 +41,8 @@ export interface BillingAccounts {
   authorize(customer: string): Promise<{ ok: true } | { ok: false; error: string }>;
   /** The agent's cumulative platform cost for the month starting `periodStart`; the backend debits only what is new. */
   reportHosting(customer: string, input: { ref: string; periodStart: string; totalCents: number }): Promise<void>;
+  /** The plan the account is on (2026-11-04): the free plan's agents keep the smallest machine. */
+  planOf(customer: string): Promise<string | undefined>;
   /** Whether a member's subject at an issuer names a Rowboat account. */
   accountFor(identities: Array<{ iss: string; sub: string }>): string | undefined;
 }
@@ -119,6 +121,12 @@ export function httpBilling(options: HttpBillingOptions): BillingAccounts {
     async authorize(customer) {
       const { data } = await call<{ success?: boolean; error?: string }>(customerPath(customer, '/authorize'), { type: 'use_credits' });
       return data.success ? { ok: true } : { ok: false, error: data.error ?? 'Not authorized' };
+    },
+    async planOf(customer) {
+      const res = await doFetch(`${base}${customerPath(customer, '')}`, { headers: { authorization: `Bearer ${options.key}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      if (!res.ok) throw new BillingError(res.status, `billing answered ${res.status}`);
+      const data = (await res.json().catch(() => ({}))) as { customer?: { subscriptionPlanId?: unknown } };
+      return typeof data.customer?.subscriptionPlanId === 'string' ? data.customer.subscriptionPlanId : undefined;
     },
     async reportHosting(customer, input) {
       await call(customerPath(customer, '/hosting-usage'), input);

@@ -33,6 +33,7 @@ class FakeBilling implements BillingAccounts {
   readonly reports: Array<{ customer: string; ref: string; periodStart: string; totalCents: number }> = [];
   readonly outOfCredits = new Set<string>();
   readonly unregistered: string[] = [];
+  readonly plans = new Map<string, string>();
   private minted = 0;
 
   async upgradeUrl() {
@@ -65,6 +66,9 @@ class FakeBilling implements BillingAccounts {
   }
   async reportHosting(customer: string, input: { ref: string; periodStart: string; totalCents: number }) {
     this.reports.push({ customer, ...input });
+  }
+  async planOf(customer: string) {
+    return this.plans.get(customer) ?? 'free';
   }
   accountFor(identities: Array<{ iss: string; sub: string }>) {
     return identities.find((i) => i.iss === ISSUER)?.sub;
@@ -246,6 +250,46 @@ describe('managed agents on a deployment that bills', () => {
     const { invocations } = await post(`${mention(codex)} fix it`);
     const done = await ended(invocations[0]!.id);
     expect(done).toMatchObject({ state: 'failed', error: NEEDS_OWN_LLM_MESSAGE });
+  });
+
+  it('reads the machine size from the platform: its range, its rate, and the free plan kept to the smallest (2026-11-04)', async () => {
+    const free = (await as('dev-harsh').get('/v1/agents')).body.agents.find((l: AgentListing) => l.agent.displayName === 'Helper').agent as Member;
+    await until(async () => (((await as('dev-harsh').get('/v1/agents')).body.agents as AgentListing[]).find((l) => l.agent.id === free.id)?.hosting?.status === 'ready' ? true : undefined), 'Helper to be ready');
+    const r = await as('dev-harsh').get(`/v1/agents/${free.id}/hosting/size`);
+    expect(r.status).toBe(200);
+    // 512 MB to 8 GB, in Maritime's 2 GB blocks, each block at the agent box's list rate for a 730-hour month.
+    expect(r.body.size).toMatchObject({ memMb: 2048, diskGb: 5, vcpus: 1, maxDiskGb: 100, resizable: false, upgradeUrl: UPGRADE });
+    expect(r.body.size.memOptions).toEqual([
+      { memMb: 2048, centsPerMonth: 100 },
+      { memMb: 4096, centsPerMonth: 200 },
+      { memMb: 6144, centsPerMonth: 300 },
+      { memMb: 8192, centsPerMonth: 400 },
+    ]);
+    const refused = await as('dev-harsh').put(`/v1/agents/${free.id}/hosting/size`, { memMb: 4096, diskGb: 5 });
+    expect(refused).toMatchObject({ status: 400, body: { message: expect.stringMatching(/free plan/) } });
+    expect(fake.resizes).toHaveLength(0);
+
+    // A new limit and a new rate from Maritime change the options with no change here.
+    fake.limits = { ...fake.limits, maxMemMb: 4096 };
+    fake.agentBoxCentsPerHour = 0.2;
+    const after = await as('dev-harsh').get(`/v1/agents/${free.id}/hosting/size`);
+    expect(after.body.size.memOptions).toEqual([{ memMb: 2048, centsPerMonth: 146 }, { memMb: 4096, centsPerMonth: 292 }]);
+    fake.limits = { ...fake.limits, maxMemMb: 8192 };
+    fake.agentBoxCentsPerHour = 0.136986301369863;
+  });
+
+  it('resizes a paid owner’s agent within the platform’s range, and restarts it to apply', async () => {
+    billing.plans.set(RAMNIQUE, 'pro_1');
+    const powerBefore = fake.power.filter((p) => p.agentId === codex.agentInstance && p.action === 'restart').length;
+    const r = await as('dev-ramnique').put(`/v1/agents/${codex.id}/hosting/size`, { memMb: 4096, diskGb: 20 });
+    expect(r.status).toBe(200);
+    expect(r.body.size).toMatchObject({ memMb: 4096, diskGb: 20, resizable: true });
+    expect(fake.resizes.at(-1)).toEqual({ agentId: codex.agentInstance, body: { mem_mb: 4096, disk_gb: 20 } });
+    expect(fake.power.filter((p) => p.agentId === codex.agentInstance && p.action === 'restart').length).toBe(powerBefore + 1);
+    expect(await as('dev-ramnique').put(`/v1/agents/${codex.id}/hosting/size`, { memMb: 3000, diskGb: 20 })).toMatchObject({ status: 400, body: { message: expect.stringMatching(/memory must be one of/) } });
+    expect(await as('dev-ramnique').put(`/v1/agents/${codex.id}/hosting/size`, { memMb: 4096, diskGb: 500 })).toMatchObject({ status: 400, body: { message: expect.stringMatching(/at most 100 GB/) } });
+    // Someone who neither owns it nor administers the org may read nothing of it.
+    expect((await as('dev-harsh').put(`/v1/agents/${codex.id}/hosting/size`, { memMb: 2048, diskGb: 20 })).status).toBe(403);
   });
 
   it('on delete, revokes the gateway key, reports the last cost, leaves the platform and the plan', async () => {

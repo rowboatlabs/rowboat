@@ -64,6 +64,95 @@ export function MachineBlock({ orgId, agentId, state }: { orgId: string; agentId
     )
 }
 
+const gb = (memMb: number) => `${Number.isInteger(memMb / 1024) ? memMb / 1024 : (memMb / 1024).toFixed(1)} GB`
+const perMonth = (cents: number) => `~$${(cents / 100).toFixed(2)}/mo`
+
+/**
+ * The machine's size (2026-11-04): memory and disk within what Maritime
+ * allows, each memory size with Maritime's own estimate. Every number comes
+ * from Harbor, which reads it from the platform; nothing is priced here. A new
+ * size applies by restarting the machine; the free plan keeps the smallest.
+ */
+export function SizeBlock({ orgId, agentId }: { orgId: string; agentId: string }) {
+    const [size, setSize] = useState<spaces.HostingSize | null>(null)
+    const [memMb, setMemMb] = useState<number | undefined>(undefined)
+    const [diskGb, setDiskGb] = useState('')
+    const [busy, setBusy] = useState(false)
+    const show = useCallback((s: spaces.HostingSize) => {
+        setSize(s)
+        setMemMb(s.memMb ?? s.memOptions[0]?.memMb)
+        setDiskGb(s.diskGb !== undefined ? String(s.diskGb) : '')
+    }, [])
+    useEffect(() => {
+        let gone = false
+        window.ipc.invoke('spaces:getHostingSize', { orgId, agentId }).then(({ size: s }) => { if (!gone) show(s) }).catch(() => { if (!gone) setSize(null) })
+        return () => { gone = true }
+    }, [orgId, agentId, show])
+    if (!size || size.memOptions.length === 0) return null
+    const disk = Number(diskGb)
+    const diskOk = Number.isInteger(disk) && disk > 0 && (size.maxDiskGb === undefined || disk <= size.maxDiskGb)
+    const changed = memMb !== size.memMb || (size.diskGb !== undefined && disk !== size.diskGb)
+    const apply = async () => {
+        if (!memMb || !diskOk || busy) return
+        setBusy(true)
+        try {
+            show((await window.ipc.invoke('spaces:setHostingSize', { orgId, agentId, memMb, diskGb: disk })).size)
+            toast('Resized; the machine is restarting to apply it', 'success')
+        } catch (err) {
+            fail(err, 'Could not resize')
+        } finally {
+            setBusy(false)
+        }
+    }
+    return (
+        <div role="group" aria-label="Size" className="flex flex-col gap-2 rounded-lg border border-border p-3">
+            <div className="flex items-baseline justify-between gap-2">
+                <p className="text-sm font-semibold text-foreground">Size</p>
+                <p className="text-[11px] text-muted-foreground">{size.vcpus ? `${size.vcpus} vCPU · ` : ''}billed to your Rowboat plan at Maritime's cost</p>
+            </div>
+            <div role="radiogroup" aria-label="Memory" className="flex flex-wrap gap-1.5">
+                {size.memOptions.map((o) => (
+                    <button
+                        key={o.memMb}
+                        type="button"
+                        role="radio"
+                        aria-checked={memMb === o.memMb}
+                        disabled={!size.resizable || busy}
+                        onClick={() => setMemMb(o.memMb)}
+                        className={cn('flex min-w-20 flex-col items-start rounded-md border px-2.5 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-60', memMb === o.memMb ? 'border-foreground bg-muted' : 'border-border')}
+                    >
+                        <span className="text-xs font-medium text-foreground">{gb(o.memMb)}</span>
+                        {o.centsPerMonth !== undefined && <span className="text-[11px] text-muted-foreground">{perMonth(o.centsPerMonth)}</span>}
+                    </button>
+                ))}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-foreground">
+                Disk
+                <Input type="number" min={1} {...(size.maxDiskGb !== undefined ? { max: size.maxDiskGb } : {})} value={diskGb} disabled={!size.resizable || busy} onChange={(e) => setDiskGb(e.target.value)} aria-label="Disk in GB" className="h-8 w-20 text-xs" />
+                <span className="text-muted-foreground">GB{size.maxDiskGb !== undefined ? ` (up to ${size.maxDiskGb})` : ''}</span>
+            </label>
+            {size.resizable ? (
+                <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">Prices are estimates from Maritime's rate; you pay what the machine actually costs. A new size applies on restart.</p>
+                    <Button size="sm" disabled={!changed || !diskOk || busy} onClick={() => void apply()}>
+                        {busy && <Loader2 className="size-3.5 animate-spin" />}
+                        Apply and restart
+                    </Button>
+                </div>
+            ) : (
+                <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">{size.reason}</p>
+                    {size.upgradeUrl && (
+                        <Button size="sm" variant="outline" onClick={() => window.open(size.upgradeUrl)}>
+                            Upgrade
+                        </Button>
+                    )}
+                </div>
+            )}
+        </div>
+    )
+}
+
 /** Environment variables on the VM: a secret shows as set, never its value; a reload or restart applies changes. */
 export function EnvScreen({ orgId, agentId, state }: { orgId: string; agentId: string; state: HostingState }) {
     const { env, setEnv, setMachine } = state
