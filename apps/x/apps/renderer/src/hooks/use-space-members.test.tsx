@@ -77,3 +77,17 @@ it('shows no online dots for older servers without onlinePeople', async () => {
     await waitFor(() => expect(result.current.roster).toEqual([person]))
     expect(result.current.online.size).toBe(0)
 })
+
+it('refetches after reconnect even when an older roster request is still in flight', async () => {
+    let finish: (value: unknown) => void = () => {}
+    invoke.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    invoke.mockResolvedValue({ members: [person], onlinePeople: [] })
+    const { result } = renderHook(() => {
+        useOrgRoster('online-reconnect-race', [])
+        return usePeopleOnline('online-reconnect-race')
+    })
+    act(() => refreshOrgRoster('online-reconnect-race'))
+    await act(async () => finish({ members: [person], onlinePeople: ['friend'] }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2))
+    expect(result.current.has('friend')).toBe(false)
+})

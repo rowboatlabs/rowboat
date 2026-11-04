@@ -257,3 +257,55 @@ it('delivers human presence without a space subscription', async () => {
   off();
   live.close();
 });
+
+describe('foreground presence transport', () => {
+  it('sends current focus on connect and replays it on reconnect', async () => {
+    const live = makeLive({ staleAfterMs: 100_000, watchdogTickMs: 100_000 });
+    live.onMemberFrame(() => {});
+    live.memberActivity('window', true);
+    await settle();
+    const first = FakeWebSocket.instances[0]!;
+    first.open();
+    expect(first.sent.map(s => JSON.parse(s))).toContainEqual({ kind: 'member_activity', sessionId: 'window', active: true });
+    first.close();
+    await vi.advanceTimersByTimeAsync(1_100);
+    const second = FakeWebSocket.instances.at(-1)!;
+    second.open();
+    expect(second.sent.map(s => JSON.parse(s))).toContainEqual({ kind: 'member_activity', sessionId: 'window', active: true });
+    live.memberActivity('window', false);
+    expect(JSON.parse(second.sent.at(-1)!)).toEqual({ kind: 'member_activity', sessionId: 'window', active: false });
+    second.close();
+    await vi.advanceTimersByTimeAsync(1_100);
+    const third = FakeWebSocket.instances.at(-1)!;
+    third.open();
+    expect(third.sent).toEqual([]);
+    live.close();
+  });
+
+  it('does not revive expired focus after the renderer stops renewing it', async () => {
+    const live = makeLive({ staleAfterMs: 100_000, watchdogTickMs: 100_000 });
+    live.onMemberFrame(() => {});
+    live.memberActivity('window', true);
+    await settle();
+    const first = FakeWebSocket.instances[0]!;
+    first.open();
+    await vi.advanceTimersByTimeAsync(26_000);
+    first.close();
+    await vi.advanceTimersByTimeAsync(1_100);
+    const second = FakeWebSocket.instances.at(-1)!;
+    second.open();
+    expect(second.sent).toEqual([]);
+    live.close();
+  });
+
+  it('drops a pending focus report if the window blurs before connection opens', async () => {
+    const live = makeLive();
+    live.memberActivity('window', true);
+    live.memberActivity('window', false);
+    await settle();
+    const socket = FakeWebSocket.instances[0]!;
+    socket.open();
+    expect(socket.sent).toEqual([]);
+    live.close();
+  });
+});
