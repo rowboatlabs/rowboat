@@ -167,17 +167,36 @@ export class Invocations {
    * thread. Only that one, so a reply never starts two agents. A refused
    * invocation does not count, since it never reached the agent, and neither
    * does Ro, which tags and never converses (§8 Jev). Policy then applies as
-   * to a mention.
+   * to a mention. Amended 2026-11-05 ("reply ux" in Main): only while that
+   * conversation is the thread's latest, so the message before the reply is
+   * the agent's own or the author's to it; otherwise the reply is to people.
    */
   private async followedUp(ctx: ActorCtx, spaceId: string, message: Message): Promise<string | undefined> {
     if (!message.threadRoot || message.peopleOnly || ctx.agent || message.author.actingMode !== 'direct') return undefined;
     if (message.mentions.length > 0 || message.mentionsHere || message.mentionsRowboat) return undefined;
-    for (const i of await this.k.store.listSpaceInvocations(spaceId, message.threadRoot, LIST_LIMIT)) {
+    const invocations = await this.k.store.listSpaceInvocations(spaceId, message.threadRoot, LIST_LIMIT);
+    let agentId: string | undefined;
+    for (const i of invocations) {
       if (i.trigger.authorId !== message.author.memberId || i.state === 'refused') continue;
       if ((await this.k.store.getMember(i.agentId))?.agentKind === JEV_KIND) continue;
-      return i.agentId;
+      agentId = i.agentId;
+      break;
     }
-    return undefined;
+    if (!agentId) return undefined;
+    // Ro's cc lines only tag, so they are not the conversation's latest.
+    const earlier = (await this.k.store.listThread(spaceId, message.threadRoot, { beforeOffset: message.offset, limit: 10 })).reverse();
+    const root = await this.k.store.getMessage(spaceId, message.threadRoot);
+    let previous: Message | undefined;
+    for (const m of [...earlier, ...(root ? [root] : [])]) {
+      if ((await this.k.store.getMember(m.author.memberId))?.agentKind === JEV_KIND) continue;
+      previous = m;
+      break;
+    }
+    if (!previous) return undefined;
+    if (previous.author.memberId === agentId) return agentId;
+    const toAgent = previous.author.memberId === message.author.memberId
+      && invocations.some((i) => i.agentId === agentId && i.trigger.messageId === previous.id);
+    return toAgent ? agentId : undefined;
   }
 
   /** Send what the lock held back. */

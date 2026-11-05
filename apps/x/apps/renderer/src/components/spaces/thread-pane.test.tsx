@@ -331,7 +331,10 @@ describe('thread follow-ups (Harbor spec §8, 2026-10-27)', () => {
         conversation: { spaceId: 'space', threadRootId: 'root' }, trigger: { messageId: 'r1', authorId: 'me', body: 'hi' },
         where: { spaceKind: 'shared', spaceName: 'Space' },
     }
+    const answer = { ...message('r3', 'found it', 22, 'root'), author: { memberId: 'hermes', actingMode: 'direct' } } as spaces.Message
+    let latest: spaces.Message[] = [answer]
     beforeEach(() => {
+        latest = [answer]
         follow.members = [hermes]
         follow.invocations = new Map([['r1', [asked]]])
         const base = window.ipc.invoke as (channel: string, args: unknown) => Promise<unknown>
@@ -340,6 +343,8 @@ describe('thread follow-ups (Harbor spec §8, 2026-10-27)', () => {
             configurable: true,
             value: {
                 invoke: vi.fn(async (channel: string, args: unknown) => {
+                    // Hermes answered last (2026-11-05: only a conversation that is the thread's latest is followed up).
+                    if (channel === 'spaces:listThread') return { root, topic: null, messages: [...replies, ...latest], hasMore: false, following: false, readOffset: null }
                     if (channel !== 'spaces:postMessage') return base(channel, args)
                     n += 1
                     return { message: message(`p${n}`, (args as { body: string }).body, 30 + n, 'root'), invocations: [] }
@@ -355,27 +360,35 @@ describe('thread follow-ups (Harbor spec §8, 2026-10-27)', () => {
 
     it('names the agent your next reply goes to, and its × sends one reply to people only', async () => {
         mount()
-        expect(screen.getByText('Hermes')).toBeTruthy()
-        fireEvent.click(screen.getByRole('button', { name: 'Send to people only, not Hermes' }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Send to people only, not Hermes' }))
         expect(screen.getByText('To people only')).toBeTruthy()
         await act(async () => {
             await follow.composer!.onSend('thanks all')
         })
         expect(posted().at(-1)).toMatchObject({ body: 'thanks all', peopleOnly: true })
-        // One reply only: the line is back, and the next goes to Hermes.
-        expect(screen.getByText('Hermes')).toBeTruthy()
+        // That reply to the people is now the latest, so the next goes to people too, without the flag.
+        expect(screen.queryByRole('button', { name: 'Send to people only, not Hermes' })).toBeNull()
         await act(async () => {
             await follow.composer!.onSend('one more')
         })
         expect(posted().at(-1)!.peopleOnly).toBeUndefined()
     })
 
+    it('names no one once someone else has replied after the conversation (2026-11-05)', async () => {
+        latest = [answer, message('r4', 'I saw it too', 23, 'root')]
+        mount()
+        await waitFor(() => expect(screen.getByText('I saw it too')).toBeTruthy())
+        expect(screen.queryByRole('button', { name: 'Send to people only, not Hermes' })).toBeNull()
+    })
+
     it('hides while the draft mentions anyone, and for an agent someone else invoked', async () => {
         mount()
+        const toPeople = { name: 'Send to people only, not Hermes' }
+        await screen.findByRole('button', toPeople)
         act(() => follow.composer!.onDraftChange!('[@Alex](#member:alex) can you?'))
-        expect(screen.queryByText('Hermes')).toBeNull()
+        expect(screen.queryByRole('button', toPeople)).toBeNull()
         act(() => follow.composer!.onDraftChange!('plain'))
-        expect(screen.getByText('Hermes')).toBeTruthy()
+        expect(screen.getByRole('button', toPeople)).toBeTruthy()
         cleanup()
         follow.invocations = new Map([['r1', [{ ...asked, trigger: { ...asked.trigger, authorId: 'alex' } }]]])
         mount()

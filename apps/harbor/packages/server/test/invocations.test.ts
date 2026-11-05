@@ -310,6 +310,18 @@ describe('thread follow-ups without a mention (2026-10-27)', () => {
     expect((await post(hermes.key, 'a note from Hermes', { threadRoot: root })).invocations).toEqual([]);
   });
 
+  it('only while the conversation is the thread’s latest (2026-11-05): after the agent’s answer, not after someone else', async () => {
+    const root = await askedHermes();
+    await post(hermes.key, 'found two errors', { threadRoot: root });
+    const answered = await reply('dev-harsh', 'which one first?', root);
+    expect(answered.invocations.map((i) => i.agentId)).toEqual([hermes.agent.id]);
+    await hermes.report(answered.invocations[0]!.id, { state: 'done' });
+    await reply('dev-ramnique', 'I saw those too', root);
+    expect((await reply('dev-harsh', 'nice, thanks', root)).invocations).toEqual([]);
+    // Nor after the author's own reply to people: the conversation moved on.
+    expect((await reply('dev-harsh', 'one more for the team', root)).invocations).toEqual([]);
+  });
+
   it('not on a new message in the stream, which starts a conversation of its own', async () => {
     await askedHermes();
     expect((await post('dev-harsh', 'unrelated news')).invocations).toEqual([]);
