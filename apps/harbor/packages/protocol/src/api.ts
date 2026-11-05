@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, SecretName, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
   HostingConsole,
@@ -63,6 +63,14 @@ export const NewPoll = z.object({
   allowMultiselect: z.boolean().optional(),
 });
 
+/**
+ * A secret for the members the message mentions (2026-11-04): the value is
+ * sealed apart from the message and the log, and only they read it back
+ * (`readMessageSecret`). Neither the body nor the summary may contain it, so
+ * a value pasted into the text too is refused rather than shown.
+ */
+export const NewMessageSecret = z.object({ name: SecretName, value: z.string().min(1).max(8_192) });
+
 const NewMessage = z.object({
   /**
    * Present = a reply into the flat thread under this root (the org
@@ -95,6 +103,12 @@ const NewMessage = z.object({
    * in that thread. Mentions still invoke. Ignored on a new root message.
    */
   peopleOnly: z.boolean().optional(),
+  /**
+   * Secrets for the members this message mentions (2026-11-04), who are its
+   * readers from then on (Message.secrets). A message that mentions no one
+   * (outside a DM) cannot carry one. Names are unique. Immutable once posted.
+   */
+  secrets: z.array(NewMessageSecret).max(10).optional(),
 });
 
 /**
@@ -1094,6 +1108,8 @@ export const routes = {
        * Absent from servers before it.
        */
       online: z.array(MemberId).optional(),
+      /** People with a live connection (2026-11-04); member_presence keeps this fresh. */
+      onlinePeople: z.array(MemberId).optional(),
     }),
   },
   /**
@@ -1425,6 +1441,18 @@ export const routes = {
     request: NewMessage,
     /** `invocations`: the agents this message invoked, or refused to (spec §8) — absent from older orgs. */
     response: z.object({ message: Message, invocations: z.array(Invocation).default([]) }),
+  },
+  /**
+   * A secret a message handed the caller (2026-11-04): the value as
+   * `text/plain`, `cache-control: no-store`, only to its readers (anyone
+   * else, the author included, gets not_found). Gone once the message is
+   * deleted.
+   */
+  readMessageSecret: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/messages/:messageId/secrets/:name',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId, name: z.string() }),
+    response: z.never(),
   },
   /**
    * Author-only tombstone (the content plane is role-flat, so deleter ==

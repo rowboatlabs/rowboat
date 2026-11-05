@@ -1234,6 +1234,25 @@ export const MIGRATIONS: Migration[] = [
     id: '058-agent-hosting-billing',
     statements: [`alter table agent_hosting add column if not exists billing_customer text`],
   },
+  {
+    // Secrets in a thread (2026-11-04, "secrets card" in Main): the message
+    // keeps the names and its readers, the card everyone sees; the values are
+    // sealed (sealing.ts) in their own table, outside the message row and the
+    // log, so no read of either can carry one. Deleting the message deletes
+    // its rows.
+    id: '059-message-secrets',
+    statements: [
+      `alter table messages add column if not exists secrets jsonb`,
+      `create table if not exists message_secrets (
+        space_id text not null,
+        message_id text not null,
+        name text not null,
+        sealed text not null,
+        primary key (space_id, message_id, name),
+        constraint message_secrets_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

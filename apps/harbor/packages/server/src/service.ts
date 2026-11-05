@@ -459,6 +459,10 @@ export class HarborService {
     return this.spaces.listOrgMembers(ctx);
   }
   /** Of these members, the agents whose connector is connected now (local agents, 2026-10-28). */
+  onlinePeople(members: readonly Member[]): string[] {
+    return this.presence.onlinePeople(members);
+  }
+
   onlineAgents(members: readonly Member[]): string[] {
     return this.presence.online(members);
   }
@@ -627,6 +631,9 @@ export class HarborService {
   }
   postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     return this.feed.postMessage(ctx, spaceId, input);
+  }
+  readMessageSecret(ctx: ActorCtx, spaceId: string, messageId: string, name: string): Promise<string> {
+    return this.feed.readMessageSecret(ctx, spaceId, messageId, name);
   }
   /**
    * A connector's answer to one of its agent's invocations: posted in its

@@ -34,6 +34,69 @@ async function loadWorkspace() {
   return import("./workspace.js");
 }
 
+describe("workspace.readdir extension filtering", () => {
+  beforeEach(async () => {
+    vi.doMock("../config/config.js", () => ({ WorkDir: workspaceDir }));
+    for (const dir of ["Notes/Nested", "Archive.txt", ".hidden"]) {
+      await fs.mkdir(path.join(workspaceDir, "listing", dir), { recursive: true });
+    }
+    for (const file of ["root.md", "ignored.txt", "Notes/kept.md", "Notes/Nested/deep.md", "Notes/ignored.txt", "Archive.txt/archived.md", ".hidden/secret.md", ".hidden.md"]) {
+      await fs.writeFile(path.join(workspaceDir, "listing", file), "test");
+    }
+  });
+
+  afterEach(() => {
+    vi.doUnmock("../config/config.js");
+  });
+
+  it("traverses directories regardless of their names and filters only files", async () => {
+    const workspace = await loadWorkspace();
+    const entries = await workspace.readdir("listing", { recursive: true, allowedExtensions: [".md"] });
+
+    expect(entries.filter((entry) => entry.kind === "file").map((entry) => entry.path).sort()).toEqual([
+      "listing/Archive.txt/archived.md",
+      "listing/Notes/Nested/deep.md",
+      "listing/Notes/kept.md",
+      "listing/root.md",
+    ]);
+    expect(entries.filter((entry) => entry.kind === "dir").map((entry) => entry.path).sort()).toEqual([
+      "listing/Archive.txt", "listing/Notes", "listing/Notes/Nested",
+    ]);
+  });
+
+  it("keeps directory rows and stats in non-recursive filtered listings", async () => {
+    const workspace = await loadWorkspace();
+    const entries = await workspace.readdir("listing", { allowedExtensions: [".md"], includeStats: true });
+
+    expect(entries.map((entry) => [entry.name, entry.kind])).toEqual([
+      ["Archive.txt", "dir"], ["Notes", "dir"], ["root.md", "file"],
+    ]);
+    for (const entry of entries) {
+      expect(entry.stat).toEqual({ size: expect.any(Number), mtimeMs: expect.any(Number) });
+    }
+  });
+
+  it("honors includeHidden for matching files and directory traversal", async () => {
+    const workspace = await loadWorkspace();
+    const entries = await workspace.readdir("listing", {
+      recursive: true, allowedExtensions: [".md"], includeHidden: true,
+    });
+    const paths = entries.map((entry) => entry.path);
+    expect(paths).toContain("listing/.hidden");
+    expect(paths).toContain("listing/.hidden/secret.md");
+    expect(paths).toContain("listing/.hidden.md");
+    expect(paths).not.toContain("listing/ignored.txt");
+  });
+
+  it("treats an empty extension list as unfiltered", async () => {
+    const workspace = await loadWorkspace();
+    const unfiltered = await workspace.readdir("listing", { recursive: true });
+    const entries = await workspace.readdir("listing", { recursive: true, allowedExtensions: [] });
+    expect(entries).toEqual(unfiltered);
+    expect(entries.map((entry) => entry.path)).toContain("listing/Notes/ignored.txt");
+  });
+});
+
 describe("workspace.writeFile etag guard", () => {
   it("accepts a write keyed on the etag readFile reported, then refuses the stale one", async () => {
     const workspace = await loadWorkspace();
@@ -81,5 +144,22 @@ describe("workspace.writeFile etag guard", () => {
       encoding: "base64",
     });
     expect(recreated.stat.size).toBe(6);
+  });
+});
+
+describe("workspace.copy overwrite behavior", () => {
+  it("copies new files, protects existing files by default, and overwrites explicitly", async () => {
+    const workspace = await loadWorkspace();
+    await workspace.writeFile("source.txt", "source");
+
+    await expect(workspace.copy("source.txt", "new.txt")).resolves.toEqual({ ok: true });
+    await expect(fs.readFile(path.join(workspaceDir, "new.txt"), "utf8")).resolves.toBe("source");
+
+    await workspace.writeFile("existing.txt", "keep");
+    await expect(workspace.copy("source.txt", "existing.txt")).rejects.toThrow("Destination already exists");
+    await expect(fs.readFile(path.join(workspaceDir, "existing.txt"), "utf8")).resolves.toBe("keep");
+
+    await expect(workspace.copy("source.txt", "existing.txt", true)).resolves.toEqual({ ok: true });
+    await expect(fs.readFile(path.join(workspaceDir, "existing.txt"), "utf8")).resolves.toBe("source");
   });
 });

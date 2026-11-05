@@ -17,6 +17,18 @@ import { mentionToken, type MentionRef } from '@x/shared/dist/spaces.js'
 // of `**bold**` converting live as you type.
 
 /**
+ * 2026-11-05: Clear formatting — the selection's marks (links included) come
+ * off and its blocks (lists, quotes, code) go back to plain paragraphs; with
+ * only a caret, its block resets and typing continues unformatted.
+ */
+export function clearFormatting(editor: Editor): boolean {
+    return editor.chain().focus().unsetAllMarks().clearNodes().command(({ tr }) => {
+        tr.setStoredMarks([])
+        return true
+    }).run()
+}
+
+/**
  * the conversation formatting chords on top of TipTap's defaults (⌘B/⌘I bold/italic,
  * ⌘E code, ⌘⇧7/8 ordered/bullet come built in).
  */
@@ -28,6 +40,7 @@ const ChatFormatKeys = Extension.create({
             'Mod-Shift-c': () => this.editor.commands.toggleCode(),
             'Mod-Shift-9': () => this.editor.commands.toggleBlockquote(),
             'Mod-Alt-Shift-c': () => this.editor.commands.toggleCodeBlock(),
+            'Mod-\\': () => clearFormatting(this.editor),
         }
     },
 })
@@ -529,7 +542,11 @@ const CodeFences = Extension.create({
  */
 export function composerExtensions(getPlaceholder: () => string) {
     return [
-        ChatStarterKit.configure({ link: false }),
+        // 2026-11-05: No underline — markdown can't carry it, and links pasted
+        // from web pages and docs arrive wrapped in underline styling that
+        // (inclusive, unlike the link) ran on into whatever was typed next,
+        // looking like the link itself and outliving an unlink.
+        ChatStarterKit.configure({ link: false, underline: false }),
         // 2026-09-29: Typing after a pasted link must start ordinary text.
         Link.extend({ inclusive: false }).configure({ openOnClick: false, autolink: true }),
         MentionNode,

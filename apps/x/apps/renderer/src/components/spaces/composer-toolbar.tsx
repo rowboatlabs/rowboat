@@ -1,7 +1,7 @@
 import { useState, type RefObject } from 'react'
 import { useEditorState, type Editor } from '@tiptap/react'
 import {
-    BoldIcon, CodeIcon, CodeSquareIcon, ItalicIcon, LinkIcon, ListIcon, ListOrderedIcon, QuoteIcon, StrikethroughIcon,
+    BoldIcon, CodeIcon, CodeSquareIcon, ItalicIcon, LinkIcon, ListIcon, ListOrderedIcon, QuoteIcon, RemoveFormattingIcon, StrikethroughIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { isMac } from '@/lib/shortcut'
+import { clearFormatting } from '@/components/spaces/composer-editor'
 import { insertLink, toggleCodeBlock, toggleInline, toggleLinePrefix, type FormatResult } from '@/lib/spaces-format'
 
 // The conversation formatting bar over a markdown textarea (the space composer
@@ -192,7 +193,7 @@ export function FormattingToolbar({ textareaRef, value, onChange, onCaret, class
 // textarea-era version, now without a caller.
 // ---------------------------------------------------------------------------
 
-type RichToolKey = 'bold' | 'italic' | 'strike' | 'ordered' | 'bullet' | 'quote' | 'code' | 'codeblock'
+type RichToolKey = 'bold' | 'italic' | 'strike' | 'ordered' | 'bullet' | 'quote' | 'code' | 'codeblock' | 'clear'
 
 interface RichToolDef {
     key: RichToolKey
@@ -217,6 +218,9 @@ const RICH_GROUPS: RichToolDef[][] = [
     [
         { key: 'code', title: `Code (${mod}E)`, icon: CodeIcon, run: (e) => e.chain().focus().toggleCode().run() },
         { key: 'codeblock', title: `Code block (${mod}⌥⇧C)`, icon: CodeSquareIcon, run: (e) => e.chain().focus().toggleCodeBlock().run() },
+    ],
+    [
+        { key: 'clear', title: `Clear formatting (${mod}\\)`, icon: RemoveFormattingIcon, run: (e) => { clearFormatting(e) } },
     ],
 ]
 
@@ -270,7 +274,16 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
         setLinkOpen(false)
     }
 
-    const button = (t: RichToolDef) => (
+    // 2026-11-05: A link (typed or pasted) can be taken off again; its text stays.
+    const removeLink = () => {
+        editor.chain().focus().extendMarkRange('link').unsetLink().run()
+        setLinkOpen(false)
+    }
+
+    const button = (t: RichToolDef) => {
+        // Clear formatting is an action, never a state the selection is in.
+        const pressed = t.key === 'clear' ? false : (active?.[t.key] ?? false)
+        return (
         <Tooltip key={t.key} delayDuration={400}>
             <TooltipTrigger asChild>
                 <Button
@@ -278,8 +291,8 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
                     variant="ghost"
                     size="icon"
                     aria-label={t.title}
-                    aria-pressed={active?.[t.key] ?? false}
-                    className={cn('size-7 text-muted-foreground hover:text-foreground', active?.[t.key] && 'bg-accent text-foreground')}
+                    aria-pressed={pressed}
+                    className={cn('size-7 text-muted-foreground hover:text-foreground', pressed && 'bg-accent text-foreground')}
                     // Keep the editor focused (and its selection alive) through the click.
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => t.run(editor)}
@@ -289,7 +302,8 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
             </TooltipTrigger>
             <TooltipContent side="top">{t.title}</TooltipContent>
         </Tooltip>
-    )
+        )
+    }
 
     const separator = <span className="mx-1 h-4 w-px shrink-0 bg-border" />
 
@@ -334,11 +348,16 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
                             className="h-8 text-sm"
                         />
                         <div className="flex justify-end gap-1.5">
+                            {active?.link ? (
+                                <Button type="button" variant="ghost" size="sm" className="mr-auto h-7" onClick={removeLink}>
+                                    Unlink
+                                </Button>
+                            ) : null}
                             <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => setLinkOpen(false)}>
                                 Cancel
                             </Button>
                             <Button type="button" size="sm" className="h-7" disabled={!linkUrl.trim()} onClick={submitLink}>
-                                Add
+                                {active?.link ? 'Save' : 'Add'}
                             </Button>
                         </div>
                     </div>
@@ -350,6 +369,8 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
             {RICH_GROUPS[2]!.map(button)}
             {separator}
             {RICH_GROUPS[3]!.map(button)}
+            {separator}
+            {RICH_GROUPS[4]!.map(button)}
         </div>
     )
 }

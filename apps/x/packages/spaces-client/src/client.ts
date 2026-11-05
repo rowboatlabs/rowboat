@@ -669,7 +669,7 @@ export class SpacesClient {
   }
 
   /** The roster with the agents connected now (`online`, local agents 2026-10-28; absent from older servers). */
-  async orgRoster(): Promise<{ members: Member[]; online?: string[] }> {
+  async orgRoster(): Promise<{ members: Member[]; online?: string[]; onlinePeople?: string[] }> {
     return this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response);
   }
 
@@ -815,6 +815,20 @@ export class SpacesClient {
       bytes: new Uint8Array(await res.arrayBuffer()),
       mime: res.headers.get('content-type') ?? 'application/octet-stream',
     };
+  }
+
+  /** A secret a message shared with the caller, as text (2026-11-04): Harbor answers its readers only. */
+  async readMessageSecret(spaceId: string, messageId: string, name: string): Promise<string> {
+    const res = await this.authorizedFetch(`${this.baseUrl}${this.space(spaceId, `/messages/${messageId}/secrets/${encodeURIComponent(name)}`)}`);
+    if (!res.ok) {
+      const parsed = ((await res.json().catch(() => undefined)) ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? `secret read failed with ${res.status}`,
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    return res.text();
   }
 
   // --- feed -----------------------------------------------------------------

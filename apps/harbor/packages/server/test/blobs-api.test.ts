@@ -154,6 +154,30 @@ describe('blob uploads over the render face', () => {
     expect(r.headers.get('content-disposition')).toBe('attachment; filename="..-weird-signups.csv"');
   });
 
+  it('serves one byte range as 206, past the end as 416, and several as the whole blob (2026-11-04)', async () => {
+    const path = `/v1/spaces/${spaceId}/blobs/${blobHash(PNG_1PX)}`;
+    const ranged = (range: string) => fetch(`${harbor.url}${path}`, { headers: { authorization: 'Bearer dev-ramnique', range } });
+    const whole = await ramnique.get(path);
+    expect(whole.headers.get('accept-ranges')).toBe('bytes');
+
+    const head = await ranged('bytes=0-7');
+    expect(head.status).toBe(206);
+    expect(head.headers.get('content-range')).toBe(`bytes 0-7/${PNG_1PX.length}`);
+    expect(head.headers.get('content-length')).toBe('8');
+    expect(Buffer.from(await head.arrayBuffer())).toEqual(Buffer.from(PNG_1PX.subarray(0, 8)));
+
+    const tail = await ranged('bytes=-4');
+    expect(Buffer.from(await tail.arrayBuffer())).toEqual(Buffer.from(PNG_1PX.subarray(PNG_1PX.length - 4)));
+
+    const past = await ranged(`bytes=${PNG_1PX.length}-`);
+    expect(past.status).toBe(416);
+    expect(past.headers.get('content-range')).toBe(`bytes */${PNG_1PX.length}`);
+
+    const several = await ranged('bytes=0-1,4-5');
+    expect(several.status).toBe(200);
+    expect((await several.arrayBuffer()).byteLength).toBe(PNG_1PX.length);
+  });
+
   it('keeps a ?name= beyond Latin-1 whole in filename*, with a Latin-1 fallback', async () => {
     const r = await ramnique.get(
       `/v1/spaces/${spaceId}/blobs/${blobHash(CSV_BYTES)}?name=${encodeURIComponent('signups (é) ✓.csv')}`,

@@ -20,6 +20,7 @@ The renderer's Spaces section also builds as a standalone web app (2026-10-09): 
 - **Every Harbor call rides Harbor's session cookie** (`src/web/session.ts`; CONTRACT.md: `createSession`). The page mints the cookie at the apex from its access token, and mints it again when the token changes or a call is refused. The shared client's cookie mode sends credentials and no bearer, and the live socket opens with no token in its URL.
 - **Files and images load straight from the org's Harbor.**
   - A blob URL is the org's own `/v1/spaces/<space>/blobs/<hash>`. A plain `<img>` loads it on the cookie, and Harbor streams it with immutable caching, so the browser fetches each blob once. In-page reads go through `fetchBlob`, which sends the cookie.
+  - Videos play the same way (2026-11-04): a `<video>` loads the blob URL on the cookie and seeks with byte ranges, which is why the Content Security Policy's `media-src` allows `https:`, as `img-src` does.
   - Downloads are links with `download=1`.
   - HTML documents render as `srcdoc` in the viewer's sandbox, without their relative files.
 - **No local runtime.** Nothing that needs the person's own machine is shown: `LOCAL_RUNTIME` in `lib/feature-flags.ts` is false here. That covers their Rowboat agent, scheduled sends and reminders, and voice.

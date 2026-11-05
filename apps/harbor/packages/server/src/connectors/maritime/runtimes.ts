@@ -151,6 +151,11 @@ const mcpJson = (orgUrl: string) =>
 
 // --- Hermes ---------------------------------------------------------------------------------
 
+/** Hermes's words when its gateway is not ready to take a turn yet (`connect_gateway`, Hermes 0.22). */
+const GATEWAY_NOT_READY = 'Gateway (starting|draining): ';
+/** Tries five seconds apart: two minutes for the gateway to be ready. */
+const GATEWAY_RETRIES = 24;
+
 const hermes: Runtime = {
   root: '/opt/data',
   sessionFor: (threadKey) => `rb-${threadKey}`,
@@ -185,7 +190,10 @@ const hermes: Runtime = {
       // The rowboat-spaces skill, once: without it the first turn of every session fetches it from GitHub (seen on prod 2026-10-26).
       `{ [ -d /opt/data/skills/rowboat-spaces ] || ls -d /opt/data/skills/*/rowboat-spaces >/dev/null 2>&1; } || run hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes >/dev/null 2>&1 || true`,
       'cd /opt/data/workspace',
-      `run hermes chat --query-file ${q(input.promptPath)} --oneshot --format stream-json -c ${q(input.session ?? 'rowboat')} --create-if-missing ${flags} > ${q(input.outPath)} 2> ${q(input.errPath)}`,
+      // A VM woken from a snapshot can find its gateway still `starting`, or `draining` while the supervisor stops a
+      // duplicate one, and `hermes chat` then refuses before any turn runs ("Gateway draining: not_ready", seen on prod
+      // 2026-11-04). Hermes's own kanban worker waits those two states out; the turn does too, for up to two minutes.
+      `n=0; while :; do rc=0; run hermes chat --query-file ${q(input.promptPath)} --oneshot --format stream-json -c ${q(input.session ?? 'rowboat')} --create-if-missing ${flags} > ${q(input.outPath)} 2> ${q(input.errPath)} || rc=$?; [ "$rc" = 0 ] && break; n=$((n+1)); [ "$n" -lt ${GATEWAY_RETRIES} ] && grep -qE ${q(GATEWAY_NOT_READY)} ${q(input.outPath)} ${q(input.errPath)} 2>/dev/null || exit "$rc"; sleep 5; done`,
     ].join('\n');
   },
   // The thread's session is its name (`-c`), kept from the first turn; the id a result reports is not read back.

@@ -19,6 +19,7 @@ import type {
   Membership,
   MentionStamps,
   Message,
+  MessageSecrets,
   Poll,
   Space,
   Topic,
@@ -321,6 +322,7 @@ interface MessageRow {
   summary?: string | null;
   people_only?: boolean | null;
   archived?: boolean | null;
+  secrets?: MessageSecrets | null;
 }
 
 /** What search indexes for a message: its summary (2026-10-25) and its body. */
@@ -358,6 +360,7 @@ function rowToMessage(r: MessageRow): Message {
     // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
     ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
     ...(r.people_only ? { peopleOnly: true as const } : {}),
+    ...(r.secrets ? { secrets: r.secrets } : {}),
     ...(r.archived ? { archived: true as const } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
@@ -1228,8 +1231,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only, secrets)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18, $19::jsonb)`,
       [
         message.id,
         message.spaceId,
@@ -1249,8 +1252,23 @@ export class PgStore implements Store {
         message.approval ? JSON.stringify(message.approval) : null,
         message.summary ?? null,
         message.peopleOnly === true,
+        message.secrets ? JSON.stringify(message.secrets) : null,
       ],
     );
+  }
+
+  async putMessageSecrets(spaceId: string, messageId: string, secrets: Array<{ name: string; sealed: string }>): Promise<void> {
+    for (const x of secrets) {
+      await this.sql.query('insert into message_secrets (space_id, message_id, name, sealed) values ($1, $2, $3, $4)', [spaceId, messageId, x.name, x.sealed]);
+    }
+  }
+
+  async getMessageSecret(spaceId: string, messageId: string, name: string): Promise<string | undefined> {
+    const rows = await this.sql.query<{ sealed: string }>(
+      'select sealed from message_secrets where space_id = $1 and message_id = $2 and name = $3',
+      [spaceId, messageId, name],
+    );
+    return rows[0]?.sealed;
   }
 
   async setThreadArchived(spaceId: string, rootMessageId: string, archived: boolean): Promise<void> {
@@ -1317,16 +1335,18 @@ export class PgStore implements Store {
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', summary = null, deleted_at = $3, poll = null, approval = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
+      `update messages set body = '', summary = null, deleted_at = $3, poll = null, approval = null, secrets = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
        where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
     // Votes are content too: a member-attributed row must not outlive the poll it was cast on.
     await this.sql.query(`delete from poll_votes where space_id = $1 and message_id = $2`, [spaceId, messageId]);
+    // A deleted message hands nothing over any more (2026-11-04).
+    await this.sql.query(`delete from message_secrets where space_id = $1 and message_id = $2`, [spaceId, messageId]);
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}' #- '{summary}') || jsonb_build_object(
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}' #- '{summary}' #- '{secrets}') || jsonb_build_object(
          'body', '', 'deletedAt', $3::text, 'mentions', '[]'::jsonb, 'mentionsHere', false, 'mentionsRowboat', false))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],

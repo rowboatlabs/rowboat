@@ -22,6 +22,8 @@ import {
   isGroupChat,
   canAddAgent,
   canReachPersonalAgent,
+  canHandSecrets,
+  canReadSecret,
   canCreateAgentKey,
   canRenameAgent,
   canRevokeAgentKey,
@@ -243,7 +245,7 @@ describe('policy', () => {
     expect(canDecideSuperAgentRequest(admin, boss)).toMatchObject({ code: 'forbidden' });
   });
 
-  it('invocations: a shared space to invoke, three hops, the invoker cancels, invoker or admin stops when the connector can', () => {
+  it('invocations: a shared space to invoke, the hop limit, the invoker cancels, invoker or admin stops when the connector can', () => {
     const helper: Member = { id: 'helper', displayName: 'Helper', role: 'member', kind: 'agent', ownerId: 'harsh' };
     const byHarsh = { agent: helper, authorId: 'harsh' };
     expect(invocationRefusal(true, 0, byHarsh)).toBeNull();
@@ -301,5 +303,25 @@ describe('personal agents (2026-10-26)', () => {
     expect(canReachPersonalAgent('gagan', personal, 'message')).toMatchObject({ code: 'forbidden', message: expect.stringContaining('message it') });
     expect(canReachPersonalAgent('gagan', channel, 'add')).toBeNull();
     expect(canReachPersonalAgent('harsh', person, 'message')).toBeNull();
+  });
+});
+
+describe('secrets in a message (2026-11-04)', () => {
+  const harsh: Member = { id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' };
+  const scout: Member = { id: 'scout', displayName: 'Scout', role: 'member', kind: 'agent', ownerId: 'harsh' };
+  const personal: Member = { ...scout, id: 'mine', personal: true };
+  it('goes to the members the message mentions, people and agents, a personal agent only from its owner', () => {
+    expect(canHandSecrets('gagan', [harsh, scout])).toBeNull();
+    expect(canHandSecrets('gagan', [])).toMatchObject({ code: 'invalid_request', message: expect.stringContaining('mention who should read') });
+    expect(canHandSecrets('gagan', [scout, personal])).toMatchObject({ code: 'forbidden' });
+    expect(canHandSecrets('harsh', [personal])).toBeNull();
+  });
+  it('is read by its readers alone, an admin and its author included', () => {
+    const secrets = { names: ['KEY'], readers: ['scout', 'harsh'] };
+    expect(canReadSecret('scout', secrets, 'KEY')).toBeNull();
+    expect(canReadSecret('harsh', secrets, 'KEY')).toBeNull();
+    expect(canReadSecret('gagan', secrets, 'KEY')).toMatchObject({ code: 'not_found' });
+    expect(canReadSecret('scout', secrets, 'OTHER')).toMatchObject({ code: 'not_found' });
+    expect(canReadSecret('scout', undefined, 'KEY')).toMatchObject({ code: 'not_found' });
   });
 });

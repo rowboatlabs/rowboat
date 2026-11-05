@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { routes, type Invocation, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
+import { AGENT_HOP_LIMIT } from '../src/policy.js';
 import type { RunningHarbor } from '../src/server.js';
 import { agentClient, liveClient, restClient, startTestHarbor, type LiveClient } from './helpers.js';
 
@@ -309,6 +310,18 @@ describe('thread follow-ups without a mention (2026-10-27)', () => {
     expect((await post(hermes.key, 'a note from Hermes', { threadRoot: root })).invocations).toEqual([]);
   });
 
+  it('only while the conversation is the thread’s latest (2026-11-05): after the agent’s answer, not after someone else', async () => {
+    const root = await askedHermes();
+    await post(hermes.key, 'found two errors', { threadRoot: root });
+    const answered = await reply('dev-harsh', 'which one first?', root);
+    expect(answered.invocations.map((i) => i.agentId)).toEqual([hermes.agent.id]);
+    await hermes.report(answered.invocations[0]!.id, { state: 'done' });
+    await reply('dev-ramnique', 'I saw those too', root);
+    expect((await reply('dev-harsh', 'nice, thanks', root)).invocations).toEqual([]);
+    // Nor after the author's own reply to people: the conversation moved on.
+    expect((await reply('dev-harsh', 'one more for the team', root)).invocations).toEqual([]);
+  });
+
   it('not on a new message in the stream, which starts a conversation of its own', async () => {
     await askedHermes();
     expect((await post('dev-harsh', 'unrelated news')).invocations).toEqual([]);
@@ -354,8 +367,8 @@ describe('who may invoke', () => {
     await hermes.report(allowed.id, { state: 'done' });
   });
 
-  it('lets agents hand work on three hops deep, then refuses the fourth', async () => {
-    const chain = await Promise.all(['A', 'B', 'C', 'D', 'E'].map(async (n) => {
+  it('lets agents hand work on up to the hop limit, then refuses the next', async () => {
+    const chain = await Promise.all(Array.from({ length: AGENT_HOP_LIMIT + 2 }, async (_, n) => {
       const { agent, key } = await addAgent('harsh', `Agent ${n}`);
       return Connector.start(agent, key);
     }));
@@ -363,7 +376,7 @@ describe('who may invoke', () => {
       const start = await post('dev-harsh', `${mention(chain[0]!.agent)} start`);
       const root = start.message.id;
       let invocation = start.invocations[0]!;
-      for (let hop = 0; hop < 4; hop += 1) {
+      for (let hop = 0; hop <= AGENT_HOP_LIMIT; hop += 1) {
         await chain[hop]!.ack(invocation.id);
         const handOff = await post(chain[hop]!.key, `${mention(chain[hop + 1]!.agent)} over to you`, { threadRoot: root });
         invocation = handOff.invocations[0]!;

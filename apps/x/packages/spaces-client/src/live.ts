@@ -346,7 +346,7 @@ export class SpacesLive {
       // and its approvals' decisions.
       if (
         frame.kind === 'profile_updated' || frame.kind === 'space_added' || frame.kind === 'space_removed' || frame.kind === 'read_mark' ||
-        frame.kind === 'notify' || frame.kind === 'org_changed' || frame.kind === 'agent_presence' ||
+        frame.kind === 'notify' || frame.kind === 'org_changed' || frame.kind === 'agent_presence' || frame.kind === 'member_presence' ||
         frame.kind === 'invocation' || frame.kind === 'invocation_stop' || frame.kind === 'approval_decided'
       ) {
         for (const h of this.memberHandlers) h(frame);

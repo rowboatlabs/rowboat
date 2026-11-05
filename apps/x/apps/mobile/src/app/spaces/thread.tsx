@@ -85,11 +85,13 @@ export default function SpaceThreadScreen() {
   const [invocations, setInvocations] = useState<Invocation[]>([]);
   const [peopleOnly, setPeopleOnly] = useState(false);
   const [draftMentions, setDraftMentions] = useState(false);
+  // Only while that conversation is the thread's latest (2026-11-05, "reply ux" in Main).
   const followUp = useMemo(() => {
-    const id = spaces.followUpAgentId(invocations, root, me, members);
+    const thread = rootMessage ? [rootMessage, ...(replies ?? [])] : [];
+    const id = spaces.followUpAgentId(invocations, root, me, members, thread);
     const agent = id ? members.get(id) : undefined;
     return agent && !isOthersPersonalAgent(agent, me) ? agent : undefined;
-  }, [invocations, root, me, members]);
+  }, [invocations, root, me, members, rootMessage, replies]);
   const scrollRef = useRef<ScrollView>(null);
   const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);

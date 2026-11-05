@@ -770,6 +770,21 @@ export const MessageEdit = z.object({
 });
 export type MessageEdit = z.infer<typeof MessageEdit>;
 
+/**
+ * The secrets a message hands to the members it mentions (2026-11-04,
+ * "secrets card" in Main): an API key a person shares in a thread without the
+ * rest of the space seeing it. The message carries the names and its readers,
+ * which every member sees as the card; the values are sealed apart from the
+ * log. The readers are the people and agents the message mentioned when it was
+ * posted (a DM's other members, mention or not), fixed then, so an edit adds
+ * no one; @here is not a reader. Each reads a value over REST
+ * (`readMessageSecret`), never through a tool (spec §4: a secret returned to
+ * a tool lands in a transcript).
+ */
+export const SecretName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/, 'a secret name is letters, digits and underscores, like an environment variable');
+export const MessageSecrets = z.object({ names: z.array(SecretName).min(1), readers: z.array(MemberId).min(1) });
+export type MessageSecrets = z.infer<typeof MessageSecrets>;
+
 export const Message = z.object({
   id: MessageId,
   spaceId: SpaceId,
@@ -845,6 +860,8 @@ export const Message = z.object({
    * show the card.
    */
   approval: Approval.optional(),
+  /** The secrets this message hands over: names and who may read them, never values (2026-11-04). Written once; deletion removes them. */
+  secrets: MessageSecrets.optional(),
   /** A thread reply its author sent to people only (NewMessage.peopleOnly, 2026-10-27). Written once. */
   peopleOnly: z.literal(true).optional(),
   /**

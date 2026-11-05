@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
-import { caretContext, closeFenceLine, composerExtensions, composerMarkdown, openFenceLine } from './composer-editor'
+import { caretContext, clearFormatting, closeFenceLine, composerExtensions, composerMarkdown, openFenceLine } from './composer-editor'
 
 // The composer's contract: what the editor holds serializes back to the
 // exact markdown the wire (and every downstream consumer: drafts, slash
@@ -182,6 +182,37 @@ describe('formatting boundaries', () => {
         type(e, ' normal text')
         expect(e.state.doc.firstChild!.lastChild!.marks).toEqual([])
         expect(e.view.dom.querySelector('a')?.textContent).toBe(format === 'text' ? 'https://example.com' : 'docs')
+    })
+
+    it('a link pasted with underline styling (docs, web pages) leaves no underline to type on into, and unlinks to plain text', () => {
+        const e = makeEditor('')
+        e.commands.focus('end')
+        e.view.pasteHTML('<b style="font-weight:normal" id="docs-internal-guid-1"><a href="https://example.com"><span style="text-decoration:underline">docs</span></a></b>', pasteEvent())
+        type(e, ' more')
+        expect(e.state.doc.firstChild!.lastChild!.marks).toEqual([])
+        expect(e.view.dom.querySelector('u')).toBeNull()
+        e.chain().setTextSelection(2).extendMarkRange('link').unsetLink().run()
+        expect(composerMarkdown(e)).toBe('docs more')
+        expect(e.view.dom.innerHTML).toBe('<p>docs more</p>')
+    })
+
+    it('clear formatting strips the selection to plain paragraphs — marks, links, lists, quotes — and keeps mentions', () => {
+        const e = makeEditor('- **bold** [docs](https://example.com) `code`\n\n> *quoted* [@Ada Lovelace](#member:01HADA)')
+        e.commands.selectAll()
+        clearFormatting(e)
+        expect(composerMarkdown(e)).toBe('bold docs code\n\nquoted [@Ada Lovelace](#member:01HADA)')
+    })
+
+    it('clear formatting at a caret resets its block, and typing continues unformatted', () => {
+        const code = makeEditor('intro\n\n```\nx = 1\n```')
+        code.commands.focus('end')
+        clearFormatting(code)
+        expect(composerMarkdown(code)).toBe('intro\n\nx = 1')
+        const bold = makeEditor('')
+        bold.chain().focus().toggleBold().run()
+        clearFormatting(bold)
+        type(bold, 'plain')
+        expect(composerMarkdown(bold)).toBe('plain')
     })
 
     it('editing inside a link preserves its formatting', () => {

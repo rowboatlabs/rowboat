@@ -1,4 +1,4 @@
-import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, Space } from '@rowboat/spaces-protocol';
+import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, MessageSecrets, Space } from '@rowboat/spaces-protocol';
 import { BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
@@ -368,6 +368,27 @@ export function canReachPersonalAgent(actorId: string, member: Member, act: 'add
   };
 }
 
+/**
+ * Handing secrets in a message (2026-11-04, "secrets card" in Main): to the
+ * members it mentions, its readers, so a message that mentions no one carries
+ * none. A personal agent only from its owner, since only its owner can ask it
+ * for anything.
+ */
+export function canHandSecrets(authorId: string, readers: Member[]): Decision {
+  if (readers.length === 0) return { code: 'invalid_request', message: 'mention who should read the secret' };
+  for (const reader of readers) {
+    const refused = canReachPersonalAgent(authorId, reader, 'message');
+    if (refused) return refused;
+  }
+  return null;
+}
+
+/** Reading a secret is its readers' alone, the author and admins included; anyone else finds nothing (2026-11-04). */
+export function canReadSecret(actorId: string, secrets: MessageSecrets | undefined, name: string): Decision {
+  if (secrets && secrets.names.includes(name) && secrets.readers.includes(actorId)) return null;
+  return { code: 'not_found', message: 'no such secret for you' };
+}
+
 /** The agents a member manages, and so sees on the Agents screen: an admin, every one; anyone else, their own. */
 export function agentsManagedBy(actor: Member): 'all' | 'owned' {
   return actor.role === 'admin' ? 'all' : 'owned';
@@ -375,8 +396,14 @@ export function agentsManagedBy(actor: Member): 'all' | 'owned' {
 
 // --- invoking agent members (spec §8 Invoking agent members, 2026-09-30) -----
 
-/** How many agent hand-offs may lead to an invocation. A person's mention is depth 0. */
-export const AGENT_HOP_LIMIT = 3;
+/**
+ * How many agent hand-offs may lead to an invocation. A person's mention is
+ * depth 0. Raised from 3 to 20 (2026-11-04, Arjun): agents working together in
+ * one thread ran out of hand-offs mid-review. The cap still ends a loop of
+ * agents mentioning each other; a guard against ping-pong is not built
+ * until loops show up.
+ */
+export const AGENT_HOP_LIMIT = 20;
 
 /**
  * Whether a mention may invoke an agent, or why not. A personal agent answers

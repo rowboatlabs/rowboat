@@ -77,7 +77,7 @@ function KindCorner({ kind, size }: { kind: string | undefined; size: 'sm' | 'md
     )
 }
 
-export function MemberAvatar({ id, name, size = 'md', agent, agentKind, className, orgId, avatarUrl }: {
+export function MemberAvatar({ id, name, size = 'md', agent, agentKind, className, orgId, avatarUrl, online = false }: {
     id: string
     name: string
     size?: 'sm' | 'md' | 'lg' | 'xl'
@@ -87,6 +87,7 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
     className?: string
     orgId?: string
     avatarUrl?: string
+    online?: boolean
 }) {
     const { byId } = useSpaceProfiles()
     const refs = useSpaceRefs()
@@ -107,11 +108,16 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
             {photo && failedPhoto !== photo ? <img src={photo} alt="" className="size-full rounded-[inherit] object-cover" onError={() => setFailedPhoto(photo)} /> : initials(name)}
         </span>
     )
-    if (!round) return face
+    if (!round && !online) return face
     return (
         <span className="relative inline-flex shrink-0">
             {face}
-            <KindCorner kind={agentKind ?? inRoster?.agentKind} size={size} />
+            {round && <KindCorner kind={agentKind ?? inRoster?.agentKind} size={size} />}
+            {online && <span role="img" aria-label="Online" title="Online" className={cn(
+                'absolute -right-0.5 rounded-full bg-emerald-500 ring-2 ring-background',
+                size === 'sm' ? 'size-1.5' : 'size-2',
+                round ? '-top-0.5' : '-bottom-0.5',
+            )} />}
         </span>
     )
 }

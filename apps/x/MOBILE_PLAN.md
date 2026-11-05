@@ -98,5 +98,3 @@ push notifications, voice, TestFlight, Android.
 - reanimated/worklets crash in Expo Go → `npx expo install --fix`; worklets
   babel plugin needs @babel/* grafts in `pnpm-workspace.yaml`
   packageExtensions.
-- Core `workspace:readdir` allowedExtensions skips dirs (recursion broken)
-  — client filters instead; core fix pending.

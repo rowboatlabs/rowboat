@@ -50,10 +50,20 @@ describe('thread follow-ups (Harbor spec §8, 2026-10-27)', () => {
       where: { spaceKind: 'shared', spaceName: 'S' },
     }) as Invocation;
   const members = new Map([['ro', { agentKind: 'jev' }], ['hermes', {}], ['codex', {}]]);
+  const msg = (id: string, memberId: string) => ({ id, author: { memberId } });
 
   it('is the agent this person invoked last in this thread', () => {
     const all = [inv('1', 'hermes', 'me', '2026-10-27T09:00:00Z'), inv('2', 'codex', 'me', '2026-10-27T09:05:00Z')];
-    expect(followUpAgentId(all, 'root', 'me', members)).toBe('codex');
+    expect(followUpAgentId(all, 'root', 'me', members, [msg('2', 'me')])).toBe('codex');
+  });
+
+  it('only while that conversation is the thread’s latest (2026-11-05)', () => {
+    const all = [inv('1', 'hermes', 'me', '2026-10-27T09:00:00Z')];
+    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me'), msg('a', 'hermes')])).toBe('hermes');
+    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me'), msg('a', 'hermes'), msg('cc', 'ro')])).toBe('hermes');
+    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me'), msg('b', 'alex')])).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me'), msg('c', 'me')])).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', members, [])).toBeUndefined();
   });
 
   it('skips other people’s, other threads’, refused ones and Ro', () => {
@@ -64,8 +74,8 @@ describe('thread follow-ups (Harbor spec §8, 2026-10-27)', () => {
       inv('4', 'codex', 'me', '2026-10-27T09:03:00Z', 'refused'),
       inv('5', 'ro', 'me', '2026-10-27T09:04:00Z'),
     ];
-    expect(followUpAgentId(all, 'root', 'me', members)).toBe('hermes');
-    expect(followUpAgentId(all, 'root', 'sam', members)).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me')])).toBe('hermes');
+    expect(followUpAgentId(all, 'root', 'sam', members, [msg('1', 'me')])).toBeUndefined();
   });
 
   it('a mention of anyone, @here or Ro counts; a bare name does not', () => {
