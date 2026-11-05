@@ -572,6 +572,8 @@ export interface Store {
   /** A connector's own record for one thread (its shape is the connector's). */
   getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
   putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;
+  /** Every thread record of one agent's connector (the worker's seed at the switch, 2026-11-05). */
+  listConnectionThreads(agentId: string): Promise<Array<{ spaceId: string; threadRootId: string; data: unknown }>>;
   /** The agent key a connector hands its agent's workspaces: which key, and its sealed secret. */
   getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined>;
   putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void>;

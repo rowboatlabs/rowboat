@@ -2130,6 +2130,13 @@ export class PgStore implements Store {
       [this.orgId, agentId, spaceId, threadRootId, JSON.stringify(data), at],
     );
   }
+  async listConnectionThreads(agentId: string): Promise<Array<{ spaceId: string; threadRootId: string; data: unknown }>> {
+    const rows = await this.sql.query<{ space_id: string; thread_root_id: string; data: unknown }>(
+      'select space_id, thread_root_id, data from agent_connection_threads where org_id = $1 and agent_id = $2 order by updated_at desc',
+      [this.orgId, agentId],
+    );
+    return rows.map((r) => ({ spaceId: r.space_id, threadRootId: r.thread_root_id, data: r.data }));
+  }
   async getAgentHosting(agentId: string): Promise<StoredAgentHosting | undefined> {
     const rows = await this.sql.query<AgentHostingRow>(`select ${HOSTING_COLUMNS} from agent_hosting where org_id = $1 and agent_id = $2`, [this.orgId, agentId]);
     return rows[0] ? rowToAgentHosting(rows[0]) : undefined;

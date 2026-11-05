@@ -23,6 +23,11 @@
 #   HARBOR_MARITIME_API_KEY (optional; Rowboat's Maritime key — with it the
 #     app offers agents Rowboat runs) HARBOR_MARITIME_LLM_CAP_CENTS (the
 #     trial's monthly cap) HARBOR_MARITIME_IDLE_SECONDS (how long a VM stays awake)
+#     HARBOR_MARITIME_WORKER_KINDS (optional; kinds the agent worker drives on
+#     the box instead of one execution per turn, e.g. `codex`; off when unset)
+#     HARBOR_MARITIME_WORKER_TTL_SECONDS (the worker execution's lifetime, default a day)
+#     HARBOR_MARITIME_WORKER_IDLE_SECONDS (the worker exits after this idle, default 600)
+#     HARBOR_WORKER_BUNDLE (the worker file to put on boxes; default packages/worker/dist)
 #   HARBOR_BILLING_URL and HARBOR_BILLING_KEY (optional, both or neither;
 #     rowboatx-backend's origin and internal key — with them agents Rowboat
 #     runs bill to their owners' Rowboat plans and there is no trial)
@@ -35,6 +40,7 @@ WORKDIR /harbor
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/server/package.json packages/server/
+COPY packages/worker/package.json packages/worker/
 RUN pnpm install --frozen-lockfile
 COPY packages ./packages
 # No prune: pnpm's virtual store doesn't survive `prune --prod` intact, and
