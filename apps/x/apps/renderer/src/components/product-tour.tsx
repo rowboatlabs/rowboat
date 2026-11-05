@@ -64,7 +64,7 @@ const TOUR_STEPS: TourStep[] = [
     hat: 'sailor',
     vignette: 'spaces',
     title: 'Rowboats',
-    text: "Rowboats is where you, your team and your crew of agents work together: spaces, direct messages, and the files and boards you share. Your agents and your teammates' agents pick up work right alongside you.",
+    text: "Rowboats is where you work with your team of AI coworkers: spaces, direct messages, and the files and boards you share. Your agents and your teammates' agents pick up work right alongside you.",
   },
   {
     id: 'assistant',

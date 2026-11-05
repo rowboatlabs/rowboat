@@ -28,8 +28,8 @@ export function SpaceStep({ state }: SpaceStepProps) {
         </h2>
         <p className="text-base text-muted-foreground leading-relaxed">
           {joined
-            ? "Your team and your crew are already here."
-            : "Where you, your team and your crew work. You can rename it any time."}
+            ? "Your team and your AI coworkers are already here."
+            : "Where you, your team and your AI coworkers work. You can rename it any time."}
         </p>
       </motion.div>
 
