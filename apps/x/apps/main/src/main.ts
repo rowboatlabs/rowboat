@@ -150,6 +150,7 @@ app.on("open-url", (event, url) => {
 
 // Subsequent launches on Windows/Linux land here via the single-instance lock.
 app.on("second-instance", (_event, argv) => {
+  showApp();
   const url = extractDeepLinkFromArgv(argv);
   if (url) dispatchUrl(url);
 });
@@ -435,8 +436,15 @@ function configureAppDisplayMediaHandler(targetSession: Session): void {
 // running from the tray. showApp() is the single "bring the app up" path
 // used by the tray, the Dock, and pending tray commands.
 let mainWindow: BrowserWindow | null = null;
+let isStartingUp = true;
+let pendingShowOnStartup = false;
 
 function showApp(): void {
+  if (isStartingUp) {
+    pendingShowOnStartup = true;
+    app.focus({ steal: true });
+    return;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     if (!mainWindow.isVisible()) mainWindow.maximize();
@@ -473,6 +481,16 @@ function wasLaunchedAtLogin(): boolean {
 }
 
 function createWindow(options: { startHidden?: boolean } = {}) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!options.startHidden) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.maximize();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    return mainWindow;
+  }
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -515,6 +533,10 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     if (options.startHidden) return;
     win.maximize();
     win.show();
+    if (pendingShowOnStartup) {
+      win.focus();
+      app.focus({ steal: true });
+    }
   });
 
   // A link into a signed-in org (the contract's link grammar: a space, a
@@ -732,7 +754,8 @@ app.whenReady().then(async () => {
     toggleMeetingNotes: toggleMeetingNotesFromMenus,
   });
 
-  createWindow({ startHidden: wasLaunchedAtLogin() });
+  createWindow({ startHidden: pendingShowOnStartup ? false : wasLaunchedAtLogin() });
+  isStartingUp = false;
 
   // Menu bar icon: open the app / start-stop meeting notes without the window.
   createAppTray({
