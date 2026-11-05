@@ -623,7 +623,13 @@ export function ThreadPane({
     // Thread follow-ups (Harbor spec §8, 2026-10-27): a reply that mentions
     // nobody goes to the agent you last invoked here. The line above the
     // composer names it; its × sends the next reply to people only.
-    const followUp = useFollowUpAgent(org.id, space.id, rootMessageId, org.memberId)
+    // Only a conversation that is the thread's latest (2026-11-05): a detached
+    // window does not hold the latest, so it names no one.
+    const followUpThread = useMemo(
+        () => (hasMoreAfter || !root ? [] : [root, ...messages.filter((m) => !m.pending && !m.failed)]),
+        [hasMoreAfter, root, messages],
+    )
+    const followUp = useFollowUpAgent(org.id, space.id, rootMessageId, org.memberId, followUpThread)
     const [peopleOnly, setPeopleOnly] = useState(false)
     const [draftMentions, setDraftMentions] = useState(false)
 

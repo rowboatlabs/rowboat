@@ -440,21 +440,37 @@ export function mentionsAnyone(body: string): boolean {
  * The agent a person's reply in this thread goes to when it mentions nobody
  * (Harbor spec §8, 2026-10-27): the one they most recently invoked there, a
  * refused invocation and Ro aside. Harbor decides; the composer shows the same
- * answer so the person can see it and send to people only instead.
+ * answer so the person can see it and send to people only instead. Amended
+ * 2026-11-05 ("reply ux" in Main): only while that conversation is the
+ * thread's latest, so `thread` (its messages oldest first, root included)
+ * must end, Ro's cc lines aside, in the agent's message or the person's to it.
  */
 export function followUpAgentId(
   invocations: Iterable<Invocation>,
   threadRootId: string,
   memberId: string,
   members: ReadonlyMap<string, Pick<Member, 'agentKind'>>,
+  thread: ReadonlyArray<{ id: string; author: { memberId: string } }>,
 ): string | undefined {
+  const mine: Invocation[] = [];
   let latest: Invocation | undefined;
   for (const i of invocations) {
-    if (i.conversation.threadRootId !== threadRootId || i.trigger.authorId !== memberId || i.state === 'refused') continue;
+    if (i.conversation.threadRootId !== threadRootId || i.trigger.authorId !== memberId) continue;
+    mine.push(i);
+    if (i.state === 'refused') continue;
     if (members.get(i.agentId)?.agentKind === JEV_KIND) continue;
     if (!latest || i.createdAt > latest.createdAt) latest = i;
   }
-  return latest?.agentId;
+  if (!latest) return undefined;
+  const agentId = latest.agentId;
+  let previous: (typeof thread)[number] | undefined;
+  for (let n = thread.length - 1; n >= 0 && !previous; n--) {
+    if (members.get(thread[n]!.author.memberId)?.agentKind !== JEV_KIND) previous = thread[n];
+  }
+  if (!previous) return undefined;
+  if (previous.author.memberId === agentId) return agentId;
+  const toAgent = previous.author.memberId === memberId && mine.some((i) => i.agentId === agentId && i.trigger.messageId === previous.id);
+  return toAgent ? agentId : undefined;
 }
 
 /**

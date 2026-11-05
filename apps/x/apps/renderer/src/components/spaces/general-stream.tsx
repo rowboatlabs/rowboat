@@ -171,7 +171,15 @@ export function GeneralStream({
     // thread pane's follow-up line. Its × holds for one reply, and another
     // target resets it.
     const targetRoot = replyingTo?.rootMessageId ?? candidateRoot
-    const followUp = useFollowUpAgent(org.id, space.id, targetRoot, org.memberId)
+    // Only a conversation that is the thread's latest (2026-11-05): the inline
+    // stream holds every reply by offset, unless a jump detached it.
+    const followUpThread = useMemo(() => {
+        if (targetRoot === undefined || stream.hasMoreAfter) return []
+        const replies = stream.messages.filter((m) => !m.pending && !m.failed && (m.id === targetRoot || m.threadRoot === targetRoot))
+        const root = stream.threadRoots.get(targetRoot)
+        return root && replies[0]?.id !== targetRoot ? [root, ...replies] : replies
+    }, [targetRoot, stream.hasMoreAfter, stream.messages, stream.threadRoots])
+    const followUp = useFollowUpAgent(org.id, space.id, targetRoot, org.memberId, followUpThread)
     const implicitTo = !replyingTo && candidateRoot !== undefined && followUp !== undefined ? candidateRoot : undefined
     const replyRoot = replyingTo?.rootMessageId ?? implicitTo
     const [peopleOnly, setPeopleOnly] = useState(false)
