@@ -6,6 +6,7 @@
 export * from './ids.js';
 export * from './blob.js';
 export * from './core.js';
+export * from './availability.js';
 export * from './changeset.js';
 export * from './events.js';
 export * from './invocation.js';

@@ -1,4 +1,4 @@
-import { mentionsAsText, type Message, type NotifyReason, type Space } from '@rowboat/spaces-protocol';
+import { notificationsPaused, mentionsAsText, type Message, type NotifyReason, type Space } from '@rowboat/spaces-protocol';
 import type { SpaceHub } from './hub.js';
 import type { PushSender } from './push.js';
 import type { Store } from './store.js';
@@ -85,6 +85,7 @@ export async function decideNotifications(store: Store, space: Space, message: M
   const rows: Notification[] = [];
   for (const m of members) {
     if (m.id === message.author.memberId && message.author.actingMode === 'direct') continue;
+    if (notificationsPaused(m.availability)) continue;
     const kind = classifyFor(m.id, space, message, followers);
     // A long message's summary is its point (2026-10-25): the notification reads that.
     const text = buildNotifyText({ kind, space, authorName, body: message.summary ?? message.body, names });

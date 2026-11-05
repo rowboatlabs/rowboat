@@ -1,3 +1,4 @@
+import { Availability } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
 import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
@@ -4187,7 +4188,7 @@ export const ipcSchemas = {
     res: z.object({ member: z.custom<SpacesTypes.Member>() }),
   },
   'spaces:updateProfile': {
-    req: z.object({ orgId: z.string(), displayName: z.string().max(128).optional(), title: z.string().max(128).optional() }),
+    req: z.object({ orgId: z.string(), displayName: z.string().max(128).optional(), title: z.string().max(128).optional(), availability: Availability.optional() }),
     res: z.object({ member: z.custom<SpacesTypes.Member>() }),
   },
   'spaces:setAvatar': {
@@ -4768,6 +4769,10 @@ export const ipcSchemas = {
   // calls this on powerMonitor resume so the server bounces every stream.
   'spaces:bounceLive': {
     req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:activity': {
+    req: z.object({ orgId: z.string(), active: z.boolean() }),
     res: z.object({ success: z.literal(true) }),
   },
   'spaces:presence': {

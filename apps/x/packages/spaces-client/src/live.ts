@@ -146,6 +146,11 @@ export class SpacesLive {
     };
   }
 
+  activity(active: boolean): void {
+    if (this.ws?.readyState === this.WebSocketImpl.OPEN) this.ws.send(JSON.stringify({ kind: 'activity', active }));
+    else this.ensureConnected();
+  }
+
   presence(spaceId: string, state: PresenceState, threadRootId?: string): void {
     if (this.ws?.readyState === this.WebSocketImpl.OPEN) {
       this.ws.send(

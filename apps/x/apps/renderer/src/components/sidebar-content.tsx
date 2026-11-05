@@ -1,3 +1,4 @@
+import { AvailabilitySettings } from '@/components/spaces/availability-menu'
 "use client"
 
 import { ProfileSettings } from './spaces/profile-settings'
@@ -484,6 +485,7 @@ export function SidebarContentPanel({
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [profileSettingsOpen, setProfileSettingsOpen] = useState(false)
+  const [availabilityOpen, setAvailabilityOpen] = useState(false)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [openConnectionsAfterClose, setOpenConnectionsAfterClose] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1246,7 +1248,8 @@ export function SidebarContentPanel({
         onConnectAccounts={() => setConnectionsSettingsOpen(true)}
       />
       <SidebarFooter className="gap-0 px-2 pb-2 pt-1">
-        {profileSettingsOpen && <ProfileSettings onClose={() => setProfileSettingsOpen(false)} />}
+        {availabilityOpen && <AvailabilitySettings onClose={() => setAvailabilityOpen(false)} />}
+      {profileSettingsOpen && <ProfileSettings onClose={() => setProfileSettingsOpen(false)} />}
         {/* The out-of-credits notice anchors to the account row and opens by
             itself once per episode, as the plan card's did. */}
         <Popover open={creditPopoverOpen && outOfCredits && !sidebarCollapsed} onOpenChange={setCreditPopoverOpen}>
@@ -1305,6 +1308,7 @@ export function SidebarContentPanel({
                       {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
                     </button>
                   )}
+                  <DropdownMenuItem onSelect={() => setAvailabilityOpen(true)}>Status &amp; availability</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setProfileSettingsOpen(true)}><Pencil />Edit Spaces profile</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setConnectionsSettingsOpen(true)}>
                     <Plug />

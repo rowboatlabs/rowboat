@@ -37,7 +37,7 @@ export type HarborChannel =
   | 'spaces:reactToMessage' | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:listInvocations' | 'spaces:cancelInvocation' | 'spaces:getAgentCapabilities' | 'spaces:setAgentOptionDefaults'
   | 'spaces:decideApproval'
-  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
+  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:activity' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:markRead' | 'spaces:followThread' | 'spaces:getUnread' | 'spaces:getActivity' | 'spaces:markActivitySeen'
   | 'spaces:readAll';
 
@@ -46,17 +46,18 @@ export type HarborChannelHandlers = {
 };
 
 export interface HarborChannelDeps {
+  isActive?: () => boolean;
   /** The org's REST client; throws for an org the host doesn't know. */
   getClient(orgId: string): SpacesClient;
   /** The org's live socket. */
-  getLive(orgId: string): Pick<SpacesLive, 'presence' | 'whiteboard'>;
+  getLive(orgId: string): Pick<SpacesLive, 'activity' | 'presence' | 'whiteboard'>;
   /** The host's per-space subscriptions (one per org and space). */
   subscriptions: SpaceSubscriptions;
   /** Where a subscribed space's frames go: every window on the desktop. */
   emit(event: spacesShared.SpacesBusEvent): void;
 }
 
-export function harborChannelHandlers({ getClient, getLive, subscriptions, emit }: HarborChannelDeps): HarborChannelHandlers {
+export function harborChannelHandlers({ getClient, getLive, subscriptions, emit, isActive }: HarborChannelDeps): HarborChannelHandlers {
   return {
     'spaces:getProfile': (args) => getClient(args.orgId).me(),
     'spaces:updateProfile': async ({ orgId, ...input }) => ({ member: await getClient(orgId).updateProfile(input) }),
@@ -401,6 +402,10 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
       return { success: true };
     },
 
+    'spaces:activity': async (args) => {
+      getLive(args.orgId).activity(isActive ? isActive() : args.active);
+      return { success: true };
+    },
     'spaces:presence': async (args) => {
       getLive(args.orgId).presence(args.spaceId, args.state, args.threadRootId);
       return { success: true };

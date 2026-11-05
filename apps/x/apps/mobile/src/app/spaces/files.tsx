@@ -1,3 +1,4 @@
+import { reportMobileActivity } from '../../lib/spaces/activity';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import { Image } from '@/components/sf-image';
@@ -113,11 +114,13 @@ export default function SpaceFilesScreen() {
   // A changeset means some file changed — refetch the cheap listing.
   useEffect(() => {
     const live = new SpacesLive({ baseUrl: `https://${org}`, token: () => account.getAccessToken() });
+    const stopActivity = reportMobileActivity(live);
     const off = live.subscribe(space, (frame) => {
       if (frame.kind === 'event' && frame.event.type === 'change' && loaded.current) void refresh();
     });
     return () => {
       off();
+      stopActivity();
       live.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one socket per screen

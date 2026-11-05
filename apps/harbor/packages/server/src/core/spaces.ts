@@ -87,11 +87,13 @@ export class Spaces {
       if (title) updated.title = title;
       else delete updated.title;
     }
-    if (updated.displayName === member.displayName && updated.title === member.title) return member; // idempotent no-op: no write
+    if (updated.displayName === member.displayName && updated.title === member.title && (!input.availability || Object.entries(input.availability).every(([key, value]) => JSON.stringify(member.availability?.[key as keyof typeof input.availability]) === JSON.stringify(value)))) return member; // idempotent no-op: no write
     this.k.guardWrite();
-    await this.k.store.putMember(updated);
-    await this.k.publishProfile(updated);
-    return updated;
+    if (updated.displayName !== member.displayName || updated.title !== member.title) await this.k.store.putMember(updated);
+    if (input.availability) await this.k.store.patchAvailability(member.id, input.availability);
+    const saved = await this.me(ctx);
+    await this.k.publishProfile(saved);
+    return saved;
   }
 
   /**

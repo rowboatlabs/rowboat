@@ -1253,6 +1253,7 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  { id: '060-member-availability', statements: ["alter table members add column availability jsonb not null default '{}'::jsonb"] },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

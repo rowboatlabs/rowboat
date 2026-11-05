@@ -1,3 +1,4 @@
+import { AvailabilitySettings } from '@/components/spaces/availability-menu'
 import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
@@ -605,6 +606,7 @@ export function DockSidebar({
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [switcherIndex, setSwitcherIndex] = useState(0)
   const [profileSettingsOpen, setProfileSettingsOpen] = useState(false)
+  const [availabilityOpen, setAvailabilityOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [syncLogOpen, setSyncLogOpen] = useState(false)
@@ -1455,7 +1457,8 @@ export function DockSidebar({
                         {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onSelect={() => setProfileSettingsOpen(true)}><Pencil /> Edit Spaces profile</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setAvailabilityOpen(true)}>Status &amp; availability</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setProfileSettingsOpen(true)}><Pencil /> Edit Spaces profile</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setConnectionsSettingsOpen(true)}>
                       <Plug /> Connect accounts
                       {hasOauthError && <span className="ml-auto size-1.5 rounded-full bg-amber-500" />}
@@ -1635,6 +1638,7 @@ export function DockSidebar({
       </AlertDialog>
 
       {/* Settings dialogs (main + a connections-tab shortcut) */}
+      {availabilityOpen && <AvailabilitySettings onClose={() => setAvailabilityOpen(false)} />}
       {profileSettingsOpen && <ProfileSettings onClose={() => setProfileSettingsOpen(false)} />}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <SettingsDialog

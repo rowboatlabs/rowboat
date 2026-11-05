@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
+import { HumanPresence } from './core/human-presence.js';
 import { AgentPresence } from './core/agent-presence.js';
 import { Hosting, type HostingHooks, type HostingProvider } from './core/hosting.js';
 import type { BillingAccounts } from './billing.js';
@@ -92,6 +93,7 @@ export class HarborService {
   private readonly hosting: Hosting;
   private readonly invocations: Invocations;
   private readonly presence: AgentPresence;
+  private readonly humanPresence: HumanPresence;
   private readonly superAgents: SuperAgents;
 
   constructor(
@@ -114,6 +116,7 @@ export class HarborService {
     this.readState = new ReadState(this.k, this.spaces, this.feed);
     this.agents = new Agents(this.k, this.spaces);
     this.hosting = new Hosting(this.k, this.spaces, this.agents);
+    this.humanPresence = new HumanPresence(this.k, undefined, options.presenceGraceMs);
     this.presence = new AgentPresence(this.k, options.presenceGraceMs);
     this.superAgents = new SuperAgents(this.k, this.hosting, this.spaces, this.feed, this.invocations);
   }
@@ -167,8 +170,10 @@ export class HarborService {
   me(ctx: ActorCtx): Promise<Member> {
     return this.spaces.me(ctx);
   }
-  updateProfile(ctx: ActorCtx, input: UpdateProfile): Promise<Member> {
-    return this.spaces.updateProfile(ctx, input);
+  async updateProfile(ctx: ActorCtx, input: UpdateProfile): Promise<Member> {
+    const member = await this.spaces.updateProfile(ctx, input);
+    await this.humanPresence.refresh(ctx.memberId);
+    return member;
   }
   createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
     return this.spaces.createAgent(input);
@@ -451,22 +456,27 @@ export class HarborService {
   }
   /** Of these members, the agents whose connector is connected now (local agents, 2026-10-28). */
   onlinePeople(members: readonly Member[]): string[] {
-    return this.presence.onlinePeople(members);
+    return this.humanPresence.online(members);
   }
 
   onlineAgents(members: readonly Member[]): string[] {
     return this.presence.online(members);
   }
   /** A live connection opened or closed for a member (ws.ts): an agent's presence follows its connections. */
+  reportActivity(memberId: string, session: object, active: boolean): Promise<void> {
+    return this.humanPresence.activity(memberId, session, active);
+  }
   liveOpened(memberId: string): Promise<void> {
     return this.presence.opened(memberId);
   }
-  liveClosed(memberId: string): void {
+  liveClosed(memberId: string, session?: object): void {
+    if (session) void this.humanPresence.closed(memberId, session).catch(() => {});
     this.presence.closed(memberId);
   }
   /** Drop the presence timers (runtime close). */
   closePresence(): void {
     this.presence.close();
+    this.humanPresence.close();
   }
   addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
     return this.spaces.addMembers(ctx, spaceId, input);

@@ -777,3 +777,9 @@ Held softly — none block v1, all should be answered by use, not by speculation
 11. **Harbor repo timing.** When to extract Harbor from the monorepo into `rowboatlabs/harbor` with a one-command self-host path (likely: when third-party hosting is announced). The name is free: the private spec repo that held it was retired 2026-09-22.
 12. **Agent replies: in the stream or in the thread.** Deferred 2026-08-21 — agent replies stay in the stream for now. Revisit before the managed service opens; flipping later splits history into two eras.
 13. ~~**Open spaces and org membership.**~~ Answered 2026-09-22 — the six shape questions are Decided in §5, with the deletion doctrine in §6.
+
+### Member availability (2026-11-05)
+
+People have independent availability, custom status, and notification preferences, per organization. Online means recent activity on at least one client; ten minutes without activity means away. Manual away persists across connections until cleared. Desktop uses system idle time; web uses page interactions; mobile uses foreground state. A connected but inactive client is not sufficient to remain online indefinitely. Activity is ephemeral; manual preferences survive restarts.
+
+The account menu offers active/away, a status emoji and message with optional expiry, notification pauses and resume, and notification hours (days, start/end, timezone). A person may be online with notifications paused. The member list displays online/away, snooze, and a custom-status emoji whose tooltip shows its text. Notification pauses suppress delivery on desktop, web, and phone without preventing messages or changing unread counts. Temporary resume is explicit and time-limited. The schedule and manual DND never substitute for actual activity.
