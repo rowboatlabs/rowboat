@@ -1,7 +1,7 @@
 import { useState, type RefObject } from 'react'
 import { useEditorState, type Editor } from '@tiptap/react'
 import {
-    BoldIcon, CodeIcon, CodeSquareIcon, ItalicIcon, LinkIcon, ListIcon, ListOrderedIcon, QuoteIcon, StrikethroughIcon,
+    BoldIcon, CodeIcon, CodeSquareIcon, ItalicIcon, LinkIcon, ListIcon, ListOrderedIcon, QuoteIcon, RemoveFormattingIcon, StrikethroughIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { isMac } from '@/lib/shortcut'
+import { clearFormatting } from '@/components/spaces/composer-editor'
 import { insertLink, toggleCodeBlock, toggleInline, toggleLinePrefix, type FormatResult } from '@/lib/spaces-format'
 
 // The conversation formatting bar over a markdown textarea (the space composer
@@ -192,7 +193,7 @@ export function FormattingToolbar({ textareaRef, value, onChange, onCaret, class
 // textarea-era version, now without a caller.
 // ---------------------------------------------------------------------------
 
-type RichToolKey = 'bold' | 'italic' | 'strike' | 'ordered' | 'bullet' | 'quote' | 'code' | 'codeblock'
+type RichToolKey = 'bold' | 'italic' | 'strike' | 'ordered' | 'bullet' | 'quote' | 'code' | 'codeblock' | 'clear'
 
 interface RichToolDef {
     key: RichToolKey
@@ -217,6 +218,9 @@ const RICH_GROUPS: RichToolDef[][] = [
     [
         { key: 'code', title: `Code (${mod}E)`, icon: CodeIcon, run: (e) => e.chain().focus().toggleCode().run() },
         { key: 'codeblock', title: `Code block (${mod}⌥⇧C)`, icon: CodeSquareIcon, run: (e) => e.chain().focus().toggleCodeBlock().run() },
+    ],
+    [
+        { key: 'clear', title: `Clear formatting (${mod}\\)`, icon: RemoveFormattingIcon, run: (e) => { clearFormatting(e) } },
     ],
 ]
 
@@ -361,6 +365,8 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
             {RICH_GROUPS[2]!.map(button)}
             {separator}
             {RICH_GROUPS[3]!.map(button)}
+            {separator}
+            {RICH_GROUPS[4]!.map(button)}
         </div>
     )
 }

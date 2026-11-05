@@ -17,6 +17,18 @@ import { mentionToken, type MentionRef } from '@x/shared/dist/spaces.js'
 // of `**bold**` converting live as you type.
 
 /**
+ * 2026-11-05: Clear formatting — the selection's marks (links included) come
+ * off and its blocks (lists, quotes, code) go back to plain paragraphs; with
+ * only a caret, its block resets and typing continues unformatted.
+ */
+export function clearFormatting(editor: Editor): boolean {
+    return editor.chain().focus().unsetAllMarks().clearNodes().command(({ tr }) => {
+        tr.setStoredMarks([])
+        return true
+    }).run()
+}
+
+/**
  * the conversation formatting chords on top of TipTap's defaults (⌘B/⌘I bold/italic,
  * ⌘E code, ⌘⇧7/8 ordered/bullet come built in).
  */
@@ -28,6 +40,7 @@ const ChatFormatKeys = Extension.create({
             'Mod-Shift-c': () => this.editor.commands.toggleCode(),
             'Mod-Shift-9': () => this.editor.commands.toggleBlockquote(),
             'Mod-Alt-Shift-c': () => this.editor.commands.toggleCodeBlock(),
+            'Mod-\\': () => clearFormatting(this.editor),
         }
     },
 })
