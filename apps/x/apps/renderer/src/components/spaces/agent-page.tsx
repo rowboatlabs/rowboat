@@ -64,12 +64,13 @@ function Section({ title, note, children }: { title: string; note?: string; chil
     )
 }
 
-export function AgentPage({ org, listing, isAdmin, onChanged }: {
+export function AgentPage({ org, listing, isAdmin, onChanged, onFilesDirtyChange }: {
     org: OrgWithSpaces
     listing: spaces.AgentListing
     isAdmin: boolean
     /** Reload the listing after a change to keys or the platform key. */
     onChanged: () => Promise<void>
+    onFilesDirtyChange?: (dirty: boolean) => void
 }) {
     const { agent, keys, credential, hook, hosting } = listing
     const setup = setupFor(agent)
@@ -239,7 +240,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                   return found.signedIn
               }
             : undefined
-    if (hosting && ready && canManage) tabs.push(...vmTabs({ orgId: org.id, agent, hermes, state: hostingState, ...(signIn ? { signIn } : {}) }))
+    if (hosting && ready && canManage) tabs.push(...vmTabs({ orgId: org.id, agent, hermes, state: hostingState, onFilesDirtyChange, ...(signIn ? { signIn } : {}) }))
 
     if (setup.alerts) {
         tabs.push({
@@ -325,14 +326,14 @@ function AccessSection({ orgId, agent, canSwitch, onChanged }: { orgId: string; 
 }
 
 /** The VM's tabs on a ready managed agent's page: one per part of the machine, Skills and Automations for Hermes only. */
-function vmTabs({ orgId, agent, hermes, state, signIn }: { orgId: string; agent: spaces.Member; hermes: boolean; state: HostingState; signIn?: () => Promise<boolean> }): AgentTab[] {
+function vmTabs({ orgId, agent, hermes, state, signIn, onFilesDirtyChange }: { orgId: string; agent: spaces.Member; hermes: boolean; state: HostingState; onFilesDirtyChange?: ((dirty: boolean) => void) | undefined; signIn?: () => Promise<boolean> }): AgentTab[] {
     const agentId = agent.id
     const tabs: AgentTab[] = [
         { id: 'environment', label: 'Environment', icon: <SlidersHorizontal />, count: state.env?.length, content: <EnvScreen orgId={orgId} agentId={agentId} state={state} /> },
         { id: 'commands', label: 'Commands', icon: <Terminal />, content: <CommandsScreen orgId={orgId} agentId={agentId} /> },
         { id: 'terminal', label: 'Terminal', icon: <SquareTerminal />, content: <TerminalScreen orgId={orgId} agentId={agentId} agentName={agent.displayName} {...(signIn ? { signIn } : {})} /> },
         { id: 'logs', label: 'Logs', icon: <ScrollText />, content: <LogsScreen orgId={orgId} agentId={agentId} /> },
-        { id: 'files', label: 'Files', icon: <Folder />, content: <FilesScreen key={state.filesEpoch} orgId={orgId} agentId={agentId} home={HOME[agent.agentKind ?? ''] ?? '/'} /> },
+        { id: 'files', label: 'Files', icon: <Folder />, content: <FilesScreen onDirtyChange={onFilesDirtyChange} key={state.filesEpoch} orgId={orgId} agentId={agentId} home={HOME[agent.agentKind ?? ''] ?? '/'} /> },
     ]
     if (hermes) {
         tabs.push(

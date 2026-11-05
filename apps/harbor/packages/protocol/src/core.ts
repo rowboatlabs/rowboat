@@ -436,16 +436,33 @@ export type HostingEnvVar = z.infer<typeof HostingEnvVar>;
 export const HostingPowerAction = z.enum(['restart', 'sleep', 'wake', 'reload']);
 export type HostingPowerAction = z.infer<typeof HostingPowerAction>;
 
+/** Maritime file transfers are capped at 100 MB (spec §8, 2026-11-02). */
+export const MAX_HOSTING_UPLOAD_BYTES = 100_000_000;
+
 /** One command run on the VM: submitted at once, then read until it ends. */
 export const HostingExecution = z.object({
   id: z.string().max(128),
-  /** `running`, `completed`, `cancelled`, `failed`. */
+  /** `running`, `completed`, `cancelled`, `failed`, `timed_out`, `lost`. */
   status: z.string().max(32),
   exitCode: z.number().int().nullable().optional(),
   stdout: z.string().optional(),
   stderr: z.string().optional(),
+  reason: z.string().max(1024).optional(),
+  signal: z.string().max(64).optional(),
 });
 export type HostingExecution = z.infer<typeof HostingExecution>;
+
+/** Keep command and conversation failures consistent (2026-11-02). */
+export function hostingExecutionFailure(e: { status: string; exitCode?: number | null; reason?: string; signal?: string }): string | undefined {
+  if (e.status === 'timed_out') return 'The command exceeded its time limit. Its output may be incomplete. Try a smaller task.';
+  if (e.status === 'lost') return e.reason === 'vm_replaced'
+    ? 'The VM was replaced and this execution was lost. Check any changes before retrying.'
+    : 'Maritime lost this execution. Check any changes before retrying.';
+  if (e.signal === 'SIGKILL' || e.exitCode === 137) return 'The process was killed (SIGKILL). It may have run out of memory. Try a smaller task or check the VM logs.';
+  if (e.status === 'failed') return `The command failed.${e.reason ? ` ${e.reason}` : ''}`;
+  if (e.signal) return `The process ended with signal ${e.signal}.`;
+  return undefined;
+}
 
 /** A console into the VM (2026-10-30): the platform's terminal socket and a token that opens it for a few minutes, as root. */
 export const HostingConsole = z.object({

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { JEV_KIND, addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
-export { LLM_PROVIDERS, ownerSetsUp } from '@rowboat/spaces-protocol';
+export { hostingExecutionFailure, LLM_PROVIDERS, MAX_HOSTING_UPLOAD_BYTES, ownerSetsUp } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
   AgentCredential,

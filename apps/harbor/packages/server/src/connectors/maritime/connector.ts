@@ -1,3 +1,4 @@
+import { hostingExecutionFailure } from '@rowboat/spaces-protocol';
 import type { ConnectorCapabilities, Invocation, InvocationUpdate, Message, ServerFrame } from '@rowboat/spaces-protocol';
 import { HarborError } from '../../errors.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
@@ -339,11 +340,14 @@ export class MaritimeConnector implements RunningConnector {
             await this.report(invocation, working(lastActivity || 'Working on Maritime'));
           }
         } else {
-          const out = (await api.readFile(this.maritimeAgentId, record.turn!.files.out)) ?? '';
+          const failure = execution && hostingExecutionFailure(execution);
+          const readOutput = () => api.readFile(this.maritimeAgentId, record.turn!.files.out);
+          const out = (failure ? await this.safe(readOutput, undefined) : await readOutput()) ?? '';
           const last = await this.safe(() => api.readFile(this.maritimeAgentId, record.turn!.files.last), undefined);
           const err = await this.safe(() => api.readFile(this.maritimeAgentId, record.turn!.files.err), undefined);
           if (execution?.status === 'cancelled' || this.stops.has(invocation.id)) return this.cancelled(invocation, record);
           const reading = this.runtime.read(out, last, err, execution?.exitCode);
+          if (failure) reading.failure = failure;
           if (gone && !reading.answer && !reading.failure) {
             return this.fail(invocation, 'Maritime no longer has this turn and its files hold no answer. Mention me again to retry.');
           }

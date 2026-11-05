@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileText, Folder, Loader2, Play, RefreshCw, Square } from 'lucide-react'
-import type { spaces } from '@x/shared'
+import { Loader2, Play, RefreshCw, Square } from 'lucide-react'
+import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { HOME, fail, type HostingState } from '@/components/spaces/agent-hosting-state'
 import { ConfirmButton, DangerRow, Empty, FormCard, Row, RowAction, Rows, ScreenHeader, Subhead, Tag } from '@/components/spaces/agent-tabs'
 import { toast } from '@/lib/toast'
@@ -261,7 +260,7 @@ export function CommandsScreen({ orgId, agentId }: { orgId: string; agentId: str
                 setExecution(next)
             } catch (err) {
                 fail(err, 'Lost the command')
-                setExecution((e) => (e ? { ...e, status: 'failed' } : e))
+                setExecution((e) => (e ? { ...e, status: 'failed', reason: 'Could not retrieve the result. Check VM logs before retrying.' } : e))
             }
         }, COMMAND_POLL_MS)
         return () => clearInterval(timer)
@@ -286,7 +285,7 @@ export function CommandsScreen({ orgId, agentId }: { orgId: string; agentId: str
             fail(err, 'Could not stop the command')
         }
     }
-    const outcome = !execution ? '' : running ? 'Running…' : execution.status === 'cancelled' ? 'Stopped.' : `Exited ${execution.exitCode ?? '?'}.`
+    const outcome = !execution ? '' : running ? 'Running…' : execution.status === 'cancelled' ? 'Stopped.' : spaces.hostingExecutionFailure(execution) ?? `Exited ${execution.exitCode ?? '?'}.`
     return (
         <>
             <ScreenHeader title="Commands" note="One command at a time, as root on the VM. Not a shell: nothing persists between commands. Ten minutes at most." />
@@ -311,7 +310,7 @@ export function CommandsScreen({ orgId, agentId }: { orgId: string; agentId: str
             {execution && (
                 <div className="flex flex-col gap-1.5">
                     <div className="flex items-center gap-2">
-                        <Tag tone={running ? 'accent' : execution.exitCode === 0 ? 'muted' : 'warn'}>{running ? 'running' : execution.status === 'cancelled' ? 'stopped' : `exit ${execution.exitCode ?? '?'}`}</Tag>
+                        <Tag tone={running ? 'accent' : execution.exitCode === 0 ? 'muted' : 'warn'}>{running ? 'running' : execution.status === 'cancelled' ? 'stopped' : execution.status !== 'completed' ? execution.status : `exit ${execution.exitCode ?? '?'}`}</Tag>
                         <p role="status" className="text-[11px] text-muted-foreground">{outcome}</p>
                         {!running && (
                             <RowAction className="ml-auto" onClick={() => setExecution(null)}>
@@ -415,158 +414,7 @@ export function LogsScreen({ orgId, agentId }: { orgId: string; agentId: string 
 }
 
 /** The VM's files: a directory at a time; a text file opens to edit; new folder, rename. Delete is on the Danger zone. */
-export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: string; home: string }) {
-    const [path, setPath] = useState(home)
-    const [entries, setEntries] = useState<spaces.HostingFileEntry[] | null>(null)
-    const [open, setOpen] = useState<{ path: string; content: string; truncated: boolean } | null>(null)
-    const [draft, setDraft] = useState('')
-    const [busy, setBusy] = useState(false)
-    const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null)
-    const [folder, setFolder] = useState<string | null>(null)
-
-    const list = useCallback(
-        async (dir: string) => {
-            setBusy(true)
-            try {
-                const page = await window.ipc.invoke('spaces:listHostingFiles', { orgId, agentId, path: dir })
-                setPath(page.path)
-                setEntries([...page.entries].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1)))
-            } catch (err) {
-                fail(err, 'Could not list the files')
-            } finally {
-                setBusy(false)
-            }
-        },
-        [orgId, agentId],
-    )
-    useEffect(() => {
-        void list(home)
-    }, [list, home])
-
-    const read = async (file: string) => {
-        setBusy(true)
-        try {
-            const got = await window.ipc.invoke('spaces:readHostingFile', { orgId, agentId, path: file })
-            setOpen(got)
-            setDraft(got.content)
-        } catch (err) {
-            fail(err, 'Could not read the file')
-        } finally {
-            setBusy(false)
-        }
-    }
-    const save = async () => {
-        if (!open) return
-        setBusy(true)
-        try {
-            await window.ipc.invoke('spaces:writeHostingFile', { orgId, agentId, path: open.path, content: draft })
-            setOpen({ ...open, content: draft, truncated: false })
-            toast('Saved', 'success')
-            await list(path)
-        } catch (err) {
-            fail(err, 'Could not save the file')
-        } finally {
-            setBusy(false)
-        }
-    }
-    const act = async (what: () => Promise<unknown>, fallback: string) => {
-        setBusy(true)
-        try {
-            await what()
-            await list(path)
-        } catch (err) {
-            fail(err, fallback)
-        } finally {
-            setBusy(false)
-            setRenaming(null)
-            setFolder(null)
-        }
-    }
-    const dir = path.replace(/\/+$/, '')
-    const parent = dir.split('/').slice(0, -1).join('/') || '/'
-    return (
-        <>
-            <ScreenHeader
-                title="Files"
-                note="The VM's volume. Text files open to edit."
-                action={
-                    <Button size="sm" variant="outline" disabled={busy || folder !== null} onClick={() => setFolder('')}>
-                        New folder
-                    </Button>
-                }
-            />
-            <form
-                className="flex items-center gap-1.5"
-                onSubmit={(e) => {
-                    e.preventDefault()
-                    void list(path)
-                }}
-            >
-                <Input value={path} onChange={(e) => setPath(e.target.value)} aria-label="Directory" className="h-8 min-w-0 flex-1 font-mono text-xs" spellCheck={false} />
-                <Button type="submit" size="sm" variant="outline" disabled={busy}>Go</Button>
-                {path !== '/' && (
-                    <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void list(parent)}>
-                        Up
-                    </Button>
-                )}
-            </form>
-            {folder !== null && (
-                <FormCard title={`New folder in ${dir || '/'}`} onSubmit={() => folder.trim() && void act(() => window.ipc.invoke('spaces:makeHostingDir', { orgId, agentId, path: `${dir}/${folder.trim()}` }), 'Could not make the folder')}>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        <Input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="name" aria-label="Folder name" className="h-8 w-56 font-mono text-xs" autoFocus />
-                        <Button type="submit" size="sm" disabled={!folder.trim() || busy}>Create folder</Button>
-                        <Button type="button" size="sm" variant="ghost" onClick={() => setFolder(null)}>Cancel</Button>
-                    </div>
-                </FormCard>
-            )}
-            {entries === null ? (
-                <Empty>Loading…</Empty>
-            ) : (
-                <Rows label="Files" className="max-h-72 overflow-auto">
-                    {entries.length === 0 && <Row className="text-muted-foreground">Empty.</Row>}
-                    {entries.map((e) => (
-                        <Row key={e.path} className="font-mono">
-                            <button type="button" disabled={busy} onClick={() => (e.kind === 'dir' ? void list(e.path) : void read(e.path))} className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-foreground">
-                                {e.kind === 'dir' ? <Folder className="size-3.5 shrink-0 text-muted-foreground" /> : <FileText className="size-3.5 shrink-0 text-muted-foreground" />}
-                                <span className="truncate">{e.name}{e.kind === 'dir' ? '/' : ''}</span>
-                                {e.size !== undefined && <span className="ml-auto shrink-0 text-muted-foreground">{e.size} B</span>}
-                            </button>
-                            {renaming?.from === e.path ? (
-                                <form
-                                    className="flex items-center gap-1"
-                                    onSubmit={(ev) => {
-                                        ev.preventDefault()
-                                        void act(() => window.ipc.invoke('spaces:moveHostingFile', { orgId, agentId, from: renaming.from, to: renaming.to }), 'Could not move it')
-                                    }}
-                                >
-                                    <Input value={renaming.to} onChange={(ev) => setRenaming({ from: renaming.from, to: ev.target.value })} aria-label="New path" className="h-7 w-56 font-mono text-xs" autoFocus />
-                                    <Button type="submit" size="xs" disabled={busy}>Move</Button>
-                                    <Button type="button" size="xs" variant="ghost" onClick={() => setRenaming(null)}>Cancel</Button>
-                                </form>
-                            ) : (
-                                <RowAction disabled={busy} onClick={() => setRenaming({ from: e.path, to: e.path })}>Rename</RowAction>
-                            )}
-                        </Row>
-                    ))}
-                </Rows>
-            )}
-            {open && (
-                <div className="overflow-hidden rounded-lg border border-border">
-                    <div className="flex items-center gap-2 border-b border-border bg-muted/40 py-1.5 pr-1.5 pl-3">
-                        <span className="min-w-0 truncate font-mono text-xs font-medium text-foreground">{open.path}</span>
-                        {open.truncated && <Tag tone="warn">cut at 1 MB</Tag>}
-                        {draft !== open.content && <Tag tone="accent">edited</Tag>}
-                        <div className="ml-auto flex gap-1">
-                            <Button size="xs" disabled={busy || open.truncated || draft === open.content} onClick={() => void save()}>Save</Button>
-                            <Button size="xs" variant="ghost" onClick={() => setOpen(null)}>Close</Button>
-                        </div>
-                    </div>
-                    <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="File content" className="min-h-40 rounded-none border-0 font-mono text-xs focus-visible:ring-0" spellCheck={false} />
-                </div>
-            )}
-        </>
-    )
-}
+export { FilesScreen } from './agent-files'
 
 /** Skills on a Hermes VM, and the platform catalog's matches to install. Removing one is on the Danger zone. */
 export function SkillsScreen({ orgId, agentId, state }: { orgId: string; agentId: string; state: HostingState }) {

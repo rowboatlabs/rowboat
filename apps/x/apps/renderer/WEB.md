@@ -43,7 +43,7 @@ Against a deployment, with real sign-in: set `VITE_SPACES_APEX_URL` (default pro
 - **Vercel.** The project's Root Directory is `apps/x/apps/renderer`. `vercel.json` there carries:
   - the install and build commands, as `scripts/vercel-install.sh` and `scripts/vercel-build.sh`, because Vercel caps a command at 256 characters (Harbor's protocol package first, then the renderer's workspace dependencies)
   - the rewrite of every path to `web.html`
-  - the Content Security Policy. Tokens sit in page storage, so no inline or foreign script may run, and `components/streamdown.tsx` sanitizes every Markdown it renders.
+  - the Content Security Policy. Managed VM PDF previews use blob-backed frames (`frame-src blob:`); remote frames and object embeds remain blocked (2026-11-05). Tokens sit in page storage, so no inline or foreign script may run, and `components/streamdown.tsx` sanitizes every Markdown it renders.
 - **Environment:** `VITE_SPACES_APEX_URL` for the deployment it serves, and `VITE_ROWBOAT_ACCOUNT_URL` for the Rowboat account app the account menu's **Plan & usage** opens (2026-11-04; default production, `https://app.x.rowboatlabs.com`). Two Vercel projects, one per deployment:
   - staging: `https://staging.spaces.rowboatlabs.com`, with `VITE_SPACES_APEX_URL=https://spaces.staging.x.rowboatlabs.com`
   - production: `https://spaces.rowboatlabs.com`, with the default apex

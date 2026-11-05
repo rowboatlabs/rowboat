@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import { routes } from '@rowboat/spaces-protocol';
+import { routes, MAX_HOSTING_UPLOAD_BYTES } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
@@ -567,10 +567,49 @@ export function buildHttpApp(deps: {
     const q = parseWith(routes.listHostingFiles.query, c.req.query());
     return reply(c, routes.listHostingFiles.response, await service.listHostingFiles(actor(c), agentId, q.path ?? '/'));
   });
+  app.get(routes.downloadHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.downloadHostingFile.params, c.req.param());
+    const q = parseWith(routes.downloadHostingFile.query, c.req.query());
+    return reply(c, routes.downloadHostingFile.response, await service.downloadHostingFile(actor(c), agentId, q.path));
+  });
   app.get(routes.readHostingFile.path, async (c) => {
     const { agentId } = parseWith(routes.readHostingFile.params, c.req.param());
     const q = parseWith(routes.readHostingFile.query, c.req.query());
     return reply(c, routes.readHostingFile.response, await service.readHostingFile(actor(c), agentId, q.path));
+  });
+  app.put(routes.uploadHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.uploadHostingFile.params, c.req.param());
+    const input = parseWith(routes.uploadHostingFile.query, c.req.query());
+    const result = await service.uploadHostingFile(actor(c), agentId, input, async () => {
+      if (Number(c.req.header('content-length') ?? '0') > MAX_HOSTING_UPLOAD_BYTES) throw new HarborError('payload_too_large', 'Files must be 100 MB or smaller');
+      const reader = c.req.raw.body?.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      if (reader) {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > MAX_HOSTING_UPLOAD_BYTES) {
+              await reader.cancel();
+              throw new HarborError('payload_too_large', 'Files must be 100 MB or smaller');
+            }
+            chunks.push(value);
+          }
+        } finally { reader.releaseLock(); }
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      return bytes;
+    });
+    return reply(c, routes.uploadHostingFile.response, result);
+  });
+  app.post(routes.createHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.createHostingFile.params, c.req.param());
+    const input = await body(c, routes.createHostingFile.request);
+    return reply(c, routes.createHostingFile.response, await service.createHostingFile(actor(c), agentId, input));
   });
   app.put(routes.writeHostingFile.path, async (c) => {
     const { agentId } = parseWith(routes.writeHostingFile.params, c.req.param());

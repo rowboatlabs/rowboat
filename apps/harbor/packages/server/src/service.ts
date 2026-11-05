@@ -319,8 +319,17 @@ export class HarborService {
   listHostingFiles(ctx: ActorCtx, agentId: string, path: string) {
     return this.hosting.files(ctx, agentId, path);
   }
+  downloadHostingFile(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.downloadFile(ctx, agentId, path);
+  }
   readHostingFile(ctx: ActorCtx, agentId: string, path: string) {
     return this.hosting.readFile(ctx, agentId, path);
+  }
+  uploadHostingFile(ctx: ActorCtx, agentId: string, input: { directory: string; name: string }, read: () => Promise<Uint8Array>) {
+    return this.hosting.uploadFile(ctx, agentId, input, read);
+  }
+  createHostingFile(ctx: ActorCtx, agentId: string, input: { directory: string; name: string }) {
+    return this.hosting.createFile(ctx, agentId, input);
   }
   writeHostingFile(ctx: ActorCtx, agentId: string, path: string, content: string) {
     return this.hosting.writeFile(ctx, agentId, path, content);

@@ -1,3 +1,4 @@
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { useCallback, useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
 import { BotIcon, ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
@@ -471,12 +472,18 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     }, [open, startName, startBot, startAgentId, startApprovalId, org.id])
 
     // Back to the chooser from one of its paths, else to the list, or out of the dialog when it was opened past the list.
+    const [filesDirty, setFilesDirty] = useState(false)
+    const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null)
+    const leave = (action: () => void) => {
+        if (filesDirty) setPendingLeave(() => action)
+        else action()
+    }
     const fromChooser = (screen.name === 'add' && !screen.bot) || screen.name === 'create'
-    const back = () => {
+    const back = () => leave(() => {
         if (fromChooser && (start?.name === 'choose' || !start)) setScreen({ name: 'choose' })
         else if (start) onOpenChange(false)
         else setScreen({ name: 'list' })
-    }
+    })
     // Cancel leaves the whole flow: out of the dialog when it was opened past the list, else to the list.
     const cancel = () => (start ? onOpenChange(false) : setScreen({ name: 'list' }))
 
@@ -605,9 +612,17 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     }
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={value => value ? onOpenChange(true) : leave(() => onOpenChange(false))}>
             {/* One column that may shrink: long setup lines wrap inside it instead of widening the dialog. */}
-            <DialogContent className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'agent' ? 'sm:max-w-3xl' : screen.name === 'connect' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
+            <DialogContent onEscapeKeyDown={event => {
+                // Radix handles Escape during document capture, before the input can cancel it.
+                if (event.target instanceof Element && event.target.hasAttribute('data-file-directory-input')) event.preventDefault()
+            }} className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'agent' ? 'sm:max-w-3xl' : screen.name === 'connect' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
+                <AlertDialog open={pendingLeave !== null} onOpenChange={value => { if (!value) setPendingLeave(null) }}>
+                    <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Discard unsaved file changes?</AlertDialogTitle><AlertDialogDescription>Your edits have not been saved to the agent.</AlertDialogDescription></AlertDialogHeader>
+                        <AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction onClick={() => { const action = pendingLeave; setPendingLeave(null); setFilesDirty(false); action?.() }}>Discard changes</AlertDialogAction></AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
                 {screen.name === 'list' && (
                     <>
                         <Header
@@ -1003,7 +1018,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 onBack={back}
                             />
                             <Body>
-                                <AgentPage org={org} listing={listing} isAdmin={isAdmin} onChanged={load} />
+                                <AgentPage onFilesDirtyChange={setFilesDirty} org={org} listing={listing} isAdmin={isAdmin} onChanged={load} />
                             </Body>
                             <Footer>
                                 <Button size="sm" onClick={back}>Done</Button>

@@ -1072,6 +1072,24 @@ describe('AgentsDialog', () => {
         expect(FakeSocket.instances[1]!.url).toBe('wss://api.maritime.sh/api/agents/agt-m1/terminal?token=eu_console_2')
     })
 
+    it('preserves file drafts across tabs and confirms before leaving the agent page', async () => {
+        await openJarvis()
+        fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
+        const files = await screen.findByRole('list', { name: 'Files' })
+        fireEvent.click(within(files).getByRole('button', { name: /^config\.yaml/ }))
+        fireEvent.change(await screen.findByLabelText('File content'), { target: { value: 'unsaved draft' } })
+        fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
+        fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
+        expect(screen.getByLabelText('File content')).toHaveValue('unsaved draft')
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+        expect(await screen.findByRole('alertdialog')).toHaveTextContent('Discard unsaved file changes?')
+        fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+        expect(screen.getByLabelText('File content')).toHaveValue('unsaved draft')
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+        fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }))
+        expect(screen.queryByLabelText('File content')).not.toBeInTheDocument()
+    })
+
     it('logs, files, skills and automations load when their tab is chosen; removing is on the Danger zone', async () => {
         await openJarvis()
         fireEvent.click(screen.getByRole('tab', { name: 'Logs' }))
@@ -1082,7 +1100,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
         const files = await screen.findByRole('list', { name: 'Files' })
         expect(invoke).toHaveBeenCalledWith('spaces:listHostingFiles', { orgId: 'org-1', agentId: 'jv', path: '/opt/data' })
-        fireEvent.click(within(files).getByRole('button', { name: /config\.yaml/ }))
+        fireEvent.click(within(files).getByRole('button', { name: /^config\.yaml/ }))
         expect(await screen.findByLabelText('File content')).toHaveValue('model: gpt-5.4')
 
         fireEvent.click(screen.getByRole('tab', { name: 'Skills' }))
@@ -1136,7 +1154,7 @@ describe('AgentsDialog', () => {
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setHostingLlm', { orgId: 'org-1', agentId: 'jv', provider: 'anthropic', apiKey: 'sk-ant-api03-mine-wxyz', model: 'claude-sonnet-4-5' }))
         expect(await screen.findByText('Runs on your Anthropic key …wxyz')).toBeInTheDocument()
         expect(screen.getByText(/Model claude-sonnet-4-5/)).toBeInTheDocument()
-        expect(screen.queryByText(/trial credit/)).toBeNull()
+        expect(screen.queryByText("On Rowboat's trial credit")).toBeNull()
         expect(screen.getByRole('button', { name: 'Replace key' })).toBeInTheDocument()
     })
 
@@ -1239,7 +1257,7 @@ describe('AgentsDialog', () => {
         fireEvent.click(within(access).getByRole('button', { name: 'Check sign-in' }))
         expect(await screen.findByText('Runs on your ChatGPT plan')).toBeInTheDocument()
         await waitFor(() => expect(toast).toHaveBeenCalledWith('Cx now runs on your ChatGPT plan', 'success'))
-        expect(screen.queryByText(/trial credit/)).toBeNull()
+        expect(screen.queryByText("On Rowboat's trial credit")).toBeNull()
         expect(screen.getByRole('button', { name: 'Use a key instead' })).toBeInTheDocument()
         // On the plan, a check is still offered: it sets the VM up again (the way a newer setup reaches an agent signed in before it).
         expect(screen.queryByRole('button', { name: 'Check sign-in' })).toBeNull()
