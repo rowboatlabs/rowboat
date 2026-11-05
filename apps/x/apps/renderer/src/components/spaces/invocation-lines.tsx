@@ -15,7 +15,9 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 // queued one; the invoker or an admin can stop a running one when the agent's
 // connector declared it can stop. Working shows the typing dots (2026-10-08):
 // one line for an agent at work, its activity, and Stop, rather than a
-// separate "is typing" beside it.
+// separate "is typing" beside it. A message folded into the running turn
+// (`steers`, 2026-11-05) says so: it can be cancelled until the agent takes
+// it, and is stopped with the turn, never on its own.
 
 interface InvocationsContextValue {
     byMessage: ReadonlyMap<string, spaces.Invocation[]>
@@ -62,7 +64,8 @@ export function InvocationLines({ messageId }: { messageId: string }) {
                 const name = names.get(invocation.agentId) ?? 'The agent'
                 const mine = invocation.trigger.authorId === selfId
                 const canCancel = writable && mine && (invocation.state === 'queued' || invocation.state === 'pending')
-                const canStop = writable && RUNNING.includes(invocation.state) && (mine || isAdmin) && caps.get(invocation.agentId)?.stop === true
+                // A folded steer is stopped with its turn (2026-11-05): Stop sits on the turn's own line.
+                const canStop = writable && RUNNING.includes(invocation.state) && !invocation.steers && (mine || isAdmin) && caps.get(invocation.agentId)?.stop === true
                 const { Icon, text, tone } = describe(invocation, name)
                 return (
                     <div key={invocation.id} data-invocation={invocation.state} className={cn('flex items-center gap-1.5 text-[12.5px]', tone)}>
@@ -153,6 +156,9 @@ function workingText(name: string, activity: string | undefined): string {
 
 function describe(invocation: spaces.Invocation, name: string): { Icon: typeof Clock; text: string; tone: string } {
     const muted = 'text-muted-foreground'
+    // Folded into the turn the agent is running (steers, 2026-11-05): not a turn of its own, so no activity of its own.
+    if (invocation.steers && invocation.state === 'pending') return { Icon: Clock, text: `Adding this to what ${name} is doing`, tone: muted }
+    if (invocation.steers && invocation.state === 'working') return { Icon: Loader2, text: `${name} folded this into its current turn`, tone: muted }
     switch (invocation.state) {
         case 'queued':
             return { Icon: Clock, text: `${name} will get to this next`, tone: muted }

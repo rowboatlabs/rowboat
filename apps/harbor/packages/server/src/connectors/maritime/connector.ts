@@ -473,7 +473,7 @@ export class MaritimeConnector implements RunningConnector {
   // --- what the connector tells Harbor --------------------------------------------------------
 
   private async declare(): Promise<void> {
-    const capabilities: ConnectorCapabilities = { stop: true, options: this.runtime.options(this.models) };
+    const capabilities: ConnectorCapabilities = { stop: true, steer: false, options: this.runtime.options(this.models) };
     const signature = JSON.stringify(capabilities);
     if (signature === this.declared) return;
     this.declared = signature;

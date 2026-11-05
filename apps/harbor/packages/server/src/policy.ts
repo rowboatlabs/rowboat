@@ -454,3 +454,18 @@ export function canStopInvocation(actor: Member, invocation: Invocation, stopDec
   if (!stopDeclared) return { code: 'invalid_request', message: 'this agent can’t be stopped from Spaces; open it in its own app' };
   return null;
 }
+
+/**
+ * Steering a running turn (spec §8, 2026-11-05): a message in its conversation
+ * is folded into it, rather than queued behind it, when the agent's connector
+ * declared it can steer and the author is the turn's invoker or an admin: the
+ * people who may stop a turn may redirect it. Picks steer over queue; a
+ * refusal here never refuses the message.
+ */
+export function canSteerInvocation(actor: Member, turn: Invocation, steerDeclared: boolean): Decision {
+  if (!steerDeclared) return { code: 'invalid_request', message: 'this agent’s connector does not steer; the message queues' };
+  if (turn.trigger.authorId !== actor.id && actor.role !== 'admin') {
+    return { code: 'forbidden', message: 'only the person who asked, or an admin, can steer it' };
+  }
+  return null;
+}

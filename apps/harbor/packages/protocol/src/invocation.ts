@@ -95,6 +95,12 @@ export const Invocation = z.object({
   instructions: z.string().optional(),
   /** Set when this invocation is a person's answer to one that is waiting in the same conversation. */
   answers: InvocationId.optional(),
+  /**
+   * Set when this invocation steers the one working in the same conversation
+   * (2026-11-05): delivered at once for the connector to fold into that turn,
+   * and finished with it. Never the conversation's turn itself.
+   */
+  steers: InvocationId.optional(),
   state: InvocationState,
   /** One ephemeral line: what it is doing ("Running tests"), or what it waits for. */
   activity: z.string().max(200).optional(),
@@ -130,11 +136,13 @@ export type InvocationUpdate = z.infer<typeof InvocationUpdate>;
  * What a connector's agent offers beyond the contract's floor, declared when
  * it connects and again whenever it changes. Absent means no: Harbor offers
  * Stop on a running invocation only to a connector that declared it, and the
- * composer shows only declared options. Steering, when it comes, is another
- * optional field here, and a connector that does not declare it keeps queueing.
+ * composer shows only declared options. Steering (2026-11-05) is the same
+ * shape: a connector that declared it gets the conversation's next message
+ * while its turn works, marked `steers`; one that did not keeps queueing.
  */
 export const ConnectorCapabilities = z.object({
   stop: z.boolean().default(false),
+  steer: z.boolean().default(false),
   options: z.array(InvocationOption).max(8).default([]),
 });
 export type ConnectorCapabilities = z.infer<typeof ConnectorCapabilities>;

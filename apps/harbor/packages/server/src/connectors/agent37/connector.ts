@@ -411,7 +411,7 @@ export class Agent37Connector implements RunningConnector {
     // Keyed `effort` (2026-10-08, was `reasoning`; migration 035 moved owners' defaults), so the
     // composer shows it on the model picker, as it does every agent's `model` and `effort`.
     options.push({ type: 'select', key: 'effort', label: 'Effort', choices: EFFORTS.map((e) => ({ id: e, label: e === 'xhigh' ? 'Extra high' : e[0]!.toUpperCase() + e.slice(1) })) });
-    const capabilities: ConnectorCapabilities = { stop: true, options };
+    const capabilities: ConnectorCapabilities = { stop: true, steer: false, options };
     const signature = JSON.stringify(capabilities);
     if (signature === this.declared) return;
     this.declared = signature;
