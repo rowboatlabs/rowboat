@@ -36,6 +36,16 @@ export class AgentPresence {
     return (this.connections.get(agentId) ?? 0) > 0 || this.leaving.has(agentId);
   }
 
+  /**
+   * Whether a member holds a live connection right now, grace or not: what
+   * the Maritime connector in worker mode asks before starting a worker on
+   * the agent's box (2026-11-05). Counted for every member, whatever its
+   * connection; `online` above decides who is announced.
+   */
+  connected(memberId: string): boolean {
+    return (this.connections.get(memberId) ?? 0) > 0;
+  }
+
   /** A live connection opened for this member. */
   async opened(memberId: string): Promise<void> {
     const count = (this.connections.get(memberId) ?? 0) + 1;

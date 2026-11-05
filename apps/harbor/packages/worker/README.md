@@ -6,6 +6,6 @@ The worker that runs beside an agent's harness and carries Harbor's invocations 
 rowboat-worker --url https://org.example --cwd /data/workspace --state /data/rowboat/worker --idle 600
 ```
 
-The key comes from `ROWBOAT_AGENT_KEY` or `--key-file`; the worker never writes it anywhere. `--idle` makes it exit after that many seconds with nothing to do, so a Maritime box can sleep; without it, it runs until stopped. `--sandbox` is `danger-full-access` unless told otherwise: the machine is the sandbox, as it was for the exec-driven turn.
+The key comes from `ROWBOAT_AGENT_KEY` or `--key-file`; the worker never writes it anywhere. `--idle` makes it exit after that many seconds with nothing to do, so a Maritime box can sleep; without it, it runs until stopped. `--sandbox` is `danger-full-access` unless told otherwise: the machine is the sandbox, as it was for the exec-driven turn. `--lock <file>` keeps one worker per machine: a second start that finds the first alive exits at once. A `seed.json` beside `threads.json` in the state folder is read once and removed: the sessions Harbor's exec-driven turns kept, for conversations this worker has not seen (how a Maritime box switches to the worker without losing its threads).
 
 `pnpm build` writes the library to `dist/` and one file for the machine the worker runs on, `dist/rowboat-worker.cjs` (Node 20 or later, nothing to install beside it). `pnpm test` runs the worker against the real stub Harbor on Postgres in-process, and the Codex adapter against a stand-in app-server (`test/fake-app-server.mjs`).

@@ -45,6 +45,8 @@ export interface ConnectorEnv {
   thread: {
     get(spaceId: string, threadRootId: string): Promise<unknown | undefined>;
     put(spaceId: string, threadRootId: string, data: unknown): Promise<void>;
+    /** Every thread's record (the worker's seed at the switch to worker mode, 2026-11-05). */
+    list(): Promise<Array<{ spaceId: string; threadRootId: string; data: unknown }>>;
   };
   log(message: string, detail?: unknown): void;
 }

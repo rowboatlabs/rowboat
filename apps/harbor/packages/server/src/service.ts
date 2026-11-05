@@ -457,6 +457,10 @@ export class HarborService {
   onlineAgents(members: readonly Member[]): string[] {
     return this.presence.online(members);
   }
+  /** Whether a member holds a live connection now (the Maritime connector in worker mode, 2026-11-05). */
+  agentConnected(memberId: string): boolean {
+    return this.presence.connected(memberId);
+  }
   /** A live connection opened or closed for a member (ws.ts): an agent's presence follows its connections. */
   liveOpened(memberId: string): Promise<void> {
     return this.presence.opened(memberId);
