@@ -270,6 +270,12 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
         setLinkOpen(false)
     }
 
+    // 2026-11-05: A link (typed or pasted) can be taken off again; its text stays.
+    const removeLink = () => {
+        editor.chain().focus().extendMarkRange('link').unsetLink().run()
+        setLinkOpen(false)
+    }
+
     const button = (t: RichToolDef) => (
         <Tooltip key={t.key} delayDuration={400}>
             <TooltipTrigger asChild>
@@ -334,11 +340,16 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
                             className="h-8 text-sm"
                         />
                         <div className="flex justify-end gap-1.5">
+                            {active?.link ? (
+                                <Button type="button" variant="ghost" size="sm" className="mr-auto h-7" onClick={removeLink}>
+                                    Unlink
+                                </Button>
+                            ) : null}
                             <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => setLinkOpen(false)}>
                                 Cancel
                             </Button>
                             <Button type="button" size="sm" className="h-7" disabled={!linkUrl.trim()} onClick={submitLink}>
-                                Add
+                                {active?.link ? 'Save' : 'Add'}
                             </Button>
                         </div>
                     </div>

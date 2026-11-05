@@ -184,6 +184,18 @@ describe('formatting boundaries', () => {
         expect(e.view.dom.querySelector('a')?.textContent).toBe(format === 'text' ? 'https://example.com' : 'docs')
     })
 
+    it('a link pasted with underline styling (docs, web pages) leaves no underline to type on into, and unlinks to plain text', () => {
+        const e = makeEditor('')
+        e.commands.focus('end')
+        e.view.pasteHTML('<b style="font-weight:normal" id="docs-internal-guid-1"><a href="https://example.com"><span style="text-decoration:underline">docs</span></a></b>', pasteEvent())
+        type(e, ' more')
+        expect(e.state.doc.firstChild!.lastChild!.marks).toEqual([])
+        expect(e.view.dom.querySelector('u')).toBeNull()
+        e.chain().setTextSelection(2).extendMarkRange('link').unsetLink().run()
+        expect(composerMarkdown(e)).toBe('docs more')
+        expect(e.view.dom.innerHTML).toBe('<p>docs more</p>')
+    })
+
     it('editing inside a link preserves its formatting', () => {
         const e = makeEditor('[docs](https://example.com)')
         e.commands.setTextSelection(3)

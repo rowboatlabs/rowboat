@@ -529,7 +529,11 @@ const CodeFences = Extension.create({
  */
 export function composerExtensions(getPlaceholder: () => string) {
     return [
-        ChatStarterKit.configure({ link: false }),
+        // 2026-11-05: No underline — markdown can't carry it, and links pasted
+        // from web pages and docs arrive wrapped in underline styling that
+        // (inclusive, unlike the link) ran on into whatever was typed next,
+        // looking like the link itself and outliving an unlink.
+        ChatStarterKit.configure({ link: false, underline: false }),
         // 2026-09-29: Typing after a pasted link must start ordinary text.
         Link.extend({ inclusive: false }).configure({ openOnClick: false, autolink: true }),
         MentionNode,
