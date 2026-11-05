@@ -280,7 +280,10 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
         setLinkOpen(false)
     }
 
-    const button = (t: RichToolDef) => (
+    const button = (t: RichToolDef) => {
+        // Clear formatting is an action, never a state the selection is in.
+        const pressed = t.key === 'clear' ? false : (active?.[t.key] ?? false)
+        return (
         <Tooltip key={t.key} delayDuration={400}>
             <TooltipTrigger asChild>
                 <Button
@@ -288,8 +291,8 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
                     variant="ghost"
                     size="icon"
                     aria-label={t.title}
-                    aria-pressed={active?.[t.key] ?? false}
-                    className={cn('size-7 text-muted-foreground hover:text-foreground', active?.[t.key] && 'bg-accent text-foreground')}
+                    aria-pressed={pressed}
+                    className={cn('size-7 text-muted-foreground hover:text-foreground', pressed && 'bg-accent text-foreground')}
                     // Keep the editor focused (and its selection alive) through the click.
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => t.run(editor)}
@@ -299,7 +302,8 @@ export function RichFormattingToolbar({ editor, className }: { editor: Editor | 
             </TooltipTrigger>
             <TooltipContent side="top">{t.title}</TooltipContent>
         </Tooltip>
-    )
+        )
+    }
 
     const separator = <span className="mx-1 h-4 w-px shrink-0 bg-border" />
 
