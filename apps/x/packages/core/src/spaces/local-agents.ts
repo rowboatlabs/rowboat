@@ -226,7 +226,7 @@ class LocalAgentRunner {
    */
   private async declareCapabilities(): Promise<void> {
     try {
-      await this.client.declareCapabilities({ stop: true, options: [] });
+      await this.client.declareCapabilities({ stop: true, steer: false, options: [] });
       const kind = this.record()?.kind;
       if (!kind) return;
       const choices = await (await resolveManager()).listModelOptions(ENGINE[kind]).catch((err) => {
@@ -234,7 +234,7 @@ class LocalAgentRunner {
         return undefined;
       });
       const options = choices ? optionsFor(choices) : [];
-      if (options.length > 0 && !this.stopped) await this.client.declareCapabilities({ stop: true, options });
+      if (options.length > 0 && !this.stopped) await this.client.declareCapabilities({ stop: true, steer: false, options });
     } catch (err) {
       this.fail(err);
     }
