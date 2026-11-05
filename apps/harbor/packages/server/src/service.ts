@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
 import { AgentPresence } from './core/agent-presence.js';
+import { HumanPresence } from './core/human-presence.js';
 import { Hosting, type HostingHooks, type HostingProvider } from './core/hosting.js';
 import type { BillingAccounts } from './billing.js';
 import { Assets } from './core/assets.js';
@@ -92,6 +93,7 @@ export class HarborService {
   private readonly hosting: Hosting;
   private readonly invocations: Invocations;
   private readonly presence: AgentPresence;
+  private readonly humanPresence: HumanPresence;
   private readonly superAgents: SuperAgents;
 
   constructor(
@@ -103,7 +105,7 @@ export class HarborService {
     /** Absent = no notifications on this org (notify.ts: frames + push). */
     notifier?: Notifier,
     /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
-    options: { presenceGraceMs?: number } = {},
+    options: { presenceGraceMs?: number; humanPresenceLeaseMs?: number } = {},
   ) {
     this.k = new Kernel(store, hub, org);
     this.spaces = new Spaces(this.k, blobs);
@@ -115,6 +117,7 @@ export class HarborService {
     this.agents = new Agents(this.k, this.spaces);
     this.hosting = new Hosting(this.k, this.spaces, this.agents);
     this.presence = new AgentPresence(this.k, options.presenceGraceMs);
+    this.humanPresence = new HumanPresence(this.k, options.humanPresenceLeaseMs);
     this.superAgents = new SuperAgents(this.k, this.hosting, this.spaces, this.feed, this.invocations);
   }
 
@@ -449,11 +452,20 @@ export class HarborService {
   listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
     return this.spaces.listOrgMembers(ctx);
   }
-  /** Of these members, the agents whose connector is connected now (local agents, 2026-10-28). */
   onlinePeople(members: readonly Member[]): string[] {
-    return this.presence.onlinePeople(members);
+    return this.humanPresence.online(members);
+  }
+  humanOpened(connection: object, memberId: string): void {
+    this.humanPresence.opened(connection, memberId);
+  }
+  humanActivity(connection: object, sessionId: string, active: boolean): void {
+    this.humanPresence.activity(connection, sessionId, active);
+  }
+  humanClosed(connection: object): void {
+    this.humanPresence.closed(connection);
   }
 
+  /** Of these members, the agents whose connector is connected now (local agents, 2026-10-28). */
   onlineAgents(members: readonly Member[]): string[] {
     return this.presence.online(members);
   }
@@ -467,6 +479,7 @@ export class HarborService {
   /** Drop the presence timers (runtime close). */
   closePresence(): void {
     this.presence.close();
+    this.humanPresence.close();
   }
   addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
     return this.spaces.addMembers(ctx, spaceId, input);

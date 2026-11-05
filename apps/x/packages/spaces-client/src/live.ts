@@ -81,6 +81,7 @@ export class SpacesLive {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private watchdog: ReturnType<typeof setInterval> | undefined;
   private lastTraffic = 0;
+  private focusedSessions = new Map<string, number>();
 
   constructor(options: SpacesLiveOptions) {
     this.wsBase = options.baseUrl.replace(/\/$/, '').replace(/^http/, 'ws');
@@ -146,6 +147,18 @@ export class SpacesLive {
     };
   }
 
+  memberActivity(sessionId: string, active: boolean): void {
+    const now = Date.now();
+    for (const [id, renewedAt] of this.focusedSessions) {
+      if (now - renewedAt >= 25_000) this.focusedSessions.delete(id);
+    }
+    if (active) this.focusedSessions.set(sessionId, now);
+    else this.focusedSessions.delete(sessionId);
+    if (this.ws?.readyState === this.WebSocketImpl.OPEN) {
+      this.ws.send(JSON.stringify({ kind: 'member_activity', sessionId, active }));
+    } else if (active) this.ensureConnected();
+  }
+
   presence(spaceId: string, state: PresenceState, threadRootId?: string): void {
     if (this.ws?.readyState === this.WebSocketImpl.OPEN) {
       this.ws.send(
@@ -175,6 +188,7 @@ export class SpacesLive {
   }
 
   close(): void {
+    this.focusedSessions.clear();
     this.closed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.watchdog) clearInterval(this.watchdog);
@@ -320,6 +334,12 @@ export class SpacesLive {
       this.attempts = 0;
       this.lastTraffic = Date.now();
       this.setStatus('open');
+      // Replay only fresh foreground reports; a sleeping renderer must not be revived as online (2026-11-04).
+      for (const [sessionId, renewedAt] of this.focusedSessions) {
+        if (Date.now() - renewedAt < 25_000) {
+          ws.send(JSON.stringify({ kind: 'member_activity', sessionId, active: true }));
+        } else this.focusedSessions.delete(sessionId);
+      }
       // Resubscribe everything with the last offsets we saw — replay fills the gap.
       for (const [spaceId, sub] of this.subs) this.sendSubscribe(spaceId, sub);
     });

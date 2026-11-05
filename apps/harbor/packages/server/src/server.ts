@@ -56,6 +56,8 @@ export interface HarborOptions {
   liveMaxBufferedBytes?: number;
   /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
   agentPresenceGraceMs?: number;
+  /** Test knob: focused-window lease duration (default 45s). */
+  humanPresenceLeaseMs?: number;
   /**
    * The operator face (internal.ts). `key` enables GET /internal/stats; `log`
    * prints the live-load line once a minute — independent of the key, the
@@ -112,6 +114,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
     ...(options.hosting ? { hosting: options.hosting } : {}),
     ...(options.agentPresenceGraceMs !== undefined ? { agentPresenceGraceMs: options.agentPresenceGraceMs } : {}),
+    ...(options.humanPresenceLeaseMs !== undefined ? { humanPresenceLeaseMs: options.humanPresenceLeaseMs } : {}),
   });
   await seedOrg(runtime.service, store, options);
 

@@ -4770,6 +4770,10 @@ export const ipcSchemas = {
     req: z.null(),
     res: z.object({ success: z.literal(true) }),
   },
+  'spaces:memberActivity': {
+    req: z.object({ orgId: z.string(), sessionId: z.string(), active: z.boolean() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'spaces:presence': {
     req: z.object({
       orgId: z.string(),

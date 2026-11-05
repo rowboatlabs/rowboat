@@ -442,7 +442,12 @@ function wireFeedBus(): void {
         if (frame.kind === 'subscribed') {
             // A re-acknowledged subscription = the socket was down: anything
             // we were put in meanwhile was announced to nobody.
-            if (isReconnect(event.orgId, frame.spaceId, frame)) { resyncListing(); void loadSpaceDirectory(event.orgId) }
+            if (isReconnect(event.orgId, frame.spaceId, frame)) {
+                // Focus/blur frames are ephemeral: even a quick reconnect must repair online dots (2026-11-04).
+                refreshOrgRoster(event.orgId)
+                resyncListing()
+                void loadSpaceDirectory(event.orgId)
+            }
             return
         }
         if (frame.kind === 'space_removed') {

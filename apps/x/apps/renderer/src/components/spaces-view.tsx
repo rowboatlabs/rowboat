@@ -10,6 +10,7 @@ import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVI
 import { getViewerType } from '@/lib/file-types'
 import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useFocusedPresence } from '@/hooks/use-focused-presence'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Lock, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Plus, Rows3, Star, Trash2, UserPlus, Users } from 'lucide-react'
@@ -171,6 +172,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     }
 
     const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
+    useFocusedPresence(selectedOrg?.id, active && !selectedOrg?.error)
     const joinedSpace = selection && selectedOrg ? findSpace(selectedOrg, selection.spaceId) : undefined
     const directory = useSpaceDirectory(selectedOrg?.id ?? null, active && !!selection?.spaceId && !joinedSpace)
     const discovered = directory.entries.find(e => e.space.id === selection?.spaceId)

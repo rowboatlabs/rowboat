@@ -171,6 +171,7 @@ function handleConnection(
   });
   // An agent's presence follows its live connections (local agents, 2026-10-28).
   void deps.service.liveOpened(memberId).catch(() => {});
+  deps.service.humanOpened(ws, memberId);
 
   ws.on('message', (data) => {
     ws.sawLifeSinceLastBeat = true;
@@ -243,6 +244,10 @@ function handleConnection(
             drop(frame.spaceId);
             break;
           }
+          case 'member_activity': {
+            deps.service.humanActivity(ws, frame.sessionId, frame.active);
+            break;
+          }
           case 'presence': {
             await deps.service.publishPresence({ memberId }, frame.spaceId, frame.state, frame.threadRootId);
             break;
@@ -253,8 +258,9 @@ function handleConnection(
           }
         }
       } catch (err) {
-        if (err instanceof HarborError) sendError(err.code, err.message, frame.spaceId);
-        else sendError('internal', 'unexpected error', frame.spaceId);
+        const spaceId = 'spaceId' in frame ? frame.spaceId : undefined;
+        if (err instanceof HarborError) sendError(err.code, err.message, spaceId);
+        else sendError('internal', 'unexpected error', spaceId);
       }
     })();
   });
@@ -262,6 +268,7 @@ function handleConnection(
   ws.on('close', () => {
     unsubscribeMember();
     deps.service.liveClosed(memberId);
+    deps.service.humanClosed(ws);
     for (const spaceId of [...subscriptions.keys()]) drop(spaceId);
     stats?.connectionClosed();
   });

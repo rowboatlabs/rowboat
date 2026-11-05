@@ -37,7 +37,7 @@ export type HarborChannel =
   | 'spaces:reactToMessage' | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:listInvocations' | 'spaces:cancelInvocation' | 'spaces:getAgentCapabilities' | 'spaces:setAgentOptionDefaults'
   | 'spaces:decideApproval'
-  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
+  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:memberActivity' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:markRead' | 'spaces:followThread' | 'spaces:getUnread' | 'spaces:getActivity' | 'spaces:markActivitySeen'
   | 'spaces:readAll';
 
@@ -49,7 +49,7 @@ export interface HarborChannelDeps {
   /** The org's REST client; throws for an org the host doesn't know. */
   getClient(orgId: string): SpacesClient;
   /** The org's live socket. */
-  getLive(orgId: string): Pick<SpacesLive, 'presence' | 'whiteboard'>;
+  getLive(orgId: string): Pick<SpacesLive, 'presence' | 'whiteboard' | 'memberActivity'>;
   /** The host's per-space subscriptions (one per org and space). */
   subscriptions: SpaceSubscriptions;
   /** Where a subscribed space's frames go: every window on the desktop. */
@@ -401,6 +401,10 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
       return { success: true };
     },
 
+    'spaces:memberActivity': async (args) => {
+      getLive(args.orgId).memberActivity(args.sessionId, args.active);
+      return { success: true };
+    },
     'spaces:presence': async (args) => {
       getLive(args.orgId).presence(args.spaceId, args.state, args.threadRootId);
       return { success: true };

@@ -51,6 +51,8 @@ export interface OrgRuntimeInput {
   hosting?: { provider: HostingProvider; tickMs?: number; trialMs?: number; billing?: BillingAccounts; settleEveryMs?: number };
   /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
   agentPresenceGraceMs?: number;
+  /** Test knob: focused-window lease duration (default 45s). */
+  humanPresenceLeaseMs?: number;
 }
 
 /** The managed-hosting provider the deployment's own Maritime key makes, or none. */
@@ -85,7 +87,10 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     input.org,
     input.blobs,
     new Notifier(store, hub, input.pushSender ?? new PushSender(store, input.orgId)),
-    input.agentPresenceGraceMs !== undefined ? { presenceGraceMs: input.agentPresenceGraceMs } : {},
+    {
+      ...(input.agentPresenceGraceMs !== undefined ? { presenceGraceMs: input.agentPresenceGraceMs } : {}),
+      ...(input.humanPresenceLeaseMs !== undefined ? { humanPresenceLeaseMs: input.humanPresenceLeaseMs } : {}),
+    },
   );
   // The mentions backfill (service.migrateMentions): idempotent, ledgered once per org, before the faces serve.
   await service.migrateMentions();

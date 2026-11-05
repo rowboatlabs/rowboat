@@ -128,6 +128,7 @@ export function refreshMembers(orgId: string, spaceId: string, opts: { force?: b
 
 /** Refetch the org roster now: a change this member just made (a new agent) must show in the pickers at once. */
 export function refreshOrgRoster(orgId: string): void {
+    if (membersLoading.has(orgKey(orgId))) membersDirty.add(orgKey(orgId))
     void loadOrgRoster(orgId, [])
 }
 
@@ -306,7 +307,7 @@ export function isAgentOffline(member: Pick<spaces.Member, 'id' | 'kind' | 'agen
     return member.kind === 'agent' && member.agentConnection === 'local' && online !== null && !online.has(member.id)
 }
 
-// Human online dots use org connections, independent of the space being viewed (2026-11-04).
+// Human online dots use focused Spaces windows, independent of the thread being viewed (2026-11-04).
 let peopleOnlineState: ReadonlyMap<string, ReadonlySet<string>> = new Map()
 const peopleOnlineListeners = new Set<() => void>()
 const EMPTY_ONLINE: ReadonlySet<string> = new Set()

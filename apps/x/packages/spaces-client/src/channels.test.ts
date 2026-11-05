@@ -147,3 +147,14 @@ it('uploads, reads, and clears an avatar through the shared handlers', async () 
   expect((await table['spaces:clearAvatar']({ orgId })).member.avatarUrl).toBeUndefined();
   await expect(table['spaces:getProfileImage']({ orgId, hash: '../other' })).rejects.toThrow('Invalid profile image hash');
 });
+
+it('routes focused-window activity through the shared host channel and updates the roster', async () => {
+  await table['spaces:memberActivity']({ orgId, sessionId: 'test-window', active: true });
+  await vi.waitFor(async () => {
+    expect((await table['spaces:listOrgMembers']({ orgId })).onlinePeople).toContain('ramnique');
+  }, { timeout: 5_000 });
+  await table['spaces:memberActivity']({ orgId, sessionId: 'test-window', active: false });
+  await vi.waitFor(async () => {
+    expect((await table['spaces:listOrgMembers']({ orgId })).onlinePeople).not.toContain('ramnique');
+  }, { timeout: 5_000 });
+});
