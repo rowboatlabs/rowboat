@@ -4,9 +4,11 @@
 // stay byte-stable. Shared by both engines — extracted from the legacy
 // engine file so the turn-runtime bridges no longer depend on it.
 
-import { ModelMessage } from "ai";
+import { ModelMessage, AssistantModelMessage } from "ai";
 import { Message, UserMessageContext } from "@x/shared/dist/message.js";
 import { z } from "zod";
+
+type AssistantContentPart = Extract<AssistantModelMessage['content'], Array<unknown>>[number];
 
 function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserMessageContext>): string {
     const sections: string[] = [];
@@ -100,7 +102,47 @@ function formatBytes(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
+export interface ConvertFromMessagesOptions {
+    /**
+     * When true, reasoning parts in assistant messages are demoted to regular
+     * text parts (or dropped if empty). This prevents OpenAI-compatible providers
+     * (e.g. Groq) from receiving unsupported `reasoning_content` fields in the
+     * assistant history wire format (#463).
+     */
+    demoteReasoning?: boolean;
+}
+
+/**
+ * Demotes reasoning parts in assistant ModelMessages to plain text parts (or
+ * drops empty reasoning parts). Defense-in-depth for wire streams to
+ * providers (e.g. OpenAI-compatible / Groq) that reject `reasoning_content`.
+ */
+export function demoteReasoningInModelMessages(messages: ModelMessage[]): ModelMessage[] {
+    return messages.map((message) => {
+        if (message.role !== "assistant" || typeof message.content === "string") {
+            return message;
+        }
+        const content: AssistantContentPart[] = [];
+        for (const part of message.content) {
+            if (part.type === "reasoning") {
+                if (part.text.trim() !== "") {
+                    content.push({ type: "text", text: part.text });
+                }
+            } else {
+                content.push(part);
+            }
+        }
+        return {
+            ...message,
+            content: content.length > 0 ? content : "",
+        };
+    });
+}
+
+export function convertFromMessages(
+    messages: z.infer<typeof Message>[],
+    options?: ConvertFromMessagesOptions,
+): ModelMessage[] {
     const result: ModelMessage[] = [];
     for (const msg of messages) {
         const { providerOptions } = msg;
@@ -113,24 +155,35 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                         providerOptions,
                     });
                 } else {
+                    const contentParts: AssistantContentPart[] = [];
+                    for (const part of msg.content) {
+                        switch (part.type) {
+                            case 'text':
+                                contentParts.push(part);
+                                break;
+                            case 'reasoning':
+                                if (options?.demoteReasoning) {
+                                    if (part.text.trim() !== "") {
+                                        contentParts.push({ type: 'text', text: part.text });
+                                    }
+                                } else {
+                                    contentParts.push(part);
+                                }
+                                break;
+                            case 'tool-call':
+                                contentParts.push({
+                                    type: 'tool-call',
+                                    toolCallId: part.toolCallId,
+                                    toolName: part.toolName,
+                                    input: part.arguments,
+                                    providerOptions: part.providerOptions,
+                                });
+                                break;
+                        }
+                    }
                     result.push({
                         role: "assistant",
-                        content: msg.content.map(part => {
-                            switch (part.type) {
-                                case 'text':
-                                    return part;
-                                case 'reasoning':
-                                    return part;
-                                case 'tool-call':
-                                    return {
-                                        type: 'tool-call',
-                                        toolCallId: part.toolCallId,
-                                        toolName: part.toolName,
-                                        input: part.arguments,
-                                        providerOptions: part.providerOptions,
-                                    };
-                            }
-                        }),
+                        content: contentParts.length > 0 ? contentParts : "",
                         providerOptions,
                     });
                 }

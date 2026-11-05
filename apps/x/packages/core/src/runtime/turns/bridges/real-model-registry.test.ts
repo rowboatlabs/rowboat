@@ -362,6 +362,93 @@ describe("RealModelRegistry", () => {
         });
     });
 
+    it("demotes reasoning blocks to text on openai-compatible providers (#463)", async () => {
+        const fakeModel = { modelId: "groq-model" } as unknown as LanguageModel;
+        const registry = new RealModelRegistry({
+            resolveProvider: async () => ({ flavor: "openai-compatible" }) as never,
+            createProviderImpl: (() => ({
+                languageModel: () => fakeModel,
+            })) as never,
+            reasoningSupport: async () => false,
+            invoke: () => ({ stream: (async function* () {})() }),
+        });
+        const model = await registry.resolve({ provider: "openai-compatible", model: "groq-model" });
+        const encoded = model.encodeMessages([
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "reasoning",
+                        text: "thought",
+                    },
+                    {
+                        type: "tool-call",
+                        toolCallId: "tc1",
+                        toolName: "echo",
+                        arguments: { x: 1 },
+                    },
+                ],
+            },
+        ] as never) as Array<{ role: string; content: Array<Record<string, unknown>> }>;
+
+        expect(encoded[0].content[0]).toMatchObject({
+            type: "text",
+            text: "thought",
+        });
+        expect(encoded[0].content[1]).toMatchObject({
+            type: "tool-call",
+            toolCallId: "tc1",
+            input: { x: 1 },
+        });
+    });
+
+    it("demotes assistant reasoning blocks in stream messages for openai-compatible providers (#463)", async () => {
+        const capture: InvokerOptions[] = [];
+        const fakeModel = { modelId: "groq-model" } as unknown as LanguageModel;
+        const registry = new RealModelRegistry({
+            resolveProvider: async () => ({ flavor: "openai-compatible" }) as never,
+            createProviderImpl: (() => ({
+                languageModel: () => fakeModel,
+            })) as never,
+            reasoningSupport: async () => false,
+            invoke: (options) => {
+                capture.push(options);
+                return {
+                    stream: (async function* () {
+                        yield { type: "finish-step", finishReason: "stop", usage: {} };
+                    })(),
+                };
+            },
+        });
+        const model = await registry.resolve({ provider: "openai-compatible", model: "groq-model" });
+        const req = request({
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "reasoning", text: "thought to demote" },
+                        { type: "text", text: "answer" },
+                    ],
+                },
+            ] as never,
+        });
+        const events: unknown[] = [];
+        for await (const event of model.stream(req)) {
+            events.push(event);
+        }
+        expect(events.length).toBeGreaterThan(0);
+
+        const [options] = capture;
+        const assistantMsg = (options.messages as Array<Record<string, unknown>>)[0];
+        expect(assistantMsg).toEqual({
+            role: "assistant",
+            content: [
+                { type: "text", text: "thought to demote" },
+                { type: "text", text: "answer" },
+            ],
+        });
+    });
+
     describe("reasoning effort mapping", () => {
         function makeFlavorRegistry(
             flavor: string,

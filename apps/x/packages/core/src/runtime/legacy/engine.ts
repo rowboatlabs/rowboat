@@ -934,6 +934,7 @@ export async function* streamAgent({
                 modelId,
                 providerName: state.runProvider!,
             },
+            { demoteReasoning: providerConfig.flavor === "openai-compatible" },
         )) {
             messageBuilder.ingest(event);
             yield* processEvent({
@@ -1141,8 +1142,9 @@ async function* streamLlm(
     tools: ToolSet,
     signal?: AbortSignal,
     analytics?: StreamLlmAnalytics,
+    options?: { demoteReasoning?: boolean },
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
-    const converted = convertFromMessages(messages);
+    const converted = convertFromMessages(messages, options);
     console.log(`! SENDING payload to model: `, JSON.stringify(converted))
     const streamResult = analytics
         ? withUseCase({
