@@ -72,6 +72,7 @@ export async function shouldDeferBackgroundTasks(): Promise<boolean> {
  *
  * - "rowboat" → gateway provider (auth via OAuth bearer; no creds field).
  * - "codex" → ChatGPT subscription (auth in chatgpt-auth.json).
+ * - "antigravity" → Google Cloud Code gateway (auth in antigravity-auth.json).
  * - other ids → the models.json providers map.
  */
 export async function resolveProviderConfig(name: string): Promise<z.infer<typeof LlmProvider>> {
@@ -80,6 +81,9 @@ export async function resolveProviderConfig(name: string): Promise<z.infer<typeo
     }
     if (name === "codex") {
         return { flavor: "codex" };
+    }
+    if (name === "antigravity") {
+        return { flavor: "antigravity" };
     }
     const cfg = await readConfig();
     const entry = cfg?.providers[name];

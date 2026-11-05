@@ -2,10 +2,12 @@ import z from "zod";
 import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import { isSignedIn } from "../account/account.js";
 import { getChatGPTStatus } from "../auth/chatgpt-auth.js";
+import { getAntigravityStatus } from "../auth/antigravity-auth.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "./repo.js";
 import { listGatewayImageModels, listGatewayModels } from "./gateway.js";
 import { listCodexModels } from "./codex.js";
+import { listAntigravityModels } from "./antigravity.js";
 import { listImageModelsForProvider, listModelsForProvider } from "./models.js";
 import { getImageModelIds, listOnboardingModels } from "./models-dev.js";
 import { getDefaultModelAndProvider } from "./defaults.js";
@@ -56,6 +58,7 @@ export interface ModelCatalogResult {
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
     rowboat: "Rowboat",
     codex: "OpenAI Codex",
+    antigravity: "Antigravity",
     openai: "OpenAI",
     anthropic: "Anthropic",
     google: "Gemini",
@@ -105,7 +108,7 @@ type ProviderConfig = z.infer<typeof LlmProvider>;
 interface DiscoveredProvider {
     id: string;
     flavor: string;
-    /** Absent for rowboat/codex — their auth lives outside models.json. */
+    /** Absent for rowboat/codex/antigravity — their auth lives outside models.json. */
     config?: ProviderConfig;
 }
 
@@ -136,6 +139,12 @@ async function discoverProviders(): Promise<DiscoveredProvider[]> {
         if (chatgpt.signedIn) discovered.push({ id: "codex", flavor: "codex" });
     } catch {
         // ChatGPT status failures must never break the main list.
+    }
+    try {
+        const antigravity = await getAntigravityStatus();
+        if (antigravity.signedIn) discovered.push({ id: "antigravity", flavor: "antigravity" });
+    } catch {
+        // Antigravity status failures must never break the main list.
     }
 
     const cfg = await readModelConfig();
@@ -176,6 +185,9 @@ async function fetchProviderEntry(
             models = result.providers[0]?.models ?? [];
         } else if (provider.id === "codex") {
             const result = await listCodexModels();
+            models = result.providers[0]?.models ?? [];
+        } else if (provider.id === "antigravity") {
+            const result = await listAntigravityModels();
             models = result.providers[0]?.models ?? [];
         } else if (MODELS_DEV_FLAVORS.has(provider.flavor) && (modelsDevByFlavor.get(provider.flavor)?.length ?? 0) > 0) {
             models = modelsDevByFlavor.get(provider.flavor) ?? [];
