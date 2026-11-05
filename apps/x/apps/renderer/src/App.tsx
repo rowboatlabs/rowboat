@@ -7367,12 +7367,7 @@ function App() {
               area={inRowboats ? 'rowboats' : 'assistant'}
               onOpenRowboats={() => { void openSpaces() }}
               onOpenAssistant={openAssistantArea}
-              onOpenEmail={() => openEmailView()}
-              onOpenMeetings={openMeetingsView}
-              onOpenBgTasks={sidebarNavProps.onOpenBgTasks}
-              onOpenApps={openAppsGrid}
               onStartTour={() => setTourActive(true)}
-              assistantSidebarVisible={assistantSidebarVisible}
               meetingRecordingState={meetingTranscription.state}
             />
             <SidebarInset

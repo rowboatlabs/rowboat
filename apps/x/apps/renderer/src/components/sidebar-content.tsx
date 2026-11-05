@@ -864,7 +864,9 @@ export function SidebarContentPanel({
           </AlertDialogContent>
         </AlertDialog>
       </SidebarContent>
-      {/* First-time-action credit rewards (feature-flagged, signed-in only) */}
+      {/* First-time-action credit rewards (feature-flagged, signed-in only).
+          Only here: floated beside the rail it covered the Spaces composer
+          (2026-11-05, #1299 review), and its tasks are the Assistant's. */}
       <SidebarCreditRewards
         onOpenEmail={onOpenEmail}
         onOpenMeetings={onOpenMeetings}

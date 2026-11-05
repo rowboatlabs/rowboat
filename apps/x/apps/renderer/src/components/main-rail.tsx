@@ -22,7 +22,6 @@ import { SHORTCUTS } from '@/lib/shortcuts'
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { ProfileSettings } from "@/components/spaces/profile-settings"
 import { SettingsDialog } from "@/components/settings-dialog"
-import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import { useSpacesUnreadCounts } from "@/hooks/use-space-chat"
 import { MascotFaceIcon } from "@/components/talking-head"
@@ -268,13 +267,7 @@ export type MainRailProps = {
   area: RailArea
   onOpenRowboats: () => void
   onOpenAssistant: () => void
-  onOpenEmail?: () => void
-  onOpenMeetings?: () => void
-  onOpenBgTasks?: () => void
-  onOpenApps?: () => void
   onStartTour?: () => void
-  /** The Assistant sidebar is showing and carries its own credit rewards. */
-  assistantSidebarVisible?: boolean
   /** Live meeting recording state: it must stay visible from Rowboats too. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
 }
@@ -297,12 +290,7 @@ export function MainRail({
   area,
   onOpenRowboats,
   onOpenAssistant,
-  onOpenEmail,
-  onOpenMeetings,
-  onOpenBgTasks,
-  onOpenApps,
   onStartTour,
-  assistantSidebarVisible = false,
   meetingRecordingState = 'idle',
 }: MainRailProps) {
   const [profileSettingsOpen, setProfileSettingsOpen] = useState(false)
@@ -643,20 +631,6 @@ export function MainRail({
           </Popover>
         </div>
       </nav>
-
-      {/* First-time-action credit rewards (feature-flagged, signed-in only).
-          The Assistant sidebar carries its own copy while it shows. */}
-      {!assistantSidebarVisible && (
-        <div className="titlebar-no-drag fixed bottom-2 z-30 w-60" style={{ left: DOCK_GUTTER_PX }}>
-          <SidebarCreditRewards
-            onOpenEmail={onOpenEmail}
-            onOpenMeetings={onOpenMeetings}
-            onOpenAgents={onOpenBgTasks}
-            onOpenApps={onOpenApps}
-            onConnectAccounts={() => setConnectionsSettingsOpen(true)}
-          />
-        </div>
-      )}
 
       {profileSettingsOpen && <ProfileSettings onClose={() => setProfileSettingsOpen(false)} />}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
