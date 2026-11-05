@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
+import { DEVICE_NAME } from "@/lib/shortcuts"
 
 type ConnectionInfo = {
   mode: "in-process" | "child" | "remote"
@@ -65,7 +66,7 @@ export function RemoteServerSettings({ dialogOpen }: { dialogOpen: boolean }) {
     try {
       const result = await window.ipc.invoke("server:disconnectRemote", null)
       if (result.success) {
-        toast.success("Back to this Mac — reloading…")
+        toast.success(`Back to this ${DEVICE_NAME} — reloading…`)
       } else {
         toast.error(result.error ?? "Could not disconnect")
         setBusy(false)
@@ -98,10 +99,10 @@ export function RemoteServerSettings({ dialogOpen }: { dialogOpen: boolean }) {
         </div>
         <p className="text-xs text-muted-foreground">
           Your chats, notes, and connectors live on that machine. Disconnect to go back
-          to running everything on this Mac.
+          to running everything on this {DEVICE_NAME}.
         </p>
         <Button variant="outline" size="sm" disabled={busy} onClick={handleDisconnect}>
-          {busy ? "Disconnecting…" : "Disconnect — use this Mac"}
+          {busy ? "Disconnecting…" : `Disconnect — use this ${DEVICE_NAME}`}
         </Button>
       </div>
     )

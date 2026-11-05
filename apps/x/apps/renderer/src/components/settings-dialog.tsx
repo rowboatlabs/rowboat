@@ -43,6 +43,7 @@ import { ShortcutSettings } from "@/components/settings/shortcut-settings"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
 import { useSections, type Sections } from "@/hooks/use-sections"
+import { DEVICE_NAME } from "@/lib/shortcuts"
 
 export type ConfigTab = "account" | "connections" | "mobile" | "phone" | "models" | "mcp" | "security" | "code-mode" | "sections" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
 
@@ -77,7 +78,7 @@ const tabs: TabConfig[] = [
     id: "phone",
     label: "Phone app",
     icon: QrCode,
-    description: "Pair the Rowboat phone app with this Mac",
+    description: `Pair the Rowboat phone app with this ${DEVICE_NAME}`,
   },
   {
     id: "models",

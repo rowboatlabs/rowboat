@@ -3,6 +3,7 @@ import { Coffee } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { DEVICE_NAME } from "@/lib/shortcuts"
 
 /**
  * Caffeinate (keep-system-awake) toggle for the fixed top-left control
@@ -38,7 +39,7 @@ export function CaffeinateToggle() {
         setEnabled(res.enabled)
         // There is no time limit, so say so at the moment of the click —
         // the amber icon covers the rest of the time it is on.
-        if (res.enabled) toast.success("Caffeinate on — your Mac won't sleep until you turn this off.")
+        if (res.enabled) toast.success(`Caffeinate on — your ${DEVICE_NAME} won't sleep until you turn this off.`)
       })
       .catch(() => {
         toast.error(next ? "Failed to turn on Caffeinate" : "Failed to turn off Caffeinate")
@@ -52,7 +53,7 @@ export function CaffeinateToggle() {
           type="button"
           onClick={toggle}
           aria-pressed={enabled}
-          aria-label={enabled ? "Caffeinate is on — click to turn off" : "Caffeinate — keep your Mac awake"}
+          aria-label={enabled ? "Caffeinate is on — click to turn off" : `Caffeinate — keep your ${DEVICE_NAME} awake`}
           className={cn(
             "flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent",
             enabled ? "text-amber-500 hover:text-amber-600" : "text-muted-foreground hover:text-foreground",
@@ -63,10 +64,10 @@ export function CaffeinateToggle() {
       </TooltipTrigger>
       <TooltipContent side="bottom">
         {enabled ? (
-          "Caffeinate is on — your Mac won't sleep. Click to turn off."
+          `Caffeinate is on — your ${DEVICE_NAME} won't sleep. Click to turn off.`
         ) : (
           <>
-            <p>Keep your Mac awake</p>
+            <p>Keep your {DEVICE_NAME} awake</p>
             {/* The tooltip is dark, so "muted" here is the light text dimmed. */}
             <p className="text-background/70">Useful while a long task or code session runs.</p>
           </>

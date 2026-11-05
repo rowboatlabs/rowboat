@@ -5,6 +5,10 @@
 
 export const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
+/** What to call this computer in copy: "Mac" on macOS, "system" on Linux
+ *  and Windows (2026-11-05, #1299 review). */
+export const DEVICE_NAME = IS_MAC ? 'Mac' : 'system'
+
 /** "mod" is ⌘ on macOS and Ctrl elsewhere. */
 export type ShortcutKeys = readonly string[]
 

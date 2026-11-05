@@ -6,6 +6,7 @@ import { Copy, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
+import { DEVICE_NAME } from "@/lib/shortcuts"
 
 type PairingInfo = {
   running: boolean
@@ -91,7 +92,7 @@ export function PhonePairingSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="min-w-0">
           <div className="text-sm font-medium">Allow connections from your network</div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            Lets your phone reach this Mac over Wi-Fi or Tailscale. Anyone with the
+            Lets your phone reach this {DEVICE_NAME} over Wi-Fi or Tailscale. Anyone with the
             pairing code below can read your notes and chat as you — only turn this
             on for networks you trust.
           </div>
