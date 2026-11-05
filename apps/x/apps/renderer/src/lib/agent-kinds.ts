@@ -58,6 +58,8 @@ export const KINDS: Record<string, { label: string; logo?: Logo; bot?: boolean }
     posthog: { label: 'PostHog', bot: true },
     cal: { label: 'Cal.com', bot: true },
     attio: { label: 'Attio', bot: true },
+    // xAI's Grok Bot (2026-11-05): no official mark we may use yet, so the generic one.
+    'grok-bot': { label: 'Grok Bot' },
     custom: { label: 'Agent' },
     // Ro (Harbor spec §8 Jev, 2026-10-07): the agent Harbor itself is, run on
     // TypeSafe's Jev through Rowboat's OpenRouter key. People meet it as Ro,
@@ -552,6 +554,46 @@ function maritimeSetup({ kind }: SetupContext): SetupRoute[] {
     ]
 }
 
+// Grok Bot (2026-11-05, Harbor spec §8 Grok Bot): xAI offers no API to call it, so Harbor wakes
+// a webhook routine of the owner's in Grok Bot with each mention, and Grok Bot answers through our
+// MCP server on the agent's key, as Ando connects it. The routine comes first (its address and key
+// are the credential); the MCP server and the routine's instructions come after, with the new key.
+const GROK_BOT_ROUTINE = [
+    'This routine is woken by Rowboat, our team chat, when someone mentions you there.',
+    'The webhook payload\'s "prompt" is the request, with the thread and how to behave in Rowboat: do what it says, using the Rowboat tools.',
+    'Read more of the thread with read_thread when you need it.',
+    'When you are done, post your answer once, as a reply in the thread, with post_message (spaceId and threadRootId are in the payload).',
+    'Always post a reply, even to say you could not do it: Rowboat shows the request as running until you do.',
+].join(' ')
+
+function grokBotSetup({ orgUrl, agentKey }: SetupContext): SetupRoute[] {
+    return [
+        {
+            id: 'grok-bot',
+            label: 'Grok Bot',
+            steps: [
+                {
+                    title: 'Give it the Rowboat tools',
+                    note: 'In Grok Bot, Connect apps → add a custom MCP server with this URL and header. It acts as this agent: it reads and posts in Rowboat through it.',
+                    values: [
+                        { label: 'MCP URL', text: `${orgUrl}/mcp` },
+                        { label: 'Authorization header', text: `Bearer ${agentKey}`, secret: true },
+                    ],
+                },
+                {
+                    title: 'Give the routine its instructions',
+                    note: 'Open the webhook routine whose address you pasted, and make this its prompt. Approve the Rowboat tools when Grok Bot asks, so it can reply without you.',
+                    code: { caption: 'Routine prompt', text: GROK_BOT_ROUTINE, copyLabel: 'Copy the prompt' },
+                },
+                {
+                    title: 'Mention it',
+                    note: 'Rowboat sends the mention to the routine and shows it running until Grok Bot posts its reply in the thread. Nothing after 25 minutes fails the request; the routine’s Run history in Grok Bot says why.',
+                },
+            ],
+        },
+    ]
+}
+
 export const AGENT_SETUPS: readonly AgentSetup[] = [
     {
         id: 'local',
@@ -642,6 +684,21 @@ export const AGENT_SETUPS: readonly AgentSetup[] = [
         },
         docsUrl: 'https://www.conductor.build/docs/api',
         setup: conductorSetup,
+    },
+    {
+        id: 'grok-bot',
+        label: 'Grok Bot',
+        description: 'xAI’s Grok Bot, woken by a webhook routine on your Grok Bot account',
+        connection: 'grok-bot',
+        kinds: ['grok-bot'],
+        defaultName: 'Grok',
+        credential: {
+            label: 'Routine webhook',
+            placeholder: 'https://… (POST to) followed by the key, separated by a space',
+            note: 'In Grok Bot, make a routine with a Webhook trigger, then paste its POST to address and key from the routine’s Webhook section. You give the routine its instructions next. Harbor keeps them sealed.',
+        },
+        docsUrl: 'https://x.ai/bot/guides/grok-bot-101',
+        setup: grokBotSetup,
     },
     {
         id: 'posthog',
