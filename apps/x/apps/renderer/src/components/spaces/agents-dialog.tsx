@@ -614,7 +614,10 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     return (
         <Dialog open={open} onOpenChange={value => value ? onOpenChange(true) : leave(() => onOpenChange(false))}>
             {/* One column that may shrink: long setup lines wrap inside it instead of widening the dialog. */}
-            <DialogContent className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'agent' ? 'sm:max-w-3xl' : screen.name === 'connect' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
+            <DialogContent onEscapeKeyDown={event => {
+                // Radix handles Escape during document capture, before the input can cancel it.
+                if (event.target instanceof Element && event.target.hasAttribute('data-file-directory-input')) event.preventDefault()
+            }} className={cn('grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0', screen.name === 'agent' ? 'sm:max-w-3xl' : screen.name === 'connect' ? 'sm:max-w-2xl' : 'sm:max-w-xl')}>
                 <AlertDialog open={pendingLeave !== null} onOpenChange={value => { if (!value) setPendingLeave(null) }}>
                     <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Discard unsaved file changes?</AlertDialogTitle><AlertDialogDescription>Your edits have not been saved to the agent.</AlertDialogDescription></AlertDialogHeader>
                         <AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction onClick={() => { const action = pendingLeave; setPendingLeave(null); setFilesDirty(false); action?.() }}>Discard changes</AlertDialogAction></AlertDialogFooter>

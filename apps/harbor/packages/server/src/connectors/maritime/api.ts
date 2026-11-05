@@ -114,8 +114,9 @@ export interface MaritimeApi {
   /** A retained execution: `running` with no output yet, or its end state with exit code and output. */
   execution(agentId: string, executionId: string): Promise<Execution>;
   cancelExecution(agentId: string, executionId: string): Promise<Execution>;
+  /** Upload raw bytes and return the actual in-container path (the platform may map the directory). */
+  uploadFile(agentId: string, directory: string, name: string, bytes: Uint8Array): Promise<string>;
   /** Write a UTF-8 text file on the agent's volume, creating or replacing it. Wakes a sleeping agent. */
-  uploadFile(agentId: string, directory: string, name: string, bytes: Uint8Array): Promise<void>;
   writeFile(agentId: string, path: string, content: string): Promise<void>;
   /** Read a file on the agent as text; undefined when there is no such file. */
   downloadFile(agentId: string, path: string): Promise<Uint8Array | undefined>;
@@ -293,7 +294,9 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
       const form = new FormData();
       form.set('dest_dir', directory);
       form.set('file', new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
-      await call<unknown>(`/api/agents/${id(agentId)}/files/upload`, { method: 'POST', form, timeoutMs: 120_000 });
+      const result = await call<{ path: string }>(`/api/agents/${id(agentId)}/files/upload`, { method: 'POST', form, timeoutMs: 120_000 });
+      if (typeof result.path !== 'string' || !result.path.startsWith('/') || result.path.includes('\0')) throw new MaritimeError(502, undefined, 'Maritime did not return the uploaded file path');
+      return result.path;
     },
     async writeFile(agentId, path, content) {
       await call<unknown>(`/api/agents/${id(agentId)}/files/write`, { method: 'PUT', body: { path, content }, timeoutMs: 60_000 });

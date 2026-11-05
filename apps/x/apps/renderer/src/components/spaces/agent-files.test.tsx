@@ -136,3 +136,22 @@ it('guards unsaved edits when changing files, navigating, or closing the editor'
     fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }))
     expect(screen.queryByLabelText('File content')).not.toBeInTheDocument()
 })
+
+
+it('locks the editor while navigation is pending and restores it if navigation fails', async () => {
+    await mount()
+    fireEvent.click(screen.getByRole('button', { name: 'file2.txt' }))
+    await screen.findByLabelText('File content')
+    let reject!: (error: Error) => void
+    const normal = invoke.getMockImplementation()!
+    invoke.mockImplementation((channel, args) => channel === 'spaces:listHostingFiles' && args.path === '/'
+        ? new Promise((_resolve, fail) => { reject = fail }) : normal(channel, args))
+    fireEvent.click(screen.getByRole('button', { name: 'Up' }))
+    expect(screen.getByLabelText('File content')).toBeDisabled()
+    await act(async () => reject(new Error('Directory unavailable')))
+    expect(screen.getByLabelText('File content')).toBeEnabled()
+    expect(screen.getByLabelText('File content')).toHaveValue('original')
+    fireEvent.change(screen.getByLabelText('File content'), { target: { value: 'unsaved work' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Up' }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('Discard unsaved changes?')
+})

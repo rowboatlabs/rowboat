@@ -488,6 +488,21 @@ describe('managed Maritime agents', () => {
     await expect(org.harbor.service.uploadHostingFile({ memberId: 'ramnique' }, agent.id, { directory, name: 'oversized.zip' }, async () => new Uint8Array(100_000_001))).rejects.toMatchObject({ code: 'payload_too_large' });
   });
 
+  it('uploads to Hermes home through the supported staging directory', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Hermes uploads', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const directory = '/opt/data';
+    const bytes = new Uint8Array([0, 255, 65]);
+    const response = await fetch(`${org.harbor.url}/v1/agents/${agent.id}/hosting/files/upload?${new URLSearchParams({ directory, name: 'hermes.bin' })}`, {
+      method: 'PUT', headers: { authorization: 'Bearer dev-ramnique' }, body: bytes,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ path: '/opt/data/hermes.bin', size: 3 });
+    expect(fake.uploads.get('/opt/data/hermes.bin')).toEqual(bytes);
+    expect([...fake.files.keys()].some(path => path.startsWith('/data/.rowboat-upload-'))).toBe(false);
+  });
+
   // The owner's ChatGPT sign-in (2026-10-30): made from the Terminal, found when asked, and the agent runs on it.
   it('finds a ChatGPT sign-in on a Codex when asked, runs the agent on it from then on, and signs it out again', async () => {
     const me = org.as('dev-ramnique');

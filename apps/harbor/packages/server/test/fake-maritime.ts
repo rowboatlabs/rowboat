@@ -313,6 +313,7 @@ export class FakeMaritime {
       const file = form?.get('file');
       const directory = form?.get('dest_dir');
       if (!(file instanceof File) || typeof directory !== 'string') return send(400, { detail: 'file and dest_dir required' });
+      if (directory !== '/data' && !directory.startsWith('/data/')) return send(400, { detail: 'dest_dir must be under /data' });
       const path = `${directory.replace(/\/$/, '')}/${file.name}`;
       const bytes = new Uint8Array(await file.arrayBuffer());
       this.uploads.set(path, bytes);
@@ -351,6 +352,7 @@ export class FakeMaritime {
     }
     if (req.method === 'DELETE' && rest.startsWith('files/delete')) {
       const path = url.searchParams.get('path') ?? '';
+      this.uploads.delete(path);
       if (!this.files.delete(path) && !this.dirs.delete(path)) return send(404, { detail: 'File not found' });
       return send(200, { ok: true });
     }
@@ -445,6 +447,18 @@ export class FakeMaritime {
         generation: 0,
       };
       this.executions.set(execution.executionId, execution);
+      if (Array.isArray(command) && command[0] === 'python3' && String(command[2]).includes('os.link(temporary, target)')) {
+        const source = String(command[3]);
+        const target = String(command[4]);
+        const bytes = this.uploads.get(source);
+        const exists = this.files.has(target) || this.dirs.has(target);
+        if (bytes && !exists) {
+          this.uploads.set(target, bytes);
+          this.files.set(target, Buffer.from(bytes).toString('latin1'));
+        }
+        Object.assign(execution, { status: 'completed', exitCode: exists ? 17 : bytes ? 0 : 1 });
+        return send(200, { executionId: execution.executionId, status: execution.status, exitCode: execution.exitCode });
+      }
       if (Array.isArray(command) && command[0] === 'python3' && String(command[2]).includes('os.O_EXCL')) {
         const path = String(command[3]);
         const exists = this.files.has(path) || this.dirs.has(path);

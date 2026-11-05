@@ -1,3 +1,4 @@
+import deployment from '../../../vercel.json'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CommandsScreen, FilesScreen } from './agent-hosting'
@@ -155,4 +156,12 @@ it.each([
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
     expect(await screen.findByRole('status')).toHaveTextContent(message)
     expect(screen.getByLabelText('Command output')).toHaveTextContent('Partial output')
+})
+
+
+it('allows blob PDF frames in the deployed web policy without allowing remote frames', () => {
+    const policy = deployment.headers.flatMap(rule => rule.headers).find(header => header.key === 'Content-Security-Policy')!.value
+    const frames = policy.split(';').map(part => part.trim()).find(part => part.startsWith('frame-src '))
+    expect(frames).toBe('frame-src blob:')
+    expect(policy).toContain("object-src 'none'")
 })

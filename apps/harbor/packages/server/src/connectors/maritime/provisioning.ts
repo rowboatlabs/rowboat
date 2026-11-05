@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { HostingEnvVar, HostingFileEntry, HostingLogLine, HostingSkill, HostingTrigger } from '@rowboat/spaces-protocol';
 import { PlatformRefusal, type HostingOps, type HostingProvider, type ProvisionInput } from '../../core/hosting.js';
 import { MARITIME_API, MaritimeError, maritimeApi, type CreateAgentInput, type Execution, type MaritimeApi } from './api.js';
@@ -213,7 +214,38 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
         const last = logs.at(-1);
         return { logs, ...(logs.length >= opts.limit && last ? { nextBefore: last.id || last.timestamp } : {}) };
       }),
-    uploadFile: (directory, name, bytes) => refusing(() => api.uploadFile(agentId, directory, name, bytes)),
+    // Stage through Maritime's supported /data upload path, then publish exclusively
+    // on the destination filesystem (including Hermes's /opt/data, 2026-11-05).
+    uploadFile: (directory, name, bytes) => refusing(async () => {
+      const stagingName = `.rowboat-upload-${randomUUID()}`;
+      let source = `/data/${stagingName}`;
+      const target = `${directory.replace(/\/+$/, '')}/${name}`;
+      const script = [
+        'import os, shutil, sys, tempfile',
+        'source, target = sys.argv[1:]',
+        'temporary = None',
+        'try:',
+        ' fd, temporary = tempfile.mkstemp(prefix=".rowboat-upload-", dir=os.path.dirname(target))',
+        ' with os.fdopen(fd, "wb") as output, open(source, "rb") as input:',
+        '  shutil.copyfileobj(input, output)',
+        '  output.flush()',
+        '  os.fchmod(output.fileno(), 0o644)',
+        ' os.link(temporary, target)',
+        'except FileExistsError:',
+        ' sys.exit(17)',
+        'finally:',
+        ' if temporary is not None: os.unlink(temporary)',
+      ].join('\n');
+      try {
+        source = await api.uploadFile(agentId, '/data', stagingName, bytes);
+        const result = await api.exec(agentId, ['python3', '-c', script, source, target], { detached: false, timeoutSeconds: 60 });
+        if (result.exitCode === 17) throw new PlatformRefusal('A file or folder with this name already exists. Rename your file before uploading.');
+        if (result.status !== 'completed' || result.exitCode !== 0) throw new PlatformRefusal('Could not finish the upload. Refresh the directory before retrying.');
+      } finally {
+        // Cleanup must not hide the upload's result if the VM becomes unreachable.
+        await api.deleteFile(agentId, source).catch(() => undefined);
+      }
+    }),
     files: (path) => refusing(async () => shapeFiles(await api.listFiles(agentId, path), path)),
     downloadFile: (path) => refusing(() => api.downloadFile(agentId, path)),
     readFile: (path) => refusing(() => api.readFile(agentId, path)),

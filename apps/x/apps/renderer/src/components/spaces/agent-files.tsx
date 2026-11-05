@@ -295,7 +295,7 @@ export function FilesScreen({ orgId, agentId, home, onDirtyChange }: { orgId: st
                 {path !== '/' && <Button size="xs" variant="ghost" disabled={busy} onClick={() => navigate(parent)}>Up</Button>}
             </nav>
             {editingPath && <form className="flex items-center gap-1.5" onSubmit={event => { event.preventDefault(); if (!busy) navigate(directoryDraft) }}>
-                <Input value={directoryDraft} disabled={busy} onChange={event => setDirectoryDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingPath(false) } }} aria-label="Directory" className="h-8 min-w-0 flex-1 font-mono text-xs" autoFocus spellCheck={false} />
+                <Input data-file-directory-input value={directoryDraft} disabled={busy} onChange={event => setDirectoryDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingPath(false) } }} aria-label="Directory" className="h-8 min-w-0 flex-1 font-mono text-xs" autoFocus spellCheck={false} />
                 <Button type="submit" size="sm" variant="outline" disabled={busy || !directoryDraft.startsWith('/')}>Go</Button>
             </form>}
             <div className="flex items-center gap-2">
@@ -379,7 +379,7 @@ export function FilesScreen({ orgId, agentId, home, onDirtyChange }: { orgId: st
                             <Button size="xs" variant="ghost" onClick={() => guard(() => setOpen(null))}>Close</Button>
                         </div>
                     </div>
-                    <Textarea key={open.path} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="File content" className="min-h-40 rounded-none border-0 font-mono text-xs focus-visible:ring-0" spellCheck={false} />
+                    <Textarea key={open.path} disabled={busy} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="File content" className="min-h-40 rounded-none border-0 font-mono text-xs focus-visible:ring-0" spellCheck={false} />
                 </div>
             )}
         </div>
