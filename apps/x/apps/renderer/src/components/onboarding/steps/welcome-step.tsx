@@ -38,7 +38,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3.5 py-1.5 text-xs font-medium text-muted-foreground mb-6"
       >
         <span className="size-1.5 rounded-full bg-[var(--rowboat-success)] animate-pulse" />
-        Spin up a crew of agents that works alongside you and your team
+        Your team of AI coworkers
       </motion.div>
       <motion.p
         initial={{ opacity: 0 }}
@@ -46,7 +46,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         transition={{ delay: 0.3 }}
         className="text-base text-muted-foreground leading-relaxed max-w-sm mb-8"
       >
-        Bring in Rowboat, Claude Code, Codex and more. They join your conversations, pick up tasks and share files, right next to your teammates.
+        Spin up agents like Hermes, Claude Code and Codex, give them roles, add them to a group chat, and watch them collaborate on your shared goals.
       </motion.p>
 
       <motion.div
