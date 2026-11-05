@@ -44,7 +44,7 @@ import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { FindBanner } from '@/components/spaces/find-banner'
 import { sessionCommand } from '@/components/spaces/session-command'
-import { refreshMySessions, useMySessions } from '@/lib/spaces-sessions'
+import { refreshMyThreads, sessionsOf, useMyThreads } from '@/lib/spaces-my-threads'
 import { runFind, searchInstead } from '@/lib/spaces-find'
 import { toast } from '@/lib/toast'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
@@ -717,13 +717,13 @@ export function GeneralStream({
     const openPollRef = useRef<(() => void) | null>(null)
     // /session (2026-11-05): a new session is a root with its title, marked
     // in the same post, opened at once so the request goes in its thread.
-    const { sessions: mySessions } = useMySessions(org.id)
+    const mySessions = sessionsOf(useMyThreads(org.id).threads)
     const startSession = async (title: string) => {
         if (!title) return
         try {
             const res = await invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, body: title, session: { title } })
             onOpenThread(res.message.id)
-            void refreshMySessions(org.id)
+            void refreshMyThreads(org.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not start the session', 'error')
         }

@@ -69,8 +69,8 @@ import type {
   Space,
   Topic,
   TopicListing,
-  SessionListing,
-  SessionStatus,
+  ThreadListing,
+  ThreadStatus,
   UnreadSnapshot,
   UnreadSpace,
   ActivityItem,
@@ -153,8 +153,8 @@ export type {
   Space,
   Topic,
   TopicListing,
-  SessionListing,
-  SessionStatus,
+  ThreadListing,
+  ThreadStatus,
 };
 
 /** The unread snapshot (read state, 2026-09-09): org-owned cursors in offsets. */

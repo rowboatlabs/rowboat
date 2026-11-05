@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { mcpTools, type Member, type Message, type SessionListing } from '@rowboat/spaces-protocol';
+import { mcpTools, type Member, type Message, type ThreadListing } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { agentClient, restClient, startTestHarbor } from './helpers.js';
 
 // Sessions (2026-11-05, "coding session: threads" in Main): a person marks a
-// thread as short-lived work, and each member's open sessions are one list
-// across their spaces with where each one stands for them. Ending one is
-// archiving its thread. A discussion is never a session.
+// thread as short-lived work. Each member's threads, sessions among them, are
+// one list across their spaces with where each stands for them. Ending a
+// session is archiving its thread. A discussion is never a session.
 
 let harbor: RunningHarbor;
 let spaceId: string;
@@ -25,11 +25,12 @@ const post = async (body: string, extra: Record<string, unknown> = {}, client = 
 };
 const setSession = (rootId: string, session: { title: string } | null, client = ram()) =>
   client.post(`/v1/spaces/${spaceId}/threads/${rootId}/session`, { session, actingMode: 'direct' });
-const sessions = async (client = ram()) => {
-  const res = await client.get('/v1/sessions');
+const threads = async (client = ram(), archived = false) => {
+  const res = await client.get(`/v1/threads${archived ? '?archived=true' : ''}`);
   expect(res.status).toBe(200);
-  return res.body.sessions as SessionListing[];
+  return res.body.threads as ThreadListing[];
 };
+const ids = async (client = ram(), archived = false) => (await threads(client, archived)).map((t) => t.root.id);
 const sessionEvents = async () =>
   (await harbor.store.listEventsAfter(spaceId, 0)).filter((e) => e.event.type === 'thread_session').map((e) => e.event);
 
@@ -125,36 +126,50 @@ describe('marking a thread', () => {
   });
 });
 
-describe('my sessions', () => {
-  it('lists the sessions I started or follow, open ones only, newest activity first', async () => {
+describe('my threads', () => {
+  it('lists the threads I started or follow across my spaces, newest activity first', async () => {
     const { message: mine } = await post('mine', { session: { title: 'mine' } });
     const { message: theirs } = await post('theirs', { session: { title: 'theirs' } }, gagan());
-    const { message: joined } = await post('joined', { session: { title: 'joined' } }, gagan());
+    const { message: joined } = await post('a plain thread', {}, gagan());
     await post('I am in', { threadRoot: joined.id });
+    const { message: lonely } = await post('a root nobody answered');
 
-    const listed = (await sessions()).map((s) => s.root.id);
-    expect(listed).toContain(mine.id);
-    expect(listed).toContain(joined.id);
+    const listed = await ids();
+    expect(listed).toContain(mine.id); // a session is a thread from its first message
+    expect(listed).toContain(joined.id); // replying follows
     expect(listed).not.toContain(theirs.id);
+    expect(listed).not.toContain(lonely.id);
     expect(listed.indexOf(joined.id)).toBeLessThan(listed.indexOf(mine.id));
-    expect((await sessions()).find((s) => s.root.id === mine.id)).toMatchObject({ spaceId, spaceName: 'Launch', status: 'idle' });
+    expect((await threads()).find((t) => t.root.id === mine.id)).toMatchObject({ spaceId, spaceName: 'Launch', status: 'idle', root: { session: { title: 'mine' } } });
+    expect((await threads()).find((t) => t.root.id === joined.id)?.root.session).toBeUndefined();
 
-    // Ending it is archiving its thread; a reply brings it back.
+    // Ending a session is archiving its thread: it moves to the archived list, and a reply brings it back.
     await ram().post(`/v1/spaces/${spaceId}/threads/${mine.id}/archive`, { archived: true, actingMode: 'direct' });
-    expect((await sessions()).map((s) => s.root.id)).not.toContain(mine.id);
+    expect(await ids()).not.toContain(mine.id);
+    expect(await ids(ram(), true)).toContain(mine.id);
     await post('one more thing', { threadRoot: mine.id });
-    expect((await sessions()).map((s) => s.root.id)).toContain(mine.id);
+    expect(await ids()).toContain(mine.id);
+  });
+
+  it('carries a discussion with its topic, archived on the topic', async () => {
+    const { message: root } = await post('pricing');
+    await post('thoughts', { threadRoot: root.id });
+    const topic = (await ram().post(`/v1/spaces/${spaceId}/topics`, { rootMessageId: root.id, title: 'Pricing page', actingMode: 'direct' })).body.topic;
+    expect((await threads()).find((t) => t.root.id === root.id)?.topic).toMatchObject({ id: topic.id, title: 'Pricing page' });
+    await ram().post(`/v1/spaces/${spaceId}/topics/${topic.id}`, { action: 'archive', actingMode: 'direct' });
+    expect(await ids()).not.toContain(root.id);
+    expect(await ids(ram(), true)).toContain(root.id);
   });
 
   it('spans every space I am in', async () => {
     const { message } = await post('design pass', { session: { title: 'design pass' } }, ram(), otherSpaceId);
-    expect((await sessions()).find((s) => s.root.id === message.id)).toMatchObject({ spaceId: otherSpaceId, spaceName: 'Design' });
-    expect((await sessions(gagan())).map((s) => s.root.id)).not.toContain(message.id);
+    expect((await threads()).find((t) => t.root.id === message.id)).toMatchObject({ spaceId: otherSpaceId, spaceName: 'Design' });
+    expect(await ids(gagan())).not.toContain(message.id);
   });
 
   it('says where each stands: working, needs you, idle', async () => {
     const { message: root, invocations } = await post(`${mention(hermes.member)} fix the rail`, { session: { title: 'fix the rail' } });
-    const status = async () => (await sessions()).find((s) => s.root.id === root.id)?.status;
+    const status = async () => (await threads()).find((t) => t.root.id === root.id)?.status;
     expect(await status()).toBe('working');
     const id = invocations[0]!.id;
     const connector = restClient(harbor, hermes.key);
@@ -167,7 +182,7 @@ describe('my sessions', () => {
     await post('on it', { threadRoot: root.id }, connector);
     expect(await status()).toBe('working');
     await connector.post(`/v1/agent/invocations/${id}/update`, { state: 'done' });
-    const listing = (await sessions()).find((s) => s.root.id === root.id)!;
+    const listing = (await threads()).find((t) => t.root.id === root.id)!;
     expect(listing).toMatchObject({ status: 'needs_you', unreadReplies: 1 });
     await ram().post(`/v1/spaces/${spaceId}/read`, { threadRootId: root.id, offset: listing.root.lastReplyOffset });
     expect(await status()).toBe('idle');
@@ -179,7 +194,7 @@ describe('the agent face', () => {
     const posted = await call<{ messageId: string }>('post_message', { spaceId, body: 'agent session', session: { title: 'agent session' } });
     const root = (await ram().get(`/v1/spaces/${spaceId}/threads/${posted.messageId}`)).body.root as Message;
     expect(root.session).toEqual({ title: 'agent session' });
-    expect((await call<{ sessions: SessionListing[] }>('list_my_sessions', {})).sessions.map((s) => s.root.id)).toContain(root.id);
+    expect((await call<{ threads: ThreadListing[] }>('list_my_threads', {})).threads.map((t) => t.root.id)).toContain(root.id);
     const retitled = await call<{ root: Message }>('set_session', { spaceId, rootMessageId: root.id, title: 'renamed' });
     expect(retitled.root.session).toEqual({ title: 'renamed' });
     expect((await sessionEvents()).at(-1)).toMatchObject({ by: { memberId: 'gagan', actingMode: 'agent' } });

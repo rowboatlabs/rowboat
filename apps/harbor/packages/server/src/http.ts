@@ -1079,7 +1079,10 @@ export function buildHttpApp(deps: {
   });
 
   app.get(routes.unread.path, async (c) => reply(c, routes.unread.response, await service.unread(actor(c))));
-  app.get(routes.mySessions.path, async (c) => reply(c, routes.mySessions.response, { sessions: await service.mySessions(actor(c)) }));
+  app.get(routes.myThreads.path, async (c) => {
+    const q = parseWith(routes.myThreads.query, { ...(c.req.query('archived') !== undefined ? { archived: c.req.query('archived') } : {}) });
+    return reply(c, routes.myThreads.response, { threads: await service.myThreads(actor(c), q) });
+  });
 
   app.get(routes.activity.path, async (c) => {
     const q = parseWith(routes.activity.query, {

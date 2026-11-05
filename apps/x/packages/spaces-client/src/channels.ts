@@ -32,7 +32,7 @@ export type HarborChannel =
   | 'spaces:createInvite' | 'spaces:resolveInvite' | 'spaces:acceptInvite'
   | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset' | 'spaces:deleteAsset' | 'spaces:restoreAsset'
   | 'spaces:readAsset' | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff'
-  | 'spaces:listTopics' | 'spaces:createTopic' | 'spaces:manageTopic' | 'spaces:archiveThread' | 'spaces:listArchivedThreads' | 'spaces:setSession' | 'spaces:mySessions' | 'spaces:search'
+  | 'spaces:listTopics' | 'spaces:createTopic' | 'spaces:manageTopic' | 'spaces:archiveThread' | 'spaces:listArchivedThreads' | 'spaces:setSession' | 'spaces:myThreads' | 'spaces:search'
   | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:readMessageSecret' | 'spaces:listThread' | 'spaces:postMessage'
   | 'spaces:reactToMessage' | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:listInvocations' | 'spaces:cancelInvocation' | 'spaces:getAgentCapabilities' | 'spaces:setAgentOptionDefaults'
@@ -301,7 +301,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit 
       root: await getClient(args.orgId).setSession(args.spaceId, args.rootMessageId, args.session),
     }),
 
-    'spaces:mySessions': async (args) => ({ sessions: await getClient(args.orgId).mySessions() }),
+    'spaces:myThreads': async (args) => ({ threads: await getClient(args.orgId).myThreads(args.archived === true) }),
 
     'spaces:search': async (args) =>
       getClient(args.orgId).search(args.spaceId, {

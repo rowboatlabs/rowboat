@@ -166,22 +166,24 @@ export type UnreadSpace = z.infer<typeof UnreadSpace>;
 export const UnreadSnapshot = z.object({ spaces: z.array(UnreadSpace) });
 
 /**
- * Where a session stands for the member asking (2026-11-05): `needs_you`
- * when an agent in it waits on a person or it has replies they haven't read,
+ * Where a thread stands for the member asking (2026-11-05): `needs_you` when
+ * an agent in it waits on a person or it has replies they haven't read,
  * `working` while an agent's turn is queued or running, else `idle`. A
  * waiting agent wins over a working one; unread replies only show as
  * `needs_you` once no agent is still working.
  */
-export const SessionStatus = z.enum(['needs_you', 'working', 'idle']);
-export type SessionStatus = z.infer<typeof SessionStatus>;
+export const ThreadStatus = z.enum(['needs_you', 'working', 'idle']);
+export type ThreadStatus = z.infer<typeof ThreadStatus>;
 
-/** One of the member's open sessions (mySessions): its root, where it lives, and where it stands. */
-export const SessionListing = z.object({
+/** One of the member's threads (myThreads): its root, its topic when named, where it lives, and where it stands. */
+export const ThreadListing = z.object({
   spaceId: SpaceId,
   spaceName: z.string(),
   spaceKind: SpaceKind,
   root: Message,
-  status: SessionStatus,
+  /** Present when the thread is a discussion. */
+  topic: Topic.optional(),
+  status: ThreadStatus,
   /** Replies past the member's thread mark, not their own. */
   unreadReplies: z.number().int().nonnegative(),
   /** Of those, the ones addressed to the member. */
@@ -189,7 +191,7 @@ export const SessionListing = z.object({
   /** The newest reply's time, else the root's. The list's order, newest first. */
   lastActivityAt: z.iso.datetime(),
 });
-export type SessionListing = z.infer<typeof SessionListing>;
+export type ThreadListing = z.infer<typeof ThreadListing>;
 export type UnreadSnapshot = z.infer<typeof UnreadSnapshot>;
 
 /**
@@ -1620,13 +1622,16 @@ export const routes = {
     response: z.object({ root: Message }),
   },
   /**
-   * The member's open sessions in every space they are in (2026-11-05): the
-   * ones they started or follow, not archived, newest activity first.
+   * The member's threads in every space they are in (2026-11-05, "coding
+   * session: threads" in Main): the ones they started (with replies, or a
+   * session) or follow, newest activity first, at most 200. Active by
+   * default; `archived=true` lists the archived and ended ones instead.
    */
-  mySessions: {
+  myThreads: {
     method: 'GET',
-    path: '/v1/sessions',
-    response: z.object({ sessions: z.array(SessionListing) }),
+    path: '/v1/threads',
+    query: z.object({ archived: z.enum(['true', 'false']).transform((v) => v === 'true').optional() }),
+    response: z.object({ threads: z.array(ThreadListing) }),
   },
   listArchivedThreads: {
     method: 'GET',

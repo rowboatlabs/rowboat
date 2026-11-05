@@ -62,7 +62,7 @@ import type {
   Routes,
   SearchKind,
   SearchResults,
-  SessionListing,
+  ThreadListing,
   Space,
   PlatformInstance,
   SuperAgent,
@@ -743,8 +743,8 @@ export class HarborService {
     return this.feed.setSession(ctx, spaceId, rootMessageId, input);
   }
 
-  mySessions(ctx: ActorCtx): Promise<SessionListing[]> {
-    return this.readState.mySessions(ctx);
+  myThreads(ctx: ActorCtx, opts: { archived?: boolean } = {}): Promise<ThreadListing[]> {
+    return this.readState.myThreads(ctx, opts);
   }
   search(
     ctx: ActorCtx,

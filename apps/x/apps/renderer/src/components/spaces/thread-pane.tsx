@@ -41,7 +41,7 @@ import { FindBanner } from '@/components/spaces/find-banner'
 import { toast as notify } from 'sonner'
 import { applyReaction, artifactsForThread, isContinuation, mergeMessages, sessionArchiveLabel, threadLabelOf, withArchived } from '@/lib/spaces-conventions'
 import { sessionCommand } from '@/components/spaces/session-command'
-import { refreshMySessions, useMySessions } from '@/lib/spaces-sessions'
+import { refreshMyThreads, sessionsOf, useMyThreads } from '@/lib/spaces-my-threads'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
@@ -895,7 +895,7 @@ export function ThreadPane({
             const res = await invokeSpace('spaces:archiveThread', { orgId: org.id, spaceId: space.id, rootMessageId, archived })
             setRoot(res.root)
             updateStreamMessage(org.id, space.id, res.root)
-            if (res.root.session) void refreshMySessions(org.id)
+            if (res.root.session) void refreshMyThreads(org.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not archive the thread', 'error')
         }
@@ -908,12 +908,12 @@ export function ThreadPane({
             const res = await invokeSpace('spaces:setSession', { orgId: org.id, spaceId: space.id, rootMessageId, session })
             setRoot(res.root)
             updateStreamMessage(org.id, space.id, res.root)
-            void refreshMySessions(org.id)
+            void refreshMyThreads(org.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not update the session', 'error')
         }
     }
-    const { sessions: mySessions } = useMySessions(org.id)
+    const mySessions = sessionsOf(useMyThreads(org.id).threads)
     const session = topic ? undefined : root?.session
 
     // The one file this discussion is about: picked from the space's live

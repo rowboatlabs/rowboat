@@ -8,12 +8,13 @@ import { useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 /** Stable space/people navigation. Space contents live in the top strip. */
-export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThread, onOpenActivity, activityActive = false, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, open, onTogglePin, peekRef, edgeless = false }: {
+export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, activityActive = false, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, open, onTogglePin, peekRef, edgeless = false }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
-    /** Opens a thread in any space of the org: the Sessions rows (2026-11-05). */
-    onOpenThread?: (orgId: string, spaceId: string, rootMessageId: string) => void
+    /** Your threads across the org (2026-11-05); absent = no row. */
+    onOpenThreads?: (orgId: string) => void
+    threadsActive?: boolean
     onOpenBrowse?: (orgId: string) => void
     browseActive?: boolean
     onOpenAgents?: (orgId: string) => void
@@ -40,7 +41,7 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThread, onOpenActiv
             {/* A column, so the navigation can pin its Invite row to the foot. */}
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2">
                 <ServerSpaceNavigation onOpenActivity={onOpenActivity} activityActive={activityActive} onOpenBrowse={onOpenBrowse} browseActive={browseActive}
-                    onOpenAgents={onOpenAgents} agentsActive={agentsActive} org={org} spaceId={spaceId} onOpenSpace={onOpenSpace} onOpenThread={onOpenThread} showDiscussions={false} />
+                    onOpenAgents={onOpenAgents} agentsActive={agentsActive} org={org} spaceId={spaceId} onOpenSpace={onOpenSpace} onOpenThreads={onOpenThreads} threadsActive={threadsActive} showDiscussions={false} />
             </div>
         </SpaceRailSections>}
     </SecondaryRail>

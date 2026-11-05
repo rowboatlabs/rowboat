@@ -1,8 +1,8 @@
 import { Plus } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import type { SlashChoice, SlashCommand } from '@/components/spaces/composer'
-import { SessionStatusDot } from '@/components/spaces/session-status'
-import { sessionStatusLabel } from '@/lib/spaces-sessions'
+import { ThreadStatusDot } from '@/components/spaces/session-status'
+import { threadStatusLabel } from '@/lib/spaces-my-threads'
 
 /** How many open sessions the picker lists under New. */
 const LISTED = 8
@@ -15,13 +15,13 @@ const LISTED = 8
  */
 export function sessionCommand({ spaceId, sessions, newLabel, fallbackTitle, onNew, onOpen }: {
     spaceId: string
-    sessions: readonly spaces.SessionListing[]
+    sessions: readonly spaces.ThreadListing[]
     /** The first row's words for a title: "New session: …", "Make this thread a session: …". */
     newLabel: (title: string) => string
     /** A title to use when none is typed; absent = one must be typed. */
     fallbackTitle?: string
     onNew: (title: string) => void | Promise<void>
-    onOpen: (session: spaces.SessionListing) => void
+    onOpen: (session: spaces.ThreadListing) => void
 }): SlashCommand {
     return {
         name: 'session',
@@ -32,7 +32,7 @@ export function sessionCommand({ spaceId, sessions, newLabel, fallbackTitle, onN
             const typed = args.trim()
             const title = typed || fallbackTitle || ''
             const query = typed.toLowerCase()
-            const here = (s: spaces.SessionListing) => (s.spaceId === spaceId ? 0 : 1)
+            const here = (s: spaces.ThreadListing) => (s.spaceId === spaceId ? 0 : 1)
             const listed = sessions
                 .filter((s) => !query || (s.root.session?.title ?? '').toLowerCase().includes(query))
                 .sort((a, b) => here(a) - here(b))
@@ -48,10 +48,10 @@ export function sessionCommand({ spaceId, sessions, newLabel, fallbackTitle, onN
                 key: s.root.id,
                 section: 'Your open sessions',
                 label: s.root.session?.title ?? 'Session',
-                detail: [s.spaceId === spaceId ? null : s.spaceName, sessionStatusLabel(s.status), s.unreadReplies > 0 ? `${s.unreadReplies} new` : null]
+                detail: [s.spaceId === spaceId ? null : s.spaceName, threadStatusLabel(s.status), s.unreadReplies > 0 ? `${s.unreadReplies} new` : null]
                     .filter(Boolean)
                     .join(' · '),
-                icon: <SessionStatusDot status={s.status} />,
+                icon: <ThreadStatusDot status={s.status} />,
                 run: () => onOpen(s),
             }))]
         },

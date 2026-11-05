@@ -1,4 +1,4 @@
-import type { ActivityKind, ActivityPage, SessionListing } from '@rowboat/spaces-protocol';
+import type { ActivityKind, ActivityPage, ThreadListing } from '@rowboat/spaces-protocol';
 import {
   routes,
   type AcceptInviteResult,
@@ -1059,9 +1059,9 @@ export class SpacesClient {
     ).root;
   }
 
-  /** The member's open sessions in every space they are in, newest activity first (api.ts mySessions). */
-  async mySessions(): Promise<SessionListing[]> {
-    return (await this.request('GET', routes.mySessions.path, routes.mySessions.response)).sessions;
+  /** The member's threads in every space they are in, newest activity first; archived ones with `archived` (api.ts myThreads). */
+  async myThreads(archived = false): Promise<ThreadListing[]> {
+    return (await this.request('GET', `${routes.myThreads.path}${archived ? '?archived=true' : ''}`, routes.myThreads.response)).threads;
   }
 
   async listArchivedThreads(spaceId: string): Promise<Message[]> {

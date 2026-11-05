@@ -524,8 +524,8 @@ async function dispatch(
       });
       return { root };
     }
-    case 'list_my_sessions':
-      return { sessions: await service.mySessions(ctx) };
+    case 'list_my_threads':
+      return { threads: await service.myThreads(ctx, { archived: (args as { archived?: boolean }).archived === true }) };
     // --- super agents (spec §4 Agent members, 2026-11-02) ----------------------
     case 'create_agent':
       return service.superAgentCreate(ctx, args as { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string });

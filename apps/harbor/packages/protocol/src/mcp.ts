@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MENTION_GRAMMAR } from './mentions.js';
-import { ActivityKind, NewPoll, SessionListing } from './api.js';
+import { ActivityKind, NewPoll, ThreadListing } from './api.js';
 import {
   Asset,
   ChangeSet,
@@ -616,13 +616,14 @@ export const setSession = tool({
   output: z.object({ root: Message }),
 });
 
-export const listMySessions = tool({
-  name: 'list_my_sessions',
+export const listMyThreads = tool({
+  name: 'list_my_threads',
   description:
-    "Your open sessions in every space you are in (the ones you started or follow), newest activity first, " +
-    'each with its status: needs_you, working or idle. Read one via read_thread.',
-  input: z.object({}),
-  output: z.object({ sessions: z.array(SessionListing) }),
+    'Your threads in every space you are in (the ones you started or follow), newest activity first, ' +
+    'each with its status (needs_you, working, idle); a session carries root.session, a discussion its topic. ' +
+    'archived: true lists the archived and ended ones. Read one via read_thread.',
+  input: z.object({ archived: z.boolean().optional() }),
+  output: z.object({ threads: z.array(ThreadListing) }),
 });
 
 export const listArchivedThreads = tool({
@@ -922,7 +923,7 @@ export const mcpTools = [
   archiveThread,
   listArchivedThreads,
   setSession,
-  listMySessions,
+  listMyThreads,
   createAsset,
   readAsset,
   proposeChange,
@@ -955,7 +956,7 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   searchSpace.name,
   listTopics.name,
   listArchivedThreads.name,
-  listMySessions.name,
+  listMyThreads.name,
   readAsset.name,
   assetHistory.name,
   diff.name,

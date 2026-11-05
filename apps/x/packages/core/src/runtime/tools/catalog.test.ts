@@ -262,7 +262,7 @@ const HISTORICAL_KEY_ORDER = [
     "archive_thread",
     "list_archived_threads",
     "set_session",
-    "list_my_sessions",
+    "list_my_threads",
     "create_asset",
     "read_asset",
     "propose_change",

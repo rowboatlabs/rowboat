@@ -12,12 +12,13 @@ export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
  */
 /**
  * The org-level surfaces that replace a space in the pane: Activity, Browse
- * spaces, and Agents (2026-10-21, every agent in the org).
+ * spaces, Agents (2026-10-21, every agent in the org), and Threads
+ * (2026-11-05, every thread you are in, sessions among them).
  */
-export type OrgView = 'activity' | 'browse' | 'agents'
+export type OrgView = 'activity' | 'browse' | 'agents' | 'threads'
 
 export function isOrgView(value: unknown): value is OrgView {
-    return value === 'activity' || value === 'browse' || value === 'agents'
+    return value === 'activity' || value === 'browse' || value === 'agents' || value === 'threads'
 }
 
 export type SpaceLocation = {

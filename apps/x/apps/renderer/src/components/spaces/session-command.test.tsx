@@ -5,7 +5,7 @@ import { sessionCommand } from './session-command'
 // /session (2026-11-05): New first and the default, then your open sessions,
 // this space's first, filtered by the words typed after the command.
 
-const listing = (id: string, spaceId: string, title: string, status: spaces.SessionStatus, unreadReplies = 0): spaces.SessionListing => ({
+const listing = (id: string, spaceId: string, title: string, status: spaces.ThreadStatus, unreadReplies = 0): spaces.ThreadListing => ({
     spaceId,
     spaceName: spaceId === 'here' ? 'Main' : 'Design',
     spaceKind: 'shared',

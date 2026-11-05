@@ -4484,15 +4484,16 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ threads: z.array(z.custom<SpacesTypes.Message>()) }),
   },
-  // Sessions (harbor setSession / mySessions, 2026-11-05): mark, retitle or
-  // unmark a thread (null), and the member's open sessions across the org.
+  // Sessions and your threads (harbor setSession / myThreads, 2026-11-05):
+  // mark, retitle or unmark a thread (null), and the member's threads across
+  // the org (active, or archived).
   'spaces:setSession': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), session: z.object({ title: z.string() }).nullable() }),
     res: z.object({ root: z.custom<SpacesTypes.Message>() }),
   },
-  'spaces:mySessions': {
-    req: z.object({ orgId: z.string() }),
-    res: z.object({ sessions: z.array(z.custom<SpacesTypes.SessionListing>()) }),
+  'spaces:myThreads': {
+    req: z.object({ orgId: z.string(), archived: z.boolean().optional() }),
+    res: z.object({ threads: z.array(z.custom<SpacesTypes.ThreadListing>()) }),
   },
   'spaces:manageTopic': {
     req: z.object({

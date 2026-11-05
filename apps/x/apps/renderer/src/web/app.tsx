@@ -179,6 +179,7 @@ export function WebApp({ signInError }: { signInError: string | null }) {
                                 onOpenActivity={(id) => go(id, { view: 'activity' })}
                                 onOpenBrowse={(id) => go(id, { view: 'browse' })}
                                 onOpenAgents={(id) => go(id, { view: 'agents' })}
+                                onOpenThreads={(id) => go(id, { view: 'threads' })}
                             />
                         </div>
                     </>
