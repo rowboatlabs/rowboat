@@ -8,7 +8,7 @@ import { sessionCommand } from './session-command'
 const listing = (id: string, spaceId: string, title: string, status: spaces.SessionStatus, unreadReplies = 0): spaces.SessionListing => ({
     spaceId,
     spaceName: spaceId === 'here' ? 'Main' : 'Design',
-    spaceKind: 'space',
+    spaceKind: 'shared',
     root: {
         id, spaceId, author: { memberId: 'me', actingMode: 'direct' }, body: title, postedAt: '2026-11-05T10:00:00Z', offset: 1,
         replyCount: 0, replyAuthors: [], reactions: [], mentions: [], mentionsHere: false, mentionsRowboat: false, session: { title },
