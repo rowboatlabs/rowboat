@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, SecretName, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, SecretName, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
   HostingConsole,
@@ -109,6 +109,12 @@ const NewMessage = z.object({
    * (outside a DM) cannot carry one. Names are unique. Immutable once posted.
    */
   secrets: z.array(NewMessageSecret).max(10).optional(),
+  /**
+   * Start a session with this root (2026-11-05, Message.session): `/session
+   * fix thread nav` posts the title as the body and marks it in one step. A
+   * reply cannot carry one.
+   */
+  session: SessionMark.optional(),
 });
 
 /**
@@ -158,6 +164,32 @@ export const UnreadSpace = z.object({
 export type UnreadSpace = z.infer<typeof UnreadSpace>;
 
 export const UnreadSnapshot = z.object({ spaces: z.array(UnreadSpace) });
+
+/**
+ * Where a session stands for the member asking (2026-11-05): `needs_you`
+ * when an agent in it waits on a person or it has replies they haven't read,
+ * `working` while an agent's turn is queued or running, else `idle`. A
+ * waiting agent wins over a working one; unread replies only show as
+ * `needs_you` once no agent is still working.
+ */
+export const SessionStatus = z.enum(['needs_you', 'working', 'idle']);
+export type SessionStatus = z.infer<typeof SessionStatus>;
+
+/** One of the member's open sessions (mySessions): its root, where it lives, and where it stands. */
+export const SessionListing = z.object({
+  spaceId: SpaceId,
+  spaceName: z.string(),
+  spaceKind: SpaceKind,
+  root: Message,
+  status: SessionStatus,
+  /** Replies past the member's thread mark, not their own. */
+  unreadReplies: z.number().int().nonnegative(),
+  /** Of those, the ones addressed to the member. */
+  unreadMentions: z.number().int().nonnegative(),
+  /** The newest reply's time, else the root's. The list's order, newest first. */
+  lastActivityAt: z.iso.datetime(),
+});
+export type SessionListing = z.infer<typeof SessionListing>;
 export type UnreadSnapshot = z.infer<typeof UnreadSnapshot>;
 
 /**
@@ -1573,6 +1605,29 @@ export const routes = {
     response: z.object({ root: Message }),
   },
   /** The space's archived plain threads: their roots, newest activity first. Archived topics are listTopics'. */
+  /**
+   * Mark a thread as a session, retitle it, or unmark it (`session: null`)
+   * (2026-11-05, Message.session). Any member who can write may. A reply's
+   * id, or a root that has a topic, is `invalid_request`: a discussion is
+   * never a session. Same-state calls are no-ops with no event. Ending a
+   * session is archiveThread.
+   */
+  setSession: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/threads/:rootMessageId/session',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
+    request: z.object({ session: SessionMark.nullable(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ root: Message }),
+  },
+  /**
+   * The member's open sessions in every space they are in (2026-11-05): the
+   * ones they started or follow, not archived, newest activity first.
+   */
+  mySessions: {
+    method: 'GET',
+    path: '/v1/sessions',
+    response: z.object({ sessions: z.array(SessionListing) }),
+  },
   listArchivedThreads: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/archived-threads',

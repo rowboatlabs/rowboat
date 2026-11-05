@@ -427,6 +427,10 @@ export interface Store {
   setThreadArchived(spaceId: string, rootMessageId: string, archived: boolean): Promise<void>;
   /** The space's archived roots, newest activity first. */
   listArchivedRoots(spaceId: string): Promise<Message[]>;
+  /** A session's mark (Message.session, 2026-11-05) on its root; null clears it. */
+  setThreadSession(spaceId: string, rootMessageId: string, title: string | null): Promise<void>;
+  /** The open sessions in these spaces: marked, not archived, not deleted roots. */
+  listOpenSessionRoots(spaceIds: string[]): Promise<Message[]>;
   /**
    * Tombstone: blanks the row's body and summary, drops its secrets (2026-11-04), and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one

@@ -1,4 +1,4 @@
-import type { ActivityItem, ActivityKind, ActivityPage, Routes } from '@rowboat/spaces-protocol';
+import type { ActivityItem, ActivityKind, ActivityPage, InvocationState, Routes, SessionListing, SessionStatus } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { HarborError } from '../errors.js';
 import type { Feed } from './feed.js';
@@ -13,6 +13,11 @@ export type MarkReadInput = z.infer<Routes['markRead']['request']>;
 export type UnreadSnapshot = z.infer<Routes['unread']['response']>;
 
 const DEFAULT_ACTIVITY_PAGE = 30;
+
+/** How far back in a session's invocations its status looks: the newest few decide it. */
+const SESSION_INVOCATIONS = 20;
+
+const ACTIVE_STATES: ReadonlySet<InvocationState> = new Set(['queued', 'pending', 'working']);
 
 // The activity cursor: the last item's instant and id, joined on a character
 // neither contains (ISO instants and item ids are both `~`-free).
@@ -186,6 +191,51 @@ export class ReadState {
     }
     const seenAt = await this.k.store.advanceActivitySeenAt(ctx.memberId, at);
     return { spaces: out, threads: threads.length, seenAt };
+  }
+
+  /**
+   * The member's open sessions (2026-11-05, "coding session: threads" in
+   * Main), for the rail and the /session picker: the ones they started or
+   * follow, in every space they are in, newest activity first. Each carries
+   * where it stands for them, from its invocations and their thread mark.
+   */
+  async mySessions(ctx: ActorCtx): Promise<SessionListing[]> {
+    const spaces = await this.k.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    const byId = new Map(spaces.map((s) => [s.id, s]));
+    const roots = await this.k.store.listOpenSessionRoots(spaces.map((s) => s.id));
+    const unreadBySpace = new Map<string, Map<string, { unreadReplies: number; unreadMentions: number }>>();
+    const out: SessionListing[] = [];
+    for (const root of roots) {
+      const mine =
+        root.author.memberId === ctx.memberId || (await this.k.store.getThreadReadMark(root.spaceId, root.id, ctx.memberId))?.following === true;
+      if (!mine) continue;
+      let unread = unreadBySpace.get(root.spaceId);
+      if (!unread) {
+        unread = new Map((await this.k.store.listUnreadFollowedThreads(root.spaceId, ctx.memberId)).map((t) => [t.rootMessageId, t]));
+        unreadBySpace.set(root.spaceId, unread);
+      }
+      const counts = unread.get(root.id) ?? { unreadReplies: 0, unreadMentions: 0 };
+      const states = (await this.k.store.listSpaceInvocations(root.spaceId, root.id, SESSION_INVOCATIONS)).map((i) => i.state);
+      const status: SessionStatus = states.includes('waiting')
+        ? 'needs_you'
+        : states.some((s) => ACTIVE_STATES.has(s))
+          ? 'working'
+          : counts.unreadReplies > 0
+            ? 'needs_you'
+            : 'idle';
+      const space = byId.get(root.spaceId)!;
+      out.push({
+        spaceId: space.id,
+        spaceName: space.name,
+        spaceKind: space.kind,
+        root,
+        status,
+        unreadReplies: counts.unreadReplies,
+        unreadMentions: counts.unreadMentions,
+        lastActivityAt: root.lastReplyAt ?? root.postedAt,
+      });
+    }
+    return out.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.root.id.localeCompare(a.root.id));
   }
 
   /** Every space the member is in (DMs included): cursor, unread roots, unread followed threads. */

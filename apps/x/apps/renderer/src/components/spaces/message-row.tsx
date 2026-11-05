@@ -1,4 +1,5 @@
 import { useSpaceAccess } from '@/lib/spaces-access'
+import { SessionLine } from '@/components/spaces/session-status'
 import { useReactionReadMark } from '@/hooks/use-reaction-read-mark'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { memo, useState } from 'react'
@@ -384,6 +385,7 @@ function MessageRowImpl({
                         <span title={formatFullTimestamp(message.postedAt)} className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
                     </div>
                 )}
+                {message.session && message.threadRoot === undefined && !deleted && <SessionLine orgId={orgId} message={message} />}
                 {writable && edit !== null ? (
                     <div className="mt-1">
                         <MessageEditBox

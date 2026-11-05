@@ -333,6 +333,8 @@ export const RPC_CHANNELS = [
   'spaces:manageTopic',
   'spaces:archiveThread',
   'spaces:listArchivedThreads',
+  'spaces:setSession',
+  'spaces:mySessions',
   'spaces:reactToMessage',
   'spaces:deleteMessage',
   'spaces:editMessage',

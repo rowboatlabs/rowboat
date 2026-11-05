@@ -2,7 +2,7 @@ import { useThreadsPreference, useThreadsScroll } from '@/hooks/use-threads-view
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { useEffect, useMemo, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, ChevronDown, Link as LinkIcon, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, Timer, ChevronDown, Link as LinkIcon, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, Users } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
@@ -14,7 +14,7 @@ import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import { prefetchThread, updateStreamMessage, type ChatMessage, type SpacePresence } from '@/hooks/use-space-chat'
 import { threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
 import { useFallbackReplyAuthors } from '@/lib/spaces-thread-participants'
-import { threadLabelOf } from '@/lib/spaces-conventions'
+import { sessionArchiveLabel, threadLabelOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -26,11 +26,12 @@ import { FilterTabs, SpacesEmpty, SpacesPage } from '@/components/spaces/page-sh
  * The Threads view (2026-10-15, "threads" discussion in Main): every thread
  * in the space, not only the named ones, so a person can find their earlier
  * coding sessions. All = loaded stream roots that have replies plus every
- * discussion; Named = discussions (the wire's Topic rows); By me = All whose
- * root the reader posted. Unnamed threads come from the stream's loaded
- * window, so "Load older" pages the stream itself rather than a new route.
+ * discussion; Named = discussions (the wire's Topic rows); Sessions = roots
+ * marked as sessions (2026-11-05), replies or not; By me = All whose root
+ * the reader posted. Unnamed threads come from the stream's loaded window,
+ * so "Load older" pages the stream itself rather than a new route.
  */
-type ThreadsFilter = 'all' | 'named' | 'mine'
+type ThreadsFilter = 'all' | 'named' | 'sessions' | 'mine'
 
 /** A thread's participants: the root's author, then everyone who replied, in first-reply order. */
 function participantsOf(root: spaces.Message | undefined, replyAuthors: (root: spaces.Message) => readonly string[]): string[] {
@@ -67,14 +68,17 @@ function threadRows(topics: readonly spaces.TopicListing[], roots: readonly Chat
     const archivedRoots = new Set(topics.filter((topic) => topic.archived).map((topic) => topic.rootMessageId))
     // Naming a thread unarchives its root on the server; a stale copy here must not outlive that.
     const namedRoots = new Set(topics.map((topic) => topic.rootMessageId))
+    if (filter === 'sessions') rows.clear() // discussions are never sessions
     if (filter !== 'named' && archived) {
         for (const root of archivedPlain) {
-            if (!namedRoots.has(root.id)) rows.set(root.id, { rootMessageId: root.id, root, activityAt: root.lastReplyAt ?? root.postedAt })
+            if (!namedRoots.has(root.id) && (filter !== 'sessions' || root.session)) rows.set(root.id, { rootMessageId: root.id, root, activityAt: root.lastReplyAt ?? root.postedAt })
         }
     }
     if (filter !== 'named' && !archived) {
         for (const root of roots) {
-            if (root.pending || root.failed || root.threadRoot !== undefined || root.replyCount === 0 || archivedRoots.has(root.id) || root.archived) continue
+            // A session is a thread from its first message, replies or not (2026-11-05).
+            if (root.pending || root.failed || root.threadRoot !== undefined || (root.replyCount === 0 && !root.session) || archivedRoots.has(root.id) || root.archived) continue
+            if (filter === 'sessions' && !root.session) continue
             const row = rows.get(root.id)
             if (row) row.root = root
             else rows.set(root.id, { rootMessageId: root.id, root, activityAt: root.lastReplyAt ?? root.postedAt })
@@ -109,7 +113,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
     const { writable } = useSpaceAccess()
     useReadStateVersion()
     const memoryKey = `${orgId}:${spaceId}`
-    const [filter, setFilter] = useThreadsPreference<ThreadsFilter>(`spaces:threads-filter:${memoryKey}`, (raw) => raw === 'named' || raw === 'mine' ? raw : 'all')
+    const [filter, setFilter] = useThreadsPreference<ThreadsFilter>(`spaces:threads-filter:${memoryKey}`, (raw) => raw === 'named' || raw === 'sessions' || raw === 'mine' ? raw : 'all')
     // Several participants at once (2026-11-03, "threads ui" in Main): a thread
     // shows when any chosen person is in it. Stored comma-joined under the old
     // key, so a single saved choice from before still reads back.
@@ -170,7 +174,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
         subtitle="Every conversation in this space. Named threads have a title so the team can find them again."
         toolbar={<>
             <FilterTabs label="Show threads" value={filter} onChange={setFilter}
-                options={[{ value: 'all', label: 'All' }, { value: 'named', label: 'Named' }, { value: 'mine', label: 'By me' }]} />
+                options={[{ value: 'all', label: 'All' }, { value: 'named', label: 'Named' }, { value: 'sessions', label: 'Sessions' }, { value: 'mine', label: 'By me' }]} />
             <FilterTabs label="Show" value={archiveFilter} onChange={setArchiveFilter}
                 options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived', count: archivedCount }]} />
             <DropdownMenu>
@@ -199,13 +203,13 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
         </>}>
         <ul className="flex flex-col gap-0.5">
             {rows.map(({ rootMessageId, topic, root, activityAt }) => {
-                const title = resolveMentions(topic?.title ?? threadLabelOf(root?.body ?? ''), memberNames, spaceNames)
+                const title = resolveMentions(topic?.title ?? root?.session?.title ?? threadLabelOf(root?.body ?? ''), memberNames, spaceNames)
                 const author = root ? memberNames.get(root.author.memberId) ?? null : null
                 const badge = threadBadge(orgId, spaceId, rootMessageId, direct)
                 const replies = root?.replyCount ?? 0
                 const working = (presence.working.get(rootMessageId)?.length ?? 0) > 0
                 const copyLink = () => void copySpacesLink(messageUrl(orgAddress, spaceId, rootMessageId))
-                const Icon = topic ? MessagesSquare : MessageSquare
+                const Icon = topic ? MessagesSquare : root?.session ? Timer : MessageSquare
                 const people = participantsOf(root, replyAuthors)
                 return <li key={rootMessageId}><ContextMenu>
                     <ContextMenuTrigger asChild>
@@ -243,7 +247,7 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
                                     {!topic && root && <>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem disabled={!writable} onSelect={() => void archivePlain(root, !root.archived)}>
-                                            {root.archived ? <ArchiveRestore className="mr-2 size-3.5" /> : <Archive className="mr-2 size-3.5" />}{root.archived ? 'Unarchive' : 'Archive'}
+                                            {root.archived ? <ArchiveRestore className="mr-2 size-3.5" /> : <Archive className="mr-2 size-3.5" />}{sessionArchiveLabel(root)}
                                         </DropdownMenuItem>
                                     </>}
                                     {topic && <>
@@ -270,6 +274,8 @@ export function SpaceThreadsView({ orgId, orgAddress, spaceId, direct, selfMembe
             ? <p className="px-3 py-12 text-sm text-muted-foreground">Loading threads…</p>
             : archived
                 ? <SpacesEmpty icon={<Archive />} title="No archived threads">Archived threads stay readable here. A new reply brings one back.</SpacesEmpty>
+                : filter === 'sessions'
+                    ? <SpacesEmpty icon={<Timer />} title="No sessions">Type /session and a title in the message box to start one. End it from its ⋯ menu when the work is done.</SpacesEmpty>
                 : filter === 'named'
                     ? <SpacesEmpty icon={<MessagesSquare />} title="No named threads yet">Give a thread a title from its ⋯ menu, or type /discussion in a reply, and it shows up here.</SpacesEmpty>
                     : participants.length

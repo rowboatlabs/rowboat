@@ -245,7 +245,8 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
             </header>
             <div className="flex min-h-0 flex-1">
-            <OrgRail org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenBrowse={onOpenBrowse} browseActive={selection?.view === 'browse'}
+            <OrgRail org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenBrowse={onOpenBrowse}
+                onOpenThread={(orgId, spaceId, rootMessageId) => onSwitchSpace(orgId, spaceId, { kind: 'thread', rootMessageId })} browseActive={selection?.view === 'browse'}
                 onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'} onOpenActivity={onOpenActivity} activityActive={selection?.view === 'activity'} />
             {selection?.view === 'browse' || !selection?.spaceId && !selection?.view ? (
                 <SpaceBrowser key={selectedOrg.id} orgId={selectedOrg.id} memberId={selectedOrg.memberId} active={active} onOpenSpace={onSwitchSpace} />
@@ -752,6 +753,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         placeSelection(next)
     }
     const openFile = (assetId: string) => select({ kind: 'file', assetId })
+    // A thread anywhere in the org (sessions, 2026-11-05): here it is a
+    // selection, elsewhere a switch of space that lands on the thread.
+    const openThreadIn = (spaceId: string, rootMessageId: string) => {
+        if (spaceId === space.id) select({ kind: 'thread', rootMessageId })
+        else onSwitchSpace(org.id, spaceId, { kind: 'thread', rootMessageId })
+    }
     // Replies inline (2026-10-25): a space shown inline has no threads, so an
     // open thread pane closes with the switch, and a reply link lands in the stream.
     const streamView = useStreamView(org.id, space.id)
@@ -1230,6 +1237,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <SpaceRail
+                    onOpenThread={(orgId, spaceId, rootMessageId) => orgId === org.id
+                        ? openThreadIn(spaceId, rootMessageId)
+                        : onSwitchSpace(orgId, spaceId, { kind: 'thread', rootMessageId })}
                     onOpenBrowse={onOpenBrowse}
                     onOpenAgents={onOpenAgents}
                     onOpenActivity={onOpenActivity}
@@ -1287,6 +1297,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 presence={presence}
                                 memberNames={memberNames}
                                 onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                                onOpenThreadIn={openThreadIn}
                                 openThreadId={chatRootId}
                                 onOpenSession={onOpenSession}
                                 onClose={split ? closeChat : undefined}
@@ -1329,6 +1340,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
                                 onOpenThread={(id) => select({ kind: threadsListOpen ? 'discussions' : 'thread', rootMessageId: id })}
+                                onOpenThreadIn={openThreadIn}
                                 visible={active && !collectionOpen && showChat}
                             />
                         </section>

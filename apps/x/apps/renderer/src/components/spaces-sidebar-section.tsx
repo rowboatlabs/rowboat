@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
+import { Archive, Bell, Bot, ChevronDown, ChevronRight, CircleCheck, Compass, CornerDownRight, Hash, Lock, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
 // Phosphor's chat bubbles for Spaces (2026-10-22), matching the dock.
 import { ChatsCircle } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
@@ -31,6 +31,10 @@ import * as analytics from '@/lib/analytics'
 import { openServerDialog } from '@/lib/server-dialog'
 import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { AddServerDialog } from '@/components/spaces/add-server-dialog'
+import { SessionStatusDot } from '@/components/spaces/session-status'
+import { refreshMySessions, sessionStatusLabel, useMySessions } from '@/lib/spaces-sessions'
+import { invokeSpace } from '@/lib/spaces-invoke'
+import type { spaces } from '@x/shared'
 
 /**
  * Group chats and workspaces (2026-10-07): a server that is one conversation
@@ -110,8 +114,10 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace, onOpenS
     </SidebarNavSection>
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThread, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
+    /** Opens a thread in one of the org's spaces: the Sessions rows (2026-11-05); absent = no section. */
+    onOpenThread?: (orgId: string, spaceId: string, rootMessageId: string) => void
     activeSpace: SpaceSelection
     unread: Map<string, SpaceBadge>
     showArchived?: boolean
@@ -366,6 +372,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                     </SidebarMenuItem>
                 )}
             </SidebarMenu>}
+            {onOpenThread && <SessionRows orgId={org.id} onOpenThread={onOpenThread} />}
             <RailSection section="spaces" label="Spaces" addLabel="New space" onAdd={() => setCreating(true)}>
                 <SidebarMenu className="gap-0.5">
                     {liveSpaces.map(spaceRow)}
@@ -473,16 +480,73 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
 
 // Spaces redesign (2026-10-21): each rail section remembers whether it is open,
 // across launches; every section starts open.
+/**
+ * Your open sessions (2026-11-05, "coding session: threads" in Main), across
+ * the org's spaces, newest activity first: the way back to work running in
+ * parallel among everyone else's messages. A row opens its thread; its menu
+ * ends it. Empty, the section says how to start one.
+ */
+function SessionRows({ orgId, onOpenThread }: {
+    orgId: string
+    onOpenThread: (orgId: string, spaceId: string, rootMessageId: string) => void
+}) {
+    const { sessions, loaded } = useMySessions(orgId)
+    const end = async (session: spaces.SessionListing) => {
+        try {
+            await invokeSpace('spaces:archiveThread', { orgId, spaceId: session.spaceId, rootMessageId: session.root.id, archived: true })
+            await refreshMySessions(orgId)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not end the session', 'error')
+        }
+    }
+    const spaceCount = new Set(sessions.map((s) => s.spaceId)).size
+    return <RailSection section="sessions" label="Sessions">
+        <SidebarMenu className="gap-0.5">
+            {sessions.map((session) => {
+                const title = session.root.session?.title ?? 'Session'
+                return <SidebarMenuItem key={session.root.id}>
+                    <div className="spaces-row spaces-rail-row flex items-center rounded-md hover:bg-sidebar-accent">
+                        <SidebarMenuButton onClick={() => onOpenThread(orgId, session.spaceId, session.root.id)}
+                            title={`${title} · ${session.spaceName} · ${sessionStatusLabel(session.status)}`} className="min-w-0 flex-1 hover:bg-transparent">
+                            <span className="flex size-4 shrink-0 items-center justify-center"><SessionStatusDot status={session.status} /></span>
+                            <span className={cn('min-w-0 flex-1 truncate', session.unreadReplies > 0 && 'font-semibold text-foreground')}>{title}</span>
+                            {spaceCount > 1 && <span className="max-w-[40%] shrink truncate text-[11px] text-muted-foreground">{session.spaceName}</span>}
+                            <UnreadBadge badge={{ unread: session.unreadReplies, forYou: session.unreadMentions }} />
+                        </SidebarMenuButton>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button type="button" aria-label={`Options for ${title}`} title="Session options"
+                                    className="spaces-row-more mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                                    <MoreHorizontal className="size-3.5" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                                <DropdownMenuItem onSelect={() => void end(session)}>
+                                    <CircleCheck className="size-3.5" /> End session
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                </SidebarMenuItem>
+            })}
+        </SidebarMenu>
+        {loaded && sessions.length === 0 && <p className="px-2 py-1.5 text-xs text-muted-foreground">
+            Type <span className="font-mono">/session</span> and a title in any space to start one.
+        </p>}
+    </RailSection>
+}
+
 function readSectionOpen(key: string) {
     try { return localStorage.getItem(key) !== 'false' } catch { return true }
 }
 
 /** A collapsible rail section: a quiet header with a chevron, and a + that shows on hover. */
 function RailSection({ section, label, addLabel, onAdd, children }: {
-    section: 'spaces' | 'directs'
+    section: 'spaces' | 'directs' | 'sessions'
     label: string
-    addLabel: string
-    onAdd: () => void
+    /** Absent = no + (Sessions start from the message box, with /session). */
+    addLabel?: string
+    onAdd?: () => void
     children: ReactNode
 }) {
     const key = `spaces:sectionOpen:${section}`
@@ -500,10 +564,10 @@ function RailSection({ section, label, addLabel, onAdd, children }: {
                 <ChevronDown data-closed={!open || undefined} className="spaces-chev size-3 shrink-0" />
                 <span className="truncate">{label}</span>
             </button>
-            <button type="button" onClick={onAdd} aria-label={addLabel} title={addLabel}
+            {onAdd && <button type="button" onClick={onAdd} aria-label={addLabel} title={addLabel}
                 className="spaces-sec-add flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
                 <Plus className="size-3.5" />
-            </button>
+            </button>}
         </div>
         <RailCollapse id={bodyId} open={open}>{children}</RailCollapse>
     </div>
@@ -517,10 +581,11 @@ function RailCollapse({ id, open, children }: { id?: string, open: boolean, chil
 }
 
 /** Space and DM destinations; nested discussions are optional for legacy consumers. */
-export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
+export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenThread, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenThread?: (orgId: string, spaceId: string, rootMessageId: string) => void
     onOpenBrowse?: (orgId: string) => void
     browseActive?: boolean
     /** Every agent in the org (2026-10-21); absent = no row. */
@@ -540,7 +605,7 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivit
     // A column that fills its scroller, so the Invite row can sit at the foot.
     return <div className="spaces-rail-nav flex min-h-full flex-1 flex-col">
         <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
-            onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
+            onOpenSpace={onOpenSpace} onOpenThread={onOpenThread} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
             renderDiscussions={showDiscussions && renderActiveDiscussions ? (id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}
                 onSelect={(selection) => onOpenDiscussion?.(id, selection)} /> : undefined} />

@@ -768,6 +768,10 @@ export const SecretName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/, 'a s
 export const MessageSecrets = z.object({ names: z.array(SecretName).min(1), readers: z.array(MemberId).min(1) });
 export type MessageSecrets = z.infer<typeof MessageSecrets>;
 
+/** A session's mark on its root (Message.session, 2026-11-05): the title it was started with. */
+export const SessionMark = z.object({ title: z.string().trim().min(1).max(200) });
+export type SessionMark = z.infer<typeof SessionMark>;
+
 export const Message = z.object({
   id: MessageId,
   spaceId: SpaceId,
@@ -854,6 +858,13 @@ export const Message = z.object({
    * never carries this. A reply revives it, as it revives a topic.
    */
   archived: z.literal(true).optional(),
+  /**
+   * A root its thread's people marked as a session (2026-11-05, "coding
+   * session: threads" in Main): short-lived work, usually with an agent,
+   * that someone ends when it is done. Ending one is archiving the thread.
+   * A person sets it; nothing infers it. A discussion is never a session.
+   */
+  session: SessionMark.optional(),
   /**
    * Who this message addresses — STAMPED by the org at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that

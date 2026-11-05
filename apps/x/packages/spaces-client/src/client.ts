@@ -1,4 +1,4 @@
-import type { ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
+import type { ActivityKind, ActivityPage, SessionListing } from '@rowboat/spaces-protocol';
 import {
   routes,
   type AcceptInviteResult,
@@ -1045,6 +1045,23 @@ export class SpacesClient {
         { archived, actingMode: 'direct' },
       )
     ).root;
+  }
+
+  /** Mark a thread as a session, retitle it, or unmark it with null (api.ts setSession, 2026-11-05). */
+  async setSession(spaceId: string, rootMessageId: string, session: { title: string } | null): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}/session`),
+        routes.setSession.response,
+        { session, actingMode: 'direct' },
+      )
+    ).root;
+  }
+
+  /** The member's open sessions in every space they are in, newest activity first (api.ts mySessions). */
+  async mySessions(): Promise<SessionListing[]> {
+    return (await this.request('GET', routes.mySessions.path, routes.mySessions.response)).sessions;
   }
 
   async listArchivedThreads(spaceId: string): Promise<Message[]> {

@@ -18,6 +18,9 @@ const follow = vi.hoisted(() => ({
     members: [] as unknown[],
     invocations: new Map<string, unknown[]>(),
 }))
+vi.mock('@/lib/spaces-sessions', () => ({
+    useMySessions: () => ({ sessions: [], loaded: true }), useSessionListing: () => undefined, refreshMySessions: vi.fn(), sessionStatusLabel: () => '',
+}))
 vi.mock('@/components/spaces/composer', () => ({
     Composer: (props: typeof follow.composer) => {
         follow.composer = props
