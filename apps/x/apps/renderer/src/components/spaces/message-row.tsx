@@ -1,5 +1,5 @@
 import { useSpaceAccess } from '@/lib/spaces-access'
-import { SessionLine } from '@/components/spaces/session-status'
+import { SessionPill } from '@/components/spaces/session-status'
 import { useReactionReadMark } from '@/hooks/use-reaction-read-mark'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { memo, useState } from 'react'
@@ -144,7 +144,7 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, spaceNames, continuation, thread, inline, inThread, threadOpen, arriving, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId, orgId, visible,
+    message, memberNames, spaceNames, continuation: groupedWithPrevious, thread, inline, inThread, threadOpen, arriving, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId, orgId, visible,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     orgId?: string
@@ -244,6 +244,9 @@ function MessageRowImpl({
     // A tombstone renders only its note (and any thread row under it) — no
     // reactions, no hover actions; the deed is done.
     const deleted = !!message.deletedAt
+    // A session's first message always shows its name line, where its pill sits (2026-11-06).
+    const startsSession = !!message.session && message.threadRoot === undefined && !deleted
+    const continuation = groupedWithPrevious && !startsSession
     // Unconfirmed sends (pending or failed) have no server id yet — nothing
     // can act on them either.
     const unconfirmed = !!message.pending || !!message.failed
@@ -383,9 +386,9 @@ function MessageRowImpl({
                             )
                         )}
                         <span title={formatFullTimestamp(message.postedAt)} className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
+                        {startsSession && <SessionPill orgId={orgId} message={message} />}
                     </div>
                 )}
-                {message.session && message.threadRoot === undefined && !deleted && <SessionLine orgId={orgId} message={message} />}
                 {writable && edit !== null ? (
                     <div className="mt-1">
                         <MessageEditBox

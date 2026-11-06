@@ -1,32 +1,34 @@
-import { Timer } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { threadStatusLabel, useThreadListing } from '@/lib/spaces-my-threads'
 import { cn } from '@/lib/utils'
 
 /**
- * Where a thread stands (2026-11-05, harbor myThreads): amber when it needs
- * you, a pulsing accent while an agent works, quiet when idle. Its words
- * always sit beside it, so the dot is never the only way to tell.
+ * Where a thread stands (2026-11-06, "coding session: threads" in Main): grey
+ * when idle, amber when it needs you, green and gently pulsing while an agent
+ * works (the pulse, so green never reads as "done"). Its words sit beside it
+ * or in its label, so the dot is never the only way to tell.
  */
 export function ThreadStatusDot({ status, className }: { status: spaces.ThreadStatus; className?: string }) {
     return <span aria-hidden title={threadStatusLabel(status)}
         className={cn('inline-block size-2 shrink-0 rounded-full',
-            status === 'needs_you' ? 'bg-amber-500' : status === 'working' ? 'animate-pulse bg-[var(--stream-link)]' : 'bg-muted-foreground/40',
+            status === 'needs_you' ? 'bg-amber-500' : status === 'working' ? 'animate-pulse bg-emerald-500' : 'bg-muted-foreground/40',
             className)} />
 }
 
 /**
- * The line over a session's first message (2026-11-05): that it is a session,
- * and where it stands for you when it is one of yours, or that it ended.
+ * A session's pill on its first message's name line (2026-11-06): no line of
+ * its own. The dot is where it stands for you when it is one of yours (grey
+ * otherwise); an ended one says so.
  */
-export function SessionLine({ orgId, message }: { orgId?: string; message: spaces.Message }) {
+export function SessionPill({ orgId, message }: { orgId?: string; message: spaces.Message }) {
     const listing = useThreadListing(orgId, message.id)
     if (!message.session) return null
-    return <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Timer className="size-3.5 shrink-0" aria-hidden />
-        <span className="font-medium">Session</span>
-        {message.archived
-            ? <span>· ended</span>
-            : listing && <span className="inline-flex items-center gap-1">· <ThreadStatusDot status={listing.status} /> {threadStatusLabel(listing.status)}</span>}
-    </div>
+    const ended = !!message.archived
+    const status: spaces.ThreadStatus = !ended && listing ? listing.status : 'idle'
+    const label = ended ? 'Session, ended' : listing ? `Session, ${threadStatusLabel(status).toLowerCase()}` : 'Session'
+    return <span role="img" aria-label={label} title={label}
+        className="inline-flex items-center gap-1 self-center rounded-full border border-border px-1.5 text-[11px] font-medium leading-[18px] text-muted-foreground">
+        <ThreadStatusDot status={status} className="size-1.5" />
+        {ended ? 'Ended' : 'Session'}
+    </span>
 }
