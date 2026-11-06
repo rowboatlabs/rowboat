@@ -6,6 +6,7 @@
 // everywhere; a client's declared content-type is a fallback, not a fact.
 
 import contentDisposition from 'content-disposition';
+import { blobDownloadName } from '@rowboat/spaces-protocol';
 
 const SNIFFS: Array<{ mime: string; test: (b: Uint8Array) => boolean }> = [
   { mime: 'image/jpeg', test: (b) => startsWith(b, [0xff, 0xd8, 0xff]) },
@@ -64,7 +65,11 @@ export function dispositionFor(mime: string, name?: string, opts: { attachment?:
     .replace(/[\x00-\x1f\x7f"%;]/g, '')
     .trim();
   // By code point: a cut through a surrogate pair would make the name unencodable.
-  const clean = stripped ? Array.from(stripped).slice(0, 255).join('') : '';
+  const named = stripped ? blobDownloadName(stripped, mime) : '';
+  const addedSuffix = stripped && named.startsWith(stripped) ? named.slice(stripped.length) : '';
+  const clean = addedSuffix
+    ? Array.from(stripped!).slice(0, 255 - addedSuffix.length).join('') + addedSuffix
+    : Array.from(named).slice(0, 255).join('');
   return clean ? contentDisposition(clean, { type }) : type;
 }
 

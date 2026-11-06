@@ -1,3 +1,4 @@
+export { blobDownloadName } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { JEV_KIND, addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
 export { LLM_PROVIDERS, ownerSetsUp } from '@rowboat/spaces-protocol';
