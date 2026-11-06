@@ -43,7 +43,7 @@ vi.mock('@/hooks/use-space-chat', async () => {
 vi.mock('@/hooks/use-space-members', () => ({ prefetchMembers: vi.fn(), usePeopleOnline: () => new Set(['dm0']), useSelfDisplayName: () => 'Me', useOrgRoster: () => [] }))
 vi.mock('@/hooks/use-org-settings', () => ({ useOrgSettings: () => ({ invitePolicy: 'members' }), canInvite: () => true }))
 vi.mock('@/components/spaces-view', () => ({ OrgMonogram: () => null }))
-vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: ({ name, online }: { name: string; online?: boolean }) => <span data-testid={`avatar-${name}`} data-online={online} />, OrgMonogram: () => null }))
+vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: ({ name, online }: { name: string; online?: boolean }) => <span data-testid={`avatar-${name}`} data-online={online} />, MemberStatus: () => null, OrgMonogram: () => null }))
 vi.mock('@/components/spaces/new-direct-dialog', () => ({ NewDirectDialog: () => null }))
 vi.mock('@/lib/spaces-direct', () => ({
     directAvatarId: (dm: { id: string }) => dm.id, isSelfDirect: () => false, isSelfDirectUnsupported: () => false,

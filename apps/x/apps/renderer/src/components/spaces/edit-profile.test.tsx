@@ -7,7 +7,7 @@ import { SpaceRefsProvider, SpaceNavContext } from './space-nav'
 import type { spaces } from '@x/shared'
 
 const apply = vi.hoisted(() => vi.fn())
-vi.mock('@/hooks/use-space-members', () => ({ applyProfileUpdate: apply }))
+vi.mock('@/hooks/use-space-members', () => ({ applyProfileUpdate: apply, usePeopleOnline: () => new Set(['me', 'other']) }))
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 const member = { id: 'me', displayName: 'Harsh', title: 'Engineer', role: 'member', kind: 'human' } as spaces.Member
 const invoke = vi.fn()
@@ -126,4 +126,9 @@ it('loads photos through the selected org and falls back to initials on decode f
     expect(invoke).toHaveBeenCalledWith('spaces:getProfileImage', { orgId: 'avatar-org', hash: 'b'.repeat(64) })
     fireEvent.error(container.querySelector('img')!)
     expect(screen.getByText('HV')).toBeInTheDocument()
+})
+
+it('does not show a manually away person as here even with an active connection', () => {
+    profile({ ...member, availability: { manualAway: true } })
+    expect(screen.queryByText('Here now')).not.toBeInTheDocument()
 })

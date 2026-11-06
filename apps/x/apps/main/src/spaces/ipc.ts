@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { BrowserWindow, dialog, shell } from 'electron';
+import { BrowserWindow, dialog, shell, powerMonitor } from 'electron';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
 import * as blobCache from './blob-cache.js';
@@ -97,7 +97,7 @@ function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
 const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
 
 // The table's handlers take the request alone; main's take the IPC event first.
-const harbor = harborChannelHandlers({ getClient: orgs.getClient, getLive: orgs.getLive, subscriptions, emit: broadcastSpacesEvent });
+const harbor = harborChannelHandlers({ isActive: () => powerMonitor.getSystemIdleTime() < 600 && powerMonitor.getSystemIdleState(600) !== 'locked', getClient: orgs.getClient, getLive: orgs.getLive, subscriptions, emit: broadcastSpacesEvent });
 const harborIpcHandlers = Object.fromEntries(
   Object.entries(harbor).map(([channel, handle]) => [
     channel,

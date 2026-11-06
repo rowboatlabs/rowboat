@@ -73,7 +73,7 @@ export const updateProfile = tool({
   description:
     "Change your person's own display name or title (what they do, e.g. \"Design lead\") on this org. " +
     'Pass only what changes; an empty title removes it. Only when they ask — it is how every teammate ' +
-    'sees them. Nobody can change anyone else’s profile.',
+    'sees them. Availability can set manualAway, custom status with expiry, notification pauses and a timezone schedule. Nobody can change anyone else’s profile.',
   input: UpdateProfile,
   output: z.object({ member: Member }),
 });

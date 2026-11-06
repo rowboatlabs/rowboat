@@ -8,11 +8,11 @@ import type { Kernel } from './kernel.js';
  * connector holds a live connection, so the roster says which are, and every
  * org member hears when that changes. An agent Harbor runs is always
  * reachable and has no presence, as is Ro. Single-node, in memory, like the hub (spec
- * §12 defers more than one instance). Human connections also drive the DM
- * online dot through member_presence (2026-11-04), using the same grace.
+ * §12 defers more than one instance). Human activity lives separately in
+ * human-presence.ts (2026-11-05).
  */
 export class AgentPresence {
-  /** Open live connections per member; people share the reconnect grace (2026-11-04). */
+  /** Open live connections per member; only agents are announced here (2026-11-05). */
   private readonly connections = new Map<string, number>();
   /** Offline announcements waiting out the grace, so a reconnect does not flicker. */
   private readonly leaving = new Map<string, ReturnType<typeof setTimeout>>();
@@ -26,10 +26,6 @@ export class AgentPresence {
   /** Agents (among `members`) whose connector is connected, or reconnecting within the grace. */
   online(members: readonly Member[]): string[] {
     return members.filter((m) => this.hasPresence(m) && this.isOnline(m.id)).map((m) => m.id);
-  }
-
-  onlinePeople(members: readonly Member[]): string[] {
-    return members.filter((m) => m.kind === 'human' && !m.removedAt && !m.deactivatedAt && this.isOnline(m.id)).map((m) => m.id);
   }
 
   private isOnline(agentId: string): boolean {
@@ -83,10 +79,8 @@ export class AgentPresence {
   private async announce(memberId: string, online: boolean): Promise<void> {
     const member = await this.k.store.getMember(memberId);
     if (!member || member.removedAt || member.deactivatedAt) return;
-    if (member.kind !== 'human' && !this.hasPresence(member)) return;
-    const frame = member.kind === 'human'
-      ? { kind: 'member_presence' as const, memberId, online, at: this.k.now() }
-      : { kind: 'agent_presence' as const, agentId: memberId, online, at: this.k.now() };
+    if (member.kind === 'human' || !this.hasPresence(member)) return;
+    const frame = { kind: 'agent_presence' as const, agentId: memberId, online, at: this.k.now() };
     for (const recipient of await this.k.store.listAllMembers()) {
       if (!recipient.removedAt && !recipient.deactivatedAt) this.k.hub.publishToMember(recipient.id, frame);
     }
