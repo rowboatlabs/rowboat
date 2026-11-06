@@ -18,6 +18,11 @@ finish-args:
   # Desktop notifications & secret portal
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.secrets
+  # StatusNotifier / System Tray permissions
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=com.canonical.AppMenu.Registrar
+  - --talk-name=org.ayatana.indicator.application
+  - --talk-name=com.canonical.indicator.application
   # File access for document analysis & downloads
   - --filesystem=xdg-download
   - --filesystem=xdg-documents
