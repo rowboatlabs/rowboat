@@ -390,7 +390,9 @@ export const searchSpace = tool({
   description:
     'Search a space: messages, topic titles, and files (by extracted content or filename), ' +
     'returned as three independently-ranked lists. Query words are AND-ed; a word that is a ' +
-    "member's name also matches @-mentions of them. Message hits name their thread " +
+    "member's name also matches @-mentions of them. Filters narrow message hits and work alone: " +
+    'from:<name>, mentions:<name> (me is you), in:<thread title>, has:link|image|file; a ' +
+    'filtered query returns messages only. Message hits name their thread ' +
     '(threadRootId — feed it to read_thread for context); asset hits carry the assetId for ' +
     'read_asset and the path for display. A truncated flag means more hits existed than limit — refine the query ' +
     'rather than raising the limit. Use before posting a new root to avoid duplicating a ' +
