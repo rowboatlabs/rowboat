@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
+import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, MessagesSquare, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
 // Phosphor's chat bubbles for Spaces (2026-10-22), matching the dock.
 import { ChatsCircle } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
@@ -31,6 +31,7 @@ import * as analytics from '@/lib/analytics'
 import { openServerDialog } from '@/lib/server-dialog'
 import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { AddServerDialog } from '@/components/spaces/add-server-dialog'
+import { needsYouCount, useMyThreads } from '@/lib/spaces-my-threads'
 
 /**
  * Group chats and workspaces (2026-10-07): a server that is one conversation
@@ -110,8 +111,11 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpace, onOpenS
     </SidebarNavSection>
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
+    /** Your threads across the org's spaces, sessions among them (2026-11-05); absent = no row. */
+    onOpenThreads?: (orgId: string) => void
+    threadsActive?: boolean
     activeSpace: SpaceSelection
     unread: Map<string, SpaceBadge>
     showArchived?: boolean
@@ -317,7 +321,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
         )
     }
 
-    const navRows = !!(onOpenActivity || onOpenAgents || onOpenBrowse || needsSignIn || org.error)
+    const navRows = !!(onOpenActivity || onOpenThreads || onOpenAgents || onOpenBrowse || needsSignIn || org.error)
     return (
         <>
             {/* Spaces redesign (2026-10-21): Activity is a nav row like Agents and
@@ -349,6 +353,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
                         </SidebarMenuButton>
                     </SidebarMenuItem>
                 )}
+                {onOpenThreads && <ThreadsRow orgId={org.id} active={threadsActive} onOpen={() => onOpenThreads(org.id)} />}
                 {onOpenAgents && (
                     <SidebarMenuItem>
                         <SidebarMenuButton isActive={agentsActive} onClick={() => onOpenAgents(org.id)} className="spaces-rail-row">
@@ -473,6 +478,24 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onOpen
 
 // Spaces redesign (2026-10-21): each rail section remembers whether it is open,
 // across launches; every section starts open.
+/**
+ * Threads (2026-11-05, "coding session: threads" in Main): one row for every
+ * thread you are in across the server's spaces, sessions among them. The
+ * rail is for places, so it lists no threads itself; its number is the
+ * threads that need you (an agent waiting on you, or replies you haven't read).
+ */
+function ThreadsRow({ orgId, active, onOpen }: { orgId: string; active: boolean; onOpen: () => void }) {
+    const { threads } = useMyThreads(orgId)
+    const needsYou = needsYouCount(threads)
+    return <SidebarMenuItem>
+        <SidebarMenuButton isActive={active} onClick={onOpen} className="spaces-rail-row">
+            <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
+            <span className={cn('flex-1 truncate', needsYou > 0 && !active && 'font-semibold text-foreground')}>Threads</span>
+            {!active && <UnreadBadge badge={{ unread: needsYou, forYou: needsYou }} />}
+        </SidebarMenuButton>
+    </SidebarMenuItem>
+}
+
 function readSectionOpen(key: string) {
     try { return localStorage.getItem(key) !== 'false' } catch { return true }
 }
@@ -517,10 +540,12 @@ function RailCollapse({ id, open, children }: { id?: string, open: boolean, chil
 }
 
 /** Space and DM destinations; nested discussions are optional for legacy consumers. */
-export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
+export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenThreads?: (orgId: string) => void
+    threadsActive?: boolean
     onOpenBrowse?: (orgId: string) => void
     browseActive?: boolean
     /** Every agent in the org (2026-10-21); absent = no row. */
@@ -540,7 +565,7 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivit
     // A column that fills its scroller, so the Invite row can sit at the foot.
     return <div className="spaces-rail-nav flex min-h-full flex-1 flex-col">
         <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
-            onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
+            onOpenSpace={onOpenSpace} onOpenThreads={onOpenThreads} threadsActive={threadsActive} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
             renderDiscussions={showDiscussions && renderActiveDiscussions ? (id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}
                 onSelect={(selection) => onOpenDiscussion?.(id, selection)} /> : undefined} />

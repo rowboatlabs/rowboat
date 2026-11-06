@@ -43,6 +43,8 @@ import { useFollowUpAgent } from '@/hooks/use-follow-up-agent'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { FindBanner } from '@/components/spaces/find-banner'
+import { sessionCommand } from '@/components/spaces/session-command'
+import { refreshMyThreads, sessionsOf, useMyThreads } from '@/lib/spaces-my-threads'
 import { runFind, searchInstead } from '@/lib/spaces-find'
 import { toast } from '@/lib/toast'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
@@ -113,7 +115,7 @@ const AUTO_POST_HOLD_MS = 5_000
 const shortLabel = (label: string, max = 40): string => (label.length > max ? `${label.slice(0, max - 1)}…` : label)
 
 export function GeneralStream({
-    org, space, stream, presence, memberNames, onOpenThread, openThreadId, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
+    org, space, stream, presence, memberNames, onOpenThread, onOpenThreadIn, openThreadId, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -122,6 +124,8 @@ export function GeneralStream({
     memberNames: Map<string, string>
     /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
     onOpenThread: (rootMessageId: string) => void
+    /** Open a thread in any space of this org: /session jumps to sessions elsewhere (2026-11-05). */
+    onOpenThreadIn?: (spaceId: string, rootMessageId: string) => void
     /** The root of the thread open beside the stream — its reply line stays tinted (spaces redesign, 2026-10-21). */
     openThreadId?: string | null
     /** Navigate to a chat session — the working strip's "Open chat" affordance. */
@@ -711,6 +715,19 @@ export function GeneralStream({
 
     /** Opens the poll dialog (state lives in PollDialogHost — see its doc). */
     const openPollRef = useRef<(() => void) | null>(null)
+    // /session (2026-11-05): a new session is a root with its title, marked
+    // in the same post, opened at once so the request goes in its thread.
+    const mySessions = sessionsOf(useMyThreads(org.id).threads)
+    const startSession = async (title: string) => {
+        if (!title) return
+        try {
+            const res = await invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, body: title, session: { title } })
+            onOpenThread(res.message.id)
+            void refreshMyThreads(org.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not start the session', 'error')
+        }
+    }
     const createPoll = async (input: spaces.SpacesNewPollInput) => {
         try {
             if (detachedRef.current) await snapToLatest()
@@ -1368,6 +1385,15 @@ export function GeneralStream({
                 onType={onType}
                 seed={seed}
                 commands={[
+                    sessionCommand({
+                        spaceId: space.id,
+                        sessions: mySessions,
+                        newLabel: (title) => `New session: ${title}`,
+                        onNew: startSession,
+                        onOpen: (session) => session.spaceId === space.id
+                            ? onOpenThread(session.root.id)
+                            : onOpenThreadIn?.(session.spaceId, session.root.id),
+                    }),
                     {
                         name: 'invite',
                         hint: 'Copy an invite link to this space',

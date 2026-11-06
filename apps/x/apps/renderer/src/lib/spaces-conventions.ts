@@ -29,6 +29,19 @@ export function withArchived(root: spaces.Message, archived: boolean): spaces.Me
     return archived ? { ...rest, archived: true } : rest
 }
 
+/** A plain thread's archive action: a session ends and reopens (2026-11-05); any other thread archives. */
+export function sessionArchiveLabel(root: spaces.Message): string {
+    if (root.session) return root.archived ? 'Reopen session' : 'End session'
+    return root.archived ? 'Unarchive' : 'Archive'
+}
+
+/** A root with its session mark set, retitled or cleared (harbor setSession, 2026-11-05). */
+export function withSession(root: spaces.Message, session: { title: string } | null): spaces.Message {
+    const next = { ...root }
+    delete next.session
+    return session ? { ...next, session } : next
+}
+
 // ---------------------------------------------------------------------------
 // Artifacts — change-sets made from a thread carry its root id at the end of
 // the reason ("· thread:<id>"; the legacy spelling "topic:<id>" still parses).

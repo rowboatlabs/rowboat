@@ -4416,6 +4416,8 @@ export const ipcSchemas = {
       peopleOnly: z.boolean().optional(),
       /** Secrets for the members the message mentions, its readers (Harbor spec §8, 2026-11-04). */
       secrets: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
+      /** Start a session with this root (harbor Message.session, 2026-11-05). */
+      session: z.object({ title: z.string() }).optional(),
     }),
     res: z.custom<SpacesPostResult>(),
   },
@@ -4481,6 +4483,17 @@ export const ipcSchemas = {
   'spaces:listArchivedThreads': {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ threads: z.array(z.custom<SpacesTypes.Message>()) }),
+  },
+  // Sessions and your threads (harbor setSession / myThreads, 2026-11-05):
+  // mark, retitle or unmark a thread (null), and the member's threads across
+  // the org (active, or archived).
+  'spaces:setSession': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), session: z.object({ title: z.string() }).nullable() }),
+    res: z.object({ root: z.custom<SpacesTypes.Message>() }),
+  },
+  'spaces:myThreads': {
+    req: z.object({ orgId: z.string(), archived: z.boolean().optional() }),
+    res: z.object({ threads: z.array(z.custom<SpacesTypes.ThreadListing>()) }),
   },
   'spaces:manageTopic': {
     req: z.object({

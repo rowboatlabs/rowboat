@@ -322,6 +322,7 @@ interface MessageRow {
   summary?: string | null;
   people_only?: boolean | null;
   archived?: boolean | null;
+  session_title?: string | null;
   secrets?: MessageSecrets | null;
 }
 
@@ -362,6 +363,7 @@ function rowToMessage(r: MessageRow): Message {
     ...(r.people_only ? { peopleOnly: true as const } : {}),
     ...(r.secrets ? { secrets: r.secrets } : {}),
     ...(r.archived ? { archived: true as const } : {}),
+    ...(r.session_title ? { session: { title: r.session_title } } : {}),
     mentions: r.mentions ?? [],
     mentionsHere: r.mentions_here ?? false,
     mentionsRowboat: r.mentions_rowboat ?? false,
@@ -1231,8 +1233,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only, secrets)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18, $19::jsonb)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only, secrets, session_title)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18, $19::jsonb, $20)`,
       [
         message.id,
         message.spaceId,
@@ -1253,6 +1255,7 @@ export class PgStore implements Store {
         message.summary ?? null,
         message.peopleOnly === true,
         message.secrets ? JSON.stringify(message.secrets) : null,
+        message.session?.title ?? null,
       ],
     );
   }
@@ -1282,6 +1285,35 @@ export class PgStore implements Store {
       [spaceId],
     );
     return rows.map(rowToMessage);
+  }
+
+  async setThreadSession(spaceId: string, rootMessageId: string, title: string | null): Promise<void> {
+    await this.sql.query('update messages set session_title = $3 where space_id = $1 and id = $2', [spaceId, rootMessageId, title]);
+  }
+
+  async listMemberThreadRoots(memberId: string, spaceIds: string[], limit: number): Promise<Message[]> {
+    if (spaceIds.length === 0) return [];
+    const rows = await this.sql.query<MessageRow>(
+      `select m.* from messages m
+       where m.space_id = any($1::text[]) and m.thread_root is null and m.deleted_at is null
+         and ((m.author->>'memberId' = $2 and (m.reply_count > 0 or m.session_title is not null))
+           or exists (select 1 from thread_read_marks t
+                      where t.space_id = m.space_id and t.root_message_id = m.id and t.member_id = $2 and t.following))
+       order by coalesce(m.last_reply_at, m.posted_at) desc, m.id desc
+       limit $3`,
+      [spaceIds, memberId, limit],
+    );
+    return rows.map(rowToMessage);
+  }
+
+  async listOpenInvocationStates(spaceIds: string[]): Promise<Array<{ spaceId: string; threadRootId: string; state: InvocationState }>> {
+    if (spaceIds.length === 0) return [];
+    const rows = await this.sql.query<{ space_id: string; thread_root_id: string; state: InvocationState }>(
+      `select space_id, thread_root_id, state from invocations
+       where org_id = $1 and space_id = any($2::text[]) and state in ('queued', 'pending', 'working', 'waiting')`,
+      [this.orgId, spaceIds],
+    );
+    return rows.map((r) => ({ spaceId: r.space_id, threadRootId: r.thread_root_id, state: r.state }));
   }
 
   async refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void> {

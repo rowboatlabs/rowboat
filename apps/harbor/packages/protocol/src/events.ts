@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Attribution, Member, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
+import { Attribution, Member, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, SessionMark, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 import { Approval } from './approval.js';
 import { Invocation, InvocationActivity, InvocationId } from './invocation.js';
@@ -67,6 +67,18 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     type: z.literal('thread_archive'),
     rootMessageId: MessageId,
     action: z.enum(['archived', 'unarchived']),
+    by: Attribution,
+  }),
+  /**
+   * A thread marked as a session, retitled, or unmarked (api.ts setSession,
+   * 2026-11-05): clients set or clear the root's `session`. A root posted as
+   * a session carries it on its `message` event instead. Same-state calls
+   * emit nothing.
+   */
+  z.object({
+    type: z.literal('thread_session'),
+    rootMessageId: MessageId,
+    session: SessionMark.nullable(),
     by: Attribution,
   }),
   MembershipEvent,

@@ -1,7 +1,7 @@
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { SearchMenu } from '@/components/search-menu'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
@@ -76,6 +76,22 @@ export interface AgentOptions {
     secrets?: DraftSecret[]
 }
 
+/**
+ * One row a command offers for what is typed after it (2026-11-05, /session):
+ * the first is the default, so Enter picks it.
+ */
+export interface SlashChoice {
+    key: string
+    label: string
+    detail?: string
+    icon?: ReactNode
+    /** A heading above this row and the ones after it, until the next. */
+    section?: string
+    /** Shown, not pickable: says what is still missing. */
+    disabled?: boolean
+    run: () => void | Promise<void>
+}
+
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
 export interface SlashCommand {
     name: string
@@ -83,6 +99,8 @@ export interface SlashCommand {
     args?: string
     hint: string
     run: (args: string) => void | Promise<void>
+    /** Rows to pick from while the argument is typed, in place of the usage hint. */
+    choices?: (args: string) => SlashChoice[]
 }
 
 type CommandEntry = Omit<SlashCommand, 'run'> & { run?: SlashCommand['run'] }
@@ -409,6 +427,26 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         const m = /^\/([a-zA-Z]+)\s/.exec(draft)
         return m ? allCommands.find((c) => c.name === m[1]!.toLowerCase()) ?? null : null
     })()
+
+    // A command's rows for what follows it (2026-11-05, /session): New first,
+    // then what there is to jump to. Enter picks; Esc falls back to the hint.
+    const activeArgs = activeCommand ? draft.replace(/^\/[a-zA-Z]+\s/, '') : ''
+    const choices = !showCommands && !showMentions && activeCommand?.choices ? activeCommand.choices(activeArgs) : []
+    const [choiceIndex, setChoiceIndex] = useState(0)
+    const [choicesDismissed, setChoicesDismissed] = useState(false)
+    const [lastChoiceDraft, setLastChoiceDraft] = useState(draft)
+    if (draft !== lastChoiceDraft) {
+        setLastChoiceDraft(draft)
+        setChoiceIndex(0)
+        if (!activeCommand) setChoicesDismissed(false)
+    }
+    const showChoices = !choicesDismissed && choices.length > 0
+    const pickChoice = (choice: SlashChoice | undefined) => {
+        if (!choice || choice.disabled) return
+        editor?.chain().clearContent().run()
+        setDraft('')
+        void choice.run()
+    }
 
     const pickCommand = (c: CommandEntry) => {
         if (!editor) return
@@ -744,6 +782,24 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // editor keymap), then the send keys. Formatting chords live in the
     // editor's own extensions. Returning true consumes the event.
     const handleEditorKeyDown = (view: EditorView, e: KeyboardEvent): boolean => {
+        if (showChoices) {
+            if (e.key === 'ArrowDown') {
+                setChoiceIndex((i) => (i + 1) % choices.length)
+                return true
+            }
+            if (e.key === 'ArrowUp') {
+                setChoiceIndex((i) => (i - 1 + choices.length) % choices.length)
+                return true
+            }
+            if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                pickChoice(choices[Math.min(choiceIndex, choices.length - 1)])
+                return true
+            }
+            if (e.key === 'Escape') {
+                setChoicesDismissed(true)
+                return true
+            }
+        }
         if (showCommands) {
             if (e.key === 'ArrowDown') {
                 setCmdIndex((i) => (i + 1) % cmdCandidates.length)
@@ -924,7 +980,33 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             <div className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
                         </div>
                     )}
-                    {!showCommands && activeCommand && !showMentions && (
+                    {showChoices && (
+                        <div role="listbox" aria-label={`/${activeCommand!.name}`} className="absolute bottom-full left-0 right-0 z-20 mb-1.5 max-h-80 overflow-y-auto rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
+                            {choices.map((c, i) => (
+                                <div key={c.key}>
+                                    {c.section && c.section !== choices[i - 1]?.section && (
+                                        <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">{c.section}</div>
+                                    )}
+                                    <button
+                                        type="button"
+                                        role="option"
+                                        aria-selected={i === choiceIndex}
+                                        aria-disabled={c.disabled || undefined}
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onMouseEnter={() => setChoiceIndex(i)}
+                                        onClick={() => pickChoice(c)}
+                                        className={cn('flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left', i === choiceIndex ? 'bg-accent' : 'hover:bg-accent/60', c.disabled && 'text-muted-foreground')}
+                                    >
+                                        {c.icon && <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">{c.icon}</span>}
+                                        <span className="min-w-0 flex-1 truncate text-sm">{c.label}</span>
+                                        {c.detail && <span className="shrink-0 text-xs text-muted-foreground">{c.detail}</span>}
+                                    </button>
+                                </div>
+                            ))}
+                            <div className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground/80">↑↓ · ↵ to pick · esc</div>
+                        </div>
+                    )}
+                    {!showCommands && !showChoices && activeCommand && !showMentions && (
                         <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 rounded-2xl border-none bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--rowboat-shadow)]">
                             <span className="font-mono text-sm font-medium text-foreground">/{activeCommand.name}</span>
                             {activeCommand.args && <span className="font-mono text-sm"> {activeCommand.args}</span>} — {activeCommand.hint} · ↵ to run
