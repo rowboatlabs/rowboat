@@ -187,9 +187,9 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:saveBlob': async (event, args) => {
-    const { bytes } = await blobCache.getBlob(args.orgId, args.spaceId, args.hash);
+    const { bytes, mime } = await blobCache.getBlob(args.orgId, args.spaceId, args.hash);
     const win = BrowserWindow.fromWebContents(event.sender);
-    const options = { defaultPath: path.basename(args.suggestedName ?? args.hash.slice(0, 12)) };
+    const options = { defaultPath: spacesShared.blobDownloadName(path.basename(args.suggestedName ?? args.hash.slice(0, 12)), mime) };
     const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return { saved: false };
     await fs.writeFile(result.filePath, bytes);
