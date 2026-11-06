@@ -29,7 +29,7 @@ vi.mock('@/lib/spaces-my-threads', async (orig) => ({
     useMyThreads: () => ({ threads: live, loaded: true }),
     refreshMyThreads: vi.fn(async () => {}),
 }))
-vi.mock('@/hooks/use-spaces', () => ({ useSpaceNames: () => new Map() }))
+vi.mock('@/hooks/use-spaces', () => ({ useSpaceNames: () => new Map([['dm-harsh', 'Harsh'], ['dm-gagan', 'Gagan']]) }))
 vi.mock('@/hooks/use-space-members', () => ({ useOrgRoster: () => [{ id: 'me', displayName: 'Arjun' }, { id: 'harsh', displayName: 'Harsh' }, { id: 'gagan', displayName: 'Gagan' }] }))
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 
@@ -100,6 +100,19 @@ describe('your threads', () => {
         fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
         expect(await screen.findByRole('button', { name: /^Pricing page/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /^p1 body/ })).toBeNull()
+    })
+
+    it('names a DM for the other person, in its row and in the space filter', async () => {
+        const dm = (id: string, spaceId: string) => ({ ...listing(id), spaceId, spaceName: 'Direct message', spaceKind: 'direct' as const })
+        live = [dm('h1', 'dm-harsh'), dm('g1', 'dm-gagan')]
+        mount()
+        expect(screen.getByRole('button', { name: /^h1 body Harsh · Arjun/ })).toBeInTheDocument()
+        fireEvent.pointerDown(screen.getByRole('button', { name: 'Filter by space' }), { button: 0, ctrlKey: false })
+        fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: /Gagan/ }))
+        fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+        expect(await screen.findByRole('button', { name: 'Spaces: Gagan' })).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /^h1 body/ })).toBeNull()
+        expect(screen.queryByText('Direct message')).toBeNull()
     })
 
     it('renames a session from its menu, as the space tab does', async () => {

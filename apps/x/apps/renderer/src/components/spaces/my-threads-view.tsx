@@ -81,7 +81,12 @@ export function MyThreadsView({ org, active = true, onOpenThread }: {
         (chosenSpaces.length === 0 || chosenSpaces.includes(t.spaceId)) &&
         (people.length === 0 || participantsOf(t.root).some((id) => people.includes(id))))
     const archivedCount = (ended ?? []).filter((t) => matches(t, kind, org.memberId)).length
-    const spaceLabel = new Map(all.map((t) => [t.spaceId, t.spaceName]))
+    // A DM's listing carries Harbor's placeholder name ("Direct message"), so
+    // it is named for the other person, as the sidebar does (2026-11-06,
+    // "thread filter" in Main: every DM read "Direct message").
+    const whereOf = (t: spaces.ThreadListing) => t.spaceKind === 'direct' ? spaceNames.get(t.spaceId) ?? t.spaceName : t.spaceName
+    const spaceLabel = new Map(all.map((t) => [t.spaceId, whereOf(t)]))
+    const directIds = new Set(all.filter((t) => t.spaceKind === 'direct').map((t) => t.spaceId))
     const spaceOptions = [...new Set(ofKind.map((t) => t.spaceId))]
     const participantOptions = [...new Set(ofKind.flatMap((t) => participantsOf(t.root)))]
 
@@ -95,7 +100,7 @@ export function MyThreadsView({ org, active = true, onOpenThread }: {
         people: participantsOf(t.root),
         badge: { unread: t.unreadReplies, forYou: t.unreadMentions },
         direct: t.spaceKind === 'direct',
-        spaceName: t.spaceName,
+        spaceName: whereOf(t),
         status: t.status,
     }))
 
@@ -123,6 +128,7 @@ export function MyThreadsView({ org, active = true, onOpenThread }: {
                     options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived', count: archivedCount }]} />
                 <ParticipantFilter chosen={people} options={participantOptions} nameOf={nameOf} onChange={(ids) => setSavedPeople(ids.length ? ids.join(',') : null)} />
                 <SpaceFilter chosen={chosenSpaces} options={spaceOptions} nameOf={(id) => spaceLabel.get(id) ?? spaceNames.get(id) ?? 'Unknown space'}
+                    isDirect={(id) => directIds.has(id)}
                     onChange={(ids) => setSavedSpaces(ids.length ? ids.join(',') : null)} />
             </>}>
             {!loaded && <p className="flex items-center gap-2 px-3 py-12 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Loading…</p>}
