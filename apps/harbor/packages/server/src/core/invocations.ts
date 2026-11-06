@@ -17,7 +17,7 @@ import {
   type Space,
 } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
-import { canCancelQueuedInvocation, canDecideApproval, canDecideSuperAgentRequest, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
+import { canCancelQueuedInvocation, canDecideApproval, canDecideSuperAgentRequest, canSteerInvocation, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
 import type { ActorCtx, Kernel } from './kernel.js';
 
 // Invoking agent members (spec §8, 2026-09-30). Harbor decides and a
@@ -91,8 +91,9 @@ export class Invocations {
    * follows up (followedUp). Each agent member other than the author gets an
    * invocation: refused (no shared space, personal, or past the hop limit),
    * pending (its conversation is free, or its turn is waiting on a person,
-   * which this answers), or queued. Edits never invoke. `depth` is the
-   * message's hand-off depth (handOffDepth).
+   * which this answers, or its turn is working and the connector steers,
+   * which this steers; 2026-11-05), or queued. Edits never invoke. `depth`
+   * is the message's hand-off depth (handOffDepth).
    */
   async onMessage(
     ctx: ActorCtx,
@@ -146,17 +147,30 @@ export class Invocations {
       };
       if (!refusal) {
         const live = await this.settle(agentId, space.id, threadRootId, out);
-        const turn = live.find((i) => !i.answers);
+        // The conversation's turn: an answer to a waiting one and a steer of a working one ride with it (2026-11-05).
+        const turn = live.find((i) => !i.answers && !i.steers);
         if (!turn) invocation.state = 'pending';
         // One waiting on an approval is decided on its card: a mention queues (spec §8 part 4).
         else if (turn.state === 'waiting' && !(await this.hasOpenApproval(turn.id))) Object.assign(invocation, { state: 'pending', answers: turn.id });
-        else invocation.state = 'queued';
+        // A working turn whose connector steers takes its invoker's or an admin's message at once (spec §8, 2026-11-05):
+        // never an agent's hand-off, and not once a stop is on its way.
+        else if (turn.state === 'working' && !turn.stopRequested && !ctx.agent && (await this.maySteer(message.author.memberId, turn))) {
+          Object.assign(invocation, { state: 'pending', steers: turn.id });
+        } else invocation.state = 'queued';
       }
       await this.k.store.insertInvocation(invocation, message.offset);
       this.announce(invocation, out);
       created.push(invocation);
     }
     return created;
+  }
+
+  /** Whether this person's message folds into the turn: its connector declared steer, and the rule allows them (2026-11-05). */
+  private async maySteer(authorId: string, turn: Invocation): Promise<boolean> {
+    const actor = await this.k.store.getMember(authorId);
+    if (!actor) return false;
+    const { steer } = (await this.k.store.getAgentCapabilities(turn.agentId)) ?? ConnectorCapabilities.parse({});
+    return canSteerInvocation(actor, turn, steer) === null;
   }
 
   /**
@@ -404,6 +418,8 @@ export class Invocations {
         if (current.state === 'pending') await this.promote(next.agentId, next.conversation.spaceId, next.conversation.threadRootId, out);
         return next;
       }
+      // A steer that reached the connector lives and dies with its turn (2026-11-05).
+      if (current.steers) throw new HarborError('invalid_request', 'this was folded into a running turn: stop that turn instead');
       enforce(canStopInvocation(actor, current, stop));
       if (current.stopRequested) return current;
       const next: Invocation = { ...current, stopRequested: true, updatedAt: this.k.now() };
@@ -630,7 +646,8 @@ export class Invocations {
   /** When no turn is live in the conversation, the first-posted queued invocation becomes pending and is delivered. */
   private async promote(agentId: string, spaceId: string, threadRootId: string, out: InvocationOutbox): Promise<void> {
     const all = await this.k.store.listConversationInvocations(agentId, spaceId, threadRootId);
-    if (all.some((i) => LIVE.includes(i.state) && !i.answers)) return;
+    // A steer still being folded in does not hold the queue: it is finished with its turn (2026-11-05).
+    if (all.some((i) => LIVE.includes(i.state) && !i.answers && !i.steers)) return;
     const next = all.find((i) => i.state === 'queued');
     if (!next) return;
     // Delivered with its agent's instructions as they are now: an edit while it queued applies (2026-10-29).

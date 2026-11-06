@@ -414,6 +414,89 @@ describe('cancel and stop', () => {
   });
 });
 
+describe('steering a working turn (2026-11-05)', () => {
+  it('folds a mention into a working turn when the connector declared steer: delivered at once, marked steers, finished with it', async () => {
+    await hermes.rest.post('/v1/agent/capabilities', { stop: true, steer: true });
+    const first = await post('dev-harsh', `${mention(hermes.agent)} refactor the parser`);
+    const turn = first.invocations[0]!;
+    // Delivered but not acknowledged: nothing is running yet, so a second message queues as before.
+    const early = (await post('dev-harsh', `${mention(hermes.agent)} and the lexer`, { threadRoot: first.message.id })).invocations[0]!;
+    expect(early.state).toBe('queued');
+    await hermes.ack(turn.id);
+    const seen = hermes.delivered().length;
+    const steer = (await post('dev-harsh', `${mention(hermes.agent)} keep the public API`, { threadRoot: first.message.id })).invocations[0]!;
+    expect(steer).toMatchObject({ state: 'pending', steers: turn.id });
+    expect((await hermes.next(seen)).id).toBe(steer.id);
+    await hermes.ack(steer.id);
+    // A folded steer is stopped with its turn, never on its own.
+    expect((await as('dev-harsh').post(`/v1/invocations/${steer.id}/cancel`)).status).toBe(400);
+    // Its listing shows both; the space's shows the steer as a working one that is not the turn.
+    const listed = (await hermes.rest.get('/v1/agent/invocations')).body.invocations as Invocation[];
+    expect(listed.map((i) => i.id).sort()).toEqual([turn.id, steer.id].sort());
+    // The turn ends: the steer went with it, and the one that queued before the steer is delivered next.
+    await hermes.report(steer.id, { state: 'done' });
+    await hermes.report(turn.id, { state: 'done' });
+    expect(await hermes.next(seen + 1)).toMatchObject({ id: early.id, state: 'pending' });
+    await hermes.report(early.id, { state: 'done' });
+  });
+
+  it('a steer still being folded in does not hold the queue: the turn’s end promotes the next, and a pending steer can be cancelled', async () => {
+    const first = await post('dev-harsh', `${mention(hermes.agent)} one`);
+    const turn = first.invocations[0]!;
+    await hermes.ack(turn.id);
+    const seen = hermes.delivered().length;
+    const steer = (await post('dev-harsh', `${mention(hermes.agent)} two`, { threadRoot: first.message.id })).invocations[0]!;
+    expect(steer).toMatchObject({ state: 'pending', steers: turn.id });
+    await hermes.ack(steer.id);
+    const later = (await post('dev-harsh', `${mention(hermes.agent)} three`, { threadRoot: first.message.id })).invocations[0]!;
+    // Still the turn's invoker while the turn works: this one steers too.
+    expect(later).toMatchObject({ state: 'pending', steers: turn.id });
+    // Not yet acknowledged, so its invoker cancels it as any pending one.
+    expect((await as('dev-harsh').post(`/v1/invocations/${later.id}/cancel`)).body.invocation.state).toBe('cancelled');
+    await hermes.report(turn.id, { state: 'done' });
+    // The first steer is still working, and the thread is free all the same.
+    const fresh = (await post('dev-harsh', `${mention(hermes.agent)} four`, { threadRoot: first.message.id })).invocations[0]!;
+    expect(fresh).toMatchObject({ state: 'pending' });
+    expect(fresh.steers).toBeUndefined();
+    expect(hermes.delivered().slice(seen).map((i) => i.id)).toContain(fresh.id);
+    await hermes.report(steer.id, { state: 'done' });
+    await hermes.report(fresh.id, { state: 'done' });
+  });
+
+  it('only the turn’s invoker or an admin steers; another member and an agent’s hand-off queue, and so does a stopping turn', async () => {
+    await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
+    const c = await addAgent('ramnique', 'Codex');
+    const codex = await Connector.start(c.agent, c.key);
+    try {
+      const first = await post('dev-harsh', `${mention(hermes.agent)} start`);
+      const turn = first.invocations[0]!;
+      await hermes.ack(turn.id);
+      const other = (await post('dev-gagan', `${mention(hermes.agent)} also this`, { threadRoot: first.message.id })).invocations[0]!;
+      expect(other.state).toBe('queued');
+      const handOff = await codex.rest.post(`/v1/spaces/${spaceId}/messages`, { threadRoot: first.message.id, body: `${mention(hermes.agent)} over to you`, actingMode: 'direct' });
+      expect(handOff.status).toBe(200);
+      expect(handOff.body.invocations[0]).toMatchObject({ state: 'queued' });
+      const admin = (await post('dev-ramnique', `${mention(hermes.agent)} and this`, { threadRoot: first.message.id })).invocations[0]!;
+      expect(admin).toMatchObject({ state: 'pending', steers: turn.id });
+      await hermes.ack(admin.id);
+      // Stop requested on the turn: what comes now queues behind whatever runs next.
+      await as('dev-harsh').post(`/v1/invocations/${turn.id}/cancel`);
+      const afterStop = (await post('dev-harsh', `${mention(hermes.agent)} wait`, { threadRoot: first.message.id })).invocations[0]!;
+      expect(afterStop.state).toBe('queued');
+      await hermes.report(admin.id, { state: 'cancelled' });
+      await hermes.report(turn.id, { state: 'cancelled' });
+      // The queue drains in posting order: the other member's, the hand-off, then the one posted after Stop.
+      for (const id of [other.id, handOff.body.invocations[0].id as string, afterStop.id]) {
+        expect((await harbor.store.getInvocation(id))!.state).toBe('pending');
+        await hermes.report(id, { state: 'done' });
+      }
+    } finally {
+      codex.close();
+      await hermes.rest.post('/v1/agent/capabilities', { stop: false, steer: false });
+    }
+  });
+});
+
 describe('options and capabilities', () => {
   it('carries the picked options to the invocation, and lets any member read what the connector declared', async () => {
     await hermes.rest.post('/v1/agent/capabilities', {
@@ -422,6 +505,7 @@ describe('options and capabilities', () => {
     const caps = await as('dev-gagan').get(`/v1/agents/${hermes.agent.id}/capabilities`);
     expect(caps.body.capabilities).toEqual({
       stop: false,
+      steer: false,
       options: [{ type: 'select', key: 'environment', label: 'Environment', choices: [{ id: 'env-api', label: 'payments-api' }] }],
     });
     const { invocations } = await post('dev-harsh', `${mention(hermes.agent)} fix the bug`, {

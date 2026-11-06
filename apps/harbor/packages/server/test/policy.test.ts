@@ -7,6 +7,7 @@ import {
   canSignIn,
   agentsManagedBy,
   canCancelQueuedInvocation,
+  canSteerInvocation,
   canStopInvocation,
   invocationRefusal,
   canAccessSpace,
@@ -266,6 +267,11 @@ describe('policy', () => {
     expect(canStopInvocation(person('ramnique', 'admin'), inv, true)).toBeNull();
     expect(canStopInvocation(person('gagan'), inv, true)).toMatchObject({ code: 'forbidden' });
     expect(canStopInvocation(person('harsh'), inv, false)).toMatchObject({ code: 'invalid_request' });
+    // Steering a working turn (2026-11-05): the same people as Stop, and only a connector that declared it.
+    expect(canSteerInvocation(person('harsh'), inv, true)).toBeNull();
+    expect(canSteerInvocation(person('ramnique', 'admin'), inv, true)).toBeNull();
+    expect(canSteerInvocation(person('gagan'), inv, true)).toMatchObject({ code: 'forbidden' });
+    expect(canSteerInvocation(person('harsh'), inv, false)).toMatchObject({ code: 'invalid_request' });
   });
 });
 

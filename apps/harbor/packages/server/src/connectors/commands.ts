@@ -129,7 +129,7 @@ export class CommandConnector<Api> implements RunningConnector {
 
   private async boot(): Promise<void> {
     // A command takes no options and can't be stopped midway: it is one call.
-    const capabilities: ConnectorCapabilities = { stop: false, options: [] };
+    const capabilities: ConnectorCapabilities = { stop: false, steer: false, options: [] };
     await this.safe(() => this.env.service.declareCapabilities(this.env.ctx, capabilities), undefined);
     for (const invocation of await this.safe(() => this.env.service.listAgentInvocations(this.env.ctx), [])) {
       // One a previous run took on may or may not have reached the service; running it again
