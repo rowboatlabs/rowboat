@@ -8,9 +8,8 @@ import type { Step } from "./use-onboarding-state"
 const STEPS = [
   { step: 0 as Step, label: "Welcome" },
   { step: 1 as Step, label: "Providers" },
-  { step: 2 as Step, label: "Connect" },
-  { step: 3 as Step, label: "Code" },
-  { step: 4 as Step, label: "Done" },
+  { step: 2 as Step, label: "Space" },
+  { step: 3 as Step, label: "Agents" },
 ]
 
 interface StepIndicatorProps {
@@ -22,7 +21,7 @@ export function StepIndicator({ currentStep }: StepIndicatorProps) {
   const currentIndex = steps.findIndex(s => s.step === currentStep)
 
   return (
-    <div className="flex items-center gap-2 mb-20 px-4">
+    <div className="flex items-center gap-2 mb-14 px-4">
       {steps.map((s, i) => (
         <React.Fragment key={s.step}>
           {i > 0 && (
