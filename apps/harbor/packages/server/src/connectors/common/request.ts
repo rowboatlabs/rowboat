@@ -7,7 +7,7 @@ import { attachmentLinks, buildPrompt, type Attachment } from './prompt.js';
 // the files. Shared by the Replicas and Conductor connectors (2026-10-06).
 
 /** The prompt for this invocation: the request, the thread after `deliveredOffset`, the files. */
-export async function requestPrompt(env: ConnectorEnv, invocation: Invocation, deliveredOffset: number | undefined): Promise<string> {
+export async function requestPrompt(env: ConnectorEnv, invocation: Invocation, deliveredOffset: number | undefined, postsOwnReply = false): Promise<string> {
   const { spaceId, threadRootId } = invocation.conversation;
   const names = new Map((await quietly(env, () => env.service.listOrgMembers(env.ctx), [])).map((m) => [m.id, m.displayName]));
   const trigger = await quietly(env, () => env.service.getMessage(env.ctx, spaceId, invocation.trigger.messageId), undefined);
@@ -33,6 +33,7 @@ export async function requestPrompt(env: ConnectorEnv, invocation: Invocation, d
     orgUrl: env.orgUrl,
     attachments,
     earlierAttachments,
+    postsOwnReply,
   });
 }
 

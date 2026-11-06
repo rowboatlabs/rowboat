@@ -6,6 +6,7 @@ import { agent37Platform } from './agent37/index.js';
 import { attioPlatform } from './attio/index.js';
 import { calPlatform } from './cal/index.js';
 import { conductorPlatform } from './conductor/index.js';
+import { grokBotPlatform } from './grok-bot/index.js';
 import { jevPlatform } from './jev/index.js';
 import { maritimePlatform } from './maritime/index.js';
 import { posthogPlatform } from './posthog/index.js';
@@ -86,6 +87,7 @@ export const PLATFORMS: Record<string, ConnectorPlatform> = {
   posthog: posthogPlatform(),
   cal: calPlatform(),
   attio: attioPlatform(),
+  'grok-bot': grokBotPlatform(),
   [BUILT_IN_CONNECTION]: jevPlatform(),
 };
 
