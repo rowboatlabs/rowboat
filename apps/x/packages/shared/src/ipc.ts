@@ -1343,13 +1343,6 @@ export const ipcSchemas = {
     ]),
     res: z.null(),
   },
-  // Main → renderer: View > Toggle Sidebar. Its own channel because the
-  // handler must live inside the SidebarProvider, below where menu:command's
-  // dispatcher sits.
-  'menu:toggleSidebar': {
-    req: z.null(),
-    res: z.null(),
-  },
   // The ⌥/⌃+Tab section switcher, forwarded from the main process when an
   // embedded page (e.g. the browser <webview>) holds keyboard focus — its
   // keystrokes go to the guest and never reach the app renderer's listeners.
