@@ -214,6 +214,8 @@ const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 /** The Spaces mode's rail, the web app's w-12. */
 const SPACES_RAIL_PX = 48
 type AppMode = 'spaces' | 'local'
+/** The mascot tour, off for now (2026-11-06): its stops walk the Local sidebar. */
+const TOUR_ENABLED = false
 const WORKSPACE_ROOT = 'knowledge/Workspace'
 // Sentinel path for the default Bases view (a virtual "file" the bases table
 // renders under). The other __rowboat_* sentinel tab paths died with the tab
@@ -5555,6 +5557,19 @@ function App() {
     else void navigateToView(lastLocalViewRef.current)
   }, [openSpaces, navigateToView])
 
+  // Spaces is where the app lands (2026-11-06), unless something already
+  // opened a view first (a deep link, a notification). Applied without a
+  // history entry, so Back doesn't lead to an Assistant nobody opened.
+  const landedRef = useRef(false)
+  useEffect(() => {
+    if (landedRef.current || !SPACES_ENABLED || spacesLoading) return
+    landedRef.current = true
+    const current = currentViewStateRef.current
+    if (historyRef.current.back.length > 0 || current.type !== 'chat' || current.runId) return
+    const target = resolveSpacesLocation(getSpacesOrgs(), readLastSpace())
+    void applyViewState(target ? { type: 'spaces', ...target } : { type: 'spaces' })
+  }, [spacesLoading, applyViewState])
+
   const openMeetingsView = useCallback(() => {
     void navigateToView({ type: 'meetings' })
   }, [navigateToView])
@@ -6375,10 +6390,9 @@ function App() {
     checkOnboarding()
   }, [])
 
-  // Handler for onboarding completion. When the user accepts the tour offer
-  // on the final step, hand off to the mascot tour once the modal's exit
-  // animation has cleared.
-  const handleOnboardingComplete = useCallback(async (opts?: { startTour?: boolean }) => {
+  // Handler for onboarding completion: it ends in Spaces (2026-11-06), in
+  // the space it may have just created.
+  const handleOnboardingComplete = useCallback(async () => {
     try {
       await window.ipc.invoke('onboarding:markComplete', null)
     } catch (err) {
@@ -6386,10 +6400,8 @@ function App() {
     }
     analytics.onboardingCompleted()
     setShowOnboarding(false)
-    if (opts?.startTour) {
-      window.setTimeout(() => setTourActive(true), 400)
-    }
-  }, [])
+    if (SPACES_ENABLED) void openSpaces()
+  }, [openSpaces])
 
   const knowledgeActions = React.useMemo(() => ({
     createNote: async (parentPath: string = 'knowledge') => {
@@ -7302,7 +7314,8 @@ function App() {
     onOpenEmail: (threadId?: string) => openEmailView(threadId),
     onOpenHome: () => void navigateToView({ type: 'home' }),
     onNewChat: handleNewChatTab,
-    onStartTour: () => setTourActive(true),
+    // The tour is off for now (2026-11-06): it walks the sidebar, which Spaces replaced as the landing.
+    ...(TOUR_ENABLED ? { onStartTour: () => setTourActive(true) } : {}),
     meetingRecordingState: meetingTranscription.state,
     recordingMeetingSource,
     onToggleMeetingRecording: () => { void handleToggleMeeting() },

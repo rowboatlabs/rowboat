@@ -23,6 +23,7 @@ export function suggestedSpaceName(token: string | null): string {
 export function useCompletionSpace(enabled: boolean) {
   const [loading, setLoading] = useState(enabled)
   const [needed, setNeeded] = useState(false)
+  const [hasOrgs, setHasOrgs] = useState(false)
   const [name, setName] = useState('My space')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -40,6 +41,7 @@ export function useCompletionSpace(enabled: boolean) {
       window.ipc.invoke('account:getRowboat', null),
     ]).then(([{ orgs }, account]) => {
       if (cancelled) return
+      setHasOrgs(orgs.length > 0)
       setNeeded(account.signedIn && orgs.length === 0)
       setName(suggestedSpaceName(account.accessToken))
     }).catch(() => {
@@ -75,7 +77,7 @@ export function useCompletionSpace(enabled: boolean) {
     }
   }
 
-  return { loading, needed, name, setName, error, busy, complete, retry: () => setAttempt(value => value + 1) }
+  return { loading, needed, hasOrgs, name, setName, error, busy, complete, retry: () => setAttempt(value => value + 1) }
 }
 
 export function CompletionSpaceName({ name, onChange, disabled }: {
