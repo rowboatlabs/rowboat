@@ -54,9 +54,9 @@ function NotificationsRow() {
         <div className="px-2 py-1.5">
             <div className="flex items-center gap-2 text-sm">
                 <Bell className="size-4 text-muted-foreground" />
-                <span className="flex-1">Notifications</span>
+                <span className="flex-1">Browser notifications</span>
                 <Switch
-                    aria-label="Notifications"
+                    aria-label="Browser notifications"
                     checked={state === 'on'}
                     disabled={state === 'blocked'}
                     onCheckedChange={(on) => { if (on) void turnOnNotifications(); else turnOffNotifications() }}

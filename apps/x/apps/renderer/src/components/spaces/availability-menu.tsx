@@ -4,6 +4,8 @@ import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { applyProfileUpdate, useOrgRosters, usePeopleOnline } from '@/hooks/use-space-members'
 import { useAvailabilityClock } from '@/hooks/use-availability-clock'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Bell, ChevronRight, Settings } from 'lucide-react'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import type { spaces } from '@x/shared'
@@ -28,6 +30,7 @@ function MemberAvailability({ orgId, member }: { orgId: string; member: spaces.M
     const now = useAvailabilityClock()
     const online = usePeopleOnline(orgId).has(member.id) && !member.availability?.manualAway
     const [dialog, setDialog] = useState<'status' | 'schedule' | 'pause' | null>(null)
+    const [notificationsOpen, setNotificationsOpen] = useState(false)
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState('')
     const value = member.availability
@@ -49,16 +52,20 @@ function MemberAvailability({ orgId, member }: { orgId: string; member: spaces.M
         <button type="button" className={ROW} disabled={busy} onClick={() => void save({ manualAway: online ? true : false })}>Set yourself as {online ? 'away' : 'active'}</button>
         <button type="button" className={ROW} onClick={() => setDialog('status')}>{status ? `${status.emoji || '💬'} ${status.text}` : '☺ Update status'}</button>
         {status && <button type="button" disabled={busy} className={ROW} onClick={() => void save({ status: null })}>Clear status</button>}
-        <label className="block px-2 py-1.5 text-sm">Pause notifications
-            <select aria-label="Pause notifications" className={SELECT} value="" disabled={busy} onChange={e => {
-                if (e.target.value === 'custom') { setDialog('pause'); return }
-                if (e.target.value) void save({ pausedUntil: new Date(Date.now() + Number(e.target.value) * 60_000).toISOString(), resumedUntil: null })
-            }}>
-                <option value="">Choose duration…</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="240">4 hours</option><option value="1440">24 hours</option><option value="custom">Custom…</option>
-            </select>
-        </label>
-        {paused && <button type="button" className={ROW} disabled={busy} onClick={() => void save({ pausedUntil: null, resumedUntil: new Date(Date.now() + 60 * 60_000).toISOString() })}>Resume notifications for 1 hour</button>}
-        <button type="button" className={ROW} onClick={() => setDialog('schedule')}>Settings → Notifications</button>
+        <DropdownMenu open={notificationsOpen} onOpenChange={setNotificationsOpen} modal={false}>
+            <DropdownMenuTrigger asChild>
+                <button type="button" className={ROW} onMouseEnter={() => setNotificationsOpen(true)}><Bell className="size-4" />Notifications<ChevronRight className="ml-auto size-4" /></button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="right" align="start" onCloseAutoFocus={event => { if (dialog) event.preventDefault() }}>
+                <DropdownMenuLabel>Pause notifications</DropdownMenuLabel>
+                {[30, 60, 120, 240, 1440].map(minutes => <DropdownMenuItem key={minutes} disabled={busy} onSelect={() => void save({ pausedUntil: new Date(Date.now() + minutes * 60_000).toISOString(), resumedUntil: null })}>{minutes < 60 ? `${minutes} minutes` : `${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}`}</DropdownMenuItem>)}
+                <DropdownMenuItem onSelect={() => setDialog('pause')}>Custom…</DropdownMenuItem>
+                {paused && <DropdownMenuItem disabled={busy} onSelect={() => void save({ pausedUntil: null, resumedUntil: new Date(Date.now() + 60 * 60_000).toISOString() })}>Resume notifications for 1 hour</DropdownMenuItem>}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setDialog('schedule')}>Set a notification schedule</DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
+        <button type="button" className={ROW} onClick={() => setDialog('schedule')}><Settings className="size-4" />Preferences</button>
         {dialog && <AvailabilityEditor mode={dialog} value={value} busy={busy} error={error} onSave={save} onClose={() => setDialog(null)} />}
     </>
 }
@@ -77,8 +84,8 @@ export function AvailabilityEditor({ mode, value, busy, error, onSave, onClose }
     const [schedule, setSchedule] = useState(value?.schedule ?? { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' })
     const [validation, setValidation] = useState('')
     useEffect(() => { setValidation('') }, [schedule])
-    return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}><DialogContent className="sm:max-w-md">
-        <DialogHeader><DialogTitle>{mode === 'status' ? 'Update status' : mode === 'pause' ? 'Pause notifications' : 'Notifications'}</DialogTitle><DialogDescription>{mode === 'status' ? 'Let teammates know what you’re up to.' : 'Choose when notifications are allowed. Your online indicator follows activity.'}</DialogDescription></DialogHeader>
+    return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}><DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+        <DialogHeader><DialogTitle>{mode === 'status' ? 'Update status' : mode === 'pause' ? 'Pause notifications' : 'Preferences'}</DialogTitle><DialogDescription>{mode === 'status' ? 'Let teammates know what you’re up to.' : 'Choose when notifications are allowed. Your online indicator follows activity.'}</DialogDescription></DialogHeader>
         <form className="space-y-4" onSubmit={event => {
             event.preventDefault()
             if (mode === 'pause') {
@@ -100,8 +107,11 @@ export function AvailabilityEditor({ mode, value, busy, error, onSave, onClose }
                 <label className="block text-sm">Clear after<select className={SELECT} value={expiry} onChange={e => setExpiry(e.target.value)}><option value="30">30 minutes</option><option value="60">1 hour</option><option value="240">4 hours</option><option value="1440">24 hours</option><option value="never">Don’t clear</option></select></label>
                 <label className="flex gap-2 text-sm"><input type="checkbox" checked={pause} onChange={e => setPause(e.target.checked)} />Pause notifications until status clears</label>
             </> : mode === 'pause' ? <label className="block text-sm">Until (your local time)<Input type="datetime-local" required value={until} onChange={e => setUntil(e.target.value)} /></label> : <>
+                <h2 className="text-base font-semibold">Notifications</h2>
+                <h3 className="text-sm font-medium">Working hours</h3>
                 <label className="flex gap-2 text-sm"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />Use a notification schedule</label>
                 {enabled && <>
+                    <label className="block text-sm">Allow notifications<select className={SELECT} value={schedule.days.length === 7 ? 'every' : schedule.days.length === 5 && [1, 2, 3, 4, 5].every(day => schedule.days.includes(day)) ? 'weekdays' : 'custom'} onChange={event => setSchedule({ ...schedule, days: event.target.value === 'every' ? [0, 1, 2, 3, 4, 5, 6] : event.target.value === 'weekdays' ? [1, 2, 3, 4, 5] : [] })}><option value="every">Every day</option><option value="weekdays">Weekdays</option><option value="custom">Custom</option></select></label>
                     <div className="flex flex-wrap gap-2">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => <label key={day} className="flex gap-1 text-xs"><input type="checkbox" checked={schedule.days.includes(index)} onChange={e => setSchedule({ ...schedule, days: e.target.checked ? [...schedule.days, index] : schedule.days.filter(d => d !== index) })} />{day}</label>)}</div>
                     <label className="block text-sm">From<Input type="time" required value={schedule.start} onChange={e => setSchedule({ ...schedule, start: e.target.value })} /></label>
                     <label className="block text-sm">Until<Input type="time" required value={schedule.end} onChange={e => setSchedule({ ...schedule, end: e.target.value })} /></label>
