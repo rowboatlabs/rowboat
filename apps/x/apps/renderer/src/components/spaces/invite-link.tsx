@@ -99,8 +99,11 @@ export function InviteLinkPanel({ orgId, spaceIds }: { orgId: string; spaceIds: 
         )
 
     const link = state.kind === 'ready' ? state.link : ''
+    // min-w-0 (2026-11-06): inside a grid (the invite dialog) a no-wrap link
+    // otherwise sets the item's min width, the track grows to the whole URL,
+    // and the link, description and Copy button run past the panel.
     return (
-        <div className="flex flex-col gap-2">
+        <div className="flex min-w-0 flex-col gap-2">
             {state.kind === 'ready'
                 ? <InviteLinkText link={state.link} />
                 : <span className="block font-mono text-xs leading-6 text-muted-foreground">{state.kind === 'loading' ? 'Creating link…' : 'No link'}</span>}
