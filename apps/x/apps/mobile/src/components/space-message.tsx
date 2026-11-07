@@ -16,7 +16,8 @@ import { AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 import { memberLabel } from '@/lib/spaces/profiles';
-import { isVideoName } from '@/lib/spaces/open-blob';
+import { blobLinkName, isVideoName } from '@/lib/spaces/open-blob';
+import { MessageVideo } from '@/components/blob-video';
 
 /** The contract's file link: https://<org>/s/<spaceId>/a/<assetId> (the label is the file's name at write time). */
 const ASSET_LINK_RE = /^https:\/\/([^/?#]+)\/s\/([^/?#]+)\/a\/([^/?#]+)$/;
@@ -65,10 +66,10 @@ function fileKind(name: string): string {
 }
 
 const FILE_LINE_RE = /^\s*\[([^\]]+)\]\((https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#]+)\)\s*$/;
-// An attached video on its own line is a card too (2026-11-07), so it reads as
-// something to play rather than a link; other attachments stay links.
+// An attached video on its own line plays in the message, like an image
+// (2026-11-07); other attachments stay links.
 const BLOB_LINE_RE = /^\s*\[([^\]]+)\]\((https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/b\/[0-9a-f]{64}(?:\?[^\s)#]*)?)\)\s*$/;
-type BodySegment = { kind: 'markdown'; text: string } | { kind: 'file'; name: string; url: string };
+type BodySegment = { kind: 'markdown'; text: string } | { kind: 'file' | 'video'; name: string; url: string };
 
 /** Split a message into markdown and the file links that stand on their own line. */
 function splitFileCards(body: string): BodySegment[] {
@@ -82,11 +83,14 @@ function splitFileCards(body: string): BodySegment[] {
   };
   for (const line of body.split('\n')) {
     if (/^\s*(```|~~~)/.test(line)) fence = !fence;
-    const blob = fence ? null : BLOB_LINE_RE.exec(line);
-    const m = fence ? null : (FILE_LINE_RE.exec(line) ?? (blob && isVideoName(blob[1]!) ? blob : null));
+    const m = fence ? null : FILE_LINE_RE.exec(line);
+    const video = fence || m ? null : BLOB_LINE_RE.exec(line);
     if (m) {
       flush();
       out.push({ kind: 'file', name: m[1]!, url: m[2]! });
+    } else if (video && isVideoName(video[1]!)) {
+      flush();
+      out.push({ kind: 'video', name: video[1]!, url: video[2]! });
     } else buffer.push(line);
   }
   flush();
@@ -110,7 +114,7 @@ function FileCard({ name, path, onPress }: { name: string; path?: string; onPres
         backgroundColor: pressed ? colors.separator : colors.secondaryBackground,
       })}
     >
-      <Image source={isVideoName(name) ? 'sf:play.rectangle' : 'sf:doc.text'} style={{ width: 22, height: 22 }} contentFit="contain" tintColor={colors.secondaryLabel} />
+      <Image source="sf:doc.text" style={{ width: 22, height: 22 }} contentFit="contain" tintColor={colors.secondaryLabel} />
       <View style={{ flexShrink: 1, gap: 1 }}>
         <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>{name}</Text>
         <Text numberOfLines={1} style={{ fontSize: 12, color: colors.secondaryLabel }}>{[fileKind(name), folder].filter(Boolean).join(' · ')}</Text>
@@ -119,7 +123,7 @@ function FileCard({ name, path, onPress }: { name: string; path?: string; onPres
   );
 }
 
-/** A message body: markdown, with files on their own line as cards. */
+/** A message body: markdown, with files on their own line as cards and videos as players. */
 export function MessageBody({ body, fileNames, rules, onLinkPress }: {
   body: string;
   /** asset id → path in the space. */
@@ -135,6 +139,8 @@ export function MessageBody({ body, fileNames, rules, onLinkPress }: {
           <ChatMarkdown key={i} extraRules={rules} onLinkPress={onLinkPress}>
             {seg.text}
           </ChatMarkdown>
+        ) : seg.kind === 'video' ? (
+          <MessageVideo key={i} src={seg.url} name={blobLinkName(seg.url, seg.name)} />
         ) : (
           <FileCard key={i} name={seg.name} path={fileNames?.get(parseAssetLink(seg.url)?.assetId ?? '')} onPress={() => void onLinkPress(seg.url)} />
         ),
