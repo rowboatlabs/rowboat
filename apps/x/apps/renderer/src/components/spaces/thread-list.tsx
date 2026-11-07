@@ -183,10 +183,12 @@ export function ParticipantFilter({ chosen, options, nameOf, onChange }: {
 }
 
 /** Narrow to threads in any of the chosen spaces: the cross-space page's extra filter. */
-export function SpaceFilter({ chosen, options, nameOf, onChange }: {
+export function SpaceFilter({ chosen, options, nameOf, isDirect = () => false, onChange }: {
     chosen: string[]
     options: string[]
     nameOf: (spaceId: string) => string
+    /** A DM is offered as its person, so it wears the DM icon rather than a #. */
+    isDirect?: (spaceId: string) => boolean
     onChange: (ids: string[]) => void
 }) {
     const names = new Intl.ListFormat('en', { type: 'disjunction' }).format(chosen.map(nameOf))
@@ -194,7 +196,7 @@ export function SpaceFilter({ chosen, options, nameOf, onChange }: {
         label={chosen.length ? `Spaces: ${names}` : 'Filter by space'}
         summary={chosen.length === 0 ? 'All spaces' : chosen.length === 1 ? nameOf(chosen[0]!) : `${chosen.length} spaces`}
         everyone="All spaces" everyoneIcon={<Hash className="size-3.5" />}
-        face={() => <Hash className="size-3.5 text-muted-foreground" />}
+        face={(id) => isDirect(id) ? <MessageSquare className="size-3.5 text-muted-foreground" /> : <Hash className="size-3.5 text-muted-foreground" />}
         chosenFaces={<Hash className="size-3.5" />}
         nameOf={nameOf} />
 }
