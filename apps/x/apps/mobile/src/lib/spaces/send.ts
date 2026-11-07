@@ -18,7 +18,7 @@ type Posted = Awaited<ReturnType<SpacesClient['postMessage']>>;
 export async function postMessageReliably(
   client: SpacesClient,
   spaceId: string,
-  input: { body: string; threadRoot?: string; peopleOnly?: boolean },
+  input: { body: string; threadRoot?: string; peopleOnly?: boolean; session?: { title: string } },
   me: string,
 ): Promise<Posted> {
   const post = () => client.postMessage(spaceId, { ...input, actingMode: 'direct' });

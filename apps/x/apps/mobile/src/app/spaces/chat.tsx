@@ -20,6 +20,7 @@ import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
 import { postMessageReliably } from '@/lib/spaces/send';
+import { sessionTitleOf } from '@/lib/spaces/session';
 import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
 
 /** Rows whose link cards must be in before a channel is revealed, and how long we'll wait. */
@@ -300,10 +301,22 @@ export default function SpaceChatScreen() {
 
   const send = async (body: string): Promise<boolean> => {
     if (sending) return false;
+    // `/session <title>` posts the title as a session's first message and opens it, as on desktop.
+    const sessionTitle = sessionTitleOf(body);
+    if (sessionTitle === '') {
+      setError('Type a title after /session.');
+      return false;
+    }
     setSending(true);
     try {
-      const { message } = await postMessageReliably(client, space, { body }, me);
+      const { message } = await postMessageReliably(
+        client,
+        space,
+        sessionTitle ? { body: sessionTitle, session: { title: sessionTitle } } : { body },
+        me,
+      );
       foldMessage(message);
+      if (sessionTitle) openThread(message);
       // Your own message: always land on it, wherever you were scrolled.
       // (2026-10-05) The old animated scroll started BEFORE the new row was
       // laid out, aimed at the old end, and kept running over the follow-up
