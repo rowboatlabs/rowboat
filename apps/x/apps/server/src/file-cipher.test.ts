@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createFileCipher } from './file-cipher.js';
 
 describe('file cipher (token encryption at rest)', () => {
@@ -36,6 +36,35 @@ describe('file cipher (token encryption at rest)', () => {
     await createFileCipher(workDir);
     const stat = await fs.stat(path.join(workDir, 'cipher-key'));
     expect(stat.mode & 0o777).toBe(0o600);
+  });
+
+  it('shares one durable key across concurrent first-time initializers', async () => {
+    const dir = path.join(workDir, 'concurrent');
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const read = vi.spyOn(fs, 'readFile')
+      .mockRejectedValueOnce(missing).mockRejectedValueOnce(missing);
+    try {
+      const ciphers = await Promise.all([createFileCipher(dir), createFileCipher(dir)]);
+      const restarted = await createFileCipher(dir);
+      for (const cipher of ciphers) {
+        const encrypted = cipher.encrypt('survives-concurrent-start');
+        for (const reader of [...ciphers, restarted]) {
+          expect(reader.decrypt(encrypted)).toBe('survives-concurrent-start');
+        }
+      }
+      expect(await fs.readdir(dir)).toEqual(['cipher-key']);
+      expect((await fs.stat(path.join(dir, 'cipher-key'))).mode & 0o777).toBe(0o600);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('refuses an invalid persisted key without replacing it', async () => {
+    const dir = path.join(workDir, 'invalid');
+    await fs.mkdir(dir);
+    await fs.writeFile(path.join(dir, 'cipher-key'), 'invalid');
+    await expect(createFileCipher(dir)).rejects.toThrow('expected 32');
+    expect(await fs.readFile(path.join(dir, 'cipher-key'), 'utf8')).toBe('invalid');
   });
 
   it('rejects tampered ciphertext (GCM auth)', async () => {
