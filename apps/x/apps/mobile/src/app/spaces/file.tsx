@@ -6,10 +6,12 @@ import { Image as SymbolImage } from '@/components/sf-image';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BlobVideo } from '@/components/blob-video';
 import { ChatMarkdown } from '@/components/markdown';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { friendlyError } from '@/lib/spaces/errors';
+import { isVideoName } from '@/lib/spaces/open-blob';
 import { FileActionSheet } from '@/components/file-action-sheet';
 import { documentToRenderable } from '@/lib/note-markdown';
 import { SpacesLive } from '@x/spaces-client';
@@ -45,6 +47,7 @@ export default function SpaceFileScreen() {
   const [version, setVersion] = useState<number | null>(null);
   const [path, setPath] = useState<string>(params.path ?? '');
   const [imageUri, setImageUri] = useState<{ uri: string; headers: Record<string, string> } | null>(null);
+  const [videoHash, setVideoHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null); // non-null while editing
   const [saving, setSaving] = useState(false);
@@ -59,9 +62,11 @@ export default function SpaceFileScreen() {
       setPath(result.path);
       setVersion(result.version);
       if (result.blob) {
-        // Binary: images render inline; anything else just states itself.
+        // Binary: images and videos render inline; anything else just states itself.
         const token = await account.getAccessToken();
-        if (result.blob.mime.startsWith('image/')) {
+        if (isVideoName(result.path)) {
+          setVideoHash(result.blob.hash);
+        } else if (result.blob.mime.startsWith('image/')) {
           setImageUri({
             uri: `https://${org}/v1/spaces/${encodeURIComponent(space)}/blobs/${result.blob.hash}`,
             headers: { Authorization: `Bearer ${token}` },
@@ -201,9 +206,14 @@ export default function SpaceFileScreen() {
     <ScrollView contentInsetAdjustmentBehavior="automatic" style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
       {header}
       {error ? <Text style={{ fontSize: 13, color: colors.destructive }}>{error}</Text> : null}
-      {content === null && imageUri === null && !error ? <ActivityIndicator style={{ marginTop: 32 }} /> : null}
+      {content === null && imageUri === null && videoHash === null && !error ? <ActivityIndicator style={{ marginTop: 32 }} /> : null}
       {imageUri ? (
         <Image source={imageUri} style={{ width: width - 32, height: width - 32, borderRadius: 10 }} resizeMode="contain" />
+      ) : null}
+      {videoHash ? (
+        <View style={{ width: width - 32, height: ((width - 32) * 9) / 16, borderRadius: 10, overflow: 'hidden', backgroundColor: '#000' }}>
+          <BlobVideo org={org} spaceId={space} hash={videoHash} name={name} />
+        </View>
       ) : null}
       {content !== null ? (
         markdown ? (

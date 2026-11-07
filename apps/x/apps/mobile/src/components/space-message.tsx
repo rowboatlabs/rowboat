@@ -16,6 +16,7 @@ import { AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 import { memberLabel } from '@/lib/spaces/profiles';
+import { isVideoName } from '@/lib/spaces/open-blob';
 
 /** The contract's file link: https://<org>/s/<spaceId>/a/<assetId> (the label is the file's name at write time). */
 const ASSET_LINK_RE = /^https:\/\/([^/?#]+)\/s\/([^/?#]+)\/a\/([^/?#]+)$/;
@@ -58,11 +59,15 @@ function fileKind(name: string): string {
   if (!ext || ext === 'md' || ext === 'markdown') return 'Document';
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'svg'].includes(ext)) return 'Image';
   if (ext === 'pdf') return 'PDF';
+  if (isVideoName(name)) return 'Video';
   if (['csv', 'tsv', 'xlsx'].includes(ext)) return 'Spreadsheet';
   return `${ext.toUpperCase()} file`;
 }
 
 const FILE_LINE_RE = /^\s*\[([^\]]+)\]\((https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#]+)\)\s*$/;
+// An attached video on its own line is a card too (2026-11-07), so it reads as
+// something to play rather than a link; other attachments stay links.
+const BLOB_LINE_RE = /^\s*\[([^\]]+)\]\((https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/b\/[0-9a-f]{64}(?:\?[^\s)#]*)?)\)\s*$/;
 type BodySegment = { kind: 'markdown'; text: string } | { kind: 'file'; name: string; url: string };
 
 /** Split a message into markdown and the file links that stand on their own line. */
@@ -77,7 +82,8 @@ function splitFileCards(body: string): BodySegment[] {
   };
   for (const line of body.split('\n')) {
     if (/^\s*(```|~~~)/.test(line)) fence = !fence;
-    const m = fence ? null : FILE_LINE_RE.exec(line);
+    const blob = fence ? null : BLOB_LINE_RE.exec(line);
+    const m = fence ? null : (FILE_LINE_RE.exec(line) ?? (blob && isVideoName(blob[1]!) ? blob : null));
     if (m) {
       flush();
       out.push({ kind: 'file', name: m[1]!, url: m[2]! });
@@ -104,7 +110,7 @@ function FileCard({ name, path, onPress }: { name: string; path?: string; onPres
         backgroundColor: pressed ? colors.separator : colors.secondaryBackground,
       })}
     >
-      <Image source="sf:doc.text" style={{ width: 22, height: 22 }} contentFit="contain" tintColor={colors.secondaryLabel} />
+      <Image source={isVideoName(name) ? 'sf:play.rectangle' : 'sf:doc.text'} style={{ width: 22, height: 22 }} contentFit="contain" tintColor={colors.secondaryLabel} />
       <View style={{ flexShrink: 1, gap: 1 }}>
         <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>{name}</Text>
         <Text numberOfLines={1} style={{ fontSize: 12, color: colors.secondaryLabel }}>{[fileKind(name), folder].filter(Boolean).join(' · ')}</Text>
