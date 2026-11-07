@@ -19,13 +19,27 @@ export async function createFileCipher(workDir: string): Promise<TokenCipher> {
   let key: Buffer;
   try {
     key = Buffer.from((await fs.readFile(keyPath, 'utf8')).trim(), 'base64');
-    if (key.length !== KEY_BYTES) throw new Error(`cipher-key is ${key.length} bytes, expected ${KEY_BYTES}`);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     key = crypto.randomBytes(KEY_BYTES);
     await fs.mkdir(workDir, { recursive: true });
-    await fs.writeFile(keyPath, key.toString('base64') + '\n', { mode: 0o600 });
+    // 2026-11-07: publish a complete key without replacing another starter's
+    // key; both successful initializers must decrypt the same stored tokens.
+    const temporary = path.join(workDir, `.cipher-key-${crypto.randomUUID()}.tmp`);
+    try {
+      await fs.writeFile(temporary, key.toString('base64') + '\n', { mode: 0o600, flag: 'wx' });
+      try {
+        await fs.link(temporary, keyPath);
+      } catch (publishError) {
+        if ((publishError as NodeJS.ErrnoException).code !== 'EEXIST') throw publishError;
+      }
+      key = Buffer.from((await fs.readFile(keyPath, 'utf8')).trim(), 'base64');
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
+
+  if (key.length !== KEY_BYTES) throw new Error(`cipher-key is ${key.length} bytes, expected ${KEY_BYTES}`);
 
   return {
     isAvailable: () => true,
