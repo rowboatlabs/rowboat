@@ -19,17 +19,17 @@ it('defaults to actual people and separates both AI agents and service bots with
     expect(people[0]).toHaveTextContent('Ramnique')
     expect(people[1]).toHaveTextContent('Harsh')
     expect(screen.queryByText('Assistant')).not.toBeInTheDocument()
-    const integrations = screen.getByRole('tab', { name: 'Bots & AI integrations 2' })
-    fireEvent.mouseDown(integrations, { button: 0, ctrlKey: false })
-    expect(integrations).toHaveAttribute('aria-selected', 'true')
+    const agentsTab = screen.getByRole('tab', { name: 'Agents 2' })
+    fireEvent.mouseDown(agentsTab, { button: 0, ctrlKey: false })
+    expect(agentsTab).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('Assistant')).toBeInTheDocument()
     expect(screen.getByText('Analytics')).toBeInTheDocument()
     expect(screen.queryByText('Harsh')).not.toBeInTheDocument()
 })
 
-it('shows an empty integrations tab instead of mixing in people', () => {
+it('shows an empty Agents tab instead of mixing in people', () => {
     render(<MemberDirectory members={members.slice(0, 2)} here={new Set()} selfId="harsh" />)
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Bots & AI integrations 0' }), { button: 0, ctrlKey: false })
-    expect(screen.getByText('No bots or AI integrations in this space.')).toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Agents 0' }), { button: 0, ctrlKey: false })
+    expect(screen.getByText('No agents in this space.')).toBeInTheDocument()
     expect(within(screen.getByRole('tabpanel')).queryByRole('button')).not.toBeInTheDocument()
 })
