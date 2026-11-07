@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import * as analytics from '@/lib/analytics'
 import { toast } from '@/lib/toast'
+import { SpaceOwnerNote } from './space-owner-note'
 
 /**
  * A group chat's way to grow (2026-10-07): its channel list is out of sight,
@@ -47,6 +48,7 @@ export function AddChannelDialog({ org, open, onOpenChange, onCreated }: {
             <Input autoFocus aria-label="Channel name" value={name} placeholder="design, trips, random…"
                 onChange={(event) => setName(event.target.value)}
                 onKeyDown={(event) => event.key === 'Enter' && void create()} />
+            <SpaceOwnerNote orgName={org.name} name={name} onLeave={() => onOpenChange(false)} />
             <div className="flex justify-end gap-2 pt-1">
                 <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
                 <Button onClick={() => void create()} disabled={busy || !name.trim()}>

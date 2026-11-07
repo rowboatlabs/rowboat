@@ -33,7 +33,7 @@ afterEach(() => {
 
 it.each([
     ['Create a group chat', 'Create a group chat'],
-    ['Join a server', 'Join a server'],
+    ['Join with an invite', 'Join with an invite'],
 ])('routes %s from the chooser to the existing dialog', async (label, destination) => {
     render(<DialogFlow />)
     expect(screen.getByRole('dialog', { name: 'New group chat' })).toBeVisible()
@@ -87,4 +87,27 @@ it.each([
     expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:joinInvite')).toHaveLength(joins)
     // An invite is to the org (2026-10-19): the card names it, then every space it joins.
     if (!autoJoin) expect(screen.getByText('You’ll join launch and general')).toBeVisible()
+})
+
+// Created (2026-11-07): the dialog turns into the new chat's invite link, and
+// lands in the chat only when they close it. A name can arrive prefilled.
+it('creates a group chat from a prefilled name, then shows its invite link', async () => {
+    const onDone = vi.fn()
+    const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'spaces:apexInfo') return { apexDomain: 'spaces.example.com' }
+        if (channel === 'spaces:createOrg') return { org: { id: 'trip', name: 'Lisbon trip' } }
+        if (channel === 'spaces:createInvite') return { link: 'https://trip.spaces.example.com/join/tok' }
+        if (channel === 'spaces:resolveInviteLink') return { resolved: { state: 'ok', org: { name: 'Lisbon trip' }, spaces: [] } }
+        return {}
+    })
+    vi.stubGlobal('ipc', { invoke })
+    render(<ServerDialogs onDone={onDone} />)
+    await act(async () => { openServerDialog({ kind: 'create', name: 'Lisbon trip' }) })
+    expect(screen.getByLabelText('Group name')).toHaveValue('Lisbon trip')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Create' })) })
+    expect(await screen.findByRole('dialog', { name: 'Invite people to Lisbon trip' })).toBeVisible()
+    expect(await screen.findByText('https://trip.spaces.e', { exact: false })).toBeVisible()
+    expect(onDone).not.toHaveBeenCalled()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open the chat' })) })
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledWith('trip', undefined))
 })

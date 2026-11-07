@@ -13,7 +13,8 @@ export function CompletionStep({ state }: CompletionStepProps) {
   const { handleBack, handleComplete, handleCompleteWithTour } = state
 
   const space = useCompletionSpace(state.onboardingPath === 'rowboat')
-  const disabled = space.loading || space.busy || (space.needed && !space.name.trim())
+  const creating = space.needed || (space.offered && space.wanted)
+  const disabled = space.loading || space.busy || (creating && !space.name.trim())
 
   return (
     <div className="flex flex-col items-center justify-center text-center flex-1">
@@ -35,7 +36,27 @@ export function CompletionStep({ state }: CompletionStepProps) {
 
       {space.loading && <p role="status" className="text-sm text-muted-foreground mb-6">Checking your spaces…</p>}
       {space.needed && (
-        <CompletionSpaceName name={space.name} onChange={space.setName} disabled={space.busy} />
+        <div className="w-full max-w-sm mb-6">
+          <CompletionSpaceName name={space.name} onChange={space.setName} disabled={space.busy} />
+        </div>
+      )}
+      {space.offered && (
+        <div className="w-full max-w-sm mb-6">
+          <label className="flex items-start gap-2 text-left text-sm">
+            <input type="checkbox" className="mt-1" checked={space.wanted} disabled={space.busy}
+              onChange={event => space.setWanted(event.target.checked)} />
+            <span>
+              Also start a group chat of my own
+              <span className="block text-xs text-muted-foreground">For your own people, apart from the team you joined.</span>
+            </span>
+          </label>
+          {space.wanted && (
+            <div className="mt-3">
+              <CompletionSpaceName name={space.name} onChange={space.setName} disabled={space.busy}
+                hint="Invite people to it from the chat. You can rename it later." />
+            </div>
+          )}
+        </div>
       )}
       {space.error && (
         <div role="alert" className="mb-4 text-sm text-destructive">

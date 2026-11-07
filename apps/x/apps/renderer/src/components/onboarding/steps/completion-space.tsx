@@ -23,6 +23,11 @@ export function suggestedSpaceName(token: string | null): string {
 export function useCompletionSpace(enabled: boolean) {
   const [loading, setLoading] = useState(enabled)
   const [needed, setNeeded] = useState(false)
+  // Already in an org (an invite brought them): their own group chat is
+  // offered, not made (2026-11-07). Without it the only home they have is
+  // the team that invited them.
+  const [offered, setOffered] = useState(false)
+  const [wanted, setWanted] = useState(false)
   const [name, setName] = useState('My space')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -41,6 +46,7 @@ export function useCompletionSpace(enabled: boolean) {
     ]).then(([{ orgs }, account]) => {
       if (cancelled) return
       setNeeded(account.signedIn && orgs.length === 0)
+      setOffered(account.signedIn && orgs.length > 0)
       setName(suggestedSpaceName(account.accessToken))
     }).catch(() => {
       if (!cancelled) setError('Could not check your spaces. Please try again.')
@@ -51,15 +57,16 @@ export function useCompletionSpace(enabled: boolean) {
   }, [enabled, attempt])
 
   const complete = async (onComplete: () => void) => {
-    if (inFlight.current || loading || (needed && !name.trim())) return
+    const creating = needed || (offered && wanted)
+    if (inFlight.current || loading || (creating && !name.trim())) return
     inFlight.current = true
     setBusy(true)
     setError(null)
     try {
-      if (needed && !created.current) {
+      if (creating && !created.current) {
         // Recheck in case an invite was accepted while onboarding was open.
         const { orgs } = await window.ipc.invoke('spaces:listOrgs', null)
-        if (orgs.length === 0) {
+        if (orgs.length === 0 || wanted) {
           await window.ipc.invoke('spaces:createOrg', { name: name.trim() })
           analytics.spacesServerCreated()
         }
@@ -75,17 +82,18 @@ export function useCompletionSpace(enabled: boolean) {
     }
   }
 
-  return { loading, needed, name, setName, error, busy, complete, retry: () => setAttempt(value => value + 1) }
+  return { loading, needed, offered, wanted, setWanted, name, setName, error, busy, complete, retry: () => setAttempt(value => value + 1) }
 }
 
-export function CompletionSpaceName({ name, onChange, disabled }: {
+export function CompletionSpaceName({ name, onChange, disabled, hint = 'Invite teammates to your space, or join an existing one. You can always rename this space later.' }: {
   name: string
+  hint?: string
   onChange: (name: string) => void
   disabled: boolean
 }) {
   const [editing, setEditing] = useState(false)
   return (
-    <div className="w-full max-w-sm mb-6">
+    <div className="w-full max-w-sm">
       <div className="flex items-center justify-center gap-2 mb-3">
         {editing ? (
           <Input
@@ -111,7 +119,7 @@ export function CompletionSpaceName({ name, onChange, disabled }: {
         </Button>
       </div>
       <p className="text-sm text-muted-foreground leading-relaxed">
-        Invite teammates to your space, or join an existing one. You can always rename this space later.
+        {hint}
       </p>
     </div>
   )

@@ -85,6 +85,7 @@ import { NO_BADGE } from "@/lib/spaces-read-state"
 import { UnreadBadge } from "@/components/spaces/unread-badge"
 import { MemberAvatar } from "@/components/spaces/atoms"
 import { NewDirectDialog } from "@/components/spaces/new-direct-dialog"
+import { SpaceOwnerNote } from "@/components/spaces/space-owner-note"
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from "@/lib/spaces-direct"
 import { useOrgRoster, useOrgRosters, useSelfDisplayName } from "@/hooks/use-space-members"
 import { MascotFaceIcon } from "@/components/talking-head"
@@ -2168,6 +2169,11 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
               if (!newName.trim()) setCreating(false)
             }}
           />
+        </div>
+      )}
+      {creating && (
+        <div className="pb-1 pl-5 pr-2">
+          <SpaceOwnerNote orgName={org.name} name={newName} onLeave={() => { setCreating(false); setNewName('') }} />
         </div>
       )}
     </>

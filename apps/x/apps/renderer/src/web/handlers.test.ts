@@ -88,7 +88,7 @@ describe('creating a server in the web app', () => {
         fetchMock.mockResolvedValue(new Response(JSON.stringify({ org: { id: org.id } }), { status: 201 }))
         vi.mocked(loadOrgs).mockResolvedValue([])
 
-        await expect(create()).rejects.toThrow('The server was created but is not listed yet.')
+        await expect(create()).rejects.toThrow('The group chat was created but is not listed yet.')
         expect(fetchMock).toHaveBeenCalledOnce()
     })
 })

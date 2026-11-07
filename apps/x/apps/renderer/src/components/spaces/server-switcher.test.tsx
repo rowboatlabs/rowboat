@@ -66,7 +66,7 @@ describe('ServerSwitcher', () => {
     })
     it.each(['create', 'join'] as const)('asks the app-level host for the %s dialog', (kind) => {
         setup()
-        fireEvent.click(screen.getByRole('menuitem', { name: kind === 'create' ? 'Create a group chat' : 'Join a server' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: kind === 'create' ? 'Create a group chat' : 'Join with an invite' }))
         expect(openServerDialog).toHaveBeenCalledWith({ kind })
     })
 })

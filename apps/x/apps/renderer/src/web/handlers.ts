@@ -88,12 +88,12 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
             }
             const { space } = await new SpacesClient({ baseUrl, token: harborSession }).acceptInvite(token)
             const org = (await orgs.loadOrgs()).find((o) => o.baseUrl === baseUrl)
-            if (!org) throw new Error(`You joined ${space?.name ?? 'the server'}, but it isn’t listed yet. Reload to see it.`)
+            if (!org) throw new Error(`You joined ${space?.name ?? 'it'}, but it isn’t listed yet. Reload to see it.`)
             return { org, ...(space ? { space } : {}) }
         },
 
         'spaces:createOrg': async (args) => {
-            let failure = 'Could not create the server.'
+            let failure = 'Could not create the group chat.'
             for (let attempt = 0; attempt < 3; attempt++) {
                 const res = await fetch(`${APEX_URL}/v1/orgs`, {
                     method: 'POST',
@@ -103,10 +103,10 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
                 const json = (await res.json().catch(() => ({}))) as { org?: { id: string }; message?: string }
                 if (res.ok && json.org) {
                     const created = (await orgs.loadOrgs()).find((org) => org.id === json.org!.id)
-                    if (!created) throw new Error('The server was created but is not listed yet. Reload to see it.')
+                    if (!created) throw new Error('The group chat was created but is not listed yet. Reload to see it.')
                     return { org: created }
                 }
-                failure = json.message ?? `Could not create the server (${res.status}).`
+                failure = json.message ?? `Could not create the group chat (${res.status}).`
                 if (!/is taken/.test(failure)) break
             }
             throw new Error(failure)
