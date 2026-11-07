@@ -67,7 +67,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

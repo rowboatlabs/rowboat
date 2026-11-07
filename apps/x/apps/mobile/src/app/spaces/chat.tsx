@@ -18,7 +18,7 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
-import { blobLinkName, openBlobFile } from '@/lib/spaces/open-blob';
+import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
 import { postMessageReliably } from '@/lib/spaces/send';
 import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
 
@@ -444,8 +444,9 @@ export default function SpaceChatScreen() {
   );
   const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
 
-  // A tapped attachment: this org's files download with the bearer and open
-  // in the share sheet (Quick Look, Save to Files); other hosts go to the browser.
+  // A tapped attachment: this org's videos play in the app; other files
+  // download with the bearer and open in the share sheet (Quick Look, Save to
+  // Files); other hosts go to the browser.
   const [openingFile, setOpeningFile] = useState(false);
   const openBlobLink = useCallback(
     (link: { host: string; spaceId: string; hash: string; url: string }) => {
@@ -453,9 +454,14 @@ export default function SpaceChatScreen() {
         void Linking.openURL(link.url);
         return;
       }
+      const name = blobLinkName(link.url, 'file');
+      if (isVideoName(name)) {
+        router.push({ pathname: '/spaces/video', params: { org, space: link.spaceId, hash: link.hash, name } });
+        return;
+      }
       if (openingFile) return;
       setOpeningFile(true);
-      openBlobFile(client, link.spaceId, link.hash, blobLinkName(link.url, 'file'))
+      openBlobFile(client, link.spaceId, link.hash, name)
         .catch((err) => Alert.alert("Couldn't open the file", friendlyError(err, "You're offline. Try again when you're back online.")))
         .finally(() => setOpeningFile(false));
     },

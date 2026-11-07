@@ -34,6 +34,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.1",
     "expo-system-ui": "~57.0.3",
+    "expo-video": "~57.0.5",
     "expo-web-browser": "~57.0.1",
     "markdown-it-texmath": "^1.0.0",
     "posthog-react-native": "^4.56.2",

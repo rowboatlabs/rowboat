@@ -50,6 +50,7 @@ export default function SpacesLayout() {
       <Stack.Screen name="thread" options={{ title: 'Thread', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="files" options={{ title: 'Files', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="file" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="video" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="search" options={{ title: 'Search', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="settings" options={{ title: 'Settings', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="notifications" options={{ title: 'Notifications', headerBackButtonDisplayMode: 'minimal' }} />
