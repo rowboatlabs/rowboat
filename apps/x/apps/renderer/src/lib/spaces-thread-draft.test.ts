@@ -66,3 +66,27 @@ describe('taking the reply back', () => {
         expect(m.peekStagedReply('o1/s1/r1')).toBe('')
     })
 })
+
+describe('composer picks (2026-11-07)', () => {
+    it('hands a thread its picked models back on a fresh read, per thread', async () => {
+        const m = await load()
+        m.writeComposerPicks('o1/s1/r1', { model: { provider: 'p', model: 'm', effort: 'high' }, members: { local: { model: 'opus' } } })
+        expect(m.readComposerPicks('o1/s1/r1')).toEqual({ model: { provider: 'p', model: 'm', effort: 'high' }, members: { local: { model: 'opus' } } })
+        expect(m.readComposerPicks('o1/s1/r2')).toEqual({})
+    })
+
+    it('drops the slot once nothing is picked', async () => {
+        const m = await load()
+        m.writeComposerPicks('o1/s1/r1', { members: { local: { model: 'opus' } } })
+        m.writeComposerPicks('o1/s1/r1', { members: {} })
+        expect(window.localStorage.length).toBe(0)
+    })
+
+    it('ignores a slot it cannot read', async () => {
+        const m = await load()
+        window.localStorage.setItem('spaces:picks:o1/s1/r1', '{not json')
+        expect(m.readComposerPicks('o1/s1/r1')).toEqual({})
+        window.localStorage.setItem('spaces:picks:o1/s1/r1', JSON.stringify({ model: { provider: 1 }, members: ['x'] }))
+        expect(m.readComposerPicks('o1/s1/r1')).toEqual({})
+    })
+})

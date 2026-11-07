@@ -31,7 +31,7 @@ import { AddSecretDialog, DraftSecretChips, type DraftSecret } from '@/component
 import { useMemberNames } from '@/components/spaces/member-text'
 import { mentionsAnyone } from '@x/shared/dist/spaces.js'
 import type { AutoRouteMode } from '@/lib/spaces-auto-route'
-import { draftStorageKey } from '@/lib/spaces-thread-draft'
+import { draftStorageKey, readComposerPicks, writeComposerPicks } from '@/lib/spaces-thread-draft'
 import { schedulePresets } from '@/lib/spaces-schedule'
 import { blobAppUrl, blobWireUrl, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -189,8 +189,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     followUpAgentId?: string
 }) {
     const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(draftStorageKey(draftKey)) ?? '' : ''))
-    // Picked options for mentioned agent members; sticky for the session, sent only for agents the text mentions.
-    const [memberOptions, setMemberOptions] = useState<AgentOptionValues>({})
+    // Picked options for mentioned agent members; kept per draft key (2026-11-07), sent only for agents the text mentions.
+    const [memberOptions, setMemberOptions] = useState<AgentOptionValues>(() => (draftKey ? readComposerPicks(draftKey).members ?? {} : {}))
     useEffect(() => {
         if (!draftKey) return
         try {
@@ -342,7 +342,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         !!(refs && event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files'))
 
     // Agent options — only meaningful (and only shown) when @rowboat is addressed.
-    const [model, setModel] = useState<ModelSelection | null>(null)
+    const [model, setModel] = useState<ModelSelection | null>(() => (draftKey ? readComposerPicks(draftKey).model ?? null : null))
+    useEffect(() => {
+        if (draftKey) writeComposerPicks(draftKey, { ...(model ? { model } : {}), members: memberOptions })
+    }, [draftKey, model, memberOptions])
     const [permissionMode, setPermissionMode] = useState<'auto' | 'manual'>('auto')
     const [searchEnabled, setSearchEnabled] = useState(false)
     const [codeMode, setCodeMode] = useState<'claude' | 'codex' | null>(null)
