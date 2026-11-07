@@ -140,6 +140,17 @@ describe('formatting commands produce wire markdown', () => {
         expect(composerMarkdown(e)).toBe('one\ntwo')
     })
 
+    it('Shift+Enter scrolls the caret into view, so a full box follows the new line', () => {
+        const e = makeEditor('one')
+        e.commands.focus('end')
+        let scrolled = false
+        e.on('transaction', ({ transaction }) => { scrolled ||= transaction.scrolledIntoView })
+        e.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, shiftKey: true, bubbles: true, cancelable: true }))
+        expect(scrolled).toBe(true)
+        e.commands.insertContent('two')
+        expect(composerMarkdown(e)).toBe('one\ntwo')
+    })
+
     it('a break before a line that opens a block leaves no stray backslash', () => {
         // CommonMark's `\` hard break renders as itself once the next line
         // starts a list/heading/quote — the case that put backslashes in
