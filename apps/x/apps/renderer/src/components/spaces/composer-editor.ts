@@ -125,7 +125,16 @@ const ChatStarterKit = StarterKit.extend({
     addExtensions() {
         return (this.parent?.() ?? []).map((extension) =>
             extension.name === 'hardBreak'
-                ? extension.extend({ addStorage: () => ({ markdown: { serialize: serializeHardBreak, parse: {} } }) })
+                ? extension.extend({
+                    addStorage: () => ({ markdown: { serialize: serializeHardBreak, parse: {} } }),
+                    // 2026-11-07: tiptap's setHardBreak never asks the view to
+                    // scroll, so in a box already at its max height the caret
+                    // dropped below the fold on Shift+Enter. Bring it into view.
+                    addKeyboardShortcuts(this: { editor: Editor }) {
+                        const lineBreak = () => this.editor.chain().setHardBreak().scrollIntoView().run()
+                        return { 'Mod-Enter': lineBreak, 'Shift-Enter': lineBreak }
+                    },
+                })
                 : extension.name === 'codeBlock'
                     ? extension.extend({
                         addCommands() {
