@@ -1767,8 +1767,9 @@ export const routes = {
   // --- search ---------------------------------------------------------------
   /**
    * Space search (search.ts): categorized top-N over messages, topics, and
-   * assets. `q` is free text (AND-ed words, last word prefix-matched, member
-   * names expand to their mentions); `kinds` narrows the categories searched
+   * assets. `q` is free text (AND-ed words, each prefix-matched, member
+   * names expand to their mentions) and filters (from:, mentions:, in:, has:,
+   * which narrow messages only); `kinds` narrows the categories searched
    * (default all); `limit` caps each category independently.
    */
   search: {

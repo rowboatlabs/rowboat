@@ -26,7 +26,7 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import { sortActivity } from './activity-sort.js';
-import { extractSearchText, searchTextFor, snippetAround, toPathPatterns, toTsQueryParams, tsquerySql, type SearchQuery } from './search.js';
+import { extractSearchText, HAS_PATTERNS, searchTextFor, snippetAround, toPathPatterns, toTsQueryParams, tsquerySql, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
 import {
   type MessageWindow, type PushLevel,
@@ -1189,11 +1189,35 @@ export class PgStore implements Store {
   // reaches tsquery syntax.
 
   async searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]> {
-    if (query.terms.length === 0) return [];
+    if (query.terms.length === 0 && !query.filtered) return [];
+    const params: unknown[] = [spaceId];
+    const param = (v: unknown) => {
+      params.push(v);
+      return `$${params.length}`;
+    };
+    const where = ['m.space_id = $1'];
+    if (query.terms.length > 0) {
+      const [groups, wholes] = tsqueryArgs(query);
+      where.push(`m.body_tsv @@ ${tsquerySql(param(groups), param(wholes))}`);
+    } else {
+      // Filters alone: every live message is a candidate (search.ts SearchFilters).
+      where.push('m.deleted_at is null');
+    }
+    const { filters } = query;
+    for (const ids of filters.from) where.push(`m.author->>'memberId' = any(${param(ids)}::text[])`);
+    for (const ids of filters.mentions) where.push(`m.mentions ?| ${param(ids)}::text[]`);
+    for (const fragment of filters.in) {
+      const like = param(`%${fragment.replace(/([\\%_])/g, '\\$1')}%`);
+      where.push(
+        `(exists (select 1 from topics t where t.space_id = m.space_id and t.root_message_id = coalesce(m.thread_root, m.id) and t.title ilike ${like})
+          or exists (select 1 from messages r where r.space_id = m.space_id and r.id = coalesce(m.thread_root, m.id) and r.session_title ilike ${like}))`,
+      );
+    }
+    for (const kind of filters.has) where.push(`m.body ~ ${param(HAS_PATTERNS[kind])}`);
     const rows = await this.sql.query<MessageRow>(
-      `select * from messages where space_id = $1 and body_tsv @@ ${tsquerySql('$2', '$3')}
-       order by stream_offset desc limit $4`,
-      [spaceId, ...tsqueryArgs(query), limit],
+      `select m.* from messages m where ${where.join(' and ')}
+       order by m.stream_offset desc limit ${param(limit)}`,
+      params,
     );
     return rows.map((r) => ({ message: rowToMessage(r), snippet: snippetAround(r.body, query) }));
   }

@@ -230,6 +230,75 @@ describe('shape and scoping', () => {
   });
 });
 
+describe('filters and word prefixes (2026-11-06)', () => {
+  let filterSpace: string;
+  const post = (who: { memberId: string }, body: string, threadRoot?: string) =>
+    service.postMessage(who, filterSpace, { body, ...(threadRoot ? { threadRoot } : {}), actingMode: 'direct' });
+
+  beforeAll(async () => {
+    filterSpace = (await service.createSpace(ram, 'Filter Space')).id;
+    const invite = await service.createInvite(ram, { spaceIds: [filterSpace] });
+    await service.acceptInvite(harsh, invite.token);
+  });
+
+  it('prefix-matches every word, not only the last', async () => {
+    await post(ram, 'The deployment failed overnight');
+    expect((await service.search(ram, filterSpace, 'deploy fail')).messages.length).toBe(1);
+    expect((await service.search(ram, filterSpace, 'ploy fail')).messages.length).toBe(0);
+  });
+
+  it('from: and mentions: narrow in the store, and work without a word', async () => {
+    await post(harsh, 'quarterly numbers from harsh, see https://example.com/q3');
+    await post(ram, 'quarterly numbers for [@Harsh Verma](#member:harshv01)');
+
+    const fromHarsh = await service.search(ram, filterSpace, 'quarterly from:harsh');
+    expect(fromHarsh.messages.map((m) => m.author.memberId)).toEqual(['harshv01']);
+    // `me` is the searcher; a filter alone is a search.
+    const mine = await service.search(ram, filterSpace, 'from:me');
+    expect(mine.messages.every((m) => m.author.memberId === 'ramnique')).toBe(true);
+    expect(mine.messages.length).toBe(2);
+    const mentionsHarsh = await service.search(ram, filterSpace, 'mentions:harsh');
+    expect(mentionsHarsh.messages.map((m) => m.snippet)).toEqual(['quarterly numbers for [@Harsh Verma](#member:harshv01)']);
+    // A name nobody has matches nothing, rather than being ignored.
+    expect((await service.search(ram, filterSpace, 'quarterly from:nobody')).messages).toEqual([]);
+  });
+
+  it('has: matches links, images and files anywhere in the body', async () => {
+    await post(ram, 'screenshot ![shot](https://x/s/a/b/abc) attached');
+    await post(ram, 'the spec is [spec.pdf](https://x/s/a/b/def)');
+    const links = await service.search(ram, filterSpace, 'has:link');
+    expect(links.messages.length).toBe(3);
+    expect((await service.search(ram, filterSpace, 'has:image')).messages.map((m) => m.snippet)).toEqual([
+      'screenshot ![shot](https://x/s/a/b/abc) attached',
+    ]);
+    expect((await service.search(ram, filterSpace, 'has:file')).messages.map((m) => m.snippet)).toEqual([
+      'the spec is [spec.pdf](https://x/s/a/b/def)',
+    ]);
+  });
+
+  it("in: matches the thread's discussion or session title", async () => {
+    const planning = await post(ram, 'planning root');
+    await service.createTopic(ram, filterSpace, { rootMessageId: planning.message.id, title: 'Launch plan', actingMode: 'direct' });
+    await post(harsh, 'budget is approved', planning.message.id);
+    const session = await post(ram, 'session root');
+    await service.setSession(ram, filterSpace, session.message.id, { session: { title: 'Fix search' }, actingMode: 'direct' });
+    await post(harsh, 'budget for the search work', session.message.id);
+
+    expect((await service.search(ram, filterSpace, 'budget in:launch')).messages.map((m) => m.snippet)).toEqual(['budget is approved']);
+    expect((await service.search(ram, filterSpace, 'budget in:search')).messages.map((m) => m.snippet)).toEqual([
+      'budget for the search work',
+    ]);
+  });
+
+  it('a filtered query searches messages alone', async () => {
+    await service.createAsset(ram, filterSpace, { path: 'quarterly.md', newContent: 'quarterly', reason: 'seed', actingMode: 'direct' });
+    expect((await service.search(ram, filterSpace, 'quarterly')).assets.length).toBe(1);
+    const filtered = await service.search(ram, filterSpace, 'quarterly from:me');
+    expect(filtered.assets).toEqual([]);
+    expect(filtered.topics).toEqual([]);
+  });
+});
+
 describe('extractSearchText', () => {
   it('passes prose through, strips generic JSON to string leaves', () => {
     expect(extractSearchText('a.md', '# Hello world')).toBe('# Hello world');

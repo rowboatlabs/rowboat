@@ -14,12 +14,19 @@ import { MessageId, StreamOffset } from './ids.js';
 // messages newest-first (chat convention), topics and assets by relevance.
 //
 // Query semantics (documented, not configurable): terms are AND-ed words;
-// the final term matches as a prefix (live typing works mid-word); a term that
+// every term matches as a prefix (2026-11-06: "deploy fail" finds "deployment
+// failed"; before, only the final term did); a term that
 // equals a space member's name also matches mentions of that member
 // (query-time expansion — the index stores ids, names resolve fresh so
 // renames never stale it). Snippets are RAW message/asset text: mention
 // tokens ("@<memberId>") arrive unresolved, and clients render them through
 // the same mention resolution as message bodies.
+//
+// Filters (2026-11-06, "search" in Main): `from:<name>`, `mentions:<name>`
+// (`me` is the searcher), `in:<thread title>` and `has:link|image|file` narrow
+// message hits on the server, AND-ed with the words and each other. A query of
+// filters alone is a search, newest first. A filtered query returns messages
+// only: discussions and files have no author, mention, thread or link.
 
 export const SearchKind = z.enum(['messages', 'topics', 'assets']);
 export type SearchKind = z.infer<typeof SearchKind>;

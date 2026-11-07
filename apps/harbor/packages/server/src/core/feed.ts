@@ -1089,7 +1089,7 @@ export class Feed {
     const limit = Math.min(opts?.limit ?? 10, 50);
     const kinds = new Set<SearchKind>(opts?.kinds ?? ['messages', 'topics', 'assets']);
 
-    const query = parseSearchQuery(rawQuery, await this.k.store.listSpaceMembers(spaceId));
+    const query = parseSearchQuery(rawQuery, await this.k.store.listSpaceMembers(spaceId), ctx.memberId);
 
     const empty: SearchResults = {
       messages: [],
@@ -1097,8 +1097,15 @@ export class Feed {
       assets: [],
       truncated: { messages: false, topics: false, assets: false },
     };
-    if (query.terms.length === 0) return empty;
+    if (query.terms.length === 0 && !query.filtered) return empty;
     const results = empty;
+    // A filter is about messages (search.ts SearchFilters): who wrote one,
+    // whom it mentions, its thread, its links. Discussions and files have
+    // none of those, so a filtered query searches messages alone.
+    if (query.filtered) {
+      kinds.delete('topics');
+      kinds.delete('assets');
+    }
 
     if (kinds.has('messages')) {
       // limit+1 detects truncation without a count query.
