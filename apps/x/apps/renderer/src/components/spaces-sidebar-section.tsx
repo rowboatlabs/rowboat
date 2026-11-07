@@ -31,6 +31,7 @@ import * as analytics from '@/lib/analytics'
 import { openServerDialog } from '@/lib/server-dialog'
 import { isGroupChat, serverLandingSpaceId } from '@/lib/spaces-navigation'
 import { AddServerDialog } from '@/components/spaces/add-server-dialog'
+import { SpaceOwnerNote } from '@/components/spaces/space-owner-note'
 import { needsYouCount, useMyThreads } from '@/lib/spaces-my-threads'
 
 /**
@@ -394,6 +395,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                     <DialogHeader><DialogTitle>Create a space</DialogTitle><DialogDescription>Choose who can discover and read this space.</DialogDescription></DialogHeader>
                     <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void createSpace() }}>
                         <label className="text-sm">Name<Input autoFocus maxLength={128} value={newName} onChange={event => setNewName(event.target.value)} placeholder="Space name" /></label>
+                        <SpaceOwnerNote orgName={org.name} name={newName} onLeave={() => { setCreating(false); setNewName(''); setVisibility('private') }} />
                         <fieldset className="space-y-3" disabled={submitting}><legend className="mb-2 text-sm font-medium">Visibility</legend>
                             <label className="flex items-start gap-2 text-sm"><input type="radio" name="visibility" checked={visibility === 'private'} onChange={() => setVisibility('private')} /><span>Private<span className="block text-xs text-muted-foreground">Only space members can read and participate.</span></span></label>
                             <label className="flex items-start gap-2 text-sm"><input type="radio" name="visibility" checked={visibility === 'open'} disabled={!directory.loaded || !directory.supported || !!directory.error} onChange={() => setVisibility('open')} /><span>Open<span className="block text-xs text-muted-foreground">Anyone in the team can browse and join.</span></span></label>

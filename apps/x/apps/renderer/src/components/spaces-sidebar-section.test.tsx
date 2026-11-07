@@ -102,7 +102,7 @@ describe('the sidebar server list', () => {
         expect(openServerDialog).toHaveBeenLastCalledWith({ kind: 'create' })
         expect(screen.queryByRole('dialog')).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'New group chat' }))
-        fireEvent.click(screen.getByRole('button', { name: /Join a server/ }))
+        fireEvent.click(screen.getByRole('button', { name: /Join with an invite/ }))
         expect(openServerDialog).toHaveBeenLastCalledWith({ kind: 'join' })
     })
     it('lists one-space servers as chats, most recent first, and the rest as workspaces', () => {

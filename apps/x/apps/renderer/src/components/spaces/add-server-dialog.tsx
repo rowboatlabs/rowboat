@@ -9,7 +9,7 @@ export function AddServerDialog({ onClose, onChoose }: {
         <DialogContent className="max-w-md">
             <DialogHeader>
                 <DialogTitle>New group chat</DialogTitle>
-                <DialogDescription>Start one with your people, or join one you were invited to.</DialogDescription>
+                <DialogDescription>Start a chat of your own, or join one you were invited to.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-3 pt-1">
                 <button type="button" onClick={() => onChoose('create')}
@@ -25,8 +25,8 @@ export function AddServerDialog({ onClose, onChoose }: {
                     className="group flex items-center gap-4 rounded-xl border border-border p-4 text-left transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"><LogIn className="size-5" /></span>
                     <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold">Join a server</span>
-                        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">Have an invite? Connect with your team.</span>
+                        <span className="block text-sm font-semibold">Join with an invite</span>
+                        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">Paste the link someone sent you.</span>
                     </span>
                     <ArrowRight className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
                 </button>

@@ -223,8 +223,8 @@ Everything it posts lands in front of the team. Everything it reads might be pri
 
 ### Get a Space
 
-- **Create a server.** In the app, open Spaces and choose *Create a server*. Sign in with your Rowboat account (Google or Microsoft) and you get a hosted server with your first Space. Add teammates with *Copy invite link*.
-- **Join a server.** Paste the invite link someone sent you. Invites bind your sign-in to a membership; a server can restrict joins to an email domain.
+- **Create a group chat.** In the app, click **+** next to Spaces and choose *Create a group chat*. Sign in with your Rowboat account (Google or Microsoft) and you get a hosted chat of your own, separate from any team you're in. You land in it, and an empty chat offers **Add agents** first and **Invite people** second. Add channels when it grows into a team.
+- **Join with an invite.** Paste the invite link someone sent you. Invites bind your sign-in to a membership; a server can restrict joins to an email domain. Joining a team's channel makes you a member of that team: a space you create there is the team's, and the new-space dialog says so.
 - **Self-host.** Harbor is open source and lives in this repo. See [Run your own Harbor](#run-your-own-harbor).
 
 You can belong to several servers at once, and a server can be just you: your notes to self live in a one-member DM.

@@ -57,7 +57,7 @@ export function ServerDialogs({ onDone }: { onDone: ServerDialogDone }) {
     const key = `${request.kind}-${seq}`
     switch (request.kind) {
         case 'create':
-            return <CreateServerDialog key={key} onClose={close} onDone={done} onJoinInstead={() => swap({ kind: 'join' })} />
+            return <CreateServerDialog key={key} initialName={request.name} onClose={close} onDone={done} onJoinInstead={() => swap({ kind: 'join' })} />
         case 'join':
             return (
                 <JoinServerDialog
@@ -133,13 +133,14 @@ function BrowserWait() {
 // Create
 // ---------------------------------------------------------------------------
 
-function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
+function CreateServerDialog({ initialName = '', onClose, onDone, onJoinInstead }: {
+    initialName?: string
     onClose: () => void
     onDone: ServerDialogDone
     onJoinInstead: () => void
 }) {
     const account = useSpacesAccountState()
-    const [name, setName] = useState('')
+    const [name, setName] = useState(initialName)
     // The apex (/v1/config via core) gates Create. null = no spaces fleet for
     // this environment; undefined = loading.
     const [apexDomain, setApexDomain] = useState<string | null | undefined>(undefined)
@@ -157,9 +158,9 @@ function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
             const { orgs } = await window.ipc.invoke('spaces:signInRowboat', null)
             refreshSpacesAccountState()
             if (orgs.length > 0) {
-                // Signing in surfaced the servers they already belong to — that
+                // Signing in surfaced the chats they already belong to — that
                 // is the outcome; creating another can wait.
-                toast(`Signed in — ${orgs.length} ${orgs.length === 1 ? 'server' : 'servers'} ready`, 'success')
+                toast(`Signed in — ${orgs.length} ${orgs.length === 1 ? 'chat' : 'chats'} ready`, 'success')
                 onDone(orgs[0].id)
             } else {
                 toast('Signed in to Rowboat', 'success')
@@ -178,9 +179,10 @@ function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
             const { org } = await window.ipc.invoke('spaces:createOrg', { name: name.trim() })
             analytics.spacesServerCreated()
             toast(`Created ${org.name} — you're the admin`, 'success')
+            // Straight into the chat (2026-11-07): its empty state leads with Add agents.
             onDone(org.id)
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not create the server', 'error')
+            toast(err instanceof Error ? err.message : 'Could not create the group chat', 'error')
         } finally {
             setBusy(null)
         }
@@ -190,9 +192,9 @@ function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
     return (
         <Shell
             title="Create a group chat"
-            description="Name it and you’re in. Invite people from the chat, and add channels whenever it grows into a team. Free, and you’re its admin."
+            description="A chat of your own for you and your agents, separate from any team you’re in. Invite people too, and add channels when it grows. Free, and you’re its admin."
             onClose={onClose}
-            footerLeft={<FooterLink onClick={onJoinInstead}>Have an invite? Join a server</FooterLink>}
+            footerLeft={<FooterLink onClick={onJoinInstead}>Have an invite? Join with it</FooterLink>}
             footerRight={
                 <>
                     <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -210,7 +212,7 @@ function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
         >
             {needsSignIn ? (
                 <p className="text-sm text-muted-foreground">
-                    Sign in with your Rowboat account first — the chat is yours, so it needs to know who you are. Any servers you already belong to appear right after.
+                    Sign in with your Rowboat account first — the chat is yours, so it needs to know who you are. Any chats you already belong to appear right after.
                 </p>
             ) : (
                 <div>
@@ -312,7 +314,7 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
     const signedOut = account !== null && !account.hasSession
     return (
         <Shell
-            title="Join a server"
+            title="Join with an invite"
             onClose={onClose}
             footerLeft={
                 <>
@@ -334,7 +336,7 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
                             </DropdownMenuContent>
                         </DropdownMenu>
                     )}
-                    <FooterLink onClick={onCreateInstead}>New here? Create a server</FooterLink>
+                    <FooterLink onClick={onCreateInstead}>New here? Create a group chat</FooterLink>
                 </>
             }
             footerRight={

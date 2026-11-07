@@ -53,6 +53,7 @@ import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import { directAvatarId, isOthersPersonalAgent, isSelfDirect } from '@/lib/spaces-direct'
 import { useSpaceMembers } from '@/hooks/use-space-members'
+import { EmptySpacePrompt } from '@/components/spaces/empty-space-prompt'
 
 // The space's one stream: ROOT messages in order; each message's flat thread
 // lives behind its reply chip (annotation model — replying creates nothing,
@@ -1213,15 +1214,16 @@ export function GeneralStream({
                 {(!stream.ready || snapping) && (
                     <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
                 )}
-                {stream.ready && !snapping && messageRows === 0 && (
+                {stream.ready && !snapping && messageRows === 0 && (space.kind === 'direct' ? (
                     <div className="px-2 py-6 text-sm text-muted-foreground">
-                        {space.kind === 'direct' && (space.participants ?? []).length === 1
+                        {(space.participants ?? []).length === 1
                             ? `Your notes to self — drafts, links, files for later. Only you can see this${LOCAL_RUNTIME ? ', and @rowboat works here too' : ''}.`
-                            : space.kind === 'direct'
-                                ? `Private to the two of you — say hello${LOCAL_RUNTIME ? ', or @rowboat to ask your agent' : ''}.`
-                                : `Nothing here yet — say hello${LOCAL_RUNTIME ? ', or @rowboat to ask your agent' : ''}.`}
+                            : `Private to the two of you — say hello${LOCAL_RUNTIME ? ', or @rowboat to ask your agent' : ''}.`}
                     </div>
-                )}
+                ) : (
+                    <EmptySpacePrompt org={org} space={space} roster={roster} writable={member && writable}
+                        selfIsAdmin={roster.find((m) => m.id === org.memberId)?.role === 'admin'} />
+                ))}
                 {rows}
                 <TypingIndicator names={typingNames} />
                 <div ref={bottomRef} />

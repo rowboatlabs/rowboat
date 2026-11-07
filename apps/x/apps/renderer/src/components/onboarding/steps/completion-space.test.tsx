@@ -51,6 +51,26 @@ describe('completion spaces', () => {
     expect(invoke.mock.calls.some(([channel]) => channel === 'spaces:createOrg')).toBe(false)
   })
 
+  it('offers an invited member a group chat of their own, made only when they ask', async () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'spaces:listOrgs') return { orgs: [{ id: 'company' }] }
+      if (channel === 'account:getRowboat') return { signedIn: true, accessToken: token({ name: 'Arjun Kumar' }) }
+      if (channel === 'spaces:createOrg') return { org: { id: 'new' } }
+      throw new Error(`Unexpected channel ${channel}`)
+    })
+    const skipped = renderHook(() => useCompletionSpace(true))
+    await waitFor(() => expect(skipped.result.current.offered).toBe(true))
+    expect(skipped.result.current.needed).toBe(false)
+    await act(async () => { await skipped.result.current.complete(vi.fn()) })
+    expect(invoke.mock.calls.some(([channel]) => channel === 'spaces:createOrg')).toBe(false)
+
+    const wanted = renderHook(() => useCompletionSpace(true))
+    await waitFor(() => expect(wanted.result.current.offered).toBe(true))
+    act(() => wanted.result.current.setWanted(true))
+    await act(async () => { await wanted.result.current.complete(vi.fn()) })
+    expect(invoke).toHaveBeenCalledWith('spaces:createOrg', { name: "Arjun's space" })
+  })
+
   it('keeps onboarding open after creation fails and allows retry', async () => {
     const done = vi.fn()
     const { result } = renderHook(() => useCompletionSpace(true))

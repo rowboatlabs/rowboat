@@ -7,7 +7,8 @@
 // link), so it waits to be consumed.
 
 export type ServerDialogRequest =
-    | { kind: 'create' }
+    /** `name` prefills the group's name: "start your own group chat" from a channel dialog (2026-11-07). */
+    | { kind: 'create'; name?: string }
     /** With `inviteUrl` the dialog opens on the resolved invite, one click from Join. */
     | {
         kind: 'join'

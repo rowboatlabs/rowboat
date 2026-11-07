@@ -33,7 +33,7 @@ afterEach(() => {
 
 it.each([
     ['Create a group chat', 'Create a group chat'],
-    ['Join a server', 'Join a server'],
+    ['Join with an invite', 'Join with an invite'],
 ])('routes %s from the chooser to the existing dialog', async (label, destination) => {
     render(<DialogFlow />)
     expect(screen.getByRole('dialog', { name: 'New group chat' })).toBeVisible()
@@ -87,4 +87,23 @@ it.each([
     expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:joinInvite')).toHaveLength(joins)
     // An invite is to the org (2026-10-19): the card names it, then every space it joins.
     if (!autoJoin) expect(screen.getByText('You’ll join launch and general')).toBeVisible()
+})
+
+// Created (2026-11-07): straight into the new chat, whose empty state
+// offers Add agents. A name can arrive prefilled.
+it('creates a group chat from a prefilled name and lands in it', async () => {
+    const onDone = vi.fn()
+    const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'spaces:apexInfo') return { apexDomain: 'spaces.example.com' }
+        if (channel === 'spaces:createOrg') return { org: { id: 'trip', name: 'Lisbon trip' } }
+        return {}
+    })
+    vi.stubGlobal('ipc', { invoke })
+    render(<ServerDialogs onDone={onDone} />)
+    await act(async () => { openServerDialog({ kind: 'create', name: 'Lisbon trip' }) })
+    expect(screen.getByLabelText('Group name')).toHaveValue('Lisbon trip')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Create' })) })
+    expect(invoke).toHaveBeenCalledWith('spaces:createOrg', { name: 'Lisbon trip' })
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledWith('trip', undefined))
+    expect(screen.queryByRole('dialog')).toBeNull()
 })
