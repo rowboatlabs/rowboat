@@ -89,15 +89,13 @@ it.each([
     if (!autoJoin) expect(screen.getByText('You’ll join launch and general')).toBeVisible()
 })
 
-// Created (2026-11-07): the dialog turns into the new chat's invite link, and
-// lands in the chat only when they close it. A name can arrive prefilled.
-it('creates a group chat from a prefilled name, then shows its invite link', async () => {
+// Created (2026-11-07): straight into the new chat, whose empty state
+// offers Add agents. A name can arrive prefilled.
+it('creates a group chat from a prefilled name and lands in it', async () => {
     const onDone = vi.fn()
     const invoke = vi.fn(async (channel: string) => {
         if (channel === 'spaces:apexInfo') return { apexDomain: 'spaces.example.com' }
         if (channel === 'spaces:createOrg') return { org: { id: 'trip', name: 'Lisbon trip' } }
-        if (channel === 'spaces:createInvite') return { link: 'https://trip.spaces.example.com/join/tok' }
-        if (channel === 'spaces:resolveInviteLink') return { resolved: { state: 'ok', org: { name: 'Lisbon trip' }, spaces: [] } }
         return {}
     })
     vi.stubGlobal('ipc', { invoke })
@@ -105,9 +103,7 @@ it('creates a group chat from a prefilled name, then shows its invite link', asy
     await act(async () => { openServerDialog({ kind: 'create', name: 'Lisbon trip' }) })
     expect(screen.getByLabelText('Group name')).toHaveValue('Lisbon trip')
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Create' })) })
-    expect(await screen.findByRole('dialog', { name: 'Invite people to Lisbon trip' })).toBeVisible()
-    expect(await screen.findByText('https://trip.spaces.e', { exact: false })).toBeVisible()
-    expect(onDone).not.toHaveBeenCalled()
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open the chat' })) })
+    expect(invoke).toHaveBeenCalledWith('spaces:createOrg', { name: 'Lisbon trip' })
     await vi.waitFor(() => expect(onDone).toHaveBeenCalledWith('trip', undefined))
+    expect(screen.queryByRole('dialog')).toBeNull()
 })

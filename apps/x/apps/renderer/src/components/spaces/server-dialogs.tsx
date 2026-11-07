@@ -10,7 +10,6 @@ import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { listNames } from '@/lib/spaces-invites'
-import { InviteLinkPanel } from '@/components/spaces/invite-link'
 
 // The server dialogs, one host for the whole app (lib/server-dialog.ts is
 // how anything opens one). Two intents, two dialogs: CREATE a server, or
@@ -101,8 +100,7 @@ function Shell({ title, description, children, footerLeft, footerRight, onClose 
                     <DialogTitle>{title}</DialogTitle>
                     {description && <DialogDescription>{description}</DialogDescription>}
                 </DialogHeader>
-                {/* min-w-0: an invite link doesn't wrap, and would widen the dialog's grid past its edge. */}
-                <div className="min-w-0 space-y-3">{children}</div>
+                <div className="space-y-3">{children}</div>
                 <div className="flex items-center justify-between gap-3 pt-1">
                     <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">{footerLeft}</div>
                     <div className="flex shrink-0 gap-2">{footerRight}</div>
@@ -143,9 +141,6 @@ function CreateServerDialog({ initialName = '', onClose, onDone, onJoinInstead }
 }) {
     const account = useSpacesAccountState()
     const [name, setName] = useState(initialName)
-    // Created: the dialog turns into its invite link (2026-11-07). A group
-    // chat is empty until someone joins, and the link is how they do.
-    const [created, setCreated] = useState<{ id: string; name: string } | null>(null)
     // The apex (/v1/config via core) gates Create. null = no spaces fleet for
     // this environment; undefined = loading.
     const [apexDomain, setApexDomain] = useState<string | null | undefined>(undefined)
@@ -184,9 +179,8 @@ function CreateServerDialog({ initialName = '', onClose, onDone, onJoinInstead }
             const { org } = await window.ipc.invoke('spaces:createOrg', { name: name.trim() })
             analytics.spacesServerCreated()
             toast(`Created ${org.name} — you're the admin`, 'success')
-            setCreated({ id: org.id, name: org.name })
-            // So it is in the sidebar behind the invite step.
-            void refreshSpacesOrgs()
+            // Straight into the chat (2026-11-07): its empty state leads with Add agents.
+            onDone(org.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not create the group chat', 'error')
         } finally {
@@ -194,26 +188,11 @@ function CreateServerDialog({ initialName = '', onClose, onDone, onJoinInstead }
         }
     }
 
-    if (created) {
-        // Closing any way lands in the new chat; the link stays one click away in its header.
-        const finish = () => onDone(created.id)
-        return (
-            <Shell
-                title={`Invite people to ${created.name}`}
-                description="Send this link to the people you want in it. You can make another from the chat any time."
-                onClose={finish}
-                footerRight={<Button onClick={finish}>Open the chat</Button>}
-            >
-                <InviteLinkPanel orgId={created.id} spaceIds={[]} />
-            </Shell>
-        )
-    }
-
     const needsSignIn = account !== null && !account.hasSession
     return (
         <Shell
             title="Create a group chat"
-            description="A chat of your own, separate from any team you’re in. Name it, invite people, and add channels whenever it grows into a team. Free, and you’re its admin."
+            description="A chat of your own for you and your agents, separate from any team you’re in. Invite people too, and add channels when it grows. Free, and you’re its admin."
             onClose={onClose}
             footerLeft={<FooterLink onClick={onJoinInstead}>Have an invite? Join with it</FooterLink>}
             footerRight={

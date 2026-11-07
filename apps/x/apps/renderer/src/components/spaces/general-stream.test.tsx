@@ -286,9 +286,9 @@ describe('GeneralStream join lines (2026-09-29)', () => {
         expect(drawn()).toEqual(['Alex joined', 'body 2', 'Alex added Sam', 'body 5', 'Kim joined'])
     })
 
-    it('keeps the empty-space copy when only lines exist, and draws none in a DM', async () => {
+    it('keeps the empty-space prompt when only lines exist, and draws none in a DM', async () => {
         show(streamOf([], { events: [joined(1, 'alex')] }))
-        expect(screen.getByText(/Nothing here yet/)).toBeTruthy()
+        expect(screen.getByRole('heading', { name: 'Add your agents' })).toBeTruthy()
         expect(drawn()).toEqual(['Alex joined'])
         cleanup()
         show(streamOf([msg(2)], { events: [joined(1, 'alex')] }), { ...space, kind: 'direct', participants: ['me', 'alex'] } as spaces.Space)

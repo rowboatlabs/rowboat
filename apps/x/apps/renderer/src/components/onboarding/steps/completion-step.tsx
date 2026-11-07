@@ -53,7 +53,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
           {space.wanted && (
             <div className="mt-3">
               <CompletionSpaceName name={space.name} onChange={space.setName} disabled={space.busy}
-                hint="Invite people to it from the chat. You can rename it later." />
+                hint="Add your agents and invite people from the chat. You can rename it later." />
             </div>
           )}
         </div>
