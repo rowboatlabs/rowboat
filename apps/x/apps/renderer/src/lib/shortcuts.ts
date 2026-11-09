@@ -11,7 +11,6 @@ export type ShortcutKeys = readonly string[]
 export const SHORTCUTS = {
     newChat: ['mod', 'N'],
     search: ['mod', 'K'],
-    toggleSidebar: ['mod', 'B'],
     settings: ['mod', ','],
     // Go menu (menu.ts GO_ITEMS): the sidebar's order, top to bottom.
     assistant: ['mod', '1'],

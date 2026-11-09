@@ -85,6 +85,15 @@ export function readLastSpace(): unknown {
 }
 
 /**
+ * The last space opened, shape-checked but not yet checked against the
+ * servers: what the app opens on its first frame (2026-11-09), before the
+ * org list has loaded. resolveSpacesLocation confirms it once it has.
+ */
+export function lastSpaceLocation(): SpaceLocation | null {
+    return readLocation(readLastSpace())
+}
+
+/**
  * The org link landings (Harbor http.ts) hand a browser-opened link into the
  * app as rowboat://open?type=spaces&org=<address>&…, and into the web app as
  * its /open with the same query (2026-10-13): a space, a file in it, a
