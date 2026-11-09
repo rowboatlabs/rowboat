@@ -428,6 +428,7 @@ export {
   messageUrl,
   memberUrl,
   parseSpacesUrl,
+  onServer,
 } from '@rowboat/spaces-protocol';
 export type { MentionRef, MentionStamps, SpacesLink } from '@rowboat/spaces-protocol';
 

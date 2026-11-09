@@ -156,3 +156,15 @@ export function parseSpacesUrl(url: string): SpacesLink | null {
   if (parts[2] === 'm') return ULID_RE.test(id) ? { kind: 'message', address, spaceId, messageId: id } : null;
   return null;
 }
+
+/**
+ * Whether a link's host names this server. Until 2026-11-09 every link was
+ * minted on an org's host, `<org>.<address>`, and every message written
+ * before carries such links; they still mean this server (spec §4, no
+ * rewrite of the log). Hosts compare case-insensitively.
+ */
+export function onServer(host: string, address: string): boolean {
+  const h = host.toLowerCase();
+  const a = address.toLowerCase();
+  return h === a || h.endsWith(`.${a}`);
+}

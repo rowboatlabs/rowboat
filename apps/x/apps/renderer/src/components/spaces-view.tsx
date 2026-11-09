@@ -1,3 +1,4 @@
+import { onServer } from '@x/shared/dist/spaces.js'
 import { MemberDirectory } from '@/components/spaces/member-directory'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
@@ -769,14 +770,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }
     /** A canonical link into another space the reader is in: the org address names the org, App does the navigation. */
     const resolveSpace = (orgAddress: string, _spaceId: string): string | null => {
-        const target = orgs.find((o) => o.address === orgAddress)
+        const target = orgs.find((o) => onServer(orgAddress, o.address))
         return target?.id ?? null
     }
     const openSpaceFile = (orgId: string, spaceId: string, assetId: string) => {
         if (orgId === org.id && spaceId === space.id) openFile(assetId)
         else onSwitchSpace(orgId, spaceId, { kind: 'file', assetId })
     }
-    const resolveOrg = (orgAddress: string): string | null => orgs.find((o) => o.address === orgAddress)?.id ?? null
+    const resolveOrg = (orgAddress: string): string | null => orgs.find((o) => onServer(orgAddress, o.address))?.id ?? null
     /** A person link or the popover's Message action: the org creates the DM on first use, the listing learns it, then it opens. */
     const openDirect = (orgId: string, memberId: string) => {
         void invokeSpace('spaces:openDirect', { orgId, memberId })

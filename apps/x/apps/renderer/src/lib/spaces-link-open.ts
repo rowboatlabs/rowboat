@@ -1,3 +1,4 @@
+import { onServer } from '@x/shared/dist/spaces.js'
 import { findSpace, getSpacesOrgs, refreshSpacesOrgs } from '@/hooks/use-spaces'
 import type { SpacesLinkTarget } from '@/lib/spaces-navigation'
 import type { RailSelection } from '@/lib/spaces-selection'
@@ -31,7 +32,8 @@ export type SpacesLinkOutcome =
 
 export async function resolveSpacesLink(target: SpacesLinkTarget): Promise<SpacesLinkOutcome> {
     if (getSpacesOrgs().length === 0) await refreshSpacesOrgs()
-    const org = getSpacesOrgs().find((o) => o.address === target.address)
+    // A link from before 2026-11-09 names an org host under the server's address: still this server.
+    const org = getSpacesOrgs().find((o) => onServer(target.address, o.address))
     if (target.inviteToken) {
         // Rebuilt from the signed-in server's own base URL, else https on the address.
         const base = org?.baseUrl ?? `https://${target.address}`
