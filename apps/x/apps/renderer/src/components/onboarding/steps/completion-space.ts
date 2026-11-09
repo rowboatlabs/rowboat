@@ -1,7 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Pencil } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { refreshSpacesOrgs } from '@/hooks/use-spaces'
 import * as analytics from '@/lib/analytics'
 
@@ -23,7 +20,6 @@ export function suggestedSpaceName(token: string | null): string {
 export function useCompletionSpace(enabled: boolean) {
   const [loading, setLoading] = useState(enabled)
   const [needed, setNeeded] = useState(false)
-  const [hasOrgs, setHasOrgs] = useState(false)
   const [name, setName] = useState('My space')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -41,7 +37,6 @@ export function useCompletionSpace(enabled: boolean) {
       window.ipc.invoke('account:getRowboat', null),
     ]).then(([{ orgs }, account]) => {
       if (cancelled) return
-      setHasOrgs(orgs.length > 0)
       setNeeded(account.signedIn && orgs.length === 0)
       setName(suggestedSpaceName(account.accessToken))
     }).catch(() => {
@@ -77,44 +72,5 @@ export function useCompletionSpace(enabled: boolean) {
     }
   }
 
-  return { loading, needed, hasOrgs, name, setName, error, busy, complete, retry: () => setAttempt(value => value + 1) }
-}
-
-export function CompletionSpaceName({ name, onChange, disabled }: {
-  name: string
-  onChange: (name: string) => void
-  disabled: boolean
-}) {
-  const [editing, setEditing] = useState(false)
-  return (
-    <div className="w-full max-w-sm mb-6">
-      <div className="flex items-center justify-center gap-2 mb-3">
-        {editing ? (
-          <Input
-            aria-label="Space name"
-            autoFocus
-            value={name}
-            disabled={disabled}
-            onChange={event => onChange(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter' && name.trim()) setEditing(false)
-            }}
-          />
-        ) : <p className="min-w-0 break-words text-lg font-semibold">{name}</p>}
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={editing ? 'Save space name' : 'Edit space name'}
-          disabled={disabled || (editing && !name.trim())}
-          onClick={() => setEditing(value => !value)}
-          className="shrink-0"
-        >
-          {editing ? <Check className="size-4" /> : <Pencil className="size-4" />}
-        </Button>
-      </div>
-      <p className="text-sm text-muted-foreground leading-relaxed">
-        Invite teammates to your space, or join an existing one. You can always rename this space later.
-      </p>
-    </div>
-  )
+  return { loading, needed, name, setName, error, busy, complete, retry: () => setAttempt(value => value + 1) }
 }

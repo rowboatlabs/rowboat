@@ -7,16 +7,7 @@ export interface ProviderState {
   isConnecting: boolean
 }
 
-// Welcome, Providers (bring-your-own-key only), Space, Agents (2026-11-06:
-// connecting email, calendar and Slack left onboarding for Local).
-export type Step = 0 | 1 | 2 | 3
-
-export type OnboardingPath = 'rowboat' | 'chatgpt' | 'byok' | null
-
 export function useOnboardingState(open: boolean, onComplete: () => void) {
-  const [currentStep, setCurrentStep] = useState<Step>(0)
-  const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>(null)
-
   // OAuth provider states (the Rowboat sign-in on Welcome)
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
@@ -39,19 +30,6 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     }
     loadProviders()
   }, [open])
-
-  const handleNext = useCallback(() => {
-    if (currentStep < 3) setCurrentStep((currentStep + 1) as Step)
-  }, [currentStep])
-
-  const handleBack = useCallback(() => {
-    if (currentStep === 1) {
-      setCurrentStep(0)
-      setOnboardingPath(null)
-    } else if (currentStep > 1) {
-      setCurrentStep((currentStep - 1) as Step)
-    }
-  }, [currentStep])
 
   const handleComplete = useCallback(() => {
     onComplete()
@@ -139,21 +117,12 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   }, [])
 
   return {
-    // Step state
-    currentStep,
-    setCurrentStep,
-    onboardingPath,
-    setOnboardingPath,
-
     // OAuth state
     providers,
     providersLoading,
     providerStates,
     startConnect,
 
-    // Navigation
-    handleNext,
-    handleBack,
     handleComplete,
   }
 }
