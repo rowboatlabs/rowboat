@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import type { ModelSelection } from '@/hooks/use-models'
 
 // Staging a draft into a thread's composer (2026-09-23): the stream composer's
 // Auto toggle in Preview mode hands the reply Jev routed to the thread it
@@ -23,6 +24,41 @@ export function threadDraftKey(orgId: string, spaceId: string, rootMessageId: st
 /** The composer's own storage slot for a draft key. */
 export function draftStorageKey(draftKey: string): string {
     return `spaces:draft:${draftKey}`
+}
+
+// The model and options picked in a composer (2026-11-07), kept per draft key
+// beside the draft: the thread pane remounts per thread, so in-memory picks
+// fell back to the defaults on every return to a thread. Unlike the draft,
+// sending does not clear them — they hold for the thread's later turns.
+const PICKS_PREFIX = 'spaces:picks:'
+
+export interface ComposerPicks {
+    /** @rowboat's model (and effort). */
+    model?: ModelSelection
+    /** Options picked per agent member id, as the agent options strip holds them. */
+    members?: Record<string, Record<string, string | boolean>>
+}
+
+export function readComposerPicks(draftKey: string): ComposerPicks {
+    try {
+        const raw = window.localStorage.getItem(PICKS_PREFIX + draftKey)
+        if (!raw) return {}
+        const parsed = JSON.parse(raw) as ComposerPicks
+        const model = parsed.model && typeof parsed.model.provider === 'string' && typeof parsed.model.model === 'string' ? parsed.model : undefined
+        const members = parsed.members && typeof parsed.members === 'object' && !Array.isArray(parsed.members) ? parsed.members : undefined
+        return { ...(model ? { model } : {}), ...(members ? { members } : {}) }
+    } catch {
+        return {}
+    }
+}
+
+export function writeComposerPicks(draftKey: string, picks: ComposerPicks): void {
+    try {
+        if (picks.model || (picks.members && Object.keys(picks.members).length > 0)) window.localStorage.setItem(PICKS_PREFIX + draftKey, JSON.stringify(picks))
+        else window.localStorage.removeItem(PICKS_PREFIX + draftKey)
+    } catch {
+        // Quota/private mode: the picks hold for this mount only.
+    }
 }
 
 const STAGED_PREFIX = 'spaces:auto-staged:'

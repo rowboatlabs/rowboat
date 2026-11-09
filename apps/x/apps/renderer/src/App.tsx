@@ -4886,7 +4886,7 @@ function App() {
       case 'apps': return 'Apps'
       case 'spaces': {
         const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
-        if (org && currentViewState.view) return currentViewState.view === 'browse' ? 'Browse spaces' : currentViewState.view === 'agents' ? 'Agents' : 'Activity'
+        if (org && currentViewState.view) return currentViewState.view === 'browse' ? 'Browse spaces' : currentViewState.view === 'agents' ? 'Agents' : currentViewState.view === 'threads' ? 'Threads' : 'Activity'
         const space = org ? findSpace(org, currentViewState.spaceId) : undefined
         return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
@@ -5543,6 +5543,11 @@ function App() {
   /** Every agent in the org (2026-10-21). */
   const openAgents = useCallback((orgId: string) => {
     void navigateToView({ type: 'spaces', orgId, view: 'agents' })
+  }, [navigateToView])
+
+  /** Your threads across the org, sessions among them (2026-11-05). */
+  const openThreads = useCallback((orgId: string) => {
+    void navigateToView({ type: 'spaces', orgId, view: 'threads' })
   }, [navigateToView])
 
   /**
@@ -7683,6 +7688,7 @@ function App() {
                     onOpenMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
                     onOpenBrowse={openBrowse}
                     onOpenAgents={openAgents}
+                    onOpenThreads={openThreads}
                     onOpenActivity={openActivity}
                     onOpenSession={openAssistantRun}
                   />

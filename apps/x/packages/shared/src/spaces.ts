@@ -1,3 +1,4 @@
+export { blobDownloadName } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { JEV_KIND, addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
 export { Availability, NotificationSchedule, currentStatus, notificationsPaused } from '@rowboat/spaces-protocol';
@@ -70,6 +71,8 @@ import type {
   Space,
   Topic,
   TopicListing,
+  ThreadListing,
+  ThreadStatus,
   UnreadSnapshot,
   UnreadSpace,
   ActivityItem,
@@ -152,6 +155,8 @@ export type {
   Space,
   Topic,
   TopicListing,
+  ThreadListing,
+  ThreadStatus,
 };
 
 /** The unread snapshot (read state, 2026-09-09): org-owned cursors in offsets. */

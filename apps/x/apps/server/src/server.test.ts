@@ -370,6 +370,26 @@ describe('hardening guards', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('under Flatpak, reclaims lock held by an unrelated recycled PID', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-lock-flatpak-'));
+    await fs.writeFile(path.join(dir, 'server.lock'), '1'); // pid 1 is not a rowboat-server
+    const origFlatpakId = process.env.FLATPAK_ID;
+    try {
+      process.env.FLATPAK_ID = 'net.whiteblossom.Rowboat';
+      const s = await makeServer(dir);
+      const content = await fs.readFile(path.join(dir, 'server.lock'), 'utf8');
+      expect(content).toBe(String(process.pid));
+      await s.close();
+    } finally {
+      if (origFlatpakId === undefined) {
+        delete process.env.FLATPAK_ID;
+      } else {
+        process.env.FLATPAK_ID = origFlatpakId;
+      }
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('fails loudly when the port is held by another rowboat-server', async () => {
     const dirA = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-portA-'));
     const dirB = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-portB-'));

@@ -1049,6 +1049,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.archiveThread.response, { root: await service.archiveThread(actor(c), spaceId, rootMessageId, input) });
   });
 
+  app.post('/v1/spaces/:spaceId/threads/:rootMessageId/session', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.setSession.params, c.req.param());
+    const input = await body(c, routes.setSession.request);
+    return reply(c, routes.setSession.response, { root: await service.setSession(actor(c), spaceId, rootMessageId, input) });
+  });
+
   app.get('/v1/spaces/:spaceId/archived-threads', async (c) => {
     const { spaceId } = parseWith(routes.listArchivedThreads.params, c.req.param());
     return reply(c, routes.listArchivedThreads.response, { threads: await service.listArchivedThreads(actor(c), spaceId) });
@@ -1073,6 +1079,10 @@ export function buildHttpApp(deps: {
   });
 
   app.get(routes.unread.path, async (c) => reply(c, routes.unread.response, await service.unread(actor(c))));
+  app.get(routes.myThreads.path, async (c) => {
+    const q = parseWith(routes.myThreads.query, { ...(c.req.query('archived') !== undefined ? { archived: c.req.query('archived') } : {}) });
+    return reply(c, routes.myThreads.response, { threads: await service.myThreads(actor(c), q) });
+  });
 
   app.get(routes.activity.path, async (c) => {
     const q = parseWith(routes.activity.query, {

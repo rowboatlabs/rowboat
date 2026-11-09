@@ -56,6 +56,8 @@ export type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 
 export type ArchiveThreadInput = z.infer<Routes['archiveThread']['request']>;
 
+export type SetSessionInput = z.infer<Routes['setSession']['request']>;
+
 export type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 
 export type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
@@ -378,6 +380,7 @@ export class Feed {
       if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
       return { message, invocations: invocations.map(forPeople) };
     };
+    if (input.session && input.threadRoot) throw new HarborError('invalid_request', 'a reply cannot start a session: mark its thread with setSession');
     const result = await this.k.lockedAs(ctx, spaceId, async () => {
       if (opts.finishes) {
         if (!this.invocations || !input.threadRoot) throw new HarborError('invalid_request', 'an answer is a reply in its invocation\'s thread');
@@ -478,6 +481,7 @@ export class Feed {
         reactions: [],
         ...(poll ? { poll } : {}),
         ...(secrets ? { secrets: secrets.card } : {}),
+        ...(input.session ? { session: input.session } : {}),
         ...stampFields(stamps),
       };
       await this.k.store.appendMessage(message);
@@ -583,6 +587,8 @@ export class Feed {
         if (claimed) {
           throw new HarborError('invalid_request', `this thread already has a topic (${claimed.id})`);
         }
+        // A discussion is never a session (2026-11-05): one is kept, the other ends.
+        if (message.session) throw new HarborError('invalid_request', 'this thread is a session — unmark it with setSession before naming it');
         root = message;
         // One archive flag per thread (2026-11-03): naming an archived plain
         // thread is deliberate attention, so it comes back active, like a reply.
@@ -969,6 +975,34 @@ export class Feed {
     });
   }
 
+  /**
+   * Mark a thread as a session, retitle it, or unmark it (2026-11-05,
+   * "coding session: threads" in Main). The mark sits on the root like the
+   * archive flag; a discussion is never a session, so a root with a topic is
+   * refused. Ending a session is archiveThread.
+   */
+  async setSession(ctx: ActorCtx, spaceId: string, rootMessageId: string, input: SetSessionInput): Promise<Message> {
+    await this.k.requireMember(ctx, spaceId);
+    this.k.guardWrite();
+    const by = this.k.attributionOf(ctx, input);
+
+    return this.k.lockedAs(ctx, spaceId, async () => {
+      const root = await this.k.store.getMessage(spaceId, rootMessageId);
+      if (!root || root.deletedAt) throw new HarborError('not_found', 'no such message');
+      if (root.threadRoot !== undefined) {
+        throw new HarborError('invalid_request', `this is a reply — mark the thread's root (${root.threadRoot})`);
+      }
+      const topic = await this.k.store.getTopicByRoot(spaceId, root.id);
+      if (topic) throw new HarborError('invalid_request', `this thread has a topic, and a discussion is never a session (${topic.id})`);
+      const title = input.session?.title ?? null;
+      if ((root.session?.title ?? null) === title) return this.foldLive(spaceId, root); // idempotent, no event
+      await this.k.store.setThreadSession(spaceId, root.id, title);
+      await this.k.appendNext(spaceId, this.k.now(), { type: 'thread_session', rootMessageId: root.id, session: input.session, by });
+      const { session: _was, ...rest } = root;
+      return this.foldLive(spaceId, input.session ? { ...rest, session: input.session } : rest);
+    });
+  }
+
   async listArchivedThreads(ctx: ActorCtx, spaceId: string): Promise<Message[]> {
     await this.k.requireReadableSpace(ctx, spaceId);
     return this.foldPage(spaceId, await this.k.store.listArchivedRoots(spaceId));
@@ -1055,7 +1089,7 @@ export class Feed {
     const limit = Math.min(opts?.limit ?? 10, 50);
     const kinds = new Set<SearchKind>(opts?.kinds ?? ['messages', 'topics', 'assets']);
 
-    const query = parseSearchQuery(rawQuery, await this.k.store.listSpaceMembers(spaceId));
+    const query = parseSearchQuery(rawQuery, await this.k.store.listSpaceMembers(spaceId), ctx.memberId);
 
     const empty: SearchResults = {
       messages: [],
@@ -1063,8 +1097,15 @@ export class Feed {
       assets: [],
       truncated: { messages: false, topics: false, assets: false },
     };
-    if (query.terms.length === 0) return empty;
+    if (query.terms.length === 0 && !query.filtered) return empty;
     const results = empty;
+    // A filter is about messages (search.ts SearchFilters): who wrote one,
+    // whom it mentions, its thread, its links. Discussions and files have
+    // none of those, so a filtered query searches messages alone.
+    if (query.filtered) {
+      kinds.delete('topics');
+      kinds.delete('assets');
+    }
 
     if (kinds.has('messages')) {
       // limit+1 detects truncation without a count query.

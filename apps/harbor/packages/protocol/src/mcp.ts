@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MENTION_GRAMMAR } from './mentions.js';
-import { ActivityKind, NewPoll } from './api.js';
+import { ActivityKind, NewPoll, ThreadListing } from './api.js';
 import {
   Asset,
   ChangeSet,
@@ -11,7 +11,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, InvitePolicy, Member, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { Attribution, InvitePolicy, Member, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
@@ -390,7 +390,9 @@ export const searchSpace = tool({
   description:
     'Search a space: messages, topic titles, and files (by extracted content or filename), ' +
     'returned as three independently-ranked lists. Query words are AND-ed; a word that is a ' +
-    "member's name also matches @-mentions of them. Message hits name their thread " +
+    "member's name also matches @-mentions of them. Filters narrow message hits and work alone: " +
+    'from:<name>, mentions:<name> (me is you), in:<thread title>, has:link|image|file; a ' +
+    'filtered query returns messages only. Message hits name their thread ' +
     '(threadRootId — feed it to read_thread for context); asset hits carry the assetId for ' +
     'read_asset and the path for display. A truncated flag means more hits existed than limit — refine the query ' +
     'rather than raising the limit. Use before posting a new root to avoid duplicating a ' +
@@ -417,7 +419,8 @@ export const postMessage = tool({
     '(question + 2–10 answers; the body must still carry a plain-text rendering of it for clients ' +
     'that cannot show the card). Works on a DM exactly as on a space. When the body is long (more than ' +
     'a few lines: a plan, research, a report), also pass `summary`: one or two lines with the outcome, ' +
-    'which people see first, with "Show more" for the full body. ' +
+    'which people see first, with "Show more" for the full body. Pass `session: {title}` on a new root ' +
+    'to start a session (short-lived work someone ends when done) when your person asks for one. ' +
     MENTION_GRAMMAR,
   input: z.object({
     spaceId: SpaceId,
@@ -428,6 +431,8 @@ export const postMessage = tool({
     poll: NewPoll.optional(),
     /** Options for agents the message mentions, keyed by agent member id (their declared options; see get_invocations). */
     agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
+    /** Start a session with this new root (2026-11-05): its title. Not on a reply. */
+    session: SessionMark.optional(),
   }),
   output: z.object({
     messageId: MessageId,
@@ -597,6 +602,30 @@ export const archiveThread = tool({
     archived: z.boolean().optional(),
   }),
   output: z.object({ root: Message }),
+});
+
+export const setSession = tool({
+  name: 'set_session',
+  description:
+    'Mark a thread as a session (short-lived work that someone ends when it is done), retitle it, ' +
+    'or unmark it with title: null. A thread with a topic cannot be a session. End a session with ' +
+    'archive_thread. Only when your person asked for it.',
+  input: z.object({
+    spaceId: SpaceId,
+    rootMessageId: MessageId,
+    title: z.string().trim().min(1).max(200).nullable(),
+  }),
+  output: z.object({ root: Message }),
+});
+
+export const listMyThreads = tool({
+  name: 'list_my_threads',
+  description:
+    'Your threads in every space you are in (the ones you started or follow), newest activity first, ' +
+    'each with its status (needs_you, working, idle); a session carries root.session, a discussion its topic. ' +
+    'archived: true lists the archived and ended ones. Read one via read_thread.',
+  input: z.object({ archived: z.boolean().optional() }),
+  output: z.object({ threads: z.array(ThreadListing) }),
 });
 
 export const listArchivedThreads = tool({
@@ -895,6 +924,8 @@ export const mcpTools = [
   manageTopic,
   archiveThread,
   listArchivedThreads,
+  setSession,
+  listMyThreads,
   createAsset,
   readAsset,
   proposeChange,
@@ -927,6 +958,7 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   searchSpace.name,
   listTopics.name,
   listArchivedThreads.name,
+  listMyThreads.name,
   readAsset.name,
   assetHistory.name,
   diff.name,

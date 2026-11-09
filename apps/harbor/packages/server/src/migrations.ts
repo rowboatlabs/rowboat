@@ -1253,7 +1253,17 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
-  { id: '060-member-availability', statements: ["alter table members add column availability jsonb not null default '{}'::jsonb"] },
+  {
+    // Sessions (2026-11-05, "coding session: threads" in Main): the mark and
+    // its title sit on the root, like the archive flag, so every read of the
+    // root carries them. The partial index serves each member's open sessions.
+    id: '060-message-session',
+    statements: [
+      `alter table messages add column if not exists session_title text`,
+      `create index if not exists messages_session_idx on messages (space_id) where session_title is not null`,
+    ],
+  },
+  { id: '061-member-availability', statements: ["alter table members add column if not exists availability jsonb not null default '{}'::jsonb"] },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

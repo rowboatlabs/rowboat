@@ -372,6 +372,7 @@ async function dispatch(
         summary?: string;
         poll?: z.infer<typeof NewPoll>;
         agentOptions?: Record<string, Record<string, string | boolean>>;
+        session?: { title: string };
       };
       const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
@@ -379,6 +380,7 @@ async function dispatch(
         ...(a.summary ? { summary: a.summary } : {}),
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
         ...(a.agentOptions ? { agentOptions: a.agentOptions } : {}),
+        ...(a.session ? { session: a.session } : {}),
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
@@ -513,6 +515,17 @@ async function dispatch(
       const a = args as { spaceId: string };
       return { threads: await service.listArchivedThreads(ctx, a.spaceId) };
     }
+    case 'set_session': {
+      const a = args as { spaceId: string; rootMessageId: string; title: string | null };
+      const root = await service.setSession(ctx, a.spaceId, a.rootMessageId, {
+        session: a.title === null ? null : { title: a.title },
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
+      });
+      return { root };
+    }
+    case 'list_my_threads':
+      return { threads: await service.myThreads(ctx, { archived: (args as { archived?: boolean }).archived === true }) };
     // --- super agents (spec §4 Agent members, 2026-11-02) ----------------------
     case 'create_agent':
       return service.superAgentCreate(ctx, args as { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string });

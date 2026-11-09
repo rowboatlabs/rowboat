@@ -8,7 +8,7 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // /s/<space>/a/<asset>), under the org's slug.
 //
 //   /<org>                      the org (its first space opens)
-//   /<org>/activity | /browse | /agents   an org-level surface
+//   /<org>/activity | /threads | /browse | /agents   an org-level surface
 //   /<org>/s/<space>            the stream
 //   …/discussions | …/files     the space's lists
 //   …/discussions/t/<root>      a thread beside the Threads list (2026-11-03)

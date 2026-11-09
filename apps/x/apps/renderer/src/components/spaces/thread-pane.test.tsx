@@ -18,6 +18,9 @@ const follow = vi.hoisted(() => ({
     members: [] as unknown[],
     invocations: new Map<string, unknown[]>(),
 }))
+vi.mock('@/lib/spaces-my-threads', () => ({
+    useMyThreads: () => ({ threads: [], loaded: true }), sessionsOf: () => [], useThreadListing: () => undefined, refreshMyThreads: vi.fn(), threadStatusLabel: () => '',
+}))
 vi.mock('@/components/spaces/composer', () => ({
     Composer: (props: typeof follow.composer) => {
         follow.composer = props

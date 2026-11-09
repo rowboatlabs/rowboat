@@ -4,7 +4,7 @@ import { useSpaceAccess, JoinSpacePrompt } from '@/lib/spaces-access'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, CircleCheck, Timer, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
@@ -39,7 +39,9 @@ import { AutoBanner } from '@/components/spaces/auto-banner'
 import { FindBanner } from '@/components/spaces/find-banner'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
 import { toast as notify } from 'sonner'
-import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf, withArchived } from '@/lib/spaces-conventions'
+import { applyReaction, artifactsForThread, isContinuation, mergeMessages, sessionArchiveLabel, threadLabelOf, withArchived } from '@/lib/spaces-conventions'
+import { sessionCommand } from '@/components/spaces/session-command'
+import { refreshMyThreads, sessionsOf, useMyThreads } from '@/lib/spaces-my-threads'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
@@ -66,7 +68,7 @@ const NEW_FADE_MS = 800
 
 export function ThreadPane({
     org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, memberNames, refreshTick,
-    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, onOpenThread, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
+    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, onOpenThread, onOpenThreadIn, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -91,6 +93,8 @@ export function ThreadPane({
     onOpenSession?: (sessionId: string) => void
     /** Opens another thread of this space (Auto's "try another thread" re-stages the reply there). */
     onOpenThread?: (rootMessageId: string) => void
+    /** Opens a thread in any space of this org: /session jumps to sessions elsewhere (2026-11-05). */
+    onOpenThreadIn?: (spaceId: string, rootMessageId: string) => void
     /** Whether the artifacts rail is showing; the summary line under the opener toggles it. */
     artifactsRailOpen: boolean
     onToggleArtifactsRail: () => void
@@ -891,10 +895,26 @@ export function ThreadPane({
             const res = await invokeSpace('spaces:archiveThread', { orgId: org.id, spaceId: space.id, rootMessageId, archived })
             setRoot(res.root)
             updateStreamMessage(org.id, space.id, res.root)
+            if (res.root.session) void refreshMyThreads(org.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not archive the thread', 'error')
         }
     }
+
+    // A thread marked as a session, retitled or unmarked (harbor setSession,
+    // 2026-11-05). Ending one is archiving it, above.
+    const setSession = async (session: { title: string } | null) => {
+        try {
+            const res = await invokeSpace('spaces:setSession', { orgId: org.id, spaceId: space.id, rootMessageId, session })
+            setRoot(res.root)
+            updateStreamMessage(org.id, space.id, res.root)
+            void refreshMyThreads(org.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not update the session', 'error')
+        }
+    }
+    const mySessions = sessionsOf(useMyThreads(org.id).threads)
+    const session = topic ? undefined : root?.session
 
     // The one file this discussion is about: picked from the space's live
     // files; the org keeps the link by asset id, so it survives renames.
@@ -903,9 +923,19 @@ export function ThreadPane({
     // Inline title editing (window.prompt is a no-op in Electron). null = not
     // editing; the same field serves rename AND first-time goal setting.
     const [editingTitle, setEditingTitle] = useState<string | null>(null)
+    // The same field names a discussion or a session (2026-11-05).
+    const [titleFor, setTitleFor] = useState<'discussion' | 'session'>('discussion')
+    const editTitle = (kind: 'discussion' | 'session', value: string) => {
+        setTitleFor(kind)
+        setEditingTitle(value)
+    }
     const commitTitle = async () => {
         const title = editingTitle?.trim()
         setEditingTitle(null)
+        if (titleFor === 'session') {
+            if (title && title !== root?.session?.title) await setSession({ title })
+            return
+        }
         if (!title || title === topic?.title) return
         if (topic) await manage({ action: 'retitle', title })
         else await createTopic(title)
@@ -1026,7 +1056,7 @@ export function ThreadPane({
                         <span className="h-4 w-px shrink-0 bg-border" />
                     </>
                 )}
-                <span className="pl-1 text-[15px] font-semibold">{topic ? 'Discussion' : 'Thread'}</span>
+                <span className="pl-1 text-[15px] font-semibold">{topic ? 'Discussion' : session ? 'Session' : 'Thread'}</span>
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                     {editingTitle !== null ? (
                         <input
@@ -1038,12 +1068,12 @@ export function ThreadPane({
                                 if (e.key === 'Escape') setEditingTitle(null)
                             }}
                             onBlur={() => setEditingTitle(null)}
-                            placeholder={topic ? 'Discussion goal' : 'What needs to get resolved?'}
+                            placeholder={titleFor === 'session' ? 'Session title' : topic ? 'Discussion goal' : 'What needs to get resolved?'}
                             className="w-full min-w-0 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-xs text-foreground outline-none"
                         />
                     ) : (
                         <>
-                            {topic ? <MemberText text={topic.title} /> : 'from a message'}
+                            {topic ? <MemberText text={topic.title} /> : session ? <MemberText text={session.title} /> : 'from a message'}
                             {groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? 'file' : 'files'} changed` : ''}
                         </>
                     )}
@@ -1085,7 +1115,13 @@ export function ThreadPane({
                         {following ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />} {following ? 'Following' : 'Follow'}
                     </Button>
                 )}
-                {(topic ? topic.archived : root?.archived) && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
+                {session && !root?.archived && (
+                    <Button variant="ghost" size="xs" className="gap-1 px-2 text-muted-foreground" disabled={!writable} onClick={() => void archiveThread(true)}
+                        title="End this session — it leaves your Sessions until a new reply reopens it">
+                        <CircleCheck className="size-3.5" /> End session
+                    </Button>
+                )}
+                {(topic ? topic.archived : root?.archived) && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">{session ? 'ended' : 'archived'}</span>}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" aria-label="Thread options" className="size-8 shrink-0 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
@@ -1097,7 +1133,7 @@ export function ThreadPane({
                         <DropdownMenuSeparator />
                         {topic ? (
                             <>
-                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle(topic.title)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => editTitle('discussion', topic.title)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
                                 <DropdownMenuItem disabled={!writable} onClick={() => setAttaching(true)}>
@@ -1119,13 +1155,25 @@ export function ThreadPane({
                             </>
                         ) : (
                             <>
-                                <DropdownMenuItem disabled={!writable} onClick={() => setEditingTitle('')}>
-                                    <Tag className="size-3.5 mr-2" /> Make this a discussion…
-                                </DropdownMenuItem>
+                                {session ? <>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => editTitle('session', session.title)}>
+                                        <Pencil className="size-3.5 mr-2" /> Rename session
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void setSession(null)}>
+                                        <MessageSquareOff className="size-3.5 mr-2" /> Make it a plain thread
+                                    </DropdownMenuItem>
+                                </> : <>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => editTitle('session', root ? threadLabelOf(root.body) : '')}>
+                                        <Timer className="size-3.5 mr-2" /> Make this a session…
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => editTitle('discussion', '')}>
+                                        <Tag className="size-3.5 mr-2" /> Make this a discussion…
+                                    </DropdownMenuItem>
+                                </>}
                                 {root?.archived ? (
-                                    <DropdownMenuItem disabled={!writable} onClick={() => void archiveThread(false)}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void archiveThread(false)}><ArchiveRestore className="size-3.5 mr-2" /> {root && sessionArchiveLabel(root)}</DropdownMenuItem>
                                 ) : (
-                                    <DropdownMenuItem disabled={!writable} onClick={() => void archiveThread(true)}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void archiveThread(true)}>{session ? <CircleCheck className="size-3.5 mr-2" /> : <Archive className="size-3.5 mr-2" />} {root ? sessionArchiveLabel(root) : 'Archive'}</DropdownMenuItem>
                                 )}
                             </>
                         )}
@@ -1413,19 +1461,27 @@ export function ThreadPane({
                             void fold({ assetId: file.id, path: file.path })
                         },
                     },
-                    topic
+                    ...(topic ? [] : [sessionCommand({
+                        spaceId: space.id,
+                        sessions: mySessions.filter((s) => s.root.id !== rootMessageId),
+                        newLabel: (title) => session ? `Rename this session: ${title}` : `Make this thread a session: ${title}`,
+                        ...(session || !root ? {} : { fallbackTitle: threadLabelOf(root.body) }),
+                        onNew: (title) => setSession({ title }),
+                        onOpen: (s) => s.spaceId === space.id ? onOpenThread?.(s.root.id) : onOpenThreadIn?.(s.spaceId, s.root.id),
+                    })]),
+                    ...(session ? [] : [topic
                         ? {
                               name: 'rename',
                               args: '<goal>',
                               hint: 'Rename this discussion',
-                              run: (args) => void manage({ action: 'retitle', title: args }),
+                              run: (args: string) => void manage({ action: 'retitle', title: args }),
                           }
                         : {
                               name: 'discussion',
                               args: '<goal>',
                               hint: 'Make this thread a discussion with a stated goal',
-                              run: (args) => void createTopic(args),
-                          },
+                              run: (args: string) => void createTopic(args),
+                          }]),
                     {
                         name: 'poll',
                         hint: 'Create a poll — pick answers, votes tally live',
@@ -1437,9 +1493,13 @@ export function ThreadPane({
                                   ? { name: 'unarchive', hint: 'Unarchive this discussion', run: () => void manage({ action: 'unarchive' }) }
                                   : { name: 'archive', hint: 'Archive this discussion — it leaves the rail until a new reply revives it', run: () => void manage({ action: 'archive' }) },
                           ]
-                        : [root?.archived
-                              ? { name: 'unarchive', hint: 'Unarchive this thread', run: () => void archiveThread(false) }
-                              : { name: 'archive', hint: 'Archive this thread — it leaves the thread lists until a new reply revives it', run: () => void archiveThread(true) }]),
+                        : session
+                          ? [root?.archived
+                                ? { name: 'reopen', hint: 'Reopen this session', run: () => void archiveThread(false) }
+                                : { name: 'end', hint: 'End this session — it leaves your Sessions until a new reply reopens it', run: () => void archiveThread(true) }]
+                          : [root?.archived
+                                ? { name: 'unarchive', hint: 'Unarchive this thread', run: () => void archiveThread(false) }
+                                : { name: 'archive', hint: 'Archive this thread — it leaves the thread lists until a new reply revives it', run: () => void archiveThread(true) }]),
                     // Scheduled sends live on the desktop (core's scheduler), so the browser has no /remind.
                     ...(LOCAL_RUNTIME ? [{
                         name: 'remind',

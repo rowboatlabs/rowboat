@@ -18,6 +18,9 @@ import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 
 const composer = vi.hoisted(() => ({ onDraftChange: undefined as ((draft: string) => void) | undefined }))
 const followUp = vi.hoisted(() => ({ byRoot: new Map<string, { id: string; displayName: string }>(), roots: [] as (string | undefined)[] }))
+vi.mock('@/lib/spaces-my-threads', () => ({
+    useMyThreads: () => ({ threads: [], loaded: true }), sessionsOf: () => [], useThreadListing: () => undefined, refreshMyThreads: vi.fn(), threadStatusLabel: () => '',
+}))
 vi.mock('@/components/spaces/composer', () => ({
     Composer: ({ onSend, onDraftChange }: { onSend: (body: string) => void; onDraftChange?: (draft: string) => void }) => {
         composer.onDraftChange = onDraftChange

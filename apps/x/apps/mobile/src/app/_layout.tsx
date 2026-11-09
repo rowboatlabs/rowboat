@@ -18,7 +18,7 @@ const LightTheme = {
 import Drawer from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, useColorScheme, useWindowDimensions } from 'react-native';
 import { Image } from '@/components/sf-image';
 
@@ -26,7 +26,7 @@ import { GlassHamburger } from '@/components/glass-hamburger';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import * as Notifications from 'expo-notifications';
-import { router } from 'expo-router';
+import { router, usePathname, useRootNavigationState } from 'expo-router';
 
 import { DrawerContent } from '@/components/drawer-content';
 import { registerWithMac } from '@/lib/push';
@@ -138,32 +138,53 @@ function PushRegistrar() {
 // spaceId / threadRootId (push.ts on the org); the org list maps id → address.
 function PushNavigator() {
   const account = useSpacesAccount();
-  // Each notification response is handled ONCE (2026-10-07). This effect
-  // re-runs whenever the org list refreshes, and getLastNotificationResponse
-  // answers the same tap every time — so each refresh pushed chat + thread
-  // again and the back button walked through the copies.
+  const pathname = usePathname();
+  const navReady = Boolean(useRootNavigationState()?.key);
+  // Each notification response is handled ONCE (2026-10-07): the listener and
+  // getLastNotificationResponse can both answer the same tap, and replaying
+  // it pushed chat + thread again so back walked through the copies.
   const handled = useRef(new Set<string>());
+  // A tap is held until the app can act on it (2026-11-09). On a cold start
+  // the tap arrived before the navigator was ready and before Home's redirect
+  // into Spaces: the push was dropped, or the redirect landed after it and
+  // replaced it — and the tap was already marked handled, so it never retried.
+  // The app opened on Spaces home instead of the message.
+  const [pending, setPending] = useState<Notifications.NotificationResponse | null>(null);
   useEffect(() => {
-    const open = (r: Notifications.NotificationResponse) => {
-      const key = `${r.notification.request.identifier}:${r.notification.date}`;
-      if (handled.current.has(key)) return;
-      const data = r.notification.request.content.data as Record<string, unknown> | undefined;
-      const orgId = typeof data?.orgId === 'string' ? data.orgId : null;
-      const spaceId = typeof data?.spaceId === 'string' ? data.spaceId : null;
-      const threadRootId = typeof data?.threadRootId === 'string' ? data.threadRootId : null;
-      const org = account.orgs?.find((o) => o.id === orgId);
-      if (!org || !spaceId) return;
-      handled.current.add(key);
-      const base = { org: org.address, space: spaceId, me: org.memberId };
-      // From the tabs: back from the thread goes to the channel, then home.
-      if (router.canDismiss()) router.dismissAll();
-      router.push({ pathname: '/spaces/chat', params: base });
-      if (threadRootId) router.push({ pathname: '/spaces/thread', params: { ...base, root: threadRootId, title: 'Thread', focus: 'latest' } });
+    const take = (r: Notifications.NotificationResponse) => {
+      if (!handled.current.has(responseKey(r))) setPending(r);
     };
-    const sub = Notifications.addNotificationResponseReceivedListener(open);
-    // Cold start from a notification.
-    void Notifications.getLastNotificationResponseAsync().then((r) => r && open(r));
+    const last = Notifications.getLastNotificationResponse();
+    if (last) take(last);
+    const sub = Notifications.addNotificationResponseReceivedListener(take);
     return () => sub.remove();
-  }, [account.orgs]);
+  }, []);
+  useEffect(() => {
+    // pathname '/' = Home has not redirected into Spaces yet.
+    if (!pending || !navReady || pathname === '/') return;
+    const data = pending.notification.request.content.data as Record<string, unknown> | undefined;
+    const orgId = typeof data?.orgId === 'string' ? data.orgId : null;
+    const spaceId = typeof data?.spaceId === 'string' ? data.spaceId : null;
+    const threadRootId = typeof data?.threadRootId === 'string' ? data.threadRootId : null;
+    if (!spaceId) {
+      setPending(null);
+      return;
+    }
+    // Not in the org list yet: wait for the cached or refreshed list.
+    const org = account.orgs?.find((o) => o.id === orgId);
+    if (!org) return;
+    handled.current.add(responseKey(pending));
+    setPending(null);
+    Notifications.clearLastNotificationResponse();
+    const base = { org: org.address, space: spaceId, me: org.memberId };
+    // From the tabs: back from the thread goes to the channel, then home.
+    if (router.canDismiss()) router.dismissAll();
+    router.push({ pathname: '/spaces/chat', params: base });
+    if (threadRootId) router.push({ pathname: '/spaces/thread', params: { ...base, root: threadRootId, title: 'Thread', focus: 'latest' } });
+  }, [pending, navReady, pathname, account.orgs]);
   return null;
+}
+
+function responseKey(r: Notifications.NotificationResponse): string {
+  return `${r.notification.request.identifier}:${r.notification.date}`;
 }

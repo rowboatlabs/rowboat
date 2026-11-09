@@ -70,48 +70,25 @@ export function peekSpaceCorpus(orgId: string, spaceId: string): spaces.Message[
 }
 
 // ---------------------------------------------------------------------------
-// Query syntax — the conversation filter grammar over the corpus:
-//   from:<name>      author's display name contains <name> ('me' = you)
-//   in:<topic>       the topic's title contains <topic> ('messages' = the stream)
-//   has:link|image|file   the body carries one
-//   mentions:<name>  the body @-mentions <name> ('me' = you)
-// Everything else is a free-text term; all terms and filters must hit.
+// Query syntax — from:<name>, mentions:<name>, in:<title>, has:link|image|file
+// beside free words. The org owns what they mean (harbor search.ts, filtered
+// in the store since 2026-11-06); this parse only splits the words out for
+// highlighting and says whether a filter is present.
 // ---------------------------------------------------------------------------
 
 export interface ParsedQuery {
-    /** Free-text terms — every one must hit the resolved body or author name. */
+    /** Free-text terms, the words a result's text is highlighted by. */
     terms: string[]
-    from: string[]
-    inTopic: string[]
-    has: string[]
-    mentions: string[]
     /** True when any from:/in:/has:/mentions: token was present. */
     filtered: boolean
 }
 
-const FILTER_RE = /^(from|in|has|mentions):(.+)$/
+const FILTER_RE = /^(from|in|has|mentions):.+$/
 
 export function parseSearchQuery(query: string): ParsedQuery {
-    const parsed: ParsedQuery = { terms: [], from: [], inTopic: [], has: [], mentions: [], filtered: false }
-    for (const token of query.toLowerCase().split(/\s+/).filter(Boolean)) {
-        const m = FILTER_RE.exec(token)
-        if (!m) {
-            parsed.terms.push(token)
-        } else if (m[1] === 'from') parsed.from.push(m[2]!)
-        else if (m[1] === 'in') parsed.inTopic.push(m[2]!)
-        else if (m[1] === 'has') parsed.has.push(m[2]!)
-        else parsed.mentions.push(m[2]!)
-    }
-    parsed.filtered = parsed.from.length + parsed.inTopic.length + parsed.has.length + parsed.mentions.length > 0
-    return parsed
-}
-
-/** has:<kind> detectors over raw wire text (a body or a search snippet; blob links carry /b/<hash>). */
-export function hasKind(body: string, kind: string): boolean {
-    if (kind === 'link') return /https?:\/\//.test(body)
-    if (kind === 'image') return /!\[[^\]]*\]\(/.test(body)
-    if (kind === 'file') return /(?<!!)\[[^\]]*\]\([^)]*\/b\//.test(body)
-    return false
+    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean)
+    const terms = tokens.filter((t) => !FILTER_RE.test(t))
+    return { terms, filtered: terms.length < tokens.length }
 }
 
 /**

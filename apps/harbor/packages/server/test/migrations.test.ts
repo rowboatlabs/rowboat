@@ -43,6 +43,20 @@ describe('schema migrations', () => {
     } finally { await db.close(); }
   });
 
+  it('preserves availability when upgrading an earlier availability test build', async () => {
+    const db = await pgliteDb();
+    try {
+      await migrate(db);
+      await db.query(`insert into members (id, display_name, role, availability) values ('test-person', 'Test person', 'member', '{"manualAway":true}'::jsonb)`);
+      await db.query(`update schema_migrations set id = '060-member-availability' where id = '061-member-availability'`);
+      await migrate(db);
+      const members = await db.query<{ availability: unknown }>(`select availability from members where id = 'test-person'`);
+      expect(members[0]!.availability).toEqual({ manualAway: true });
+      const applied = await db.query(`select id from schema_migrations where id = '061-member-availability'`);
+      expect(applied).toHaveLength(1);
+    } finally { await db.close(); }
+  });
+
   it('is idempotent — a second run applies nothing and changes nothing', async () => {
     const db = await pgliteDb();
     await migrate(db);
