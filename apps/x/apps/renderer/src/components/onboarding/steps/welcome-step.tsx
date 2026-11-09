@@ -1,42 +1,22 @@
 import { Loader2, CheckCircle2 } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
-import { useChatGPT } from "@/hooks/useChatGPT"
-import { OpenAIIcon } from "../provider-icons"
 import type { OnboardingState } from "../use-onboarding-state"
+import { useCompletionSpace } from "./completion-space"
 
 interface WelcomeStepProps {
   state: OnboardingState
 }
 
+// Onboarding is this one page (2026-11-09): sign in with Rowboat, and the
+// app opens in Spaces. ChatGPT sign-in, model providers, naming a space and
+// adding coding agents left it; a first space is still made, under its
+// suggested name, when you have none (completion-space.ts).
 export function WelcomeStep({ state }: WelcomeStepProps) {
-  const chatgpt = useChatGPT()
   const rowboatState = state.providerStates['rowboat'] || { isConnected: false, isLoading: false, isConnecting: false }
-
-  const isConnecting = rowboatState.isConnecting || chatgpt.isSigningIn
-  const canContinue = rowboatState.isConnected || chatgpt.status.signedIn
-  const accounts = [
-    {
-      id: "rowboat",
-      name: "Rowboat",
-      description: "Free plan included. Models from OpenAI, Anthropic, Google and more.",
-      icon: <img src="/logo-only.png" alt="" className="size-7" />,
-      connected: rowboatState.isConnected,
-      loading: state.providersLoading || rowboatState.isLoading,
-      connecting: rowboatState.isConnecting,
-      signIn: () => state.startConnect("rowboat"),
-    },
-    {
-      id: "chatgpt",
-      name: "ChatGPT",
-      description: "Use your Plus or Pro subscription with your existing ChatGPT login.",
-      icon: <OpenAIIcon className="size-6" />,
-      connected: chatgpt.status.signedIn,
-      loading: chatgpt.isLoading,
-      connecting: chatgpt.isSigningIn,
-      signIn: chatgpt.signIn,
-    },
-  ]
+  const connected = rowboatState.isConnected
+  const loading = state.providersLoading || rowboatState.isLoading
+  const space = useCompletionSpace(connected)
 
   return (
     <div className="flex flex-col items-center justify-center text-center flex-1">
@@ -65,95 +45,51 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3.5 py-1.5 text-xs font-medium text-muted-foreground mb-6"
       >
         <span className="size-1.5 rounded-full bg-[var(--rowboat-success)] animate-pulse" />
-        The multiplayer personal assistant for work
+        Your team of AI coworkers
       </motion.div>
-      <motion.p
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.3 }}
-        className="text-base text-muted-foreground leading-relaxed max-w-sm mb-6"
-      >
-        Rowboat connects to your work, builds a knowledge graph, and works alongside your team and their assistants. Private and on your machine.
-      </motion.p>
 
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
-        className="w-full max-w-lg space-y-3"
+        className="w-full max-w-sm space-y-3"
       >
-        <p className="text-sm text-muted-foreground mb-4">
-          Sign in to get started. Connect both for more models.
+        <p className="text-base text-muted-foreground leading-relaxed mb-6">
+          Spin up agents like Hermes, Claude Code and Codex, give them roles, add them to a group chat, and watch them collaborate on your shared goals.
         </p>
-        {accounts.map(account => (
-          <div key={account.id} className="rounded-xl border bg-muted/20 p-4 text-left">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted" aria-hidden="true">
-                {account.icon}
-              </div>
-              <div className="min-w-0 flex-1">
-                <h2 className="text-sm font-medium">{account.name}</h2>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{account.description}</p>
-              </div>
-              {account.connected ? (
-                <span role="status" className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-[var(--rowboat-success)]">
-                  <CheckCircle2 className="size-4" />
-                  <span className="sr-only">{account.name} </span>Connected
-                </span>
-              ) : (
-                <Button
-                  onClick={() => void account.signIn()}
-                  variant="outline"
-                  disabled={account.loading || isConnecting}
-                  aria-label={`Sign in with ${account.name}`}
-                  className="shrink-0"
-                >
-                  {account.connecting || account.loading ? <Loader2 className="size-4 animate-spin" /> : "Sign in"}
-                </Button>
-              )}
-            </div>
-            {account.connecting && (
-              <div role="status" className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <p>Complete sign in in your browser, then return here.</p>
-                {account.id === "chatgpt" && (
-                  <Button variant="ghost" size="sm" onClick={chatgpt.cancelSignIn}>Cancel</Button>
-                )}
-              </div>
+        {connected ? (
+          <>
+            <p role="status" className="flex items-center justify-center gap-1.5 text-sm font-medium text-[var(--rowboat-success)]">
+              <CheckCircle2 className="size-4" />
+              Signed in to Rowboat
+            </p>
+            {space.error && <p role="alert" className="text-sm text-destructive">{space.error}</p>}
+            <Button
+              onClick={() => void space.complete(state.handleComplete)}
+              disabled={space.loading || space.busy}
+              size="lg"
+              aria-label="Continue"
+              className="w-full h-12 text-base font-medium"
+            >
+              {space.loading || space.busy ? <Loader2 className="size-5 animate-spin" /> : "Continue"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              onClick={() => void state.startConnect("rowboat")}
+              disabled={loading || rowboatState.isConnecting}
+              size="lg"
+              aria-label="Sign in with Rowboat"
+              className="w-full h-12 text-base font-medium"
+            >
+              {loading || rowboatState.isConnecting ? <Loader2 className="size-5 animate-spin" /> : "Sign in with Rowboat"}
+            </Button>
+            {rowboatState.isConnecting && (
+              <p role="status" className="text-xs text-muted-foreground">Complete sign in in your browser, then return here.</p>
             )}
-          </div>
-        ))}
-        {canContinue && (
-          <Button
-            onClick={() => {
-              state.setOnboardingPath(rowboatState.isConnected ? "rowboat" : "chatgpt")
-              state.setCurrentStep(2)
-            }}
-            disabled={isConnecting}
-            size="lg"
-            className="w-full h-12 text-base font-medium"
-          >
-            Continue
-          </Button>
+          </>
         )}
-      </motion.div>
-
-      {/* BYOK link */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-        className="mt-6"
-      >
-        <button
-          onClick={() => {
-            state.setOnboardingPath('byok')
-            state.setCurrentStep(1)
-          }}
-          disabled={isConnecting}
-          className="disabled:opacity-50 text-sm text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-muted-foreground/30 hover:decoration-foreground/50"
-        >
-          I want to bring my own API key
-        </button>
       </motion.div>
     </div>
   )

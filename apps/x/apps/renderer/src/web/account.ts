@@ -10,6 +10,7 @@ import {
     SessionEndedError,
     type SpacesTokens,
 } from '@x/spaces-client'
+import { tokenEmail } from '@/lib/spaces-account'
 import { APEX_URL, DEV_HARBOR } from './config'
 
 // The browser's Rowboat session (2026-10-09, the Spaces web app): the phone's
@@ -83,15 +84,7 @@ window.addEventListener('storage', (event) => {
  * who you are only: Harbor verifies the token, and nothing here trusts it.
  */
 export function sessionEmail(): string | null {
-    const payload = readSession()?.tokens.access.split('.')[1]
-    if (!payload) return null
-    try {
-        const bytes = Uint8Array.from(atob(payload.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
-        const claims = JSON.parse(new TextDecoder().decode(bytes)) as { email?: unknown }
-        return typeof claims.email === 'string' ? claims.email : null
-    } catch {
-        return null
-    }
+    return tokenEmail(readSession()?.tokens.access)
 }
 
 /** A local dev Harbor needs no session: its tokens are dev tokens. */

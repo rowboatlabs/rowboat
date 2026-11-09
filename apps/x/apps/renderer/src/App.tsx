@@ -1,7 +1,7 @@
 import { OpenBrowserContext } from '@/contexts/browser-context';
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
-import { isOrgView, parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type OrgView, type SpacesLinkTarget } from '@/lib/spaces-navigation'
+import { isOrgView, lastSpaceLocation, parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type OrgView, type SpacesLinkTarget } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
 import { resolveSpacesLink } from '@/lib/spaces-link-open'
 import { ServerDialogs } from '@/components/spaces/server-dialogs'
@@ -14,11 +14,9 @@ import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, MessageSquare } from 'lucide-react';
+import { CheckIcon, LoaderIcon, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, MessageSquare } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
-import { SHORTCUTS, isRichTextTarget } from '@/lib/shortcuts';
-import { Keys } from '@/components/keys';
 import { useFullScreen } from '@/hooks/use-full-screen';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { AssistantWorkspace } from './components/assistant/assistant-workspace';
@@ -39,7 +37,8 @@ import {
   reloadCleanActiveMarkdownAfterExternalChange,
 } from '@/lib/active-markdown-external-change';
 import { useDebounce } from './hooks/use-debounce';
-import { DockSidebar, DOCK_GUTTER_PX, LAST_SPACE_STORAGE_KEY } from '@/components/dock-sidebar';
+import { DockSidebar, LAST_SPACE_STORAGE_KEY } from '@/components/dock-sidebar';
+import { SpacesModeRail, SPACES_RAIL_PX } from '@/components/spaces-mode-rail';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
@@ -213,7 +212,9 @@ const KEEP_ALIVE_SECTIONS: ReadonlySet<MiddleView> = new Set<MiddleView>([
 
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
-const SIDEBAR_VIEW_STORAGE_KEY = 'x:sidebar-view'
+type AppMode = 'spaces' | 'local'
+/** The mascot tour, off for now (2026-11-06): its stops walk the Local sidebar. */
+const TOUR_ENABLED = false
 const WORKSPACE_ROOT = 'knowledge/Workspace'
 // Sentinel path for the default Bases view (a virtual "file" the bases table
 // renders under). The other __rowboat_* sentinel tab paths died with the tab
@@ -788,19 +789,17 @@ function parseDeepLink(input: string): ViewState | null {
   }
 }
 
-/** Sidebar toggle (fixed position, top-left) — one persistent control that
-    swaps between the expanded panel and the icon rail, in both directions.
-    Reports its rendered width so collapsed-mode headers can pad past the
-    whole cluster (toggle and caffeinate; New chat moved into the panel and
-    the rail, 2026-10-22). */
-function FixedSidebarToggle({
+/** The titlebar's fixed top-left cluster. The sidebar no longer collapses
+    (2026-11-06: Spaces | Local replaced the toggle, see AppModeTabs), so it
+    holds caffeinate alone. Reports its rendered width so the Spaces header
+    can pad past it and the traffic lights. */
+function TitlebarControls({
   leftInsetPx,
   onWidthChange,
 }: {
   leftInsetPx: number
   onWidthChange?: (px: number) => void
 }) {
-  const { toggleSidebar, state } = useSidebar()
   const rootRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const el = rootRef.current
@@ -812,59 +811,46 @@ function FixedSidebarToggle({
   }, [onWidthChange])
   return (
     // 38px tall, not 40: centred at 19px, the height of the traffic lights'
-    // centre (trafficLightPosition y 12 + half of their 14px), so the toggle
-    // sits level with them (2026-10-21).
+    // centre (trafficLightPosition y 12 + half of their 14px), so the
+    // controls sit level with them (2026-10-21).
     <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-[38px] items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-full shrink-0" style={{ width: leftInsetPx, transition: 'width 200ms ease' }} />
-      <Tooltip delayDuration={400}>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-            style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
-            aria-label={state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">
-          {state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
-          <Keys keys={SHORTCUTS.toggleSidebar} tone="dark" />
-        </TooltipContent>
-      </Tooltip>
       {/* Caffeinate lives here rather than in a pane header: it is app-wide
-          state, and this cluster is the one control group present on every
-          view, sidebar expanded or docked. */}
-      <CaffeinateToggle />
+          state, and this cluster is the one control group present on every view. */}
+      <div style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}><CaffeinateToggle /></div>
     </div>
   )
 }
 
-/** Application-menu "View > Toggle Sidebar" (menu:toggleSidebar). A bridge
- * component because useSidebar() must be called under the SidebarProvider,
- * below where the menu:command dispatcher sits. Renders nothing. */
-function MenuSidebarToggleBridge() {
-  const { toggleSidebar } = useSidebar()
-  const toggleRef = useRef(toggleSidebar)
-  useEffect(() => { toggleRef.current = toggleSidebar }, [toggleSidebar])
-  useEffect(() => window.ipc.on('menu:toggleSidebar', () => toggleRef.current()), [])
-  // ⌘B toggles the sidebar (2026-10-21), except in a rich-text editor, where
-  // it is bold; ⌘\ (the old chord) toggles anywhere. Capture phase, so an
-  // inner handler that stops the event can't swallow it.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
-      const key = e.key.toLowerCase()
-      if (key === '\\' || (key === 'b' && !isRichTextTarget(e.target))) {
-        e.preventDefault()
-        toggleRef.current()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown, true)
-    return () => document.removeEventListener('keydown', onKeyDown, true)
-  }, [])
-  return null
+/** Spaces | Local, centred in the titlebar (2026-11-06). Spaces is the team
+    surface alone, as the web app shows it; Local is everything on this
+    machine. The mode is the open view, not state of its own, so a link, a
+    notification or the ⌥Tab switcher into a space selects Spaces by itself. */
+function AppModeTabs({ mode, onSelect }: { mode: AppMode; onSelect: (mode: AppMode) => void }) {
+  const tab = (value: AppMode, label: string) => (
+    <button
+      type="button"
+      role="tab"
+      // The product tour's Spaces stop anchors here, where the sidebar row was.
+      data-tour-id={value === 'spaces' ? 'nav-spaces' : undefined}
+      aria-selected={mode === value}
+      onClick={() => { if (mode !== value) onSelect(value) }}
+      className={cn(
+        "h-6 rounded-[5px] px-3 text-[12.5px] font-medium transition-colors",
+        mode === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div className="fixed left-1/2 top-0 z-50 flex h-10 -translate-x-1/2 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <div role="tablist" aria-label="Spaces or local" className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+        {tab('spaces', 'Spaces')}
+        {tab('local', 'Local')}
+      </div>
+    </div>
+  )
 }
 
 /** Main content header. Expanded, the panel absorbs the fixed toggle cluster
@@ -965,9 +951,14 @@ function App() {
   const [isLiveNotesOpen, setIsLiveNotesOpen] = useState(false)
   const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
-  const [isSpacesOpen, setIsSpacesOpen] = useState(false)
+  // Spaces is open from the first frame (2026-11-09), in the space last
+  // left, so a launch never shows Local while the servers load; the landing
+  // effect below confirms the space once they have.
+  const [initialSpace] = useState(() => SPACES_ENABLED ? lastSpaceLocation() : null)
+  const [isSpacesOpen, setIsSpacesOpen] = useState(SPACES_ENABLED)
   // The space open in the Spaces view (org + space); the sidebar highlights it.
-  const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(null)
+  const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(() =>
+    initialSpace ? { orgId: initialSpace.orgId, spaceId: initialSpace.spaceId, ...(initialSpace.view ? { view: initialSpace.view } : {}) } : null)
   // Remember the last space opened (any route in) — the ⌥Tab switcher lands
   // there directly instead of opening the spaces flyout.
   useEffect(() => {
@@ -977,7 +968,7 @@ function App() {
     } catch { /* ignore */ }
   }, [spaceSelection])
   // What's selected inside the open space (general / topic / file) — part of the history.
-  const [railSelection, setRailSelection] = useState<RailSelection>({ kind: 'general' })
+  const [railSelection, setRailSelection] = useState<RailSelection>(() => initialSpace?.rail ?? { kind: 'general' })
   /**
    * The Spaces view correcting its own selection (the open space was deleted,
    * or the last server went away). Not a navigation — no history entry. The
@@ -1035,32 +1026,15 @@ function App() {
   // auto-closes when the active note changes.
   const [liveNotePanelPath, setLiveNotePanelPath] = useState<string | null>(null)
   const [, setActiveShortcutPane] = useState<ShortcutPane>('left')
-  // In collapsed mode the fixed toggle cluster (traffic lights + toggle +
-  // new chat + caffeinate) overhangs the pane's left edge (the rail gutter
-  // is narrower than it), so top bars pad past its MEASURED width — the
-  // cluster's contents vary; the expanded panel absorbs it, so ordinary
-  // padding there. Initial estimate covers first paint until the observer
-  // reports.
+  // In Spaces mode the fixed top-left cluster (traffic lights + caffeinate)
+  // overhangs the pane's left edge (the rail is narrower than it), so the
+  // header pads past its MEASURED width. Initial estimate covers first paint
+  // until the observer reports.
   const [titlebarControlsWidthPx, setTitlebarControlsWidthPx] = useState(
-    (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) + TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 3 * 32,
+    (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) + TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 32,
   )
-  const collapsedLeftPaddingPx = Math.max(12, titlebarControlsWidthPx + 8 - DOCK_GUTTER_PX)
-  // Expanded panel vs. collapsed dock — the collapse button swaps between
-  // them; the choice persists per machine.
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
-    try {
-      return window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY) !== 'dock'
-    } catch {
-      return true
-    }
-  })
+  const collapsedLeftPaddingPx = Math.max(12, titlebarControlsWidthPx + 8 - SPACES_RAIL_PX)
   const fullScreen = useFullScreen()
-  const handleSidebarOpenChange = useCallback((open: boolean) => {
-    setSidebarOpen(open)
-    try {
-      window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, open ? 'panel' : 'dock')
-    } catch { /* keep in-memory behavior */ }
-  }, [])
 
   // Keep the latest selected path in a ref (avoids stale async updates when switching rapidly)
   const selectedPathRef = useRef<string | null>(null)
@@ -5564,6 +5538,33 @@ function App() {
     void navigateToView(target ? { type: 'spaces', ...target } : { type: 'spaces' })
   }, [spacesLoading, spaceSelection, railSelection, navigateToView])
 
+  // Spaces | Local (2026-11-06). Local returns to the last view that wasn't
+  // Spaces, so switching back and forth keeps both places.
+  const appMode: AppMode = SPACES_ENABLED && isSpacesOpen ? 'spaces' : 'local'
+  const lastLocalViewRef = useRef<ViewState>({ type: 'chat', runId: null })
+  useEffect(() => {
+    if (currentViewState.type !== 'spaces') lastLocalViewRef.current = currentViewState
+  }, [currentViewState])
+  const selectAppMode = useCallback((mode: AppMode) => {
+    if (mode === 'spaces') void openSpaces()
+    else void navigateToView(lastLocalViewRef.current)
+  }, [openSpaces, navigateToView])
+
+  // Spaces is where the app lands (2026-11-06). It opens on the first frame
+  // in the space last left (initialSpace, 2026-11-09); once the servers load,
+  // this lands on that space if it's still there, or the first one, unless
+  // something already navigated (a deep link, a notification). No history
+  // entry, so Back doesn't lead anywhere nobody opened.
+  const landedRef = useRef(false)
+  useEffect(() => {
+    if (landedRef.current || !SPACES_ENABLED || spacesLoading) return
+    landedRef.current = true
+    const current = currentViewStateRef.current
+    if (historyRef.current.back.length > 0 || current.type !== 'spaces') return
+    const target = resolveSpacesLocation(getSpacesOrgs(), readLastSpace())
+    void applyViewState(target ? { type: 'spaces', ...target } : { type: 'spaces' })
+  }, [spacesLoading, applyViewState])
+
   const openMeetingsView = useCallback(() => {
     void navigateToView({ type: 'meetings' })
   }, [navigateToView])
@@ -6384,10 +6385,9 @@ function App() {
     checkOnboarding()
   }, [])
 
-  // Handler for onboarding completion. When the user accepts the tour offer
-  // on the final step, hand off to the mascot tour once the modal's exit
-  // animation has cleared.
-  const handleOnboardingComplete = useCallback(async (opts?: { startTour?: boolean }) => {
+  // Handler for onboarding completion: it ends in Spaces (2026-11-06), in
+  // the space it may have just created.
+  const handleOnboardingComplete = useCallback(async () => {
     try {
       await window.ipc.invoke('onboarding:markComplete', null)
     } catch (err) {
@@ -6395,10 +6395,8 @@ function App() {
     }
     analytics.onboardingCompleted()
     setShowOnboarding(false)
-    if (opts?.startTour) {
-      window.setTimeout(() => setTourActive(true), 400)
-    }
-  }, [])
+    if (SPACES_ENABLED) void openSpaces()
+  }, [openSpaces])
 
   const knowledgeActions = React.useMemo(() => ({
     createNote: async (parentPath: string = 'knowledge') => {
@@ -7293,10 +7291,6 @@ function App() {
     onOpenBgTasks: () => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() },
     onOpenApps: openAppsGrid,
     onOpenApp: (folder: string) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() },
-    onOpenSpace: openSpace,
-    onOpenActivity: openActivity,
-    onOpenSpaces: () => { void openSpaces() },
-    activeSpace: spaceSelection,
     recentRuns: chatRuns,
     onOpenRun: openAssistantRun,
     onOpenAssistant: openAssistant,
@@ -7315,7 +7309,8 @@ function App() {
     onOpenEmail: (threadId?: string) => openEmailView(threadId),
     onOpenHome: () => void navigateToView({ type: 'home' }),
     onNewChat: handleNewChatTab,
-    onStartTour: () => setTourActive(true),
+    // The tour is off for now (2026-11-06): it walks the sidebar, which Spaces replaced as the landing.
+    ...(TOUR_ENABLED ? { onStartTour: () => setTourActive(true) } : {}),
     meetingRecordingState: meetingTranscription.state,
     recordingMeetingSource,
     onToggleMeetingRecording: () => { void handleToggleMeeting() },
@@ -7329,30 +7324,31 @@ function App() {
         }
       }}>
         <div className="rowboat-shell flex h-svh w-full overflow-hidden">
-          {/* Left navigation, two forms: expanded = the panel sidebar,
-              collapsed = the slim icon rail. The collapse button (fixed
-              top-left) swaps between them; the gutter padding clears the
-              rail when it's showing. */}
+          {/* Left navigation (2026-11-06): Local shows the panel sidebar,
+              always open; Spaces replaces it with the Rowboat rail, and the
+              space's own rail (SpacesView) is the sidebar there. */}
           <SidebarProvider
-            open={sidebarOpen}
-            onOpenChange={handleSidebarOpenChange}
-            style={{
-              paddingLeft: sidebarOpen ? 0 : DOCK_GUTTER_PX,
-              transition: 'padding-left var(--sb-dur) var(--sb-ease)',
-            }}
+            open={appMode === 'local'}
+            onOpenChange={() => {}}
+            style={{ paddingLeft: appMode === 'spaces' ? SPACES_RAIL_PX : 0 }}
           >
+            {/* Kept mounted in Spaces, closed off-canvas, so its state survives. */}
             <SidebarContentPanel
               {...sidebarNavProps}
               onSelectFile={toggleExpand}
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onVoiceNoteCreated={handleVoiceNoteCreated}
             />
-            {/* Always mounted: renders the tray when collapsed, and only the
-                ⌥/⌃+Tab switcher while the panel is expanded (so the MRU order
-                survives toggling between the two). */}
+            {appMode === 'spaces' && <SpacesModeRail onOpenSettings={() => setMenuSettings({ open: true, tab: 'account' })} />}
+            {/* Only the ⌥/⌃+Tab switcher; the collapsed tray it also draws
+                is gone with the collapse toggle. */}
             <DockSidebar
               {...sidebarNavProps}
-              switcherOnly={sidebarOpen}
+              onOpenSpace={openSpace}
+              onOpenActivity={openActivity}
+              onOpenSpaces={() => { void openSpaces() }}
+              activeSpace={spaceSelection}
+              switcherOnly
             />
             <SidebarInset
               className={cn(
@@ -8156,26 +8152,21 @@ function App() {
                 getLevel={tts.getLevel}
               />
             )}
-            {/* Top-left gutter strip: continues the titlebar band across the
-                icon rail (the traffic lights are wider than the rail, so the
-                band must be one uninterrupted surface — the rail itself starts
-                below it) and keeps that corner draggable. */}
-            {/* The panel and the rail both float below the titlebar band
+            {/* The panel and the rail both sit below the titlebar band
                 (2026-10-21/22); this keeps the band over them draggable. */}
             <div
               aria-hidden="true"
               className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
-              style={{ width: sidebarOpen ? 'var(--sidebar-width)' : DOCK_GUTTER_PX }}
+              style={{ width: appMode === 'local' ? 'var(--sidebar-width)' : SPACES_RAIL_PX }}
             />
-            {/* Sidebar toggle — always present (both directions), rendered
-                last so its no-drag region paints over the drag regions. */}
-            <FixedSidebarToggle
-              // Full screen hides the traffic lights, so the toggle takes
+            {/* Rendered last so their no-drag regions paint over the drag regions. */}
+            <TitlebarControls
+              // Full screen hides the traffic lights, so the controls take
               // their place, in line with the sidebar's icons (2026-10-21).
               leftInsetPx={isMac && !fullScreen ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 8}
               onWidthChange={setTitlebarControlsWidthPx}
             />
-            <MenuSidebarToggleBridge />
+            {SPACES_ENABLED && <AppModeTabs mode={appMode} onSelect={selectAppMode} />}
           </SidebarProvider>
         </div>
         <CommandPalette

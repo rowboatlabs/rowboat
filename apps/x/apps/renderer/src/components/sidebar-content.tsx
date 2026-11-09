@@ -80,15 +80,12 @@ import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
-import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
 import { SidebarSection } from "@/components/sidebar-section"
 import { Keys } from "@/components/keys"
 import { SHORTCUTS } from "@/lib/shortcuts"
 import { useCodeSessions } from "@/components/code/use-code-sessions"
 import { useUnreadCodeSessions } from "@/components/code/session-read-state"
 import { UnreadBadge } from "@/components/spaces/unread-badge"
-import { SPACES_ENABLED } from "@/lib/feature-flags"
-import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
@@ -204,11 +201,6 @@ type SidebarContentPanelProps = {
   onOpenApps?: () => void
   /** Open a specific app (pinned in the sidebar) inside the Apps view. */
   onOpenApp?: (folder: string) => void
-  /** Open one space (org + space) in the Spaces view. */
-  onOpenSpace?: (orgId: string, spaceId: string) => void
-  onOpenSpaces?: () => void
-  /** The space currently open, for highlighting its sidebar row. */
-  activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenAssistant?: () => void
@@ -457,9 +449,6 @@ export function SidebarContentPanel({
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
-  onOpenSpace,
-  onOpenSpaces,
-  activeSpace,
   recentRuns = [],
   onOpenRun,
   onOpenAssistant,
@@ -1104,12 +1093,6 @@ export function SidebarContentPanel({
             ))}
           </SidebarMenu>
         </SidebarGroup>
-
-        {/* Trying Spaces right after Apps (2026-10-21). */}
-        {SPACES_ENABLED && (
-          <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
-            onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} onOpenSpaces={onOpenSpaces} />
-        )}
 
         <SidebarSection id="chats" label="Chats" tourId="nav-chats">
           {recentChats.length === 0 ? (
