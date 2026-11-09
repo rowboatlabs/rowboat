@@ -720,8 +720,18 @@ export function buildHttpApp(deps: {
     deep: `rowboat://open?${query}`,
     ...(deps.webAppUrl ? { web: `${deps.webAppUrl.replace(/\/$/, '')}/open?${query}` } : {}),
   });
-  /** The web app when there is one, else the hand-off page. */
-  const handOff = (c: Context, o: Openers, page: string) => (o.web ? c.redirect(o.web, 302) : c.html(page));
+  /**
+   * The web app when there is one, else the hand-off page. A phone's browser
+   * (by user agent) gets the hand-off page even then (2026-11-09, evening):
+   * the app it may have is the phone app, which the page offers along with
+   * the App Store and the browser; the web app is built for a desktop. The
+   * phone page launches nothing by itself — a scheme the phone has no app
+   * for is an error dialog on iOS.
+   */
+  const handOff = (c: Context, o: Openers, page: (phone: boolean) => string) => {
+    const phone = /iPhone|iPad|iPod|Android/i.test(c.req.header('user-agent') ?? '');
+    return o.web && !phone ? c.redirect(o.web, 302) : c.html(page(phone));
+  };
 
   // The invite link's landing (2026-09-15): a browser-opened /join/<token>
   // hands the invite into the app as rowboat://open?type=spaces&server=…&invite=…
@@ -735,8 +745,22 @@ export function buildHttpApp(deps: {
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
     const query = `type=spaces&server=${encodeURIComponent(service.server.address)}&invite=${encodeURIComponent(token)}`;
     const o = openers(query);
-    return handOff(c, o, invitePage({ state: 'ok', ...(resolved.space ? { space: resolved.space.name } : {}), ...(resolved.direct ? { person: resolved.direct.displayName } : {}), server: service.server.name, invitedBy: resolved.invitedBy, ...o }));
+    return handOff(c, o, (phone) => invitePage({ state: 'ok', phone, ...(resolved.space ? { space: resolved.space.name } : {}), ...(resolved.direct ? { person: resolved.direct.displayName } : {}), server: service.server.name, invitedBy: resolved.invitedBy, ...o }));
   });
+
+  // Apple's site association (2026-11-09): with it, and the domain declared in
+  // the phone app, iOS opens a link on this server in the app directly when
+  // it is installed, and in the browser otherwise — no page in between. The
+  // app id is the team and the bundle; the paths are the links the app can
+  // open: an invite, a space (and anything under it), a person.
+  const siteAssociation = (c: Context) =>
+    c.json({
+      applinks: {
+        details: [{ appIDs: ['9526N79222.com.rowboatlabs.spaces'], components: [{ '/': '/join/*' }, { '/': '/s/*' }, { '/': '/u/*' }] }],
+      },
+    });
+  app.get('/.well-known/apple-app-site-association', siteAssociation);
+  app.get('/apple-app-site-association', siteAssociation);
 
   // --- link landings ---------------------------------------------------------
   // Every Spaces link (ids.ts grammar) opened in a browser lands here and is
@@ -747,7 +771,7 @@ export function buildHttpApp(deps: {
   const landing = (c: Context, target: URLSearchParams) => {
     target.set('server', service.server.address);
     const o = openers(`type=spaces&${target.toString()}`);
-    return handOff(c, o, landingPage(o));
+    return handOff(c, o, (phone) => landingPage({ ...o, phone }));
   };
   app.get('/', (c) => landing(c, new URLSearchParams()));
   app.get('/s/:spaceId', (c) => landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId') })));
@@ -1106,14 +1130,26 @@ const PAGE_STYLE =
   `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
   `.s{margin-top:1.25rem;font-size:13px;color:#666}.s+.s{margin-top:.25rem}.s a{color:inherit}</style>`;
 
-/** The desktop app's deep link, and the web app's address for the same link when the Harbor names one. */
+/** The app's deep link, and the web app's address for the same link when the Harbor names one. */
 interface Openers {
   deep: string;
   web?: string;
+  /** A phone's browser: offer the phone app and the store, launch nothing. */
+  phone?: boolean;
 }
 
-/** Launch the desktop app at once; offer the download, and the web app. */
+/** The phone app, on the App Store (2026-11-09); the one listing serves iPhone and iPad. */
+const APP_STORE_URL = 'https://apps.apple.com/app/id6818016444';
+
+/** Launch the desktop app at once; offer the download, and the web app. On a phone: the app, the store, the browser. */
 function openerLinks(o: Openers): string {
+  if (o.phone) {
+    return (
+      `<a class="b" href="${escapeHtml(o.deep)}">Open in the Rowboat app</a>` +
+      `<p class="s">Don't have it? <a href="${APP_STORE_URL}">Get it on the App Store</a>, then open this link again.</p>` +
+      (o.web ? `<p class="s">Or <a href="${escapeHtml(o.web)}">continue in your browser</a>.</p>` : '')
+    );
+  }
   return (
     `<a class="b" href="${escapeHtml(o.deep)}">Open in Rowboat</a>` +
     `<p class="s">Don't have the app? <a href="${DOWNLOAD_URL}">Download Rowboat</a>, then open this link again.</p>` +

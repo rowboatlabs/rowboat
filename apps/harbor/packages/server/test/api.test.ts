@@ -416,6 +416,34 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(parseSpacesUrl('not a url')).toBeNull();
   });
 
+  it('a phone\u2019s browser gets the hand-off page even with a web app: the phone app, the App Store, the browser; nothing launched', async () => {
+    const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+    const res = await fetch(`${harbor.url}/s/${spaceId}`, { headers: { 'user-agent': ua }, redirect: 'manual' });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(`rowboat://open?type=spaces&amp;spaceId=${spaceId}&amp;server=`);
+    expect(html).toContain('apps.apple.com');
+    expect(html).toContain('href="https://web.test/open?');
+    expect(html).not.toContain('location.replace(');
+    // The invite too: its card names the space, pre-auth.
+    const inv = await ramnique.post('/v1/invites', { spaceId });
+    const join = await fetch(`${harbor.url}/join/${inv.body.token}`, { headers: { 'user-agent': ua }, redirect: 'manual' });
+    expect(join.status).toBe(200);
+    const named = (await api(null).post('/v1/invites/resolve', { token: inv.body.token })).body.space.name as string;
+    expect(await join.text()).toContain(named);
+  });
+
+  it('serves the Apple site association for the phone app, so its links open the app directly (2026-11-09)', async () => {
+    for (const path of ['/.well-known/apple-app-site-association', '/apple-app-site-association']) {
+      const res = await fetch(`${harbor.url}${path}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('application/json');
+      const body = await res.json() as { applinks: { details: Array<{ appIDs: string[]; components: Array<{ '/': string }> }> } };
+      expect(body.applinks.details[0]!.appIDs).toEqual(['9526N79222.com.rowboatlabs.spaces']);
+      expect(body.applinks.details[0]!.components.map((c) => c['/'])).toEqual(['/join/*', '/s/*', '/u/*']);
+    }
+  });
+
   it('a deployment that names no web app keeps the hand-off page: the desktop app at once, and its download', async () => {
     const bare = await startTestHarbor({ seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }] });
     try {

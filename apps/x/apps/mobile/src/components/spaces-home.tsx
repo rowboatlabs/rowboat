@@ -410,11 +410,12 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
   // Collapsible sections (Slack): remembered per org; only on Home. A
   // collapsed section still says how much is waiting inside it.
   const collapseKey = `collapsed:${org.id}`;
-  const [collapsed, setCollapsed] = useState<{ spaces?: boolean; dms?: boolean }>(() => peekValue<{ spaces?: boolean; dms?: boolean }>(collapseKey) ?? {});
+  type Collapsed = { spaces?: boolean; dms?: boolean; agents?: boolean };
+  const [collapsed, setCollapsed] = useState<Collapsed>(() => peekValue<Collapsed>(collapseKey) ?? {});
   useEffect(() => {
-    void loadValue<{ spaces?: boolean; dms?: boolean }>(collapseKey).then((v) => v && setCollapsed(v));
+    void loadValue<Collapsed>(collapseKey).then((v) => v && setCollapsed(v));
   }, [collapseKey]);
-  const toggle = (section: 'spaces' | 'dms') => {
+  const toggle = (section: 'spaces' | 'dms' | 'agents') => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setCollapsed((prev) => {
       const next = { ...prev, [section]: !prev[section] };
@@ -425,15 +426,19 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
   const canCollapse = mode === 'home';
   const spacesClosed = canCollapse && Boolean(collapsed.spaces);
   const dmsClosed = canCollapse && Boolean(collapsed.dms);
+  const agentsClosed = canCollapse && Boolean(collapsed.agents);
   const sum = (badges: { unread: number; forYou: number }[]) =>
     badges.reduce((t, b) => ({ unread: t.unread + b.unread, forYou: t.forYou + b.forYou }), { unread: 0, forYou: 0 });
   const spacesWaiting = sum((spaces ?? []).map((sp) => badgeFor(sp.id, false)));
-  const dmsWaiting = sum(orgMembers.map((m) => { const dm = dmWith(m.id); return dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 }; }));
+  const waitingIn = (list: Member[]) => sum(list.map((m) => { const dm = dmWith(m.id); return dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 }; }));
 
   // Search is a jump list: spaces and people whose names contain the query.
   const q = query.trim().toLowerCase();
   const shownSpaces = mode === 'dms' ? null : mode === 'search' && q ? (spaces?.filter((s) => s.name.toLowerCase().includes(q)) ?? null) : spaces;
   const shownMembers = mode === 'search' && q ? orgMembers.filter((m) => m.displayName.toLowerCase().includes(q)) : orgMembers;
+  // People and your agents in their own sections (2026-11-09, as the desktop's sidebar has them).
+  const shownPeople = shownMembers.filter((m) => m.kind !== 'agent');
+  const shownAgents = shownMembers.filter((m) => m.kind === 'agent');
 
   return (
     <View style={{ gap: 24 }}>
@@ -495,16 +500,19 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
         </View>
       ) : null}
 
-      {/* Direct messages: every member is one tap from a DM (a DM is a
+      {/* People, then your agents: every member is one tap from a DM (a DM is a
           `direct` space — openDirect is get-or-create, idempotent). Your own
           row opens the self-DM: notes to self, on the server, for every device
           and your agent. */}
-      {shownMembers.length > 0 ? (
-        <View style={{ gap: 8 }}>
-          <SectionLabel text="Direct messages" collapsed={dmsClosed} onToggle={canCollapse ? () => toggle('dms') : undefined} waiting={dmsWaiting} />
-          {dmsClosed ? null : (
+      {[
+        { key: 'dms' as const, text: 'People', list: shownPeople, closed: dmsClosed },
+        { key: 'agents' as const, text: 'Agents', list: shownAgents, closed: agentsClosed },
+      ].map(({ key, text, list, closed }) => list.length > 0 ? (
+        <View key={key} style={{ gap: 8 }}>
+          <SectionLabel text={text} collapsed={closed} onToggle={canCollapse ? () => toggle(key) : undefined} waiting={waitingIn(list)} />
+          {closed ? null : (
           <Card>
-            {shownMembers.map((m, i) => {
+            {list.map((m, i) => {
               const dm = dmWith(m.id);
               const badge = dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 };
               const self = m.id === org.memberId;
@@ -523,7 +531,7 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
           </Card>
           )}
         </View>
-      ) : null}
+      ) : null)}
       {/* Your personal link (harbor spec §4 Invites, 2026-11-09): how someone outside your groups reaches you. Under everything. */}
       {mode === 'home' ? (
         <Card>
