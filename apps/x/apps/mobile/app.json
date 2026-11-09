@@ -20,7 +20,10 @@
           "_http._tcp"
         ],
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "associatedDomains": [
+        "applinks:spaces.x.rowboatlabs.com"
+      ]
     },
     "android": {
       "package": "com.rowboatlabs.spaces",

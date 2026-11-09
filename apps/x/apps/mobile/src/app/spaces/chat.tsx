@@ -1,3 +1,4 @@
+import { PrimaryButton } from '@/components/grouped';
 import { reportMobileActivity } from '../../lib/spaces/activity';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from '@/components/sf-image';
@@ -531,9 +532,28 @@ export default function SpaceChatScreen() {
       ) : messages === null || visible.length === 0 ? (
         <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" alwaysBounceVertical style={{ flex: 1 }}>
           {messages && visible.length === 0 ? (
-            <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>
-              No messages yet — say hi.
-            </Text>
+            direct ? (
+              <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>
+                No messages yet — say hi.
+              </Text>
+            ) : (
+              /* A space with no messages yet (2026-11-09, as the web's first-run page): its first steps. */
+              <View style={{ marginTop: 40, paddingHorizontal: 24, gap: 10, alignItems: 'center' }}>
+                <Text style={{ fontSize: 20, fontWeight: '700', color: colors.label, textAlign: 'center' }}>Welcome to #{title}</Text>
+                <Text style={{ fontSize: 14, lineHeight: 20, color: colors.secondaryLabel, textAlign: 'center', marginBottom: 8 }}>
+                  {"It's just you here so far. Bring in the people who should work on this, then say what it's for."}
+                </Text>
+                <View style={{ alignSelf: 'stretch', gap: 10 }}>
+                  <PrimaryButton label="Add people" onPress={() => router.push({ pathname: '/spaces/add-people', params: { org, space, title, me } })} />
+                  <Pressable
+                    onPress={() => router.push({ pathname: '/spaces/invite', params: { org, space, title } })}
+                    style={({ pressed }) => ({ paddingVertical: 12, borderRadius: 12, borderCurve: 'continuous', alignItems: 'center', borderWidth: 1, borderColor: colors.separator, opacity: pressed ? 0.6 : 1 })}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>Share the link</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )
           ) : null}
         </ScrollView>
       ) : (
