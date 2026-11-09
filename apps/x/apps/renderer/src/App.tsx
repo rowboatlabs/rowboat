@@ -38,7 +38,7 @@ import {
 } from '@/lib/active-markdown-external-change';
 import { useDebounce } from './hooks/use-debounce';
 import { DockSidebar, LAST_SPACE_STORAGE_KEY } from '@/components/dock-sidebar';
-import { SpacesModeRail, SPACES_RAIL_PX } from '@/components/spaces-mode-rail';
+import { SpacesAccount } from '@/components/spaces-account';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
@@ -1027,13 +1027,13 @@ function App() {
   const [liveNotePanelPath, setLiveNotePanelPath] = useState<string | null>(null)
   const [, setActiveShortcutPane] = useState<ShortcutPane>('left')
   // In Spaces mode the fixed top-left cluster (traffic lights + caffeinate)
-  // overhangs the pane's left edge (the rail is narrower than it), so the
-  // header pads past its MEASURED width. Initial estimate covers first paint
+  // overhangs the pane's left edge (there is no rail beside it since
+  // 2026-11-09), so the header pads past its MEASURED width. Initial estimate covers first paint
   // until the observer reports.
   const [titlebarControlsWidthPx, setTitlebarControlsWidthPx] = useState(
     (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) + TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 32,
   )
-  const collapsedLeftPaddingPx = Math.max(12, titlebarControlsWidthPx + 8 - SPACES_RAIL_PX)
+  const collapsedLeftPaddingPx = Math.max(12, titlebarControlsWidthPx + 8)
   const fullScreen = useFullScreen()
 
   // Keep the latest selected path in a ref (avoids stale async updates when switching rapidly)
@@ -7321,12 +7321,12 @@ function App() {
       }}>
         <div className="rowboat-shell flex h-svh w-full overflow-hidden">
           {/* Left navigation (2026-11-06): Local shows the panel sidebar,
-              always open; Spaces replaces it with the Rowboat rail, and the
-              space's own rail (SpacesView) is the sidebar there. */}
+              always open; in Spaces the space's own sidebar (SpacesView) is
+              the one sidebar — the thin Rowboat rail beside it went on
+              2026-11-09, its logo and account folded into that sidebar. */}
           <SidebarProvider
             open={appMode === 'local'}
             onOpenChange={() => {}}
-            style={{ paddingLeft: appMode === 'spaces' ? SPACES_RAIL_PX : 0 }}
           >
             {/* Kept mounted in Spaces, closed off-canvas, so its state survives. */}
             <SidebarContentPanel
@@ -7335,7 +7335,6 @@ function App() {
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onVoiceNoteCreated={handleVoiceNoteCreated}
             />
-            {appMode === 'spaces' && <SpacesModeRail onOpenSettings={() => setMenuSettings({ open: true, tab: 'account' })} />}
             {/* Only the ⌥/⌃+Tab switcher; the collapsed tray it also draws
                 is gone with the collapse toggle. */}
             <DockSidebar
@@ -7665,6 +7664,7 @@ function App() {
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <SpacesView
                     active={activeMiddle === 'spaces'}
+                    accountMenu={<SpacesAccount onOpenSettings={() => setMenuSettings({ open: true, tab: 'account' })} />}
                     selection={spaceSelection}
                     onSelect={selectSpace}
                     onSwitchSpace={openSpace}
@@ -8152,7 +8152,7 @@ function App() {
             <div
               aria-hidden="true"
               className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
-              style={{ width: appMode === 'local' ? 'var(--sidebar-width)' : SPACES_RAIL_PX }}
+              style={{ width: appMode === 'local' ? 'var(--sidebar-width)' : 0 }}
             />
             {/* Rendered last so their no-drag regions paint over the drag regions. */}
             <TitlebarControls

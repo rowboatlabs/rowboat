@@ -16,7 +16,7 @@ import { railForOpening, rememberRail } from '@/lib/spaces-rail-memory'
 import { readRailSelection, type RailSelection } from '@/lib/spaces-selection'
 import { noteSpaceVisit } from '@/lib/spaces-visits'
 import { hasSession, onSessionChange } from './account'
-import { WebRail } from './account-menu'
+import { WebAccount } from './account-menu'
 import { takeJoinClick, takeOpenLink } from './links'
 import { startNotifications } from './notifications'
 import { NotificationsPrompt } from './notifications-prompt'
@@ -165,10 +165,10 @@ export function WebApp({ signInError }: { signInError: string | null }) {
                 {/* Signed out, a sign-in page; a session ending reloads the tab (above). */}
                 {hasSession() ? (
                     <>
-                        <WebRail />
                         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
                             <NotificationsPrompt />
                             <SpacesView
+                                accountMenu={<WebAccount />}
                                 selection={selection}
                                 onSelect={onSelect}
                                 onSwitchSpace={(id, space, named) => go(id, { spaceId: space, rail: railForOpening(id, space, named) })}

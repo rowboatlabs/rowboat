@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, Bot, ChevronDown, ChevronRight, CornerDownRight, Hash, Link as LinkIcon, LogIn, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
+import { Archive, Bell, ChevronDown, ChevronRight, CornerDownRight, Hash, Link as LinkIcon, LogIn, MessageSquarePlus, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, Sparkles, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { type SpaceSelection } from '@/components/spaces-view'
 import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
@@ -23,27 +24,15 @@ import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
 import { needsYouCount, useMyThreads } from '@/lib/spaces-my-threads'
 
-/** The chip over the chat list (spec §10, 2026-11-09): everything, groups, people, or your agents. */
-type ChatFilter = 'all' | 'groups' | 'people' | 'agents'
-const FILTERS: ReadonlyArray<{ value: ChatFilter; label: string }> = [
-    { value: 'all', label: 'All' },
-    { value: 'groups', label: 'Groups' },
-    { value: 'people', label: 'People' },
-    { value: 'agents', label: 'Agents' },
-]
-const FILTER_KEY = 'spaces:chatFilter'
-function readFilter(): ChatFilter {
-    try {
-        const stored = localStorage.getItem(FILTER_KEY)
-        return FILTERS.some((f) => f.value === stored) ? (stored as ChatFilter) : 'all'
-    } catch { return 'all' }
-}
+type NewChatStart = 'menu' | 'group' | 'message'
 
 /**
- * The chat list (spec §10, 2026-11-09): one list, newest activity first —
- * groups and direct messages alike, as WhatsApp lists them — with chips to
- * narrow it, New chat behind the +, and your personal link at the foot. The
- * server-level rows sit above it: Activity, Threads, Agents.
+ * The chat list (spec §10, 2026-11-09, sections since the evening's design
+ * pass): New space leads as the one primary action, Activity and Threads sit
+ * above, and the chats come in three sections — Agents first, highlighted,
+ * then Groups, then People — each newest activity first with its own "+".
+ * Your personal link is pinned to the foot; the host adds your account row
+ * under it (SpaceRail's `account`).
  */
 function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
@@ -56,7 +45,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
     activeDiscussionCount?: number
     renderDiscussions?: (spaceId: string) => ReactNode
     onOpenSpace: (orgId: string, spaceId: string) => void
-    /** Your agents (2026-10-21); absent = no row. */
+    /** Your agents (2026-10-21); absent = no Agents header row or "Add an agent". */
     onOpenAgents?: (orgId: string) => void
     agentsActive?: boolean
     /** The Activity surface (layer 3); absent = no row. */
@@ -68,12 +57,8 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
     // same "for you" the chat rows show, summed.
     let forYou = 0
     for (const [key, badge] of unread) if (key.startsWith(`${org.id}/`)) forYou += badge.forYou
-    const [filter, setFilterState] = useState<ChatFilter>(readFilter)
-    const setFilter = (next: ChatFilter) => {
-        setFilterState(next)
-        try { localStorage.setItem(FILTER_KEY, next) } catch { /* private window: the chip just isn't remembered */ }
-    }
-    const [newChatOpen, setNewChatOpen] = useState(false)
+    // The New chat sheet, opened on the screen the click meant: a group, a message, or the menu.
+    const [newChat, setNewChat] = useState<NewChatStart | null>(null)
     const [linkOpen, setLinkOpen] = useState(false)
     const [disconnecting, setDisconnecting] = useState(false)
     // Rename-in-place: the row's label becomes an input.
@@ -145,28 +130,23 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
         }
     }
 
-    // One list, newest activity first. A DM is a person or an agent (its other
-    // participant's kind, from your contacts); a group is a shared space.
-    type Row = { kind: 'group'; space: OrgWithSpaces['spaces'][number] } | { kind: 'direct'; space: OrgWithSpaces['directs'][number]; otherId: string; agent: boolean }
-    const rows: Row[] = [
-        ...org.spaces.filter((space) => !space.archived).map((space): Row => ({ kind: 'group', space })),
-        ...org.directs.map((space): Row => {
-            const otherId = directAvatarId(space, org.memberId)
-            return { kind: 'direct', space, otherId, agent: contacts.find((m) => m.id === otherId)?.kind === 'agent' }
-        }),
-    ]
+    // Each section newest activity first. A DM is a person or an agent (its
+    // other participant's kind, from your contacts); a group is a shared space.
+    type Direct = { space: OrgWithSpaces['directs'][number]; otherId: string; agent: boolean }
     const lastActivity = (space: { id: string; createdAt: string }) => spaceLastActivityAt(org.id, space.id) ?? space.createdAt
-    rows.sort((a, b) => lastActivity(b.space).localeCompare(lastActivity(a.space)))
-    const shown = rows.filter((row) =>
-        filter === 'all' ? true
-        : filter === 'groups' ? row.kind === 'group'
-        : filter === 'people' ? row.kind === 'direct' && !row.agent
-        : row.kind === 'direct' && row.agent)
-    const selfShown = !selfDm && (filter === 'all' || filter === 'people')
+    const byActivity = <T extends { space: { id: string; createdAt: string } }>(a: T, b: T) => lastActivity(b.space).localeCompare(lastActivity(a.space))
+    const groups = org.spaces.filter((space) => !space.archived).map((space) => ({ space })).sort(byActivity).map((row) => row.space)
+    const directs: Direct[] = org.directs.map((space) => {
+        const otherId = directAvatarId(space, org.memberId)
+        return { space, otherId, agent: contacts.find((m) => m.id === otherId)?.kind === 'agent' }
+    }).sort(byActivity)
+    const agentChats = directs.filter((row) => row.agent)
+    const peopleChats = directs.filter((row) => !row.agent)
+    const selfShown = !selfDm
 
     // Archived groups (harbor #1186, 2026-10-14) leave the list for a
     // collapsed section at its foot — still readable, out of the way.
-    const archivedSpaces = filter === 'all' || filter === 'groups' ? org.spaces.filter((space) => space.archived) : []
+    const archivedSpaces = org.spaces.filter((space) => space.archived)
     const [archivedOpen, setArchivedOpen] = useState(false)
     // Viewing an archived group keeps its row in sight.
     const archivedShown = archivedOpen || archivedSpaces.some((space) => activeSpace?.orgId === org.id && activeSpace.spaceId === space.id)
@@ -243,7 +223,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
             </CollapsibleSpace>
         )
     }
-    const directRow = (row: Extract<Row, { kind: 'direct' }>) => {
+    const directRow = (row: Direct) => {
         const { space: dm, otherId } = row
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
         const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
@@ -272,10 +252,41 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
         )
     }
 
-    const navRows = !!(onOpenActivity || onOpenThreads || onOpenAgents || needsSignIn || org.error)
+    const sectionHead = (label: string, add?: { label: string; onClick: () => void }) => (
+        <div className="flex items-center gap-0.5">
+            <span className="flex h-6.5 min-w-0 flex-1 items-center pl-1.5 pr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+            {add && <button type="button" onClick={add.onClick} aria-label={add.label} title={add.label}
+                className="spaces-sec-add flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                <Plus className="size-3.5" />
+            </button>}
+        </div>
+    )
+    const navRows = !!(onOpenActivity || onOpenThreads || needsSignIn || org.error)
     return (
         <>
-            {/* Spaces redesign (2026-10-21): Activity is a nav row like Agents, all on one left edge. */}
+            {/* The one primary action (2026-11-09): a space is where people and agents meet. */}
+            <div className="mb-1.5 flex items-center gap-1 px-0.5">
+                <Button size="sm" className="h-8 flex-1 justify-center gap-1.5 font-semibold" onClick={() => setNewChat('group')}>
+                    <Plus className="size-3.5" /> New space
+                </Button>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button type="button" aria-label="Spaces options" title="Options"
+                            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                            <MoreHorizontal className="size-4" />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => setNewChat('menu')}><MessageSquarePlus className="size-3.5" /> New chat…</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setLinkOpen(true)}><LinkIcon className="size-3.5" /> Your link</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDisconnecting(true)}>
+                            <Trash2 className="size-3.5" /> Sign out of Spaces on this device
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </div>
+            {/* Spaces redesign (2026-10-21): Activity is a nav row, all on one left edge. */}
             {navRows && <SidebarMenu className="gap-0.5">
                 {/* A dead session or an unreachable server leads the rail, so it is seen. */}
                 {needsSignIn ? (
@@ -304,49 +315,60 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                     </SidebarMenuItem>
                 )}
                 {onOpenThreads && <ThreadsRow orgId={org.id} active={threadsActive} onOpen={() => onOpenThreads(org.id)} />}
-                {onOpenAgents && (
-                    <SidebarMenuItem>
-                        <SidebarMenuButton isActive={agentsActive} onClick={() => onOpenAgents(org.id)} className="spaces-rail-row">
-                            <Bot className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="flex-1 truncate">Agents</span>
-                        </SidebarMenuButton>
-                    </SidebarMenuItem>
-                )}
             </SidebarMenu>}
-            <div className="spaces-sec mt-3.5">
-                <div className="flex items-center gap-0.5">
-                    <span className="flex h-6.5 min-w-0 flex-1 items-center pl-1.5 pr-1 text-xs font-semibold text-muted-foreground">Chats</span>
-                    <button type="button" onClick={() => setNewChatOpen(true)} aria-label="New chat" title="New chat"
-                        className="spaces-sec-add flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-                        <Plus className="size-3.5" />
-                    </button>
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <button type="button" aria-label="Spaces options" title="Options"
-                                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-                                <MoreHorizontal className="size-3.5" />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={() => setLinkOpen(true)}><LinkIcon className="size-3.5" /> Your link</DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDisconnecting(true)}>
-                                <Trash2 className="size-3.5" /> Sign out of Spaces on this device
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                </div>
-                <div role="tablist" aria-label="Show" className="mt-1 flex gap-1 px-1">
-                    {FILTERS.map((f) => (
-                        <button key={f.value} type="button" role="tab" aria-selected={filter === f.value} onClick={() => setFilter(f.value)}
-                            className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
-                                filter === f.value ? 'bg-sidebar-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                            {f.label}
-                        </button>
-                    ))}
-                </div>
-                <SidebarMenu className="mt-1 gap-0.5">
-                    {shown.map((row) => row.kind === 'group' ? groupRow(row.space) : directRow(row))}
+
+            {/* Agents lead, highlighted: the header row is the Agents page, the rows are your agents' chats. */}
+            <section aria-label="Agents" className="spaces-sec mt-3.5">
+                {onOpenAgents ? (
+                    <SidebarMenu className="gap-0.5">
+                        <SidebarMenuItem>
+                            <SidebarMenuButton isActive={agentsActive} onClick={() => onOpenAgents(org.id)} className="spaces-rail-row bg-primary/10 text-foreground hover:bg-primary/15 data-[active=true]:bg-primary/20">
+                                <Sparkles className="size-4 shrink-0 text-primary" />
+                                <span className="flex-1 truncate text-[11px] font-semibold uppercase tracking-wide">Agents</span>
+                                {agentChats.length > 0 && <span className="text-xs text-muted-foreground">{agentChats.length}</span>}
+                            </SidebarMenuButton>
+                        </SidebarMenuItem>
+                    </SidebarMenu>
+                ) : sectionHead('Agents')}
+                <SidebarMenu className="mt-0.5 gap-0.5">
+                    {agentChats.map(directRow)}
+                    {onOpenAgents && (
+                        <SidebarMenuItem>
+                            <SidebarMenuButton onClick={() => onOpenAgents(org.id)} className="spaces-rail-row text-primary hover:text-primary" title="Claude Code, Codex, Hermes and more — yours to bring into spaces">
+                                <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center rounded-md border border-dashed border-primary/60"><Plus className="size-3" /></span>
+                                <span className="flex-1 truncate font-medium">Add an agent</span>
+                            </SidebarMenuButton>
+                        </SidebarMenuItem>
+                    )}
+                    {agentChats.length === 0 && !onOpenAgents && <li className="px-2 py-2 text-xs text-muted-foreground">No agents yet.</li>}
+                </SidebarMenu>
+            </section>
+
+            <section aria-label="Groups" className="spaces-sec mt-3.5">
+                {sectionHead('Groups', { label: 'New group', onClick: () => setNewChat('group') })}
+                <SidebarMenu className="mt-0.5 gap-0.5">
+                    {groups.map(groupRow)}
+                    {groups.length === 0 && <li className="px-2 py-2 text-xs text-muted-foreground">No groups yet.</li>}
+                    {archivedSpaces.length > 0 && (
+                        <SidebarMenuItem>
+                            <SidebarMenuButton onClick={() => setArchivedOpen((open) => !open)} aria-expanded={archivedShown}
+                                className="spaces-rail-row text-muted-foreground">
+                                <Archive className="size-3.5 shrink-0" />
+                                <span className="flex-1 truncate">Archived ({archivedSpaces.length})</span>
+                                <ChevronDown data-closed={!archivedShown || undefined} className="spaces-chev size-3.5 shrink-0" />
+                            </SidebarMenuButton>
+                        </SidebarMenuItem>
+                    )}
+                </SidebarMenu>
+                {archivedSpaces.length > 0 && <RailCollapse open={archivedShown}>
+                    <SidebarMenu className="gap-0.5 pt-0.5">{archivedSpaces.map(groupRow)}</SidebarMenu>
+                </RailCollapse>}
+            </section>
+
+            <section aria-label="People" className="spaces-sec mt-3.5">
+                {sectionHead('People', { label: 'New message', onClick: () => setNewChat('message') })}
+                <SidebarMenu className="mt-0.5 gap-0.5">
+                    {peopleChats.map(directRow)}
                     {/* Not created yet: the same row, waiting for its first click. */}
                     {selfShown && (
                         <SidebarMenuItem>
@@ -365,29 +387,12 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                             </SidebarMenuButton>
                         </SidebarMenuItem>
                     )}
-                    {shown.length === 0 && !selfShown && (
-                        <li className="px-2 py-3 text-xs text-muted-foreground">
-                            {filter === 'groups' ? 'No groups yet.' : filter === 'agents' ? 'No agent chats yet. Add an agent and it gets one.' : filter === 'people' ? 'Nobody yet. Share a group, or your link.' : 'Nothing yet.'}
-                        </li>
-                    )}
-                    {archivedSpaces.length > 0 && (
-                        <SidebarMenuItem>
-                            <SidebarMenuButton onClick={() => setArchivedOpen((open) => !open)} aria-expanded={archivedShown}
-                                className="spaces-rail-row text-muted-foreground">
-                                <Archive className="size-3.5 shrink-0" />
-                                <span className="flex-1 truncate">Archived ({archivedSpaces.length})</span>
-                                <ChevronDown data-closed={!archivedShown || undefined} className="spaces-chev size-3.5 shrink-0" />
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
-                    )}
+                    {peopleChats.length === 0 && !selfShown && <li className="px-2 py-2 text-xs text-muted-foreground">Nobody yet. Share a group, or your link.</li>}
                 </SidebarMenu>
-                {archivedSpaces.length > 0 && <RailCollapse open={archivedShown}>
-                    <SidebarMenu className="gap-0.5 pt-0.5">{archivedSpaces.map(groupRow)}</SidebarMenu>
-                </RailCollapse>}
-            </div>
+            </section>
             {/* Your personal link (spec §4 Invites, 2026-11-09): how someone outside your groups reaches you. A full row pinned to the rail's foot. */}
             {!needsSignIn && !org.error && (
-                <div className="sticky bottom-0 mt-auto bg-[var(--rowboat-panel-soft)] pb-2 pt-3" title={`You are ${org.memberId}`}>
+                <div className="sticky bottom-0 mt-auto bg-[var(--rowboat-panel-soft)] pb-1 pt-3" title={`You are ${org.memberId}`}>
                     <SidebarMenu>
                         <SidebarMenuItem>
                             <SidebarMenuButton onClick={() => setLinkOpen(true)} title="Share a link that opens a direct message with you" className="spaces-rail-row text-muted-foreground">
@@ -398,7 +403,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                     </SidebarMenu>
                 </div>
             )}
-            <NewChatDialog org={org} open={newChatOpen} onOpenChange={setNewChatOpen} onOpenSpace={onOpenSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
+            <NewChatDialog org={org} open={newChat !== null} start={newChat ?? 'menu'} onOpenChange={(open) => { if (!open) setNewChat(null) }} onOpenSpace={onOpenSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
             <PersonalLinkDialog orgId={org.id} open={linkOpen} onOpenChange={setLinkOpen} />
             <RemoveServerDialog org={org} open={disconnecting} onOpenChange={setDisconnecting} onRemoved={onChanged} />
         </>

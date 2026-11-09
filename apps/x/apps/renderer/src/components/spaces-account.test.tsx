@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SpacesModeRail } from './spaces-mode-rail'
+import { SpacesAccount } from './spaces-account'
 
 // One server (2026-11-09): the record the app keeps of it, under the name the store kept.
 const orgs = [
@@ -30,9 +30,12 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-describe('the Spaces rail account menu', () => {
+describe('the Spaces account row', () => {
   it('shows who you are and the server, as the web app does', async () => {
-    render(<SpacesModeRail onOpenSettings={vi.fn()} />)
+    render(<SpacesAccount onOpenSettings={vi.fn()} />)
+    // The row itself carries your name and presence (2026-11-09).
+    expect(screen.getByRole('button', { name: 'Your account' })).toHaveTextContent('Arjun Maheswaran')
+    expect(screen.getByRole('button', { name: 'Your account' })).toHaveTextContent('Active')
     fireEvent.click(screen.getByRole('button', { name: 'Your account' }))
     await waitFor(() => expect(screen.getByText('arjun@rowboatlabs.com')).toBeInTheDocument())
     expect(screen.getAllByText('Arjun Maheswaran').length).toBeGreaterThan(0)
@@ -46,7 +49,7 @@ describe('the Spaces rail account menu', () => {
 
   it('opens Settings and signs out of Rowboat', async () => {
     const onOpenSettings = vi.fn()
-    render(<SpacesModeRail onOpenSettings={onOpenSettings} />)
+    render(<SpacesAccount onOpenSettings={onOpenSettings} />)
     fireEvent.click(screen.getByRole('button', { name: 'Your account' }))
     fireEvent.click(await screen.findByRole('button', { name: /Settings/ }))
     expect(onOpenSettings).toHaveBeenCalled()

@@ -18,6 +18,8 @@ import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 
 const composer = vi.hoisted(() => ({ onDraftChange: undefined as ((draft: string) => void) | undefined }))
 const followUp = vi.hoisted(() => ({ byRoot: new Map<string, { id: string; displayName: string }>(), roots: [] as (string | undefined)[] }))
+// The first-run page mints the group's link; not this test's concern.
+vi.mock('@/components/spaces/empty-space-start', () => ({ EmptySpaceStart: ({ space }: { space: { name: string } }) => <h2>Welcome to #{space.name}</h2> }))
 vi.mock('@/lib/spaces-my-threads', () => ({
     useMyThreads: () => ({ threads: [], loaded: true }), sessionsOf: () => [], useThreadListing: () => undefined, refreshMyThreads: vi.fn(), threadStatusLabel: () => '',
 }))
@@ -275,7 +277,8 @@ describe('GeneralStream join lines (2026-09-29)', () => {
 
     it('keeps the empty-space copy when only lines exist, and draws none in a DM', async () => {
         show(streamOf([], { events: [joined(1, 'alex')] }))
-        expect(screen.getByText(/Nothing here yet/)).toBeTruthy()
+        // A group with no messages opens on its first-run page (2026-11-09).
+        expect(screen.getByRole('heading', { name: /Welcome to #/ })).toBeTruthy()
         expect(drawn()).toEqual(['Alex joined'])
         cleanup()
         show(streamOf([msg(2)], { events: [joined(1, 'alex')] }), { ...space, kind: 'direct', participants: ['me', 'alex'] } as spaces.Space)
