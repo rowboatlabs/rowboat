@@ -16,7 +16,7 @@ import { activityOf, answerOf, failureOf, type AgentEvent } from '../common/agen
 // folder there, named by the invocation, so a restart finds them.
 
 export interface TurnInput {
-  /** The org's address with its scheme, and the agent's own Spaces key, for the runtime's MCP server and file downloads. */
+  /** The server's address with its scheme, and the agent's own Spaces key, for the runtime's MCP server and file downloads. */
   serverUrl: string;
   agentKey: string;
   /** The files for this turn, absolute on the VM: the request, the event stream, stderr, and the final message. */
@@ -168,7 +168,7 @@ const hermes: Runtime = {
     // so the Spaces MCP server is put back before a turn whenever it is not Rowboat's. The `${…}`
     // placeholders are Hermes's own, and the check is for the placeholders, never for a literal
     // address: a VM set up by hand or an earlier probe can carry a different Rowboat (seen live
-    // 2026-10-26, posting to the wrong org). Hermes 0.22 runs the turn through its gateway, which
+    // 2026-10-26, posting to the wrong server). Hermes 0.22 runs the turn through its gateway, which
     // fills the placeholders from the profile's `.env`, not from the turn's environment (the
     // first managed agent on prod, 2026-10-26: "not set in this profile's .env or secret source"),
     // so the two values are written there too, with `hermes config set`, whenever they differ.

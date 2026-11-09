@@ -6,8 +6,8 @@ import type { Kernel } from './kernel.js';
  * An agent whose connector holds its own key (a local agent on its owner's
  * computer, Hermes's plugin, a custom one) is reachable only while that
  * connector holds a live connection, so the roster says which are, and every
- * org member hears when that changes. An agent Harbor runs is always
- * reachable and has no presence, as is Ro. Single-node, in memory, like the hub (spec
+ * member hears when that changes. An agent Harbor runs is always
+ * reachable and has no presence. Single-node, in memory, like the hub (spec
  * §12 defers more than one instance). Human activity lives separately in
  * human-presence.ts (2026-11-05).
  */
@@ -64,7 +64,7 @@ export class AgentPresence {
     this.leaving.set(memberId, timer);
   }
 
-  /** Drop pending announcements (the org is closing). */
+  /** Drop pending announcements (the server is closing). */
   close(): void {
     for (const timer of this.leaving.values()) clearTimeout(timer);
     this.leaving.clear();

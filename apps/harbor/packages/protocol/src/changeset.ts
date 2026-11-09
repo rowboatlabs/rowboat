@@ -4,7 +4,7 @@ import { Attribution, ActingMode } from './core.js';
 import { AssetId, AssetPath, AssetVersion, BlobHash, ChangeSetId, MessageId, SpaceId, StreamOffset } from './ids.js';
 
 // Decision 1 (CONTRACT.md): a proposal is full new content against a declared
-// base version; the org performs a line-level three-way merge. No operation
+// base version; the server performs a line-level three-way merge. No operation
 // encoding on the wire. Decision 6: a conflict response carries everything a
 // human draft UI or an agent retry needs — no second round trip.
 //
@@ -71,7 +71,7 @@ export const ProposeChange = z.object({
   /** Binary variant: the address of bytes already uploaded to this space (uploadBlob). Exactly one of newContent/blob. */
   blob: BlobHash.optional(),
   reason: z.string().max(1_000).optional(),
-  /** Provenance: the thread this change was made from (root message id). Omitted by prompt-driven agents, which append "· thread:<id>" to the reason instead — the org derives threadRootId from that suffix (threadRootFromReason). */
+  /** Provenance: the thread this change was made from (root message id). Omitted by prompt-driven agents, which append "· thread:<id>" to the reason instead — the server derives threadRootId from that suffix (threadRootFromReason). */
   threadRootId: MessageId.optional(),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),
@@ -115,7 +115,7 @@ export type CreateAssetResult = z.infer<typeof CreateAssetResult>;
  * The reason-suffix convention, owned here so both faces parse it identically:
  * a change made from a thread may carry "· thread:<root message id>" at the
  * end of its reason (legacy spelling "topic:<id>", which pre-011 servers
- * stamped as a topic id). The org stamps the parsed value into
+ * stamped as a topic id). The server stamps the parsed value into
  * ChangeSet.threadRootId at commit time.
  */
 export function threadRootFromReason(reason: string | undefined): string | null {
@@ -145,7 +145,7 @@ export const ProposeChangeResult = z.discriminatedUnion('outcome', [
     version: AssetVersion,
   }),
   /**
-   * Base was stale but the three-way merge was clean. The org stored
+   * Base was stale but the three-way merge was clean. The server stored
    * `mergedContent` — the proposer MUST treat it, not `newContent`, as what
    * now exists (principle 5: no write is ever silently lost, in either direction).
    */

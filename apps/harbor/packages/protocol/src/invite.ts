@@ -5,41 +5,41 @@ import { MemberId, SpaceId } from './ids.js';
 // Decision 4 (CONTRACT.md): auth is standard OAuth 2.x, stated as TIERED
 // requirements rather than schemas (spec §4, amended 2026-08-18 — the
 // contract mandates interoperability shape; organizational policy stays with
-// the org):
+// the server):
 //
-//   MUST (interop floor): the org serves protected-resource metadata
+//   MUST (interop floor): the server serves protected-resource metadata
 //   (RFC 9728) naming its authorization server; that AS serves RFC 8414
 //   metadata; OAuth 2.1 authorization-code + PKCE (S256); standard bearer
-//   validation, tokens scoped to the org. The org itself is only ever a
+//   validation, tokens scoped to the server. The server itself is only ever a
 //   RESOURCE server — the AS behind it is pluggable (Supabase Auth flagship,
 //   Keycloak, corporate IdP, anything conforming).
 //
-//   SHOULD / org policy (consequences named in spec §4): Dynamic Client
+//   SHOULD / server policy (consequences named in spec §4): Dynamic Client
 //   Registration (RFC 7591) — on, gated, or off; off degrades "any agent is
 //   your edge" to approved-clients-only, and clients must handle its absence
 //   gracefully. Refresh tokens — needed by automations acting with no
-//   browser open; orgs restricting them accept visible re-login instead of
+//   browser open; servers restricting them accept visible re-login instead of
 //   unattended runs.
 //
 // This tiering matches the MCP remote-server authorization contract
 // (discovery MUST, DCR SHOULD) — deliberate (spec §4, §9).
 //
 // The invite link is the one auth-adjacent artifact with a wire shape:
-//   https://<org>/join/<token>
+//   https://<server>/join/<token>
 // Resolution is allowed pre-auth so the app can show what's being joined;
-// acceptance requires auth and is subject to org membership policy.
+// acceptance requires auth and binds the newcomer to the server.
 //
 // Amended 2026-08-19 (spec §4: invites/profile/roles): an invite is ONE
 // shape — an open bearer secret. Acceptance binds to the authenticated
-// (issuer, subject); every bind-time condition is ORG POLICY checked in one
-// place at acceptance (v1: email-domain rule — a standing invite under a
-// domain rule is a safe de-facto public join link). No per-token claim
+// (issuer, subject); every bind-time condition was ORG POLICY checked in one
+// place at acceptance (v1: an email-domain rule, gone with the orgs
+// 2026-11-09; every invite link is a public join link now). No per-token claim
 // checks, by decision. "Invite by email" is delivery UX, not a security
 // artifact. On the wire (built 2026-08-19): the accept path refuses with
 // ErrorCode 'policy_refused' (human-readable message, never a cryptic 401);
-// Member carries the org-level admin bit (role — membership/policy powers
-// only; content plane stays role-flat). Deferred until human mentions ship:
-// an org-unique handle. Attribution keys on member id, never name/handle.
+// Member carried the org-level admin bit (role — membership/policy powers
+// only; content plane stays role-flat; on the membership since 2026-11-09). Deferred until human mentions ship:
+// a server-unique handle. Attribution keys on member id, never name/handle.
 
 export const InviteToken = z.string().min(16).max(256);
 export type InviteToken = z.infer<typeof InviteToken>;
@@ -52,7 +52,7 @@ export type ResolveInvite = z.infer<typeof ResolveInvite>;
 // binds a newcomer to the server, then joins the space (a no-op for a member
 // already in it) or opens the DM with the maker (get-or-create). The
 // 2026-10-19 shape — an invite to the org listing several spaces, plus the
-// org's default spaces — went with the org.
+// org's default spaces — went with the orgs.
 
 /** The space an invite joins, as the pre-auth preview names it. */
 export const InviteSpace = z.object({ id: SpaceId, name: z.string() });

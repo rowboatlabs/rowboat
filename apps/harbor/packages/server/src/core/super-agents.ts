@@ -186,7 +186,7 @@ export class SuperAgents {
 
   private async caller(ctx: ActorCtx): Promise<Member> {
     const member = await this.k.store.getMember(ctx.memberId);
-    if (!member) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!member) throw new HarborError('not_a_member', 'not a member of this server');
     if (!ctx.agent) throw new HarborError('forbidden', 'only an agent, on its own key, can do this');
     return member;
   }

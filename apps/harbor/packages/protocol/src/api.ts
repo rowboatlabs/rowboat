@@ -47,7 +47,7 @@ import { SearchKind, SearchResults } from './search.js';
 
 /**
  * Poll creation (the Discord create-request asymmetry: a duration in, an
- * expiry out — the org stamps `expiresAt` from its own clock). Answer ids are
+ * expiry out — the server stamps `expiresAt` from its own clock). Answer ids are
  * server-assigned. The message's `body` must carry a plain-markdown fallback
  * rendering of the poll (question + numbered options) so poll-blind clients
  * still show it; poll-aware clients render the card instead.
@@ -73,7 +73,7 @@ export const NewMessageSecret = z.object({ name: SecretName, value: z.string().m
 
 const NewMessage = z.object({
   /**
-   * Present = a reply into the flat thread under this root (the org
+   * Present = a reply into the flat thread under this root (the server
    * normalizes a reply's id to its root, Slack-style); absent = a new root
    * message in the space's one stream. Posting a message never creates a
    * container — a topic exists only via createTopic.
@@ -198,7 +198,7 @@ export type UnreadSnapshot = z.infer<typeof UnreadSnapshot>;
  * Activity (2026-09-10, the unread arc's layer 3): everything that involves
  * the member, across every space and DM they are in, newest first. Not a
  * table fanned out on write (Slack, Discord, GitHub) but a query over facts
- * the org already keeps — the stamped mentions, the follow rows, the DM
+ * the server already keeps — the stamped mentions, the follow rows, the DM
  * kind, the reactions (Zulip's Mentions/Inbox views work this way) — so
  * edits, deletes and the backfill stay consistent for free and there is no
  * second source of truth beside the read marks. Kinds, in the priority a
@@ -240,20 +240,20 @@ export const ActivityPage = z.object({
   nextCursor: z.string().optional(),
   /** Your activity-seen mark (reactions before it are read); null = never marked. */
   seenAt: z.iso.datetime().nullable(),
-  /** Display names for every member on the page (actors and mention tokens), from the org roster the caller may see. */
+  /** Display names for every member on the page (actors and mention tokens), from the server roster the caller may see. */
   names: z.record(MemberId, z.string()),
 });
 export type ActivityPage = z.infer<typeof ActivityPage>;
 
 export const routes = {
   // --- identity ------------------------------------------------------------
-  /** Who am I on this org — the client's only source of its own memberId under OAuth. */
+  /** Who am I on this server — the client's only source of its own memberId under OAuth. */
   // --- the web app's session (2026-10-12) ------------------------------------
   /**
    * Turn the caller's bearer into Harbor's session cookie, so a browser can
    * call every face with credentials and no bearer, and load blobs with a
    * plain <img> (CONTRACT.md). The cookie is HttpOnly, Secure, SameSite=Lax,
-   * scoped to the deployment's apex so one cookie covers every org on it, and
+   * scoped to Harbor's host, and
    * expires with the token. The bearer must come in the header.
    */
   createSession: {
@@ -299,10 +299,10 @@ export const routes = {
   // --- profile images (2026-10-02) -------------------------------------------
   /**
    * Your own avatar. The body is the image itself (PNG, JPEG, WebP or GIF,
-   * at most 1 MiB; the org sniffs the bytes and ignores the content-type).
-   * The member comes back with `avatarUrl` set: an absolute URL on this org
+   * at most 1 MiB; the server sniffs the bytes and ignores the content-type).
+   * The member comes back with `avatarUrl` set: an absolute URL on this server
    * that any member may read with their bearer (getImage). Clients send a
-   * small square; the org never resizes.
+   * small square; the server never resizes.
    */
   setAvatar: {
     method: 'PUT',
@@ -317,7 +317,7 @@ export const routes = {
   },
   /**
    * An avatar's or logo's bytes: a stream or a 302 to a short-lived presigned
-   * URL, exactly as getBlob. Readable by every member of the org; hash-keyed,
+   * URL, exactly as getBlob. Readable by every member of the server; hash-keyed,
    * so cacheable forever.
    */
   getImage: {
@@ -344,9 +344,9 @@ export const routes = {
   /**
    * Direct messages (2026-09-07): a DM is a `direct` space between exactly
    * two members — same substrate, fixed membership (see SpaceKind). Get-or-
-   * create, idempotent: the org keys DMs on the sorted participant pair, so
+   * create, idempotent: the server keys DMs on the sorted participant pair, so
    * two members can only ever have one; `created` says whether this call
-   * made it. No invite and no acceptance — the org is the trust boundary,
+   * made it. No invite and no acceptance — the server is the trust boundary,
    * as inside one Slack workspace. The other participant learns of the space
    * by a `space_added` live frame (events.ts) and on their next listing.
    * Your own id opens your self-DM (2026-09-08: one participant, one
@@ -363,8 +363,7 @@ export const routes = {
    * registers its Expo push token and the member's notify level in one
    * idempotent call — the phone re-registers on every start and on every
    * preference change. Level is per MEMBER (all their devices); tokens are
-   * per device. Org-scoped like everything: each org pushes for its own
-   * spaces.
+   * per device.
    */
   registerPush: {
     method: 'POST',
@@ -427,9 +426,8 @@ export const routes = {
    * Delete a shared space (spec §6, 2026-10-14): an admin act, refused on a
    * DM, allowed on an archived space. The space and every row that hangs off
    * it go in one statement (the cascade, migration 039); blob bytes no other
-   * space or image of the org uses go after the commit. No body: no event
-   * survives to carry an attribution. Former members (every org member, for
-   * an open space) get `space_removed`. Deleting a deleted space is
+   * space or image of the server uses go after the commit. No body: no event
+   * survives to carry an attribution. Former members get `space_removed`. Deleting a deleted space is
    * `not_found`. The client confirms by name; the server does not ask.
    */
   deleteSpace: {
@@ -892,7 +890,7 @@ export const routes = {
   /**
    * What an agent's connector declared — the composer's options, whether Stop
    * is offered — and the defaults its owner set for those options, which the
-   * composer shows preselected (spec §8, 2026-10-01). Any org member.
+   * composer shows preselected (spec §8, 2026-10-01). Any member.
    */
   getAgentCapabilities: {
     method: 'GET',
@@ -973,7 +971,7 @@ export const routes = {
     response: z.object({ invocation: Invocation }),
   },
   /**
-   * Add existing org members, people or agents, to a shared space the caller
+   * Add existing members, people or agents, to a shared space the caller
    * is in (spec §4 Roles, 2026-09-29). Each one added gets a `joined` event
    * with `by`, and a `space_added` frame. Anyone already in is a no-op;
    * `memberships` answers for every id asked, in the order asked.
@@ -1011,7 +1009,7 @@ export const routes = {
     response: z.object({ removed: z.boolean() }),
   },
   /**
-   * Your contacts (spec §3, §5; 2026-11-09, replacing the org roster): the
+   * Your contacts (spec §3, §5; 2026-11-09, replacing the server roster): the
    * people you share a space with now, DMs and archived spaces included, and
    * the agents you own — sorted by display name, departed members left out.
    * Nothing lists everyone on the server. `online` / `onlinePeople` are the
@@ -1064,11 +1062,12 @@ export const routes = {
 
   // --- invites -------------------------------------------------------------
   /**
-   * An invite to the org, listing any spaces the caller is in (spec §4
-   * Invites, amended 2026-10-19). Any org member may create one; a listed
-   * DM refuses with `invalid_request`, a listed space the caller is not in
-   * or one that is archived with `forbidden`. Accepting joins the listed
-   * spaces and the org's defaults.
+   * An invite to ONE space, or a person's link (`direct: true`) whose
+   * target is a DM with its maker (spec §4 Invites, amended 2026-11-09). Any
+   * member of the space may create one; a DM, an archived space, or a space
+   * the caller is not in is refused (`invalid_request` / `forbidden`).
+   * Accepting binds a newcomer to the server, then joins the space or opens
+   * the DM.
    */
   createInvite: {
     method: 'POST',
@@ -1203,9 +1202,9 @@ export const routes = {
   /**
    * Phase 1 of every upload (spec §6): put the bytes, get the address. Body is
    * the RAW BYTES, not JSON. Required header `x-blob-sha256`: the client-
-   * computed address — the org recomputes and refuses a mismatch, so a
+   * computed address — the server recomputes and refuses a mismatch, so a
    * truncated or corrupted body can never be stored under a healthy name.
-   * `content-type` is advisory; the org sniffs well-known types and stores its
+   * `content-type` is advisory; the server sniffs well-known types and stores its
    * own verdict. Idempotent by construction (same bytes → same hash → no-op).
    * Referencing the hash (a message's blob link, or proposeChange's blob
    * variant) is phase 2 — until then the blob is an orphan awaiting GC (§12).
@@ -1217,9 +1216,9 @@ export const routes = {
     response: z.object({ blob: BlobInfo }),
   },
   /**
-   * The bytes back: a stream (disk-driver orgs) or a 302 to a short-lived
-   * presigned URL (S3-family orgs) — clients just follow the redirect; which
-   * driver an org runs is never observable in client code. Membership-gated;
+   * The bytes back: a stream (disk-driver servers) or a 302 to a short-lived
+   * presigned URL (S3-family servers) — clients just follow the redirect; which
+   * driver a server runs is never observable in client code. Membership-gated;
    * hash-keyed means immutable, so responses are cacheable forever. Sniffed
    * images serve inline; everything else is forced `attachment` + nosniff.
    * `name` only shapes the download filename — never storage.
@@ -1285,11 +1284,11 @@ export const routes = {
       /**
        * With `replies`: the roots this page's replies belong to that the page
        * does not hold, so a client can name each reply's thread; `topics`
-       * covers them too. Empty otherwise, and absent from older orgs.
+       * covers them too. Empty otherwise, and absent from older servers.
        */
       threadRoots: z.array(Message).default([]),
       hasMore: z.boolean(),
-      /** Newer rows exist above this page. Optional on the wire so a client reading an older org treats absence as false. */
+      /** Newer rows exist above this page. Optional on the wire so a client reading an older server treats absence as false. */
       hasMoreAfter: z.boolean().optional(),
       /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
       readOffset: StreamOffset,
@@ -1297,7 +1296,7 @@ export const routes = {
        * The log events the page shows as lines between its messages, oldest
        * first (2026-09-29): membership in v1. Each belongs to the page
        * holding the next message after it; the newest page also takes those
-       * after its newest message. Absent from older orgs.
+       * after its newest message. Absent from older servers.
        */
       events: z.array(StreamEvent).default([]),
     }),
@@ -1351,7 +1350,7 @@ export const routes = {
     path: '/v1/spaces/:spaceId/messages',
     params: z.object({ spaceId: SpaceId }),
     request: NewMessage,
-    /** `invocations`: the agents this message invoked, or refused to (spec §8) — absent from older orgs. */
+    /** `invocations`: the agents this message invoked, or refused to (spec §8) — absent from older servers. */
     response: z.object({ message: Message, invocations: z.array(Invocation).default([]) }),
   },
   /**
@@ -1562,7 +1561,7 @@ export const routes = {
 
   // --- read state ----------------------------------------------------------
   /**
-   * Read marks (2026-09-09): per-member cursors the org owns, so every device
+   * Read marks (2026-09-09): per-member cursors the server owns, so every device
    * agrees. Two scopes: the space's STREAM (no threadRootId) and one FOLLOWED
    * thread (threadRootId; a reply's id resolves to its root). The unit is the
    * space's event offset — the same integer that pages and replays — never a
@@ -1591,7 +1590,7 @@ export const routes = {
   /**
    * Follow or unfollow a thread. Only followed threads count toward unread
    * and badge (v1 tracks followed threads only); a mark can sit on any thread. Which acts follow
-   * automatically is org behaviour, not client convention — provisional rules
+   * automatically is server behaviour, not client convention — provisional rules
    * today: replying follows, and a root's author follows from the first reply
    * on. Unfollowing keeps the mark, so re-following never floods.
    */
@@ -1715,7 +1714,7 @@ export const routes = {
   },
 
   // --- live ----------------------------------------------------------------
-  /** WebSocket upgrade. Frames: events.ts ClientFrame / ServerFrame. One socket per org. */
+  /** WebSocket upgrade. Frames: events.ts ClientFrame / ServerFrame. One socket per server. */
   live: {
     method: 'GET',
     path: '/v1/live',

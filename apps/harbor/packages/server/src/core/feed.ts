@@ -89,14 +89,14 @@ export class Feed {
   constructor(
     private readonly k: Kernel,
     private readonly assets: Assets,
-    /** Absent = no notifications on this org (notify.ts: frames + push). */
+    /** Absent = no notifications on this server (notify.ts: frames + push). */
     private readonly notifier?: Notifier,
     /** Absent = no agent invocations (core/invocations.ts). */
     private readonly invocations?: Invocations,
   ) {}
 
   // --- mentions (protocol mentions.ts, 2026-09-10) -----------------------------
-  // The org stamps who a message addresses from its mention TOKENS alone —
+  // The server stamps who a message addresses from its mention TOKENS alone —
   // never from names — and only ids that are members of the space. Every
   // consumer (unread, Activity, push, chips) reads the stamp.
 
@@ -109,7 +109,7 @@ export class Feed {
     return { members, here: parsed.here, rowboat: parsed.rowboat };
   }
 
-  /** A mention follows you into the thread (the org's rule; @here follows nobody). */
+  /** A mention follows you into the thread (the server's rule; @here follows nobody). */
   private async followMentioned(spaceId: string, rootMessageId: string, stamps: MentionStamps, authorId: string, at: string): Promise<void> {
     for (const id of stamps.members) {
       if (id === authorId) continue;
@@ -385,7 +385,7 @@ export class Feed {
         raising = await this.invocations.assertCanRaise(ctx, opts.approval.invocationId, spaceId, input.threadRoot);
       }
       const at = this.k.now();
-      // The org stamps the poll from its own clock: answer ids 1..n, a
+      // The server stamps the poll from its own clock: answer ids 1..n, a
       // duration in becomes an expiry out (the Discord create asymmetry).
       const poll: Poll | undefined = input.poll
         ? {
@@ -676,9 +676,9 @@ export class Feed {
    * log shows an edit by them and the "(edited)" mark appears; titles go
    * through retitle the same way. Rows that carry tokens but stale stamps
    * are restamped in place (derived data, no event). Idempotent: a second
-   * run finds nothing — and a ledger row makes it run ONCE per org, so a
+   * run finds nothing — and a ledger row makes it run ONCE per server, so a
    * later bare "@<id>" typed as prose is never rewritten behind the author.
-   * Runs at boot, per org, before the faces serve.
+   * Runs at boot, per server, before the faces serve.
    */
   async migrateMentions(opts: { force?: boolean } = {}): Promise<{ messages: number; titles: number; restamped: number }> {
     const out = { messages: 0, titles: 0, restamped: 0 };
@@ -1197,7 +1197,7 @@ function foldReactions(reactions: StoredReaction[]): ReactionGroup[] {
 /**
  * What a message's sealed secret is bound to beside its space (sealing.ts): a
  * value copied to another message or name does not open. Space ids are
- * global, so the space stands in for the org (2026-11-04).
+ * global, so the space stands in for the server (2026-11-04).
  */
 function secretBinding(messageId: string, name: string): string {
   return `message-secret:${messageId}:${name}`;

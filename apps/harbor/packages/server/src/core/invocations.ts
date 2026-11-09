@@ -349,12 +349,12 @@ export class Invocations {
     return applicableDefaults((await this.k.store.getAgentCapabilities(agentId)) ?? ConnectorCapabilities.parse({}), defaults);
   }
 
-  /** The defaults the agent's owner set, as set (the composer preselects those that fit). Any org member. */
+  /** The defaults the agent's owner set, as set (the composer preselects those that fit). Any member. */
   async optionDefaults(agentId: string): Promise<InvocationOptionValues> {
     return (await this.k.store.getAgentOptionDefaults(agentId)) ?? {};
   }
 
-  /** Any org member may read an agent's capabilities: the composer shows its options, the thread its Stop. */
+  /** Any member may read an agent's capabilities: the composer shows its options, the thread its Stop. */
   async capabilities(agentId: string): Promise<ConnectorCapabilities> {
     const agent = await this.k.store.getMember(agentId);
     if (agent?.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
@@ -382,7 +382,7 @@ export class Invocations {
     if (!found) throw new HarborError('not_found', 'no such invocation');
     await this.k.requireMember(ctx, found.conversation.spaceId);
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     const { stop } = await this.capabilities(found.agentId);
     const out: InvocationOutbox = [];
     const result = await this.k.locked(found.conversation.spaceId, async () => {
@@ -477,7 +477,7 @@ export class Invocations {
     // A super agent's request is its owner's to decide (2026-11-02).
     if (found.action) {
       const actor = await this.k.store.getMember(ctx.memberId);
-      enforce(actor ? canDecideSuperAgentRequest(actor, await this.k.store.getMember(found.agentId)) : { code: 'not_a_member', message: 'not a member of this org' });
+      enforce(actor ? canDecideSuperAgentRequest(actor, await this.k.store.getMember(found.agentId)) : { code: 'not_a_member', message: 'not a member of this server' });
     }
     const out: InvocationOutbox = [];
     const result = await this.k.lockedAs(ctx, spaceId, async () => {

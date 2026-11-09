@@ -10,15 +10,15 @@ import { oneLine, type Spaces } from './spaces.js';
 // Agent members and their keys (spec §4 Agent members, 2026-09-29). Any
 // person adds an agent and owns it; the owner alone creates its keys; the
 // owner or an admin revokes them. A key is a bearer secret presented as the
-// agent itself — auth.ts resolves it on every face — and the org keeps only
+// agent itself — auth.ts resolves it on every face — and the server keeps only
 // its hash. Render face only: a secret never passes through a tool.
 //
 // An agent's kind and connection (2026-09-30) are set here and never change.
 // A platform connection's credential is checked and stored by the connector
-// host (connectors/host.ts), which seals it for this org; this module keeps
+// host (connectors/host.ts), which seals it for this server; this module keeps
 // the rules: who may set it, and that only a platform agent has one.
 
-/** What the connector host does for agent creation. Absent = this org runs no connectors. */
+/** What the connector host does for agent creation. Absent = this server runs no connectors. */
 /** What a platform credential is checked against: the agent's kind and, for an instance connection, its instance. */
 export interface CredentialTarget {
   kind: string;
@@ -58,7 +58,7 @@ export class Agents {
 
   private async actor(ctx: ActorCtx): Promise<Member> {
     const member = await this.k.store.getMember(ctx.memberId);
-    if (!member) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!member) throw new HarborError('not_a_member', 'not a member of this server');
     return member;
   }
 
@@ -140,7 +140,7 @@ export class Agents {
 
   /**
    * Rename an agent (spec §4 Agent members, amended 2026-10-21): the owner
-   * only. An org fact, like a person's rename: no event, no lock, and history
+   * only. A server fact, like a person's rename: no event, no lock, and history
    * keeps its attribution because it keys on the id.
    */
   async rename(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
@@ -159,7 +159,7 @@ export class Agents {
    * Set an agent's description and instructions (spec §4 Agent members,
    * 2026-10-29): the owner only. A field left out keeps its value; an empty
    * one clears it. The description is one line, like a person's title; the
-   * instructions keep their lines. An org fact like a rename, told to every
+   * instructions keep their lines. A server fact like a rename, told to every
    * member as a profile change so rosters show the new description.
    */
   async setProfile(ctx: ActorCtx, agentId: string, input: { title?: string; instructions?: string }): Promise<Member> {

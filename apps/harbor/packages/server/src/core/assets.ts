@@ -40,7 +40,7 @@ const RECENT_HISTORY = 10;
 export class Assets {
   constructor(
     private readonly k: Kernel,
-    /** Absent = uploads unconfigured on this org (routes refuse loudly, everything else works). */
+    /** Absent = uploads unconfigured on this server (routes refuse loudly, everything else works). */
     private readonly blobs?: BlobStore,
   ) {}
 
@@ -304,7 +304,7 @@ export class Assets {
 
   private requireBlobStore(): BlobStore {
     if (!this.blobs) {
-      throw new HarborError('internal', 'file uploads are not configured on this org');
+      throw new HarborError('internal', 'file uploads are not configured on this server');
     }
     return this.blobs;
   }
@@ -362,7 +362,7 @@ export class Assets {
   /**
    * The bytes back: a presigned URL when the driver can mint one (S3-family —
    * bytes never transit Harbor), the bytes themselves otherwise (disk/memory).
-   * Which one an org uses is a driver detail, invisible in the route contract.
+   * Which one a server uses is a driver detail, invisible in the route contract.
    */
   async downloadBlob(
     ctx: ActorCtx,

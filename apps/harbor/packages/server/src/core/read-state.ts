@@ -5,7 +5,7 @@ import type { Feed } from './feed.js';
 import { Kernel, type ActorCtx } from './kernel.js';
 import type { Spaces } from './spaces.js';
 
-// Per-member cursors the org owns (read marks, follows), the unread snapshot,
+// Per-member cursors the server owns (read marks, follows), the unread snapshot,
 // Activity, and mark-everything-read (the read-state arc, 2026-09-09).
 
 export type MarkReadInput = z.infer<Routes['markRead']['request']>;
@@ -37,7 +37,7 @@ export class ReadState {
   ) {}
 
   // --- read state ------------------------------------------------------------
-  // Per-member cursors the org owns (read state, 2026-09-09) so every device
+  // Per-member cursors the server owns (read state, 2026-09-09) so every device
   // agrees. Offsets, never timestamps. Never on the log: a mark is private
   // member state, not a space fact — the member's other connections learn by
   // an ephemeral read_mark frame, and a reconnecting client refetches unread().
@@ -89,7 +89,7 @@ export class ReadState {
   }
 
   // --- activity (2026-09-10) -------------------------------------------------
-  // The member's feed is a query over facts the org already keeps (stamps,
+  // The member's feed is a query over facts the server already keeps (stamps,
   // follow rows, DM kind, reactions), never a second table: edits, deletes
   // and the backfill stay consistent for free, and unread is the read marks'
   // answer. Cursor = the last item's (at, id), opaque on the wire.
@@ -153,7 +153,7 @@ export class ReadState {
   /**
    * Reactions through `at` read as seen. Monotone. The one instant a client
    * supplies is re-serialized first: marks are compared as text, which is
-   * chronological only in the 24-character form the org itself writes.
+   * chronological only in the 24-character form the server itself writes.
    */
   async markActivitySeen(ctx: ActorCtx, at: string): Promise<{ seenAt: string }> {
     return { seenAt: await this.k.store.advanceActivitySeenAt(ctx.memberId, new Date(at).toISOString()) };

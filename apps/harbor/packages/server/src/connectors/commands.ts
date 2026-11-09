@@ -4,7 +4,7 @@ import type { ConnectorEnv, ConnectorPlatform, RunningConnector } from './platfo
 
 // Integrations (spec §8 Integrations, 2026-10-03): an agent for a service
 // people already use from Slack, such as PostHog or Cal.com, run by Harbor
-// on the org's key for that service. No model in the loop, as in their Slack
+// on the key its owner gave it for that service. No model in the loop, as in their Slack
 // apps: a mention is a command ("@Cal today"), the connector calls the
 // service's API, and its answer is the reply. What differs per service is an
 // Integration (its client, its commands, what its alerts say); everything

@@ -21,7 +21,7 @@ import { replicasPlatform } from './replicas/index.js';
 /** What Harbor hands a running connector: its agent, the contract, and the connector's own storage. */
 export interface ConnectorEnv {
   agent: Member;
-  /** The org's public address, with its scheme: links in prompts, and what an agent's tools call. */
+  /** The server's public address, with its scheme: links in prompts, and what an agent's tools call. */
   serverUrl: string;
   service: HarborService;
   /** The agent itself: `{ memberId: agent.id, agent: true }`, as its key would resolve. */

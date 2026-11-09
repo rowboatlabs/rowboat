@@ -20,7 +20,7 @@ export function buildPrompt(input: {
   context: Message[];
   names: ReadonlyMap<string, string>;
   address: string;
-  /** The org's address with its scheme: attachment downloads. */
+  /** The server's address with its scheme: attachment downloads. */
   serverUrl: string;
   /** Attachments on earlier messages in the context, listed for the agent to fetch. */
   earlierAttachments: Attachment[];

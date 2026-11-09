@@ -7,7 +7,7 @@ import { HarborError } from './errors.js';
 // a deployment key from the environment, with a key id so the key can rotate
 // (old ids stay readable through HARBOR_INTEGRATION_PREVIOUS_KEYS), and each
 // value bound to a scope and an agent so a sealed value copied elsewhere does
-// not open. The scope was the org's id until 2026-11-09; values sealed then
+// not open. The scope was the server's id until 2026-11-09; values sealed then
 // keep that scope beside them (the store's sealedScope), and everything
 // sealed since uses SEAL_SCOPE, there being one server. Carried over from PR #1130's credentials.ts, which its review shaped.
 // A cloud KMS replaces the environment key when Harbor's other secrets move to

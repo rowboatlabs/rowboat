@@ -21,7 +21,7 @@ import { canArchiveSpace, canDeleteSpace, canChangeMembership, canEditProfile, c
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent, type StoredInvite } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
-// Spaces and membership: the org's containers and who is in them — spaces and
+// Spaces and membership: the server's containers and who is in them — spaces and
 // direct messages, invites and the bind ceremony, the roster and its agent
 // members, push registration, and the membership-gated live relays (presence,
 // whiteboard, the subscribe-time replay).
@@ -52,7 +52,7 @@ const DEFAULT_INVITE_HOURS = 24 * 7;
 export class Spaces {
   constructor(
     private readonly k: Kernel,
-    /** The org's blob bytes: deleting a space removes the ones nothing else uses. Absent = uploads unconfigured. */
+    /** The server's blob bytes: deleting a space removes the ones nothing else uses. Absent = uploads unconfigured. */
     private readonly blobs?: BlobStore,
   ) {}
 
@@ -67,7 +67,7 @@ export class Spaces {
 
   /**
    * Your own name and title (spec §4 Member profile; built 2026-10-19). An
-   * org fact, not a space's: the profile_updated frame refreshes connected clients
+   * server fact, not a space's: the profile_updated frame refreshes connected clients
    * after persistence (2026-10-22). Rosters and `me` recover missed updates. Attribution keys on the id, so a
    * rename never touches history.
    */
@@ -203,7 +203,7 @@ export class Spaces {
    * 039), every row that hangs off it. No undo and no event: the log goes
    * with it.
    *
-   * No write guard: over its limit an org cannot grow, but it may shrink
+   * No write guard: over its limit a server cannot grow, but it may shrink
    * (policy.ts canWrite), as anyone may leave.
    *
    * What the delete erases is read first, inside the lock. Everything that
@@ -242,14 +242,14 @@ export class Spaces {
    * the caller and `otherMemberId`. Membership is written for both under the
    * new space's lock — two `joined` events are the whole membership history
    * of a DM, forever (no invites, no leave). The other participant is told
-   * by a member-addressed `space_added` frame: the org is the trust
+   * by a member-addressed `space_added` frame: the server is the trust
    * boundary, so there is no acceptance step. Two participants opening the
    * same DM at once both pass the lookup; the store's direct-key uniqueness
    * refuses the second row and that caller re-reads the winner's space.
    *
    * Your own id opens your SELF-DM (2026-09-08): one participant, one
    * membership, one `joined` event, nobody to tell. Notes to self that live
-   * on the org — every device sees them, and so does your agent, through
+   * on the server — every device sees them, and so does your agent, through
    * the same face as any space.
    */
   async openDirect(ctx: ActorCtx, otherMemberId: string, opts: { byInvite?: boolean } = {}): Promise<{ space: Space; created: boolean }> {
@@ -304,7 +304,7 @@ export class Spaces {
   }
 
   /**
-   * Your contacts (spec §3, 2026-11-09; the org roster until then): the
+   * Your contacts (spec §3, 2026-11-09; the server roster until then): the
    * people you share a space with now and the agents you own, sorted by name.
    * There is no list of everyone on the server — discovery happens through
    * invite links, off-platform.
@@ -315,14 +315,14 @@ export class Spaces {
   }
 
   /**
-   * Add existing org members, people or agents, to a shared space the caller
+   * Add existing members, people or agents, to a shared space the caller
    * is in (spec §4 Roles: any member adds to spaces they are in; 2026-09-29).
-   * All or nothing: every id must be an org member before anything is
+   * All or nothing: every id must be an member before anything is
    * written. Each one added gets the ordinary `joined` event with `by`, and a
    * `space_added` frame once the transaction commits. No notification in v1
    * (decided 2026-09-29): the sidebar and the stream's join line say it.
    * Anyone already in is a no-op, so a repeated call writes nothing and
-   * passes a read-only org.
+   * passes a read-only server.
    */
   async addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
     const space = await this.k.requireMember(ctx, spaceId);
@@ -417,7 +417,7 @@ export class Spaces {
   async leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     const space = await this.k.requireMember(ctx, spaceId);
     enforce(canChangeMembership(space, 'leave'));
-    // No write guard on purpose: over its limit an org cannot grow, but anyone may leave (policy.ts canWrite).
+    // No write guard on purpose: over its limit a server cannot grow, but anyone may leave (policy.ts canWrite).
     const at = this.k.now();
     const by: Attribution = { memberId: ctx.memberId, actingMode: 'direct' };
     const agents = await this.k.lockedAs(ctx, spaceId, async (membership) => {
@@ -668,7 +668,7 @@ export class Spaces {
 
   /**
    * Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v)); the apex's
-   * DELETE /v1/me calls it once per org. The member leaves every shared space
+   * DELETE /v1/me calls it once per server. The member leaves every shared space
    * the ordinary way, then the row is marked (store.deactivateMember): the
    * name stays, so their messages keep their author (Ramnique's review,
    * 2026-10-13), and canSignIn refuses the identity from now on. DMs keep

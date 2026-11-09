@@ -434,7 +434,7 @@ export class PgStore implements Store {
     await migrate(this.db);
     // Messages/topics backfilled by migration 012 itself (generated columns);
     // assets need code (extraction is TypeScript), so boot fills what's
-    // missing. Org-agnostic on purpose: only the boot-time store runs init(),
+    // missing. Only the boot-time store runs init(),
     // and derived search rows are repair work, not a permission surface.
     await this.backfillAssetSearch();
   }
@@ -483,7 +483,7 @@ export class PgStore implements Store {
   }
 
   /**
-   * One transaction for an org-level write that spans this store and the
+   * One transaction for a server-level write that spans this store and the
    * caller's own statements (directory.ts createOrg, 2026-09-22): the
    * store's executor is bound to it — withSpaceLock's trick without the
    * space lock — and the same transaction is handed to the caller, so
@@ -618,8 +618,6 @@ export class PgStore implements Store {
   }
 
   async getSpace(id: string): Promise<Space | undefined> {
-    // Org-scoped on purpose: this is what makes a foreign org's space ids
-    // (and invite tokens, which resolve through here) not_found.
     const rows = await this.sql.query<SpaceRow>(
       'select id, name, created_at, kind, direct_key, archived from spaces where id = $1',
       [id]);
@@ -859,10 +857,7 @@ export class PgStore implements Store {
 
   async unreferencedBlobs(hashes: string[]): Promise<string[]> {
     if (hashes.length === 0) return [];
-    // Scoped to this org on purpose: every org's bytes live under its own
-    // prefix (main.ts blobStoreFactory), so only this org's references can
-    // keep them. Avatars and the logo are registered in org_images; org_logos
-    // is checked too so a logo is never lost to a registry gap.
+    // A hash is kept while a space, or the image registry (avatars), references it.
     const rows = await this.sql.query<{ hash: string }>(
       `select h.hash from unnest($1::text[]) as h(hash)
        where not exists (select 1 from space_blobs b where b.hash = h.hash)
@@ -1697,7 +1692,7 @@ export class PgStore implements Store {
   }
 
   // Backfill ledger: rides schema_migrations under a "backfill:" key (one row
-  // per org until 2026-11-09; migration 061 folds those into one).
+  // per server until 2026-11-09; migration 061 folds those into one).
   async backfillDone(id: string): Promise<boolean> {
     const rows = await this.sql.query<{ id: string }>('select id from schema_migrations where id = $1', [`backfill:${id}`]);
     return rows.length > 0;

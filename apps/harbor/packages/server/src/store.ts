@@ -71,10 +71,10 @@ export interface AssetVersionData {
 
 /**
  * The space-level read gate for uploaded bytes (the analogue of Buzz's
- * per-community sidecar): bytes dedup per org in the BlobStore underneath,
+ * per-community sidecar): bytes dedup per server in the BlobStore underneath,
  * but a blob is referencable and servable only in spaces it was uploaded to.
  */
-/** Notify level (push.ts): what a member wants pushed, org-wide. */
+/** Notify level (push.ts): what a member wants pushed, server-wide. */
 export type PushLevel = 'off' | 'mentions' | 'dms' | 'all';
 
 export interface StoredSpaceBlob {
@@ -89,7 +89,7 @@ export interface StoredSpaceBlob {
   uploadedAt: string;
 }
 
-/** An image the whole org may read (core/images.ts): an avatar or the logo. */
+/** An image every member may read (core/images.ts): an avatar; the org logo went 2026-11-09. */
 export interface StoredImage {
   hash: string;
   size: number;
@@ -135,7 +135,7 @@ export interface StoredAgentKey extends AgentKey {
 
 /** A platform credential as stored (spec §8 Connectors, 2026-09-30): what its owner sees, plus the sealed secret. */
 export interface StoredAgentCredential extends AgentCredential {
-  /** What the value was sealed under (sealing.ts): the org's id before 2026-11-09, SEAL_SCOPE since. Reads pass it back; writes may omit it. */
+  /** What the value was sealed under (sealing.ts): the server's id before 2026-11-09, SEAL_SCOPE since. Reads pass it back; writes may omit it. */
   sealedScope?: string;
   agentId: string;
   sealed: string;
@@ -299,7 +299,7 @@ export interface Store {
   putSpace(space: Space): Promise<void>;
   getSpace(id: string): Promise<Space | undefined>;
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
-  /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
+  /** Every space on the server, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
   getDirectSpace(directKey: string): Promise<Space | undefined>;
@@ -321,7 +321,7 @@ export interface Store {
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
   // push (push.ts): per-device Expo tokens, per-member notify level.
-  // A token is org-scoped and unique; re-registering moves it to its member.
+  // A token is server-scoped and unique; re-registering moves it to its member.
   putPushToken(memberId: string, token: string, updatedAt: string): Promise<void>;
   /** Operator-side prune (push.ts): Expo names a dead device by token alone. */
   deletePushToken(token: string): Promise<void>;
@@ -618,7 +618,7 @@ export interface Store {
   listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]>;
 
   // one-time passes (the mentions backfill): a ledger so a pass that rewrites
-  // content runs exactly once per org, not on every boot
+  // content runs exactly once per server, not on every boot
   backfillDone(id: string): Promise<boolean>;
   markBackfillDone(id: string, at: string): Promise<void>;
 

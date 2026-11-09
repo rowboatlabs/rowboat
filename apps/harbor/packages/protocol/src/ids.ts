@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Decision 3 (CONTRACT.md): ULIDs for durable objects; https link grammar on the
-// org address. Member ids are org-scoped IdP subjects and stay opaque.
+// server address. Member ids are opaque strings, unique on the server.
 
 /** Crockford-base32 ULID, 26 chars. */
 export const Ulid = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, 'expected a ULID');
@@ -18,13 +18,13 @@ export type MessageId = z.infer<typeof MessageId>;
 export const ChangeSetId = Ulid;
 export type ChangeSetId = z.infer<typeof ChangeSetId>;
 
-/** Org-scoped IdP subject. Opaque; never a ULID; unique only within one org. */
+/** A member's id: opaque, unique on the server (a ULID since 2026-11-09; earlier rows keep the IdP subjects they were keyed by). */
 export const MemberId = z.string().min(1).max(256);
 export type MemberId = z.infer<typeof MemberId>;
 
 /**
  * Asset path: relative, forward slashes, no empty/`.`/`..` segments.
- * V1 assets are text files; the org rejects paths outside its policy.
+ * V1 assets are text files; the server rejects paths outside its policy.
  */
 /**
  * The asset's identity (2026-09-14): what every file operation addresses —
@@ -62,7 +62,7 @@ export type StreamOffset = z.infer<typeof StreamOffset>;
 /**
  * Link grammar (v0). Plain https URLs on the server's address; the app intercepts them.
  * Anything a member can see has a link; one grammar everywhere (spec §5 Addressability).
- * Until 2026-11-09 the host was an org's address; there is one server now (spec §4),
+ * Until 2026-11-09 the host was a server's address; there is one server now (spec §4),
  * and the grammar below the host is unchanged.
  *
  *   server      https://<server>/

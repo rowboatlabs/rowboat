@@ -71,7 +71,7 @@ export const whoami = tool({
 export const updateProfile = tool({
   name: 'update_profile',
   description:
-    "Change your person's own display name or title (what they do, e.g. \"Design lead\") on this org. " +
+    "Change your person's own display name or title (what they do, e.g. \"Design lead\") on this server. " +
     'Pass only what changes; an empty title removes it. Only when they ask — it is how every teammate ' +
     'sees them. Availability can set manualAway, custom status with expiry, notification pauses and a timezone schedule. Nobody can change anyone else’s profile.',
   input: UpdateProfile,
@@ -614,7 +614,7 @@ export const readAsset = tool({
     'the version you read is your base version. Pass `version` to read an older version (time ' +
     'travel); omit for the current one. Binary files (images, pdfs, uploads) return empty content ' +
     'plus a `blob` {hash, size, mime}: no tool carries the bytes, which download by that hash from ' +
-    'GET /v1/spaces/{spaceId}/blobs/{hash} on the org\'s address.',
+    'GET /v1/spaces/{spaceId}/blobs/{hash} on the server\'s address.',
   input: z.object({ spaceId: SpaceId, assetId: AssetId, version: z.number().int().positive().optional() }),
   output: ReadAssetResult,
 });
@@ -729,7 +729,7 @@ export const diff = tool({
 /**
  * Activity (2026-09-10): the one call behind "what's new for me?". Everything
  * that involves the person across every space and DM, newest first, with the
- * org's read marks saying what is still unread.
+ * server's read marks saying what is still unread.
  */
 export const readActivity = tool({
   name: 'read_activity',
@@ -738,7 +738,7 @@ export const readActivity = tool({
     'messages that name them (`mention`), `@here` announcements (`here`), messages in their DMs (`dm`), ' +
     'replies in threads they follow (`reply`), and reactions on their own messages (`reaction`, folded per ' +
     "message and emoji). This is the one call for \"what's new for me?\", \"catch me up\", \"did anyone need " +
-    'me?\": call it once (`unread: true` for only what they have not read — the org\'s read marks decide), ' +
+    'me?\": call it once (`unread: true` for only what they have not read — the server\'s read marks decide), ' +
     'then summarise by space, name people by displayName, lead with the unread items, and offer to open or ' +
     'reply. Do not walk spaces one by one for this. `truncated` means more: pass `cursor` back to page.',
   input: z.object({
@@ -770,7 +770,7 @@ export const readActivity = tool({
 });
 
 /**
- * Mark everything read for the person — the org's "mark all as read" (2026-09-11).
+ * Mark everything read for the person — the server's "mark all as read" (2026-09-11).
  */
 export const markAllRead = tool({
   name: 'mark_all_read',

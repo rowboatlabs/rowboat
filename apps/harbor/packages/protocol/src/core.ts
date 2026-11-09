@@ -20,10 +20,6 @@ export const Attribution = z.object({
 export type Attribution = z.infer<typeof Attribution>;
 
 /**
- * The org-level admin bit (spec §4, amended 2026-08-19): admin powers are
- * membership and policy, never content — the content plane is role-flat.
- */
-/**
  * The admin bit (spec §4 Roles, rewritten 2026-11-09): on a MEMBERSHIP row,
  * meaning admin of that space. Until 2026-11-09 it sat on the member and
  * meant admin of the org.
@@ -59,7 +55,7 @@ export type SuperAgent = z.infer<typeof SuperAgent>;
 export const Member = z.object({
   availability: Availability.optional(),
   id: MemberId,
-  /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
+  /** Display-only, server-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
   /** What they do, as the roster shows it (spec §4 Member profile; built 2026-10-19). Absent = none. */
   title: z.string().min(1).max(128).optional(),
@@ -96,7 +92,7 @@ export const Member = z.object({
    * An agent's instructions from its owner (2026-10-29, agent personalities):
    * how it should behave, in its owner's words, which its connector gives the
    * agent with every invocation (Invocation.instructions). Optional, set only
-   * by the owner, read by every org member like the rest of the profile.
+   * by the owner, read by every member like the rest of the profile.
    * Absent for people and for agents without any.
    */
   instructions: z.string().min(1).max(AGENT_INSTRUCTIONS_MAX).optional(),
@@ -108,11 +104,11 @@ export const Member = z.object({
    */
   deactivatedAt: z.string().optional(),
   /**
-   * When an admin removed the member from the org (spec §4 Roles, built
-   * 2026-10-19): the member's state is `removed`. Like a deactivated
-   * account, the row stays so their messages keep their author, and clients
-   * mark them and leave them out of pickers. Unlike it, an invite accepted
-   * by the same identity reactivates the row and clears this. Absent = active.
+   * A row that departed: built 2026-10-19 for an org admin's removal; since
+   * 2026-11-09 a duplicate identity the one-server migration folded into
+   * another member, or the retired Jev. Like a deactivated account, the row
+   * stays so their messages keep their author, and clients mark them and
+   * leave them out of pickers. Absent = active.
    */
   removedAt: z.string().optional(),
 });
@@ -223,7 +219,7 @@ export function isAgentPair(kind: string, connection: string): boolean {
 
 /**
  * A credential an agent member presents as itself (spec §4, 2026-09-29): a
- * bearer secret the org stores only as a hash. The secret is shown once, at
+ * bearer secret the server stores only as a hash. The secret is shown once, at
  * creation (AgentKeySecret); every other read is this metadata.
  */
 export const AgentKey = z.object({
@@ -258,7 +254,7 @@ export type AgentCredential = z.infer<typeof AgentCredential>;
 /**
  * Where a platform agent's alerts land (spec §8 Alerts, 2026-10-03): the
  * service posts to a secret address, and the agent posts what it says into
- * this space. The address is shown once, when it is set; the org keeps its hash.
+ * this space. The address is shown once, when it is set; the server keeps its hash.
  */
 export const AgentHook = z.object({
   spaceId: SpaceId,
@@ -495,7 +491,7 @@ export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), c
 export type AgentListing = z.infer<typeof AgentListing>;
 
 /**
- * What a space IS at the org level (direct messages, 2026-09-07). `shared` =
+ * What a space IS at the server level (direct messages, 2026-09-07). `shared` =
  * the ordinary space: invites, leave, files, feed. `direct` = a DM: the SAME
  * container on the same substrate (stream, threads, files, offsets, agent
  * sessions all unchanged), with a FIXED membership — exactly `participants`,
@@ -679,7 +675,7 @@ export type Poll = z.infer<typeof Poll>;
 
 /**
  * One member's vote toggle on one poll answer — the payload of `poll_vote`.
- * Per-(member, answer), reaction semantics; on single-select polls the org
+ * Per-(member, answer), reaction semantics; on single-select polls the server
  * moves a vote by emitting a `removed` then an `added` under one lock.
  */
 export const PollVote = z.object({
@@ -759,7 +755,7 @@ export const Message = z.object({
   /**
    * The write-once reply pointer (annotation model): absent = a root message
    * in the space's one stream; present = a reply in the flat thread under
-   * that root. Always a ROOT's id — never a reply's (the org normalizes), so
+   * that root. Always a ROOT's id — never a reply's (the server normalizes), so
    * threads are flat by shape, not convention. Set at post time, immutable.
    */
   threadRoot: MessageId.optional(),
@@ -776,7 +772,7 @@ export const Message = z.object({
   /**
    * Reply denorm on ROOT messages: live (non-tombstoned) replies in this
    * message's thread, so every listing can render the reply chip without a
-   * reverse lookup. Maintained by the org; 0 on replies and on stored
+   * reverse lookup. Maintained by the server; 0 on replies and on stored
    * message events (reads carry the current truth, like reactions).
    */
   replyCount: z.number().int().nonnegative().default(0),
@@ -847,7 +843,7 @@ export const Message = z.object({
    */
   session: SessionMark.optional(),
   /**
-   * Who this message addresses — STAMPED by the org at post and edit from the
+   * Who this message addresses — STAMPED by the server at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that
    * are members of the space. Unread counts, Activity, and push read these;
    * nothing anywhere re-parses text. Defaults keep pre-stamp payloads parsing.

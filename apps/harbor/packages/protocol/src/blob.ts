@@ -11,7 +11,7 @@ export const BlobInfo = z.object({
   hash: BlobHash,
   size: z.number().int().nonnegative(),
   /**
-   * Determined at upload: the org sniffs magic bytes for well-known types and
+   * Determined at upload: the server sniffs magic bytes for well-known types and
    * falls back to the declared content-type. The stored value is authoritative
    * everywhere (serving headers, inline-vs-attachment) — never the client's
    * claim at read time, never the object store's metadata.

@@ -280,7 +280,7 @@ export class Hosting {
   /** The kinds this Harbor creates, for a member: the platform's when a provider is attached, none otherwise. */
   async kinds(ctx: ActorCtx): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     if (!this.provider) return { kinds: [] };
     if (!this.billing) return { kinds: [...MARITIME_AGENTS] };
     const upgradeUrl = await this.billing.upgradeUrl();
@@ -305,7 +305,7 @@ export class Hosting {
     requestedBy?: string,
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     enforce(canAddAgent(actor));
     const { agent, hosting } = await this.provision(ctx.memberId, input, requestedBy);
     const key = await this.agents.createKey(ctx, agent.id);
@@ -418,7 +418,7 @@ export class Hosting {
   /** Delete a managed agent's hosting: the owner. Keys go now; the platform's resources in the background. */
   async deleteManaged(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     const agent = await this.k.store.getMember(agentId);
     if (!agent || agent.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
     enforce(canRevokeAgentKey(actor, agent));
@@ -469,7 +469,7 @@ export class Hosting {
    */
   private async managed(ctx: ActorCtx, agentId: string, kinds?: ReadonlySet<string>): Promise<{ row: StoredAgentHosting; ops: HostingOps }> {
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     const agent = await this.k.store.getMember(agentId);
     if (!agent || agent.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
     enforce(canRevokeAgentKey(actor, agent));
