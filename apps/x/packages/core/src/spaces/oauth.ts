@@ -3,9 +3,8 @@ import type { AddressInfo } from 'node:net';
 import * as oauthClient from '../auth/oauth-client.js';
 import { ensureRowboatSession } from '../auth/oauth-flows.js';
 import { getSessionAccessToken, readSession } from '../auth/tokens.js';
-import { generatedOrgSlug, parseInviteLink, SpacesClient, SpacesRequestError } from '@x/spaces-client';
+import { parseInviteLink, SpacesClient } from '@x/spaces-client';
 import {
-  applyManagedListing,
   dropSessionOrgs,
   getClient,
   getOrg,
@@ -13,46 +12,46 @@ import {
   listOrgs,
   managedIssuer,
   sameIssuer,
+  SPACES_SERVER_ID,
   upsertOAuthOrg,
   upsertSessionOrg,
-  type ManagedOrgListing,
   type OrgRecord,
 } from './orgs.js';
 import type { AcceptInviteResult, ResolveInviteResult } from '@rowboat/spaces-protocol';
 
 // The app side of the OAuth journey (spec §4). Two roads, chosen by the
-// org's issuer (its RFC 9728 metadata names its authorization server):
+// server's issuer (its RFC 9728 metadata names its authorization server):
 //
-//   MANAGED — the org trusts the Rowboat login desk, the same one the
+//   ROWBOAT'S SERVER — it trusts the Rowboat login desk, the same one the
 //   Rowboat account comes from. No dance of our own: the account session is
 //   the identity (auth/tokens.ts, one session two uses). If no session
 //   exists yet, the ordinary Rowboat sign-in runs once and the session is
-//   stamped spaces-only. The apex's "my orgs" listing then tells us every
-//   managed org we belong to (syncManagedOrgs) — a reinstall recovers them
-//   all with one sign-in, and an invite to a second managed org needs no
-//   browser at all.
+//   stamped spaces-only. The first call, POST /v1/me, makes the account a
+//   member (2026-11-09: there is no org to be listed in; a cold start with
+//   no invite lands on an empty chat list), so a reinstall recovers the
+//   person's chats with one sign-in.
 //
-//   FOREIGN — a self-hosted Harbor on its own login desk: discovery → DCR →
-//   PKCE in the SYSTEM browser with a single-use loopback callback → token
-//   exchange, composed from the house OAuth toolkit (auth/oauth-client.ts);
-//   orgs.ts owns those tokens after the dance.
+//   SELF-HOSTED — a Harbor on its own login desk: discovery → DCR → PKCE in
+//   the SYSTEM browser with a single-use loopback callback → token exchange,
+//   composed from the house OAuth toolkit (auth/oauth-client.ts); orgs.ts
+//   owns those tokens after the dance. Connected by its address (the
+//   advanced door), and the one server this install then talks to.
 //
 // Loopback discipline (the Outlook lessons): one dance at a time, the
 // callback response closes its connection, and the server dies with the flow.
 
 const SCOPES = ['openid', 'email', 'profile'];
 const DANCE_TIMEOUT_MS = 5 * 60_000;
-
 export type OpenBrowser = (url: string) => Promise<void> | void;
 
-/** The org's RFC 9728 metadata names its AS; absence means dev auth. */
+/** The server's RFC 9728 metadata names its AS; absence means dev auth. */
 export async function discoverOrgIssuer(baseUrl: string): Promise<string | null> {
   const res = await fetch(`${baseUrl.replace(/\/$/, '')}/.well-known/oauth-protected-resource`).catch(() => null);
   if (!res || res.status === 404) return null;
-  if (!res.ok) throw new Error(`org metadata request failed (${res.status})`);
+  if (!res.ok) throw new Error(`server metadata request failed (${res.status})`);
   const meta = (await res.json()) as { authorization_servers?: string[] };
   const issuer = meta.authorization_servers?.[0];
-  if (!issuer) throw new Error('org metadata names no authorization server');
+  if (!issuer) throw new Error('server metadata names no authorization server');
   return issuer;
 }
 
@@ -65,9 +64,9 @@ interface DanceResult {
 let danceInFlight = false;
 
 /**
- * Run the full browser dance against an org. Resolves when the person has
- * signed in and consented; rejects on timeout, denial, or an org that
- * doesn't speak OAuth (dev-auth orgs — add those as dev orgs instead).
+ * Run the full browser dance against a server. Resolves when the person has
+ * signed in and consented; rejects on timeout, denial, or a server that
+ * doesn't speak OAuth (a dev-auth Harbor is connected with a dev token instead).
  */
 export async function danceForTokens(input: { baseUrl: string; openBrowser: OpenBrowser }): Promise<DanceResult> {
   if (danceInFlight) throw new Error('a sign-in is already in progress — finish or wait for it first');
@@ -75,7 +74,7 @@ export async function danceForTokens(input: { baseUrl: string; openBrowser: Open
   try {
     const issuer = await discoverOrgIssuer(input.baseUrl);
     if (!issuer) {
-      throw new Error('this org runs dev auth (no authorization server) — add it as a dev org instead');
+      throw new Error('this server runs dev auth (no authorization server) — connect with a dev token instead');
     }
 
     // Loopback first: DCR must register the exact redirect URI, port included.
@@ -90,7 +89,7 @@ export async function danceForTokens(input: { baseUrl: string; openBrowser: Open
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(
-          `this org's authorization server did not accept client registration — it may require approved clients (ask the org admin). AS said: ${message}`,
+          `this server's authorization server did not accept client registration — it may require approved clients (ask whoever runs it). AS said: ${message}`,
         );
       }
 
@@ -176,6 +175,7 @@ function startLoopback(): Promise<Loopback> {
 }
 
 /** Is this issuer the Rowboat login desk — i.e. does the org ride the account session? */
+/** Is this issuer the Rowboat login desk — i.e. does the server ride the account session? */
 async function isManagedIssuer(issuer: string): Promise<boolean> {
   const managed = await managedIssuer();
   return managed !== null && sameIssuer(issuer, managed);
@@ -186,165 +186,89 @@ function sessionClient(baseUrl: string): SpacesClient {
   return new SpacesClient({ baseUrl, token: (opts) => getSessionAccessToken(opts) });
 }
 
-function notAMember(orgName: string) {
-  return (err: unknown): never => {
-    if (err instanceof SpacesRequestError && err.code === 'not_a_member') {
-      throw new Error(`you're signed in but not a member of ${orgName} — ask for an invite link and join with it`);
-    }
-    throw err;
-  };
-}
-
 /**
- * Sign in to an org (existing member — e.g. a new device, a needs-relogin
- * org, or a server address typed by hand): managed orgs through the account
- * session (signing in to Rowboat first if there is none), foreign ones
- * through their own dance; then learn who we are via /v1/me and persist. A
- * stranger to the org gets the honest not_a_member message: they need an
- * invite link.
+ * Sign in to a server (Rowboat's through the account session, signing in to
+ * Rowboat first if there is none; a self-hosted one through its own dance),
+ * become a member if not one yet (POST /v1/me, 2026-11-09), and persist the
+ * record. The one server this install talks to from then on.
  */
-export async function signInOrg(input: { baseUrl: string; openBrowser: OpenBrowser; orgId?: string }): Promise<OrgRecord> {
+export async function signInOrg(input: { baseUrl: string; openBrowser: OpenBrowser }): Promise<OrgRecord> {
   const baseUrl = input.baseUrl.replace(/\/$/, '');
   const issuer = await discoverOrgIssuer(baseUrl);
   if (issuer && (await isManagedIssuer(issuer))) {
     await ensureRowboatSession();
     const probe = sessionClient(baseUrl);
     const health = await probe.health();
-    const me = await probe.me().catch(notAMember(health.org.name));
-    invalidateManagedOrgsSync();
-    return upsertSessionOrg({ baseUrl, name: health.org.name, address: health.org.address, issuer, memberId: me.member.id });
+    const { member } = await probe.enroll();
+    invalidateManagedSync();
+    return upsertSessionOrg({ baseUrl, name: health.server.name, address: health.server.address, issuer, memberId: member.id });
   }
   const dance = await danceForTokens({ baseUrl, openBrowser: input.openBrowser });
   const probe = new SpacesClient({ baseUrl, token: dance.tokens.access });
   const health = await probe.health();
-  const me = await probe.me().catch(notAMember(health.org.name));
+  const { member } = await probe.enroll();
   return upsertOAuthOrg({
-    ...(input.orgId ? { orgId: input.orgId } : {}),
     baseUrl,
-    name: health.org.name,
-    address: health.org.address,
+    name: health.server.name,
+    address: health.server.address,
     issuer: dance.issuer,
     clientId: dance.clientId,
-    memberId: me.member.id,
+    memberId: member.id,
     tokens: dance.tokens,
   });
 }
 
 /**
- * The managed deployment's apex (create-org, my-orgs). Resolution order:
- * ROWBOAT_SPACES_APEX (dev/local-stack override) → the api's /v1/config
- * `spacesApexUrl` (per-environment, follows API_URL — staging api names the
- * staging fleet) → error, since the config being null means no spaces fleet
- * exists for this environment yet.
+ * Rowboat's Spaces server. Resolution order: ROWBOAT_SPACES_SERVER (dev /
+ * local-stack override) → the api's /v1/config `spacesApexUrl` (the field
+ * keeps its pre-2026-11-09 name on the backend; it names the one server now,
+ * per environment — the staging api names the staging server) → error, since
+ * a null config means no Spaces server exists for this environment yet.
  */
-export async function apexUrl(): Promise<string> {
-  const override = process.env.ROWBOAT_SPACES_APEX;
+export async function serverUrl(): Promise<string> {
+  const override = process.env.ROWBOAT_SPACES_SERVER ?? process.env.ROWBOAT_SPACES_APEX;
   if (override) return override.replace(/\/$/, '');
   const { getRemoteConfig } = await import('../config/remote-config.js');
   const config = await getRemoteConfig();
   if (!config.spacesApexUrl) {
-    throw new Error('Spaces is not available for this environment yet (no fleet configured)');
+    throw new Error('Spaces is not available for this environment yet (no server configured)');
   }
   return config.spacesApexUrl.replace(/\/$/, '');
-}
-
-/**
- * Self-serve org creation on the managed deployment: the account session is
- * the identity (the apex trusts the Rowboat login desk; a local-stack apex
- * on some other desk gets its own dance, as before), POST the org, and —
- * because shared-realm tokens are realm-generic — the same session works at
- * the new org's subdomain immediately. The caller is the org's provisioned
- * first admin. The slug is generated here, not passed in: a suffix collision
- * is ~one in 1.7M per prefix, so the retry is a formality; any other failure
- * surfaces verbatim on the first pass.
- */
-export async function createOrgOnDeployment(input: {
-  name: string;
-  openBrowser: OpenBrowser;
-  apexUrl?: string;
-}): Promise<OrgRecord> {
-  const apex = (input.apexUrl ?? (await apexUrl())).replace(/\/$/, '');
-  const apexIssuer = await discoverOrgIssuer(apex);
-  const managed = apexIssuer !== null && (await isManagedIssuer(apexIssuer));
-  let dance: DanceResult | null = null;
-  if (managed) await ensureRowboatSession();
-  else dance = await danceForTokens({ baseUrl: apex, openBrowser: input.openBrowser });
-  const bearer = async () => (dance ? dance.tokens.access : getSessionAccessToken());
-  let failure = 'org creation failed';
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${apex}/v1/orgs`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${await bearer()}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: input.name, slug: generatedOrgSlug(input.name) }),
-    });
-    const body = (await res.json().catch(() => ({}))) as {
-      message?: string;
-      org?: { id: string; name: string; address: string };
-      member?: { id: string };
-    };
-    if (res.ok && body.org && body.member) {
-      const baseUrl = `${new URL(apex).protocol}//${body.org.address}`;
-      if (!dance) {
-        invalidateManagedOrgsSync();
-        return upsertSessionOrg({
-          baseUrl,
-          name: body.org.name,
-          address: body.org.address,
-          serverOrgId: body.org.id,
-          issuer: apexIssuer!,
-          memberId: body.member.id,
-        });
-      }
-      return upsertOAuthOrg({
-        baseUrl,
-        name: body.org.name,
-        address: body.org.address,
-        serverOrgId: body.org.id,
-        issuer: dance.issuer,
-        clientId: dance.clientId,
-        memberId: body.member.id,
-        tokens: dance.tokens,
-      });
-    }
-    failure = body.message ?? `org creation failed (${res.status})`;
-    if (!/is taken/.test(failure)) break;
-  }
-  throw new Error(failure);
 }
 
 /** Pre-auth resolution of a pasted invite link — what the join card shows. */
 export async function resolveInviteLink(url: string): Promise<{ baseUrl: string; token: string; resolved: ResolveInviteResult }> {
   const parsed = parseInviteLink(url);
-  if (!parsed) throw new Error('not an invite link — expected https://<org>/join/<token>');
+  if (!parsed) throw new Error('not an invite link — expected https://<server>/join/<token>');
   const client = new SpacesClient({ baseUrl: parsed.baseUrl, token: '' });
   return { ...parsed, resolved: await client.resolveInvite(parsed.token) };
 }
 
 /**
- * Who the accept made us. An invite that joined no space (2026-10-19: an org
- * with no default, nothing listed) carries no membership to read it from.
+ * Who the accept made us. A person's link accepted by its own maker, or an
+ * invite whose target is gone, carries no membership to read it from.
  */
 async function memberIdAfterAccept(client: SpacesClient, result: AcceptInviteResult): Promise<string> {
   return result.membership?.memberId ?? (await client.me()).member.id;
 }
 
 /**
- * The full join: parse → identity (the account session for a managed org —
+ * The full join: parse → identity (the account session for Rowboat's server —
  * signing in to Rowboat once if there is none; this install's own dance for
- * a foreign org it has no working auth on) → accept (the bind ceremony
- * server-side) → persist the org with the member we became. policy_refused
- * surfaces verbatim.
+ * a self-hosted one it has no working auth on) → accept (the bind ceremony
+ * server-side) → persist the server with the member we became. A link to
+ * another server than the one connected makes that server the connected one.
  */
 export async function joinViaInviteLink(input: {
   url: string;
   openBrowser: OpenBrowser;
 }): Promise<{ org: OrgRecord; result: AcceptInviteResult }> {
   const parsed = parseInviteLink(input.url);
-  if (!parsed) throw new Error('not an invite link — expected https://<org>/join/<token>');
+  if (!parsed) throw new Error('not an invite link — expected https://<server>/join/<token>');
 
-  // An org we're already signed into (dev, session-backed, or healthy oauth): plain accept.
-  const existing = listOrgs().find((o) => o.baseUrl === parsed.baseUrl);
-  if (existing) {
+  // The server we're already signed into (dev, session-backed, or healthy oauth): plain accept.
+  const existing = getOrg(SPACES_SERVER_ID);
+  if (existing && existing.baseUrl === parsed.baseUrl) {
     const sessionBacked = await isSessionBacked(existing.auth);
     const usable = existing.auth.kind === 'dev' || sessionBacked || (existing.auth.kind === 'oauth' && !existing.auth.error);
     if (usable) {
@@ -362,12 +286,12 @@ export async function joinViaInviteLink(input: {
     const health = await client.health();
     const org = upsertSessionOrg({
       baseUrl: parsed.baseUrl,
-      name: health.org.name,
-      address: health.org.address,
+      name: health.server.name,
+      address: health.server.address,
       issuer,
       memberId: await memberIdAfterAccept(client, result),
     });
-    invalidateManagedOrgsSync();
+    invalidateManagedSync();
     return { org, result };
   }
 
@@ -377,8 +301,8 @@ export async function joinViaInviteLink(input: {
   const health = await client.health();
   const org = upsertOAuthOrg({
     baseUrl: parsed.baseUrl,
-    name: health.org.name,
-    address: health.org.address,
+    name: health.server.name,
+    address: health.server.address,
     issuer: dance.issuer,
     clientId: dance.clientId,
     memberId: await memberIdAfterAccept(client, result),
@@ -387,7 +311,7 @@ export async function joinViaInviteLink(input: {
   return { org, result };
 }
 
-// --- the account session and the managed orgs it lists ----------------------
+// --- the account session and Rowboat's server ------------------------------
 
 /** What the Spaces UI needs to know about the Rowboat session (auth/tokens.ts): is there one, and is the app signed in on it? */
 export async function accountState(): Promise<{ hasSession: boolean; appSignedIn: boolean }> {
@@ -397,22 +321,27 @@ export async function accountState(): Promise<{ hasSession: boolean; appSignedIn
 
 let lastManagedSyncAt = 0;
 let managedSyncInFlight: Promise<void> | null = null;
-let apexManagedCache: { apex: string; issuer: string | null } | null = null;
+let serverIssuerCache: { server: string; issuer: string | null } | null = null;
 
-/** Something changed what the apex would list (a join, a sign-in): the next sync runs regardless of age. */
-export function invalidateManagedOrgsSync(): void {
+/** Something changed the session (a sign-in, a sign-out): the next sync runs regardless of age. */
+export function invalidateManagedSync(): void {
   lastManagedSyncAt = 0;
 }
 
+/** The pre-2026-11-09 name, kept for the hosts' subscriptions. */
+export const invalidateManagedOrgsSync = invalidateManagedSync;
+
 /**
- * Make the registry's managed orgs match the apex's "my orgs" listing —
- * the truth for them. No session: the managed records go (signed out).
- * No fleet for this environment, or a local-stack apex on some other
- * login desk: nothing to list, records untouched. A failed fetch leaves
- * the cache as it was (the caller logs). `maxAgeMs` makes the call cheap
- * from hot paths (the org listing IPC): a recent sync is reused.
+ * Make the record match the Rowboat session. No session: a session-backed
+ * record goes (signed out). A session and no record: Rowboat's server is
+ * connected on it — the account becomes a member on first contact (POST
+ * /v1/me). A record already (Rowboat's, a self-hosted one, a dev Harbor):
+ * left alone — the person's choice of server stands. No server for this
+ * environment, or a server on some other login desk: nothing to do. A failed
+ * probe leaves the record as it was (the caller logs). `maxAgeMs` makes the
+ * call cheap from hot paths (the listing IPC): a recent sync is reused.
  */
-export async function syncManagedOrgs(opts: { maxAgeMs?: number } = {}): Promise<void> {
+export async function syncManagedServer(opts: { maxAgeMs?: number } = {}): Promise<void> {
   if (managedSyncInFlight) return managedSyncInFlight;
   if (opts.maxAgeMs !== undefined && Date.now() - lastManagedSyncAt < opts.maxAgeMs) return;
   managedSyncInFlight = (async () => {
@@ -422,30 +351,30 @@ export async function syncManagedOrgs(opts: { maxAgeMs?: number } = {}): Promise
       lastManagedSyncAt = Date.now();
       return;
     }
+    if (getOrg(SPACES_SERVER_ID)) {
+      lastManagedSyncAt = Date.now();
+      return;
+    }
     const issuer = await managedIssuer();
     if (!issuer) return;
-    let apex: string;
+    let server: string;
     try {
-      apex = await apexUrl();
+      server = await serverUrl();
     } catch {
       lastManagedSyncAt = Date.now();
       return;
     }
-    if (!apexManagedCache || apexManagedCache.apex !== apex) {
-      apexManagedCache = { apex, issuer: await discoverOrgIssuer(apex) };
+    if (!serverIssuerCache || serverIssuerCache.server !== server) {
+      serverIssuerCache = { server, issuer: await discoverOrgIssuer(server) };
     }
-    if (!apexManagedCache.issuer || !sameIssuer(apexManagedCache.issuer, issuer)) {
+    if (!serverIssuerCache.issuer || !sameIssuer(serverIssuerCache.issuer, issuer)) {
       lastManagedSyncAt = Date.now();
       return;
     }
-    const token = await getSessionAccessToken();
-    const res = await fetch(`${apex}/v1/orgs`, {
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) throw new Error(`org listing failed (${res.status})`);
-    const body = (await res.json()) as { orgs?: ManagedOrgListing[] };
-    applyManagedListing(body.orgs ?? [], { apexOrigin: apex, issuer });
+    const client = sessionClient(server);
+    const health = await client.health();
+    const { member } = await client.enroll();
+    upsertSessionOrg({ baseUrl: server, name: health.server.name, address: health.server.address, issuer, memberId: member.id });
     lastManagedSyncAt = Date.now();
   })().finally(() => {
     managedSyncInFlight = null;
@@ -453,34 +382,30 @@ export async function syncManagedOrgs(opts: { maxAgeMs?: number } = {}): Promise
   return managedSyncInFlight;
 }
 
+/** The pre-2026-11-09 name, kept for the hosts. */
+export const syncManagedOrgs = syncManagedServer;
+
 /**
  * The Spaces door's "Sign in with Rowboat": a session (browser sign-in if
  * there is none — stamped spaces-only, the app stays signed out), then
- * every managed org the person belongs to, listed.
+ * Rowboat's server connected on it.
  */
 export async function signInForSpaces(): Promise<OrgRecord[]> {
   await ensureRowboatSession();
-  invalidateManagedOrgsSync();
-  await syncManagedOrgs();
+  invalidateManagedSync();
+  await syncManagedServer();
   return listOrgs();
 }
 
-/**
- * A server typed by hand: a full URL, a bare host, or — on the managed
- * deployment — just the org's slug. Resolves to the org's base URL.
- */
-export async function normalizeServerAddress(raw: string): Promise<string> {
+/** A server typed by hand: a full URL or a bare host. Resolves to its base URL. */
+export function normalizeServerAddress(raw: string): string {
   const text = raw.trim();
   if (!text) throw new Error('enter a server address');
-  if (/^[a-z0-9][a-z0-9-]*$/i.test(text)) {
-    const apex = new URL(await apexUrl());
-    return `${apex.protocol}//${text.toLowerCase()}.${apex.host}`;
-  }
   const withScheme = /^https?:\/\//i.test(text) ? text : `https://${text}`;
   return new URL(withScheme).origin;
 }
 
-/** Add an org by its address (the advanced door): sign in to it as an existing member. */
+/** Connect to a server by its address (the advanced door, for self-hosters): sign in to it and become a member. */
 export async function addOrgByAddress(input: { address: string; openBrowser: OpenBrowser }): Promise<OrgRecord> {
-  return signInOrg({ baseUrl: await normalizeServerAddress(input.address), openBrowser: input.openBrowser });
+  return signInOrg({ baseUrl: normalizeServerAddress(input.address), openBrowser: input.openBrowser });
 }

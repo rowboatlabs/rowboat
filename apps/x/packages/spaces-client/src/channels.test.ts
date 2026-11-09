@@ -20,13 +20,13 @@ beforeAll(async () => {
   const store = new PgStore(db);
   await store.init();
   const started = await startHarbor({
-    orgName: 'Channel Test Org',
+    name: 'Channel Test Org',
     store,
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
     ],
-    // A seed space's creator is the org's admin, who may archive and delete.
+    // A seed space's creator is its admin, who may archive and delete (spec §4 Roles, 2026-11-09).
     seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
   });
   harbor = { ...started, close: async () => { await started.close(); await db.close(); } };
@@ -81,8 +81,8 @@ describe('harborChannelHandlers', () => {
     expect(deleted.message.deletedAt).toBeDefined();
   });
 
-  it('resolves an invite before the org is added, by its base URL alone', async () => {
-    const invite = await table['spaces:createInvite']({ orgId, spaceIds: [spaceId] });
+  it('resolves an invite before this install has signed in, by its base URL alone', async () => {
+    const invite = await table['spaces:createInvite']({ orgId, spaceId });
     const resolved = await table['spaces:resolveInvite']({ baseUrl: harbor.url, token: invite.token });
     expect(resolved).toMatchObject({ state: 'ok', space: { id: spaceId } });
   });
@@ -102,31 +102,29 @@ describe('harborChannelHandlers', () => {
     expect(spaces.map((s) => s.id)).not.toContain(space.id);
   });
 
-  it('admin controls: visibility, removal from a space, roles, the invite policy, Ro’s switch, removal from the org', async () => {
+  it('admin controls per space: removal, roles; contacts; an agent’s seat (2026-11-09)', async () => {
     const { space } = await table['spaces:createSpace']({ orgId, name: 'Admin' });
-    expect((await table['spaces:setSpaceVisibility']({ orgId, spaceId: space.id, visibility: 'open' })).space.visibility).toBe('open');
     await table['spaces:addMembers']({ orgId, spaceId: space.id, memberIds: ['gagan'] });
+    expect((await table['spaces:listContacts']({ orgId })).members.map((m) => m.id)).toEqual(['gagan']);
+    expect((await table['spaces:setMemberRole']({ orgId, spaceId: space.id, memberId: 'gagan', role: 'admin' })).membership.role).toBe('admin');
+    expect((await table['spaces:setMemberRole']({ orgId, spaceId: space.id, memberId: 'gagan', role: 'member' })).membership.role).toBe('member');
     expect(await table['spaces:removeMember']({ orgId, spaceId: space.id, memberId: 'gagan' })).toEqual({ removed: true });
-    expect((await table['spaces:setMemberRole']({ orgId, memberId: 'gagan', role: 'admin' })).member.role).toBe('admin');
-    expect((await table['spaces:setMemberRole']({ orgId, memberId: 'gagan', role: 'member' })).member.role).toBe('member');
-    expect((await table['spaces:getOrgSettings']({ orgId })).settings).toEqual({ invitePolicy: 'members', jevEnabled: false });
-    expect((await table['spaces:setJevEnabled']({ orgId, jevEnabled: true })).settings).toEqual({ invitePolicy: 'members', jevEnabled: true });
-    await table['spaces:setJevEnabled']({ orgId, jevEnabled: false });
-    expect((await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'admins' })).settings).toEqual({ invitePolicy: 'admins', jevEnabled: false });
-    await table['spaces:setInvitePolicy']({ orgId, invitePolicy: 'members' });
-    expect((await table['spaces:removeOrgMember']({ orgId, memberId: 'gagan' })).member.removedAt).toEqual(expect.any(String));
+    const { agent } = await table['spaces:addAgent']({ orgId, displayName: 'Helper' });
+    const [seat] = (await table['spaces:addMembers']({ orgId, spaceId: space.id, memberIds: [agent.id], invocableBy: 'owner' })).memberships;
+    expect(seat?.invocableBy).toBe('owner');
+    expect((await table['spaces:setAgentAccess']({ orgId, spaceId: space.id, agentId: agent.id, invocableBy: 'members' })).membership.invocableBy).toBe('members');
+    expect((await table['spaces:listMembers']({ orgId, spaceId: space.id })).members.find((m) => m.id === agent.id)?.invocableBy).toBe('members');
   });
 
-  it('makes a space a default, and an invite to the org joins it', async () => {
-    const { space } = await table['spaces:createSpace']({ orgId, name: 'Welcome', visibility: 'open' });
-    expect((await table['spaces:setDefaultSpace']({ orgId, spaceId: space.id, isDefault: true })).space.isDefault).toBe(true);
-    const invite = await table['spaces:createInvite']({ orgId });
-    const resolved = await table['spaces:resolveInvite']({ baseUrl: harbor.url, token: invite.token });
-    expect(resolved).toMatchObject({ state: 'ok', spaces: [{ id: space.id }] });
-    await table['spaces:setDefaultSpace']({ orgId, spaceId: space.id, isDefault: false });
+  it('a personal link resolves to its maker, and search runs across every space without a spaceId', async () => {
+    const link = await table['spaces:createInvite']({ orgId, direct: true });
+    const resolved = await table['spaces:resolveInvite']({ baseUrl: harbor.url, token: link.token });
+    expect(resolved).toMatchObject({ state: 'ok', direct: { id: 'ramnique' } });
+    const results = await table['spaces:search']({ orgId, q: 'nothing-here' });
+    expect(results.messages).toEqual([]);
   });
 
-  it('fails for an org the host does not know', async () => {
+  it('fails for a server the host does not know', async () => {
     await expect(table['spaces:listSpaces']({ orgId: 'nope' })).rejects.toThrow('unknown org nope');
   });
 });

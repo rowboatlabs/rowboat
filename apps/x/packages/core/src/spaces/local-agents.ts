@@ -409,7 +409,7 @@ class LocalAgentRunner {
    */
   private async prompt(invocation: Invocation, signal: AbortSignal, instructionsInSystemPrompt: boolean): Promise<string> {
     const { spaceId, threadRootId } = invocation.conversation;
-    const roster = await this.client.orgRoster().catch(() => ({ members: [] as Member[] }));
+    const roster = await this.client.listContacts().catch(() => ({ members: [] as Member[] }));
     const names = new Map(roster.members.map((m) => [m.id, m.displayName]));
     const trigger = await this.client.getMessage(spaceId, invocation.trigger.messageId).catch(() => undefined);
     const after = readConfig().seen[seenKey(this.agentId, threadRootId)] ?? 0;
@@ -431,8 +431,8 @@ class LocalAgentRunner {
       agentId: this.agentId,
       context,
       names,
-      orgAddress: this.orgAddress,
-      orgUrl: this.baseUrl,
+      address: this.orgAddress,
+      serverUrl: this.baseUrl,
       attachments: [],
       earlierAttachments: [],
     });
@@ -584,8 +584,7 @@ export async function addLocalAgent(input: {
   const { agent, key } = await orgs.getClient(input.orgId).addAgent({
     displayName: input.displayName,
     kind: input.kind,
-    connection: LOCAL_CONNECTION,
-    personal: true,
+    connection: LOCAL_CONNECTION, // its seats are its owner's alone wherever it is added (2026-11-09)
   });
   const record: LocalAgentRecord = { orgId: input.orgId, agentId: agent.id, kind: input.kind, key: key.secret, cwd: input.cwd, policy: input.policy };
   saveRecord(record);

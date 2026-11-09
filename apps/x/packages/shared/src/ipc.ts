@@ -3831,7 +3831,9 @@ export const ipcSchemas = {
   },
 
   // ==========================================================================
-  // Spaces — shared containers on orgs speaking the spaces protocol.
+  // Spaces — the server speaking the spaces protocol. One server since
+  // 2026-11-09 (harbor spec §4): `orgId` on every channel is core's
+  // SPACES_SERVER_ID, the handle the many-org registry left behind.
   // Wire contract: @rowboat/spaces-protocol (apps/harbor/CONTRACT.md).
   // Protocol-shaped payloads cross as z.custom<T>() (see spaces.ts header).
   // ==========================================================================
@@ -3845,18 +3847,18 @@ export const ipcSchemas = {
     res: z.object({ org: SpacesOrgSummary }),
   },
   // The OAuth journey (spec §4). Paste an invite link → resolve pre-auth →
-  // join (system-browser dance if this install has no auth on the org, then
+  // join (system-browser dance if this install has no auth on the server, then
   // the server-side bind ceremony). signInOrg reruns the dance for a
-  // needs-relogin org. policy_refused / not_a_member surface as error
-  // messages verbatim — they are the honest states.
+  // needs-relogin server. not_a_member surfaces as an error message
+  // verbatim — it is the honest state.
   'spaces:resolveInviteLink': {
     req: z.object({ url: z.string() }),
     res: z.object({ baseUrl: z.string(), resolved: z.custom<SpacesTypes.ResolveInviteResult>() }),
   },
   'spaces:joinInvite': {
     req: z.object({ url: z.string() }),
-    // No space when the invite joined none (2026-10-19): the org has no
-    // default and the invite listed nothing; the app opens the org instead.
+    // The space joined, or the DM a person's link opened (2026-11-09); none
+    // when the link was the caller's own, or its target is gone.
     res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>().optional() }),
   },
   'spaces:signInOrg': {
@@ -3864,11 +3866,11 @@ export const ipcSchemas = {
     res: z.object({ org: SpacesOrgSummary }),
   },
   // One session, two uses (2026-09-14): the Rowboat account IS the identity
-  // every managed org trusts. accountState says whether a session exists and
+  // Rowboat's server trusts. accountState says whether a session exists and
   // whether the app is signed in on it (a space joined while staying signed
   // out of the app leaves a spaces-only session). signInRowboat is the Spaces
-  // door's sign-in: a browser trip only if there is no session, then the
-  // apex's listing of every managed org the person belongs to.
+  // door's sign-in: a browser trip only if there is no session, then Rowboat's
+  // server connected on it, the account made a member on first contact (2026-11-09).
   'spaces:accountState': {
     req: z.null(),
     res: z.object({ hasSession: z.boolean(), appSignedIn: z.boolean() }),
@@ -3877,28 +3879,12 @@ export const ipcSchemas = {
     req: z.null(),
     res: z.object({ orgs: z.array(SpacesOrgSummary) }),
   },
-  // The advanced door: a server by address — a URL, a host, or a managed
-  // org's slug — for an existing member (self-hosted orgs, or checking a
-  // specific one). Strangers get the not_a_member message.
+  // The advanced door: a server by address — a URL or a host — for
+  // self-hosters. Signing in makes the account a member of it (2026-11-09),
+  // and it becomes the one server this install talks to.
   'spaces:addOrgByAddress': {
     req: z.object({ address: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
-  },
-  // Self-serve org creation on the managed deployment's apex (free for now —
-  // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
-  // caller is the org's first admin. The host generates the address with
-  // spaces-client (2026-10-27: share the generator with the web host)
-  // (name-derived prefix + always-appended random suffix — decision
-  // 2026-09-07): the user names the server; nobody picks a slug.
-  'spaces:createOrg': {
-    req: z.object({ name: z.string() }),
-    res: z.object({ org: SpacesOrgSummary }),
-  },
-  // Where the Create button makes orgs (from /v1/config via core). null =
-  // no spaces fleet for this environment; the dialog says so honestly.
-  'spaces:apexInfo': {
-    req: z.null(),
-    res: z.object({ apexDomain: z.string().nullable() }),
   },
   'spaces:removeOrg': {
     req: z.object({ orgId: z.string() }),
@@ -3908,20 +3894,11 @@ export const ipcSchemas = {
   // 'direct') — opt-in on the wire so a pre-DM build never renders one as a space.
   'spaces:listSpaces': {
     req: z.object({ orgId: z.string(), includeDirect: z.boolean().optional() }),
-    // groupChat (2026-10-07): the org is one space and no DMs — a chat for
-    // every member, DMs off. Absent from servers that predate it.
-    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()), groupChat: z.boolean().optional() }),
+    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
   },
-  'spaces:browseSpaces': {
-    req: z.object({ orgId: z.string() }),
-    res: z.object({ supported: z.boolean(), spaces: z.array(z.object({ space: z.custom<SpacesTypes.Space>(), joined: z.boolean() })) }),
-  },
-  'spaces:joinSpace': {
-    req: z.object({ orgId: z.string(), spaceId: z.string() }),
-    res: z.object({ space: z.custom<SpacesTypes.Space>(), membership: z.custom<SpacesTypes.Membership>() }),
-  },
+  // A new group: its creator is its admin (spec §4 Roles, 2026-11-09).
   'spaces:createSpace': {
-    req: z.object({ orgId: z.string(), name: z.string(), visibility: z.enum(['private', 'open']).optional() }),
+    req: z.object({ orgId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
   'spaces:renameSpace': {
@@ -3943,46 +3920,24 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ deleted: z.literal(true) }),
   },
-  // Admin controls (2026-10-19, spec §4 Roles): removing someone from a
-  // space or the org, roles, a space's visibility, the invite policy. The
-  // org refuses a non-admin; the app hides the controls too.
-  'spaces:setSpaceVisibility': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), visibility: z.enum(['private', 'open']) }),
-    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
-  },
+  // Admin controls (spec §4 Roles; per space since 2026-11-09): removing
+  // someone from a space, and the space's admins. The server refuses a
+  // non-admin; the app hides the controls too.
   'spaces:removeMember': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), memberId: z.string() }),
     res: z.object({ removed: z.boolean() }),
   },
-  'spaces:removeOrgMember': {
-    req: z.object({ orgId: z.string(), memberId: z.string() }),
-    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
-  },
   'spaces:setMemberRole': {
-    req: z.object({ orgId: z.string(), memberId: z.string(), role: z.enum(['admin', 'member']) }),
-    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberId: z.string(), role: z.enum(['admin', 'member']) }),
+    res: z.object({ membership: z.custom<SpacesTypes.Membership>() }),
   },
-  'spaces:getOrgSettings': {
-    req: z.object({ orgId: z.string() }),
-    res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
+  // An agent's seat in a space — who may ask it there — its owner only (2026-11-09, harbor setAgentAccess).
+  'spaces:setAgentAccess': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), agentId: z.string(), invocableBy: z.enum(['owner', 'members']) }),
+    res: z.object({ membership: z.custom<SpacesTypes.Membership>() }),
   },
-  'spaces:setInvitePolicy': {
-    req: z.object({ orgId: z.string(), invitePolicy: z.enum(['members', 'admins']) }),
-    res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
-  },
-  // Ro on or off for the org (2026-10-30, harbor spec §8 Jev): admin only.
-  'spaces:setJevEnabled': {
-    req: z.object({ orgId: z.string(), jevEnabled: z.boolean() }),
-    res: z.object({ settings: z.custom<SpacesTypes.OrgSettings>() }),
-  },
-  // Default spaces (2026-10-19, harbor setDefaultSpace): admin only, open
-  // spaces only. Everyone an invite admits joins every default.
-  'spaces:setDefaultSpace': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), isDefault: z.boolean() }),
-    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
-  },
-  // Agent members and their keys (2026-09-29): the caller's own agents, or
-  // every agent for an admin. A key's secret crosses IPC once, on the
+  // Agent members and their keys (2026-09-29): the caller's own agents (and
+  // nobody else's, 2026-11-09). A key's secret crosses IPC once, on the
   // response that created it, for the Agents dialog to show and forget.
   'spaces:listAgents': {
     req: z.object({ orgId: z.string() }),
@@ -3998,8 +3953,6 @@ export const ipcSchemas = {
       connection: z.string().optional(),
       credential: z.string().optional(),
       instance: z.string().optional(),
-      // Only its owner may use it (Harbor spec §4 Agent members, 2026-10-26).
-      personal: z.boolean().optional(),
       // A super agent's setup card this completes (2026-11-02).
       request: z.string().optional(),
     }),
@@ -4007,7 +3960,7 @@ export const ipcSchemas = {
   },
   // The Add flow's platform setup (2026-11-02, harbor listSetupInstances /
   // createSetupInstance): the instances a pasted key reaches on Agent37 or
-  // Maritime, and a new Agent37 instance, through the org's Harbor so the web
+  // Maritime, and a new Agent37 instance, through the server so the web
   // app can do it too. The key is not kept.
   'spaces:setupInstances': {
     req: z.object({ orgId: z.string(), connection: z.string(), key: z.string() }),
@@ -4017,7 +3970,7 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), connection: z.string(), key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
     res: z.object({ instance: z.custom<SpacesTypes.PlatformInstance>() }),
   },
-  // Managed agents (2026-10-26): the kinds this org's Harbor creates on Rowboat's own
+  // Managed agents (2026-10-26): the kinds this server creates on Rowboat's own
   // Maritime account (none when the deployment has no key: no Create button), creating
   // one, and deleting its hosting. The Anthropic key for Claude Code goes to the agent's
   // environment on Maritime and is kept nowhere; the `env` variables the same way.
@@ -4033,7 +3986,6 @@ export const ipcSchemas = {
       kind: z.string(),
       anthropicApiKey: z.string().optional(),
       env: z.array(z.object({ key: z.string(), value: z.string(), secret: z.boolean().optional() })).optional(),
-      personal: z.boolean().optional(),
       request: z.string().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>(), hosting: z.custom<SpacesTypes.AgentHosting>() }),
@@ -4213,48 +4165,46 @@ export const ipcSchemas = {
     req: z.object({ name: z.string(), kind: z.string().optional(), brief: z.string() }),
     res: z.object({ instructions: z.string() }),
   },
-  // Switching an agent between channel and personal (2026-10-27, harbor setAgentPersonal): its owner only.
-  'spaces:setAgentPersonal': {
-    req: z.object({ orgId: z.string(), agentId: z.string(), personal: z.boolean() }),
-    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
-  },
-  // Making an agent a super agent, or ordinary again with null (2026-11-02, harbor setAgentSuper): admins only.
+  // Making an agent a super agent, or ordinary again with null (2026-11-02, harbor setAgentSuper): its owner's switch since 2026-11-09.
   'spaces:setAgentSuper': {
     req: z.object({ orgId: z.string(), agentId: z.string(), superAgent: z.object({ askBeforeCreate: z.boolean(), askBeforeDelete: z.boolean() }).nullable() }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
   },
-  // Add existing org members, people or agents, to a space the caller is in
-  // (2026-09-29). They learn of it by the space_added frame.
+  // Add your contacts, people or your own agents, to a space the caller is in
+  // (2026-09-29; 2026-11-09: only an agent's owner adds it, `invocableBy` is
+  // its seat there). They learn of it by the space_added frame.
   'spaces:addMembers': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), memberIds: z.array(z.string()).min(1) }),
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberIds: z.array(z.string()).min(1), invocableBy: z.enum(['owner', 'members']).optional() }),
     res: z.object({ memberships: z.array(z.custom<SpacesTypes.Membership>()) }),
   },
-  // Direct messages: get-or-create the DM with another org member. No
-  // invite, no acceptance — the other side learns of it by a space_added
-  // frame on 'spaces:events' and shows it in their sidebar.
+  // Direct messages: get-or-create the DM with someone you share a space with,
+  // or your own agent (the reach rule, 2026-11-09). No invite, no acceptance —
+  // the other side learns of it by a space_added frame on 'spaces:events'.
   'spaces:openDirect': {
     req: z.object({ orgId: z.string(), memberId: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>(), created: z.boolean() }),
   },
+  // A space's members with their role, join time and, for agents, their seat (2026-11-09).
   'spaces:listMembers': {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
-    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+    res: z.object({ members: z.array(z.custom<SpacesTypes.SpaceMember>()) }),
   },
-  // The org roster: every member, people and agents, A–Z — computed by the
-  // org (GET /v1/members; the whole org since 2026-09-29).
-  'spaces:listOrgMembers': {
+  // Your contacts: the people you share a space with and the agents you own,
+  // A–Z — computed by the server (GET /v1/contacts, 2026-11-09; the org
+  // roster until then).
+  'spaces:listContacts': {
     req: z.object({ orgId: z.string() }),
-    // `online`: the agents connected now (local agents, 2026-10-28); absent from older servers.
+    // `online`: the agents connected now (local agents, 2026-10-28); `onlinePeople` likewise (2026-11-04).
     res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()), online: z.array(z.string()).optional(), onlinePeople: z.array(z.string()).optional() }),
   },
-  // An invite to the org (2026-10-19): it lists spaces the caller is in, or
-  // none, and accepting also joins the org's default spaces.
+  // An invite to one space, or your personal link (`direct`), whose target
+  // is a DM with you (2026-11-09). Multi-use, seven days unless said.
   'spaces:createInvite': {
-    req: z.object({ orgId: z.string(), spaceIds: z.array(z.string()).optional(), expiresInHours: z.number().optional() }),
+    req: z.object({ orgId: z.string(), spaceId: z.string().optional(), direct: z.literal(true).optional(), expiresInHours: z.number().optional() }),
     res: z.custom<SpacesTypes.CreateInviteResult>(),
   },
-  // Pre-auth by design (spec §4): resolvable before the org has been added,
-  // so the app can show what's being joined. baseUrl, not orgId.
+  // Pre-auth by design (spec §4): resolvable before this install has signed
+  // in, so the app can show what's being joined. baseUrl, not orgId.
   'spaces:resolveInvite': {
     req: z.object({ baseUrl: z.string(), token: z.string() }),
     res: z.custom<SpacesTypes.ResolveInviteResult>(),
@@ -4341,13 +4291,14 @@ export const ipcSchemas = {
   // Space search: categorized top-N (messages / topics / assets), served by
   // the org's GET /v1/spaces/:spaceId/search. Snippets arrive raw — resolve
   // mentions renderer-side like any message body.
+  // One space, or — no spaceId — every space the caller is in (2026-11-09).
   'spaces:search': {
     req: z.object({
       orgId: z.string(),
-      spaceId: z.string(),
+      spaceId: z.string().optional(),
       q: z.string(),
       kinds: z.array(z.enum(['messages', 'topics', 'assets'])).optional(),
-      /** Per-category cap (org default 10, max 50). */
+      /** Per-category cap (server default 10, max 50). */
       limit: z.number().optional(),
     }),
     res: z.custom<SpacesTypes.SearchResults>(),

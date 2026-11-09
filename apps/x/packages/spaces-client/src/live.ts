@@ -342,16 +342,15 @@ export class SpacesLive {
       }
       // Member-addressed frames carry a spaceId but ride no space
       // subscription: someone put us in a space (space_added), our membership
-      // of one ended (space_removed — the org already dropped the server-side
+      // of one ended (space_removed — the server already dropped the server-side
       // subscription), one of our own connections moved a read mark
-      // (read_mark), or the org decided a message deserves our attention (notify).
-      // org_changed (2026-10-07): the org's shape changed — a group chat became a workspace.
+      // (read_mark), or the server decided a message deserves our attention (notify).
       // agent_presence (2026-10-28): an agent's connector came or went. And on
       // an agent's own key (a local agent, 2026-10-28), its invocations, a stop,
       // and its approvals' decisions.
       if (
         frame.kind === 'profile_updated' || frame.kind === 'space_added' || frame.kind === 'space_removed' || frame.kind === 'read_mark' ||
-        frame.kind === 'notify' || frame.kind === 'org_changed' || frame.kind === 'agent_presence' || frame.kind === 'member_presence' ||
+        frame.kind === 'notify' || frame.kind === 'agent_presence' || frame.kind === 'member_presence' ||
         frame.kind === 'invocation' || frame.kind === 'invocation_stop' || frame.kind === 'approval_decided'
       ) {
         for (const h of this.memberHandlers) h(frame);
