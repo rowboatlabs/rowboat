@@ -130,3 +130,5 @@ Verified against Supabase Auth (2026-08-18/19), the flagship AS: tokens on a sha
 1. Did a **product rule** change? → amend the SPEC.md section, dated.
 2. Did the **wire** change? → the protocol package and a dated CONTRACT.md bullet.
 3. Did the **structure** change — a module, an invariant, the slice? → this file.
+
+Availability (2026-11-05): `core/human-presence.ts` owns per-socket human activity leases and `member_presence`; `core/agent-presence.ts` owns agent connection presence only. `protocol/availability.ts` validates preferences and evaluates schedule/status expiry identically in the notification decision and renderer. `Spaces.updateProfile` patches the member's JSON preferences atomically via `Store.patchAvailability`; ordinary profile/avatar writes leave them alone. `notify.ts` excludes paused recipients before either delivery channel.

@@ -257,3 +257,17 @@ it('delivers human presence without a space subscription', async () => {
   off();
   live.close();
 });
+
+it('reports activity on the connection without a space subscription', async () => {
+  const live = makeLive();
+  live.activity(true);
+  await settle();
+  const socket = FakeWebSocket.instances[0];
+  socket.open();
+  live.activity(true);
+  live.activity(false);
+  expect(socket.sent.map(s => JSON.parse(s)).filter(frame => frame.kind === 'activity')).toEqual([
+    { kind: 'activity', active: true }, { kind: 'activity', active: false },
+  ]);
+  live.close();
+});

@@ -1,3 +1,6 @@
+import { currentStatus, notificationsPaused } from '@x/shared/dist/spaces.js'
+import { usePeopleOnline } from '@/hooks/use-space-members'
+import { useAvailabilityClock } from '@/hooks/use-availability-clock'
 import { useProfileImage } from '@/hooks/use-profile-image'
 import { EditProfile } from './edit-profile'
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from '@/components/ui/sheet'
@@ -77,7 +80,7 @@ function KindCorner({ kind, size }: { kind: string | undefined; size: 'sm' | 'md
     )
 }
 
-export function MemberAvatar({ id, name, size = 'md', agent, agentKind, className, orgId, avatarUrl, online = false }: {
+export function MemberAvatar({ id, name, size = 'md', agent, agentKind, className, orgId, avatarUrl, online, availability }: {
     id: string
     name: string
     size?: 'sm' | 'md' | 'lg' | 'xl'
@@ -88,8 +91,13 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
     orgId?: string
     avatarUrl?: string
     online?: boolean
+    availability?: spaces.Member['availability']
 }) {
     const { byId } = useSpaceProfiles()
+    const now = useAvailabilityClock()
+    const prefs = availability ?? byId.get(id)?.availability
+    const paused = notificationsPaused(prefs, now)
+    const active = online && !prefs?.manualAway
     const refs = useSpaceRefs()
     const photo = useProfileImage(orgId ?? refs?.orgId, avatarUrl ?? byId.get(id)?.avatarUrl)
     const [failedPhoto, setFailedPhoto] = useState<string>()
@@ -108,18 +116,25 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
             {photo && failedPhoto !== photo ? <img src={photo} alt="" className="size-full rounded-[inherit] object-cover" onError={() => setFailedPhoto(photo)} /> : initials(name)}
         </span>
     )
-    if (!round && !online) return face
+    if (!round && online === undefined && !paused) return face
     return (
         <span className="relative inline-flex shrink-0">
             {face}
             {round && <KindCorner kind={agentKind ?? inRoster?.agentKind} size={size} />}
-            {online && <span role="img" aria-label="Online" title="Online" className={cn(
-                'absolute -right-0.5 rounded-full bg-emerald-500 ring-2 ring-background',
+            {online !== undefined && <span role="img" aria-label={active ? "Online" : "Away"} title={active ? "Online" : "Away"} className={cn(
+                'absolute -right-0.5 rounded-full ring-2 ring-background', active ? 'bg-emerald-500' : 'border border-muted-foreground bg-background',
                 size === 'sm' ? 'size-1.5' : 'size-2',
                 round ? '-top-0.5' : '-bottom-0.5',
             )} />}
+            {paused && <span role="img" aria-label="Notifications paused" title="Notifications paused" className="absolute -right-1 -top-1 rounded bg-background px-0.5 text-[9px] text-muted-foreground">z</span>}
         </span>
     )
+}
+
+export function MemberStatus({ member, full = false }: { member?: spaces.Member; full?: boolean }) {
+    const now = useAvailabilityClock()
+    const status = currentStatus(member?.availability, now)
+    return status ? <span className="ml-1.5 shrink-0" title={status.text} aria-label={status.text}>{status.emoji || '💬'}{full ? ` ${status.text}` : ''}</span> : null
 }
 
 // Shared profile panel for names, mentions, and directory entries (2026-10-22).
@@ -132,7 +147,8 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
     const member = byId.get(id)
     const name = member?.displayName ?? names.get(id) ?? id
     const [editing, setEditing] = useState(false)
-    const isHere = here.has(id)
+    const peopleOnline = usePeopleOnline(refs?.orgId ?? '')
+    const isHere = member?.kind === 'agent' ? here.has(id) : peopleOnline.has(id) && !member?.availability?.manualAway
     // Someone else's personal agent answers its owner only (2026-10-30): no Mention or Message for it.
     const reachable = !member || !isOthersPersonalAgent(member, selfId ?? undefined)
     const copyId = () => {
@@ -173,6 +189,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                                 <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
                             )}
                         </div>
+                        <MemberStatus member={member} full />
                         {member?.title && <p className="break-words text-sm text-muted-foreground">{member.title}</p>}
                         {/* An agent's personality, readable by everyone (2026-10-29). */}
                         {member?.kind === 'agent' && member.instructions && (

@@ -248,6 +248,7 @@ export interface Store {
   // members (org-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
+  patchAvailability(id: string, patch: NonNullable<Member['availability']>): Promise<void>;
   /** Switch an agent between channel and personal (2026-10-27): the one write of the flag after creation. */
   setAgentPersonal(id: string, personal: boolean): Promise<void>;
   /** Make an agent a super agent or an ordinary one again (2026-11-02): the one write of the setting. */

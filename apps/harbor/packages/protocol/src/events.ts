@@ -387,13 +387,14 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * clients ignore unknown frame kinds by contract.
    */
   z.object({ kind: z.literal('agent_presence'), agentId: MemberId, online: z.boolean(), at: z.iso.datetime() }),
-  /** Human connection status, org-wide; snapshot is listOrgMembers.onlinePeople (2026-11-04). */
+  /** Human activity status, org-wide; snapshot is listOrgMembers.onlinePeople (2026-11-05). */
   z.object({ kind: z.literal('member_presence'), memberId: MemberId, online: z.boolean(), at: z.iso.datetime() }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 
 /** Client → server frames. */
 export const ClientFrame = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('activity'), active: z.boolean() }),
   z.object({
     kind: z.literal('subscribe'),
     spaceId: SpaceId,

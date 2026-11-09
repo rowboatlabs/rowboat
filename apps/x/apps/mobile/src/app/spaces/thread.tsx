@@ -1,3 +1,4 @@
+import { reportMobileActivity } from '../../lib/spaces/activity';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
@@ -189,6 +190,7 @@ export default function SpaceThreadScreen() {
   useEffect(() => {
     if (replies === null) return;
     const live = new SpacesLive({ baseUrl: `https://${org}`, token: () => account.getAccessToken() });
+    const stopActivity = reportMobileActivity(live);
     const off = live.subscribe(
       space,
       (frame) => {
@@ -226,6 +228,7 @@ export default function SpaceThreadScreen() {
     );
     return () => {
       off();
+      stopActivity();
       live.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- connect once per screen after first load

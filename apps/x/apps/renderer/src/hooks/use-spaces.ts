@@ -1,3 +1,4 @@
+import { startActivityReporter } from '@/lib/spaces-availability-activity'
 import { memberLabel } from '@/lib/spaces-direct'
 import { setSpaceArchived, setSpacePreview } from '@/lib/spaces-access'
 import { invalidateSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory, getDirectorySpace } from '@/hooks/use-space-directory'
@@ -195,13 +196,17 @@ export function useSpacesAccountState(): AccountState | null {
     return useSyncExternalStore(subscribe, () => accountState, () => accountState)
 }
 
+let stopActivity: (() => void) | undefined
+
 export function subscribeOrgs(listener: () => void): () => void {
     orgsListeners.add(listener)
+    if (SPACES_ENABLED && !stopActivity) stopActivity = startActivityReporter(() => orgsState.orgs.map(org => org.id), (orgId, active) => { void window.ipc.invoke('spaces:activity', { orgId, active }).catch(() => {}) })
     // With Spaces dark, passive subscribers (e.g. the App title crumb) must
     // not trigger the lazy fetch — the store just stays empty.
     if (SPACES_ENABLED && !orgsFetchedOnce && !orgsInflight) void refreshSpacesOrgs()
     return () => {
         orgsListeners.delete(listener)
+        if (!orgsListeners.size) { stopActivity?.(); stopActivity = undefined }
     }
 }
 

@@ -1,3 +1,4 @@
+import { AvailabilityMenu } from '@/components/spaces/availability-menu'
 import { useState, type ReactNode } from 'react'
 import type { spaces } from '@x/shared'
 import { ProfileSettings } from '@/components/spaces/profile-settings'
@@ -53,7 +54,7 @@ export function SpacesAccountMenu({ email, children }: { email: string | null; c
                         <Face id={faceId} name={name} orgId={profileOrg?.id} avatarUrl={me?.avatarUrl} />
                     </button>
                 </PopoverTrigger>
-                <PopoverContent side="right" align="end" sideOffset={10} className="w-72 p-0">
+                <PopoverContent side="right" align="end" sideOffset={10} className="max-h-[var(--radix-popover-content-available-height)] w-72 overflow-y-auto p-0">
                     <div className="flex items-center gap-3 p-3">
                         <Face id={faceId} name={name} orgId={profileOrg?.id} avatarUrl={me?.avatarUrl} large />
                         <div className="min-w-0">
@@ -61,6 +62,7 @@ export function SpacesAccountMenu({ email, children }: { email: string | null; c
                             {email && <div className="truncate text-xs text-muted-foreground">{email}</div>}
                         </div>
                     </div>
+                    <AvailabilityMenu />
                     {orgs.length > 0 && (
                         <div className="border-t border-border px-3 py-2">
                             <div className="pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Servers</div>

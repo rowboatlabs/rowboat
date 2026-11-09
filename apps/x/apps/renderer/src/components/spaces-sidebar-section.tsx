@@ -1,3 +1,4 @@
+import { MemberStatus } from '@/components/spaces/atoms'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
@@ -343,9 +344,9 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                                     }}
                                     className="spaces-rail-row"
                                 >
-                                    <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === other)?.avatarUrl} id={other} name={label} size="sm" online={peopleOnline.has(other)} />
+                                    <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === other)?.avatarUrl} id={other} name={label} size="sm" online={peopleOnline.has(other)} availability={profileRoster.find(m => m.id === other)?.availability} />
                                     <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-semibold text-foreground')}>
-                                        {label}
+                                        {label}<MemberStatus member={profileRoster.find(m => m.id === other)} />
                                         {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
                                     </span>
                                     {!active && <UnreadBadge badge={badge} direct />}
@@ -363,9 +364,9 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                                     ? `Notes to self need a newer server — ${org.name} hasn't been updated yet`
                                     : 'Notes to self — only you (and your agent) can see this'}
                             >
-                                <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === org.memberId)?.avatarUrl} id={org.memberId} name={selfName} size="sm" online={peopleOnline.has(org.memberId)} />
+                                <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === org.memberId)?.avatarUrl} id={org.memberId} name={selfName} size="sm" online={peopleOnline.has(org.memberId)} availability={profileRoster.find(m => m.id === org.memberId)?.availability} />
                                 <span className="flex-1 truncate">
-                                    {selfName}
+                                    {selfName}<MemberStatus member={profileRoster.find(m => m.id === org.memberId)} />
                                     <span className="ml-1.5 font-normal text-muted-foreground">{openingSelf ? 'opening…' : 'you'}</span>
                                 </span>
                             </SidebarMenuButton>

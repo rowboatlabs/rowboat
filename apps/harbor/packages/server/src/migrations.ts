@@ -1263,6 +1263,7 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists messages_session_idx on messages (space_id) where session_title is not null`,
     ],
   },
+  { id: '061-member-availability', statements: ["alter table members add column if not exists availability jsonb not null default '{}'::jsonb"] },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

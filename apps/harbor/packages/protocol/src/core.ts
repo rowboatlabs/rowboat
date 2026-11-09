@@ -1,3 +1,4 @@
+import { Availability } from './availability.js';
 import { z } from 'zod';
 import { Approval, type ApprovalAction } from './approval.js';
 import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
@@ -51,6 +52,7 @@ export const SuperAgent = z.object({
 export type SuperAgent = z.infer<typeof SuperAgent>;
 
 export const Member = z.object({
+  availability: Availability.optional(),
   id: MemberId,
   /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
@@ -156,6 +158,7 @@ export const UpdateAgentProfile = z.object({
 export type UpdateAgentProfile = z.infer<typeof UpdateAgentProfile>;
 
 export const UpdateProfile = z.object({
+  availability: Availability.optional(),
   displayName: z.string().max(128).optional(),
   title: z.string().max(128).optional(),
 });

@@ -1,3 +1,4 @@
+import { reportMobileActivity } from '../../lib/spaces/activity';
 import { Stack, useLocalSearchParams, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -85,12 +86,14 @@ export default function SpaceFileScreen() {
   useEffect(() => {
     void load();
     const live = new SpacesLive({ baseUrl: `https://${org}`, token: () => account.getAccessToken() });
+    const stopActivity = reportMobileActivity(live);
     const off = live.subscribe(space, (frame) => {
       // Someone else's change: refresh, unless an edit is open (Save merges it).
       if (frame.kind === 'event' && frame.event.type === 'change' && frame.event.changeSet.assetId === assetId && !editingRef.current) void load();
     });
     return () => {
       off();
+      stopActivity();
       live.close();
     };
   }, [load, account, org, space, assetId]);
