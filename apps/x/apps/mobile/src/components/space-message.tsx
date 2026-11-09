@@ -239,7 +239,7 @@ export const MessageRow = memo(function MessageRow({
   onVote?: (message: Message, answerIds: number[]) => void;
   onRemoveVote?: (message: Message) => void;
   onEndPoll?: (message: Message) => void;
-  /** A tapped file link (https://<org>/s/<spaceId>/a/<assetId>) — the screen opens the file or hands it to the browser. */
+  /** A tapped file link (https://<server>/s/<spaceId>/a/<assetId>) — the screen opens the file or hands it to the browser. */
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
   /** A tapped attachment (https://<org>/s/<spaceId>/b/<hash>?name=…) — the screen downloads and opens it. */
   onOpenBlob?: (link: { host: string; spaceId: string; hash: string; url: string }) => void;
@@ -542,7 +542,7 @@ export function MessageActionSheet({
   const mine = new Set(message.reactions.filter((g) => g.memberIds.includes(me)).map((g) => g.emoji));
   const isAuthor = message.author.memberId === me;
 
-  // Slack's long-press menu, cut to what the org supports.
+  // Slack's long-press menu, cut to what the server supports.
   const actions: { key: string; icon: string; label: string; destructive?: boolean; run: () => void }[] = [];
   if (onReply) actions.push({ key: 'reply', icon: 'sf:arrowshape.turn.up.left', label: 'Reply in thread', run: () => onReply(message) });
   if (onQuote) actions.push({ key: 'quote', icon: 'sf:quote.opening', label: 'Quote reply', run: () => onQuote(message) });

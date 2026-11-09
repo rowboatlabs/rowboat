@@ -6,7 +6,7 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { useColors } from '@/theme/colors';
 
 // Profile images (Harbor CONTRACT.md, 2026-10-02): avatars and org logos are
-// served by the org at …/v1/images/<sha256>, to members only — so every image
+// served by the server at …/v1/images/<sha256>, to members only — so every image
 // needs the bearer. The last token is shared so a remounted row paints from
 // expo-image's cache in the same frame; the hash is the cache key (a changed
 // picture is a changed URL).

@@ -23,7 +23,7 @@ import { useColors } from '@/theme/colors';
 // The name comes from the file itself (2026-10-28): a file opened from a link
 // in a message arrives with no path, and used to fall back to raw text.
 // Text files can be edited: Save proposes a change on the version that was
-// read; the org applies it, merges it with edits made meanwhile, or reports a
+// read; the server applies it, merges it with edits made meanwhile, or reports a
 // conflict (then nothing is saved and the user can reload).
 const PLAIN_TEXT_EXTENSIONS = new Set([
   'json', 'jsonl', 'csv', 'tsv', 'yaml', 'yml', 'toml', 'xml', 'html', 'css', 'log', 'env', 'ini', 'sql', 'sh',

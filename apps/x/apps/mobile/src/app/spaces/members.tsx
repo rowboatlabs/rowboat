@@ -8,22 +8,21 @@ import { Chevron, Glyph, Group, Row } from '@/components/grouped';
 import { StatusBanner } from '@/components/status-banner';
 import { peekRoster, peekValue, saveRoster } from '@/lib/spaces/cache';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
-import { canInvite, useOrg, useOrgClient, useOrgSettings } from '@/lib/spaces/invites';
+import { useOrgClient } from '@/lib/spaces/invites';
 import { memberLabel } from '@/lib/spaces/profiles';
 import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
 // A space's people (2026-11-02, desktop's members popover): who's here, and
-// on top, Invite (a link, for people not in the org yet) and Add people (org
-// members, people or agents). A DM's membership is fixed and an archived
-// space takes no one new, so neither shows there.
+// on top, Invite (the group's link, for anyone) and Add people (your
+// contacts, people or your own agents). A DM's membership is fixed and an
+// archived space takes no one new, so neither shows there. Anyone in a
+// group invites to it (2026-11-09).
 export default function MembersScreen() {
   const colors = useColors();
   const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string }>();
   const client = useOrgClient(params.org);
-  const org = useOrg(params.org);
-  const settings = useOrgSettings(client, params.org);
-  const mayInvite = canInvite(settings, org?.role);
+  const mayInvite = true;
 
   const [members, setMembers] = useState<Member[] | null>(() => peekRoster(params.org, params.space) ?? null);
   const [space, setSpace] = useState<Space | undefined>(() =>
@@ -85,7 +84,7 @@ export default function MembersScreen() {
             onPress={() => router.push({ pathname: '/spaces/add-people', params: { org: params.org, space: params.space, title: name, me: params.me } })}
           >
             <Glyph icon="sf:person.2" />
-            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>Add people from {org?.name ?? 'the org'}</Text>
+            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>Add people and your agents</Text>
             <Chevron />
           </Row>
         </Group>

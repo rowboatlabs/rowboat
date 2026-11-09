@@ -9,10 +9,10 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { useColors } from '@/theme/colors';
 
-// Join a space from an invite link (https://<org>/join/<token>): paste or
-// arrive by link → resolve (pre-auth) → "Join #space in Org" → sign in if
-// needed (tokens are realm-generic, one sign-in covers every org) → accept →
-// the space opens. Mirrors core/spaces/oauth.ts joinViaInviteLink.
+// Join from an invite link (https://<server>/join/<token>): paste or arrive
+// by link → resolve (pre-auth) → "Join #group", or "Message <person>" for a
+// personal link (2026-11-09) → sign in if needed → accept → the chat opens.
+// Mirrors core/spaces/oauth.ts joinViaInviteLink.
 
 export function parseInviteLink(url: string): { baseUrl: string; token: string } | null {
   try {
@@ -37,7 +37,7 @@ export default function JoinScreen() {
   const resolve = useCallback(async (raw: string) => {
     const parsed = parseInviteLink(raw);
     if (!parsed) {
-      setError('That is not an invite link — it should look like https://team.spaces.x.rowboatlabs.com/join/…');
+      setError('That is not an invite link — it should look like https://spaces.x.rowboatlabs.com/join/…');
       return;
     }
     setBusy('resolving');
@@ -72,9 +72,9 @@ export default function JoinScreen() {
       const org = new URL(resolved.baseUrl).host;
       const me = await client.me();
       router.replace('/spaces');
-      // An invite that joined no space (2026-10-19: nothing listed, no
-      // default) leaves you on the server list, where the new org shows.
-      if (result.space) router.push({ pathname: '/spaces/chat', params: { org, space: result.space.id, title: result.space.name, me: me.member.id } });
+      // The group joined, or the DM a personal link opened; nothing when the
+      // link was your own, or its target is gone (2026-11-09).
+      if (result.space) router.push({ pathname: '/spaces/chat', params: { org, space: result.space.id, title: result.space.name, me: me.member.id, ...(result.space.kind === 'direct' ? { kind: 'direct' } : {}) } });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -89,9 +89,9 @@ export default function JoinScreen() {
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ padding: 20, gap: 16 }}
     >
-      <Stack.Screen options={{ title: 'Join a space' }} />
+      <Stack.Screen options={{ title: 'Open an invite' }} />
       <Text style={{ fontSize: 14, lineHeight: 20, color: colors.secondaryLabel }}>
-        Paste the invite link a teammate shared with you.
+        Paste the invite link someone shared with you — to a group, or their personal link.
       </Text>
       <TextInput
         value={url}
@@ -99,7 +99,7 @@ export default function JoinScreen() {
           setUrl(t);
           setResolved(null);
         }}
-        placeholder="https://team.spaces.x.rowboatlabs.com/join/…"
+        placeholder="https://spaces.x.rowboatlabs.com/join/…"
         placeholderTextColor={colors.tertiaryLabel}
         autoCapitalize="none"
         autoCorrect={false}
@@ -126,16 +126,15 @@ export default function JoinScreen() {
         <View style={{ gap: 14, padding: 16, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.secondaryBackground }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <View style={{ width: 44, height: 44, borderRadius: 11, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.separator }}>
-              <Image source="sf:number" style={{ width: 20, height: 20 }} tintColor={colors.label} />
+              <Image source={resolved.direct ? 'sf:person' : 'sf:number'} style={{ width: 20, height: 20 }} tintColor={colors.label} />
             </View>
             <View style={{ flex: 1 }}>
-              {/* An invite is to the org (2026-10-19): the org, then the spaces it joins. */}
-              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{resolved.org.name}</Text>
+              {/* An invite is to one group, or it is a person's link (2026-11-09). */}
+              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>
+                {resolved.space ? `#${resolved.space.name}` : resolved.direct ? resolved.direct.displayName : 'This invite leads nowhere any more'}
+              </Text>
               <Text style={{ fontSize: 13, color: colors.secondaryLabel }}>
-                {[
-                  (resolved.spaces ?? []).map((s) => `#${s.name}`).join(', '),
-                  resolved.invitedBy ? `invited by ${resolved.invitedBy}` : '',
-                ].filter(Boolean).join(' · ')}
+                {resolved.direct ? 'Opens a direct message with them' : resolved.invitedBy ? `invited by ${resolved.invitedBy}` : ''}
               </Text>
             </View>
           </View>
@@ -151,7 +150,9 @@ export default function JoinScreen() {
               <ActivityIndicator color={colors.background} />
             ) : (
               <Text style={{ fontSize: 15, fontWeight: '600', color: colors.background }}>
-                {account.status === 'signedIn' ? 'Join space' : 'Sign in and join'}
+                {resolved.direct
+                  ? account.status === 'signedIn' ? `Message ${resolved.direct.displayName}` : 'Sign in and message'
+                  : account.status === 'signedIn' ? 'Join group' : 'Sign in and join'}
               </Text>
             )}
           </Pressable>

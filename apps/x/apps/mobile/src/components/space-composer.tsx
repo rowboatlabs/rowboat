@@ -16,7 +16,7 @@ import { useColors } from '@/theme/colors';
 // out: typing "@" opens a picker over the roster (+ @here, @rowboat); a pick
 // writes "@Name" into the field and remembers name → id; on send every
 // remembered "@Name" (and a bare @here / @rowboat) becomes the wire token
-// `[@Name](#member:<id>)` — the only spelling the org stamps (mentions.ts).
+// `[@Name](#member:<id>)` — the only spelling the server stamps (mentions.ts).
 // A bare @word nobody picked stays prose, as the contract says it should.
 
 export interface SpaceComposerHandle {

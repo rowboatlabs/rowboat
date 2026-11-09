@@ -92,7 +92,7 @@ export async function registerWithMac(rpc: RpcClient): Promise<'registered' | 'n
 }
 
 /**
- * Register this device with every org's Harbor (the real sender —
+ * Register this device with Harbor (the real sender —
  * apps/harbor/CONTRACT.md, the push bullet). Permission is requested on the first call after sign-in.
  */
 export async function registerWithHarbor(
@@ -110,11 +110,11 @@ export async function registerWithHarbor(
         .catch(() => false),
     ),
   );
-  // Every org refused/failed = the registration did NOT land — say so.
+  // Refused/failed = the registration did NOT land — say so.
   return results.some(Boolean) ? 'registered' : 'error';
 }
 
-/** Sign-out: forget this device on every org (the member's level stays). Best-effort. */
+/** Sign-out: forget this device on the server (the member's level stays). Best-effort. */
 export async function unregisterFromHarbor(
   orgs: SpacesOrg[],
   getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>,
