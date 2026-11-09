@@ -15,7 +15,7 @@ export function MemberDirectory({ members, here, selfId }: {
     // the People tab (2026-10-19, people/integrations separation).
     const groups = [
         { id: 'people', label: 'People', icon: Users, members: roster.filter((m) => m.kind !== 'agent'), empty: 'No people in this space.' },
-        { id: 'integrations', label: 'Bots & AI integrations', icon: Bot, members: roster.filter((m) => m.kind === 'agent'), empty: 'No bots or AI integrations in this space.' },
+        { id: 'integrations', label: 'Agents', icon: Bot, members: roster.filter((m) => m.kind === 'agent'), empty: 'No agents in this space.' },
     ]
     return (
         <Tabs.Root defaultValue="people">

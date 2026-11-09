@@ -116,7 +116,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
 
                 <Group title="Yours" count={mine.length}>
                     {mine.map(card)}
-                    <NewAgentCard creates={creates} onNew={() => setDialog({ name: 'choose' })} onBot={() => setDialog({ name: 'add', bot: true })} />
+                    <NewAgentCard creates={creates} onNew={() => setDialog({ name: 'choose' })} />
                 </Group>
 
                 {filter === 'all' && others.length > 0 && (
@@ -352,19 +352,19 @@ function SpacesBadge({ names }: { names: string[] }) {
  * The card that adds one: New agent opens the chooser, which asks where it
  * runs (on this computer, Rowboat runs it, or one you already run; 2026-10-28,
  * replacing Create agent beside Add an agent you run, which didn't say what
- * either meant). A bot is the small print.
+ * either meant). The card's "or add a bot" link went 2026-11-09 (Arjun): bots
+ * are reached from the chooser.
  */
-function NewAgentCard({ creates, onNew, onBot }: { creates: boolean; onNew: () => void; onBot: () => void }) {
+function NewAgentCard({ creates, onNew }: { creates: boolean; onNew: () => void }) {
     // The ways the chooser offers, in its order: this computer on the desktop, Rowboat's only when the org has it.
     const ways = [LOCAL_RUNTIME && 'on this computer', creates && 'run by Rowboat', 'one you already run'].filter(Boolean) as string[]
     const hint = ways.length === 1 ? 'Connect one you already run' : ways.length === 2 ? ways.join(' or ') : `${ways.slice(0, -1).join(', ')}, or ${ways.at(-1)}`
-    const small = 'text-[11px] text-muted-foreground/80 transition-colors hover:text-foreground'
     return (
         <li className="flex min-h-[188px] flex-col rounded-xl border border-dashed border-black/20 transition-colors hover:border-black/35 hover:bg-[#fafafa] [.dark_&]:border-border [.dark_&]:hover:border-foreground/25 [.dark_&]:hover:bg-transparent">
             <button
                 type="button"
                 onClick={onNew}
-                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-t-xl text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
             >
                 <span className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-[#f5f5f5] [.dark_&]:border-border [.dark_&]:bg-transparent">
                     <Plus className="size-4" />
@@ -372,7 +372,6 @@ function NewAgentCard({ creates, onNew, onBot }: { creates: boolean; onNew: () =
                 New agent
                 <span className="max-w-[16rem] px-4 text-center text-[11px] leading-snug text-muted-foreground/80">{hint.charAt(0).toUpperCase() + hint.slice(1)}</span>
             </button>
-            <button type="button" onClick={onBot} className={cn(small, 'py-2.5')}>or add a bot</button>
         </li>
     )
 }
