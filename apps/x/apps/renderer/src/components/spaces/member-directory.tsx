@@ -12,10 +12,11 @@ export function MemberDirectory({ members, here, selfId }: {
     const roster = [...members].sort((a, b) =>
         Number(here.has(b.id)) - Number(here.has(a.id)) || a.displayName.localeCompare(b.displayName))
     // Account kind, not acting mode, keeps people represented by an agent in
-    // the People tab (2026-10-19, people/integrations separation).
+    // the People tab (2026-10-19, people/integrations separation). The tab is
+    // "Agents", bots included, to match the Agents page (2026-11-07, Arjun).
     const groups = [
         { id: 'people', label: 'People', icon: Users, members: roster.filter((m) => m.kind !== 'agent'), empty: 'No people in this space.' },
-        { id: 'integrations', label: 'Bots & AI integrations', icon: Bot, members: roster.filter((m) => m.kind === 'agent'), empty: 'No bots or AI integrations in this space.' },
+        { id: 'agents', label: 'Agents', icon: Bot, members: roster.filter((m) => m.kind === 'agent'), empty: 'No agents in this space.' },
     ]
     return (
         <Tabs.Root defaultValue="people">
