@@ -6,8 +6,10 @@ import { HarborError } from './errors.js';
 // stored as a hash, a platform's key has to be recoverable. AES-256-GCM under
 // a deployment key from the environment, with a key id so the key can rotate
 // (old ids stay readable through HARBOR_INTEGRATION_PREVIOUS_KEYS), and each
-// value bound to its org and agent so a sealed value copied elsewhere does not
-// open. Carried over from PR #1130's credentials.ts, which its review shaped.
+// value bound to a scope and an agent so a sealed value copied elsewhere does
+// not open. The scope was the org's id until 2026-11-09; values sealed then
+// keep that scope beside them (the store's sealedScope), and everything
+// sealed since uses SEAL_SCOPE, there being one server. Carried over from PR #1130's credentials.ts, which its review shaped.
 // A cloud KMS replaces the environment key when Harbor's other secrets move to
 // a secrets manager; the version prefix lets a `v2` sit beside `v1`.
 
@@ -32,18 +34,21 @@ function key(id: string): Buffer {
   return Buffer.from(value, 'hex');
 }
 
-const aad = (version: string, id: string, orgId: string, agentId: string) => Buffer.from(JSON.stringify([version, id, orgId, agentId]));
+/** The scope every value is sealed under since 2026-11-09 (spec §4: one server). */
+export const SEAL_SCOPE = 'server';
 
-export function seal(secret: string, orgId: string, agentId: string): string {
+const aad = (version: string, id: string, scope: string, agentId: string) => Buffer.from(JSON.stringify([version, id, scope, agentId]));
+
+export function seal(secret: string, scope: string, agentId: string): string {
   const id = activeKeyId();
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key(id), iv);
-  cipher.setAAD(aad('v1', id, orgId, agentId));
+  cipher.setAAD(aad('v1', id, scope, agentId));
   const bytes = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
   return ['v1', id, ...[iv, cipher.getAuthTag(), bytes].map((b) => b.toString('base64'))].join('.');
 }
 
-export function unseal(sealed: string, orgId: string, agentId: string): string {
+export function unseal(sealed: string, scope: string, agentId: string): string {
   const parts = sealed.split('.');
   const [version, id, ivText, tagText, bytesText] = parts;
   if (parts.length !== 5 || version !== 'v1' || !id || !ivText || !tagText || !bytesText) throw new Error('Invalid sealed credential');
@@ -51,7 +56,7 @@ export function unseal(sealed: string, orgId: string, agentId: string): string {
   const tag = Buffer.from(tagText, 'base64');
   if (iv.length !== 12 || tag.length !== 16) throw new Error('Invalid sealed credential');
   const decipher = createDecipheriv('aes-256-gcm', key(id), iv);
-  decipher.setAAD(aad(version, id, orgId, agentId));
+  decipher.setAAD(aad(version, id, scope, agentId));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(Buffer.from(bytesText, 'base64')), decipher.final()]).toString('utf8');
 }

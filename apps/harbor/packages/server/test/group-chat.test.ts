@@ -14,7 +14,7 @@ let ramAgent: Client;
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Family',
+    name: 'Family',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

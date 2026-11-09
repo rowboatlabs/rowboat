@@ -252,7 +252,7 @@ export class ConductorConnector implements RunningConnector {
         ...(typeof options.model === 'string' ? { model: options.model } : {}),
         ...(typeof options.effort === 'string' ? { effort: options.effort } : {}),
         ...(typeof options.fast_mode === 'boolean' ? { fastMode: options.fast_mode } : {}),
-        env: { ROWBOAT_URL: this.env.orgUrl, ROWBOAT_AGENT_KEY: await this.env.agentKey() },
+        env: { ROWBOAT_URL: this.env.serverUrl, ROWBOAT_AGENT_KEY: await this.env.agentKey() },
       });
       next = { ...record, workspaceId: created.workspaceId, sessionId: created.sessionId, link: created.deepLink };
     }

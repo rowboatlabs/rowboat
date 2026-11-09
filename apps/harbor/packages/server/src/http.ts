@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
-import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
+import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type ServerAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import { webCors } from './cors.js';
 import { clearedSessionCookie, sessionCookie, sessionToken, type SessionCookieConfig } from './session.js';
@@ -111,16 +111,14 @@ function actor(c: Context<Env>): { memberId: string; agent?: boolean } {
 
 export function buildHttpApp(deps: {
   service: HarborService;
-  auth: OrgAuth;
+  auth: ServerAuth;
   /** Mounts the login/consent page (Supabase-flagship glue; consent.ts). */
   consent?: { issuer: string; publishableKey: string };
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
-  /** Browser origins allowed to call this org cross-origin (cors.ts), and to use the session cookie (session.ts). */
+  /** Browser origins allowed to call the server cross-origin (cors.ts), and to use the session cookie (session.ts). */
   webOrigins?: readonly string[];
-  /** The session cookie's Domain: the apex on a deployment, so one cookie covers every org. */
-  sessionCookieDomain?: string;
-  /** The Spaces web app, which a browser-opened org link offers beside the desktop app (the landings below). */
+  /** The Spaces web app, which a browser-opened link offers beside the desktop app (the landings below). */
   webAppUrl?: string;
 }): Hono<Env> {
   const { service, auth, consent } = deps;
@@ -137,13 +135,11 @@ export function buildHttpApp(deps: {
   });
 
   app.use('*', webCors(deps.webOrigins ?? []));
-  const session: SessionCookieConfig = {
-    webOrigins: new Set(deps.webOrigins ?? []),
-    ...(deps.sessionCookieDomain ? { domain: deps.sessionCookieDomain } : {}),
-  };
+  // Host-only since 2026-11-09: there is one host (session.ts).
+  const session: SessionCookieConfig = { webOrigins: new Set(deps.webOrigins ?? []) };
 
-  // RFC 9728 protected-resource metadata: the org names its authorization
-  // server here (the org is only ever a resource server — spec §4). 404 under
+  // RFC 9728 protected-resource metadata: the server names its authorization
+  // server here (Harbor is only ever a resource server — spec §4). 404 under
   // the dev driver, which has no AS.
   app.get('/.well-known/oauth-protected-resource', (c) => {
     const meta = auth.metadata();
@@ -156,7 +152,7 @@ export function buildHttpApp(deps: {
   // here with an authorization_id.
   if (consent) {
     app.get('/oauth/consent', (c) =>
-      c.html(consentPageHtml({ ...consent, orgName: service.org.name })),
+      c.html(consentPageHtml({ ...consent, serverName: service.server.name })),
     );
   }
 
@@ -195,11 +191,11 @@ export function buildHttpApp(deps: {
   // as HARBOR_BUILD, so a reader can tell a merge from a deploy; absent where neither is set (local runs).
   app.get('/v1/health', (c) => {
     const build = (process.env.RENDER_GIT_COMMIT ?? process.env.HARBOR_BUILD ?? '').trim().slice(0, 12);
-    return c.json({ ok: true, org: { name: service.org.name, address: service.org.address }, ...(build ? { build } : {}) });
+    return c.json({ ok: true, server: { name: service.server.name, address: service.server.address }, ...(build ? { build } : {}) });
   });
 
   // The web app's session (session.ts): the bearer in, the cookie out. The
-  // token only has to be valid here; membership is checked per org on use.
+  // token only has to be valid here; membership is checked on use.
   app.post(routes.createSession.path, async (c) => {
     const authorization = c.req.header('authorization');
     if (!authorization?.startsWith('Bearer ')) throw new HarborError('unauthorized', 'a session starts from a bearer in the Authorization header');
@@ -215,6 +211,13 @@ export function buildHttpApp(deps: {
   });
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
+
+  // Account deletion (2026-10-08; here since 2026-11-09, there being no apex): the app calls it before the
+  // account API bans the login, while the token is still good. Idempotent.
+  app.delete(routes.deleteMe.path, async (c) => {
+    await service.deactivateSelf(actor(c));
+    return reply(c, routes.deleteMe.response, { ok: true });
+  });
 
   app.put(routes.updateMe.path, async (c) => {
     const input = await body(c, routes.updateMe.request);
@@ -235,17 +238,6 @@ export function buildHttpApp(deps: {
 
   app.delete(routes.clearAvatar.path, async (c) =>
     reply(c, routes.clearAvatar.response, { member: await service.clearAvatar(actor(c)) }));
-
-  app.get(routes.getOrgLogo.path, async (c) => {
-    const logoUrl = await service.orgLogoUrl(actor(c), publicOrigin(c));
-    return reply(c, routes.getOrgLogo.response, logoUrl ? { logoUrl } : {});
-  });
-
-  app.put(routes.setOrgLogo.path, async (c) =>
-    reply(c, routes.setOrgLogo.response, await service.setOrgLogo(actor(c), await imageBody(c), publicOrigin(c))));
-
-  app.delete(routes.clearOrgLogo.path, async (c) =>
-    reply(c, routes.clearOrgLogo.response, await service.clearOrgLogo(actor(c))));
 
   // Immutable by address → cache forever, privately. Always an image (sniffed at upload).
   app.get(routes.getImage.path, async (c) => {
@@ -753,8 +745,8 @@ export function buildHttpApp(deps: {
   });
 
   // The invite link's landing (2026-09-15): a browser-opened /join/<token>
-  // hands the invite into the app as rowboat://open?type=spaces&org=…&invite=…
-  // — the same deep-link grammar as the org link landings below, the org
+  // hands the invite into the app as rowboat://open?type=spaces&server=…&invite=…
+  // — the same deep-link grammar as the link landings below, the server
   // named by its address — and shows what is being joined meanwhile (invite
   // resolution is pre-auth by design, spec §4). A dead invite says so and
   // launches nothing.
@@ -762,18 +754,18 @@ export function buildHttpApp(deps: {
     const token = c.req.param('token');
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
-    const query = `type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', spaces: resolved.spaces.map((s) => s.name), org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
+    const query = `type=spaces&server=${encodeURIComponent(service.server.address)}&invite=${encodeURIComponent(token)}`;
+    return c.html(invitePage({ state: 'ok', spaces: resolved.spaces.map((s) => s.name), server: service.server.name, invitedBy: resolved.invitedBy, ...openers(query) }));
   });
 
   // --- link landings ---------------------------------------------------------
-  // Every org link (ids.ts grammar) opened in a browser lands here and is
-  // handed on, the org named by its address. Nothing is looked up and nothing
+  // Every Spaces link (ids.ts grammar) opened in a browser lands here and is
+  // handed on, the server named by its address. Nothing is looked up and nothing
   // is rendered about the target, so a link says nothing to someone who
   // cannot open it. The app itself intercepts these URLs before they ever
   // reach a browser.
   const landing = (target: URLSearchParams) => {
-    target.set('org', service.org.address);
+    target.set('server', service.server.address);
     return landingPage(openers(`type=spaces&${target.toString()}`));
   };
   app.get('/', (c) => c.html(landing(new URLSearchParams())));
@@ -1135,13 +1127,13 @@ function openerLinks(o: Openers): string {
   );
 }
 
-/** An org link's landing. */
+/** A link's landing. */
 function landingPage(o: Openers): string {
   return `${PAGE_HEAD}<title>Open in Rowboat</title>${PAGE_STYLE}<main><h1>This link opens in Rowboat</h1>${openerLinks(o)}</main>`;
 }
 
 type InvitePage =
-  | ({ state: 'ok'; spaces: string[]; org: string; invitedBy?: string } & Openers)
+  | ({ state: 'ok'; spaces: string[]; server: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
 
 /** "a", "a and b", "a, b and c". */
@@ -1155,13 +1147,12 @@ function invitePage(page: InvitePage): string {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
     return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
-  // An invite is to the org (2026-10-19): the org is the headline, the
-  // spaces accepting joins the line under it.
-  const joins = page.spaces.length > 0 ? `<p class="m">You'll join ${escapeHtml(listNames(page.spaces))}</p>` : '';
+  // The space is the headline (2026-11-09: an invite is to one space, or a person; there is no org to join).
+  const headline = page.spaces.length > 0 ? `You're invited to ${escapeHtml(listNames(page.spaces))}` : `You're invited to ${escapeHtml(page.server)}`;
   const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${PAGE_HEAD}<title>Join ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
-    `<h1>You're invited to ${escapeHtml(page.org)}</h1>${joins}${by}` +
+    `${PAGE_HEAD}<title>Join ${escapeHtml(page.spaces[0] ?? page.server)}</title>${PAGE_STYLE}<main>` +
+    `<h1>${headline}</h1>${by}` +
     `${openerLinks(page)}</main>`
   );
 }

@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { agentOnlyMcpToolNames, mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
-import { authenticateRequest, wwwAuthenticate, type OrgAuth } from './auth.js';
+import { authenticateRequest, wwwAuthenticate, type ServerAuth } from './auth.js';
 import { HarborError } from './errors.js';
 import { publicOriginOf } from './origin.js';
 import type { ActorCtx, HarborService } from './service.js';
@@ -23,7 +23,7 @@ import type { ActorCtx, HarborService } from './service.js';
 
 interface Deps {
   service: HarborService;
-  auth: OrgAuth;
+  auth: ServerAuth;
 }
 
 interface McpActor {
@@ -155,7 +155,7 @@ async function dispatch(
     // --- identity & people --------------------------------------------------
     case 'whoami': {
       // The same row /v1/me serves.
-      return { member: await service.me(ctx), org: { name: service.org.name, address: service.org.address } };
+      return { member: await service.me(ctx), server: { name: service.server.name, address: service.server.address } };
     }
     case 'update_profile':
       return { member: await service.updateProfile(ctx, args as { displayName?: string; title?: string }) };

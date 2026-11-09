@@ -28,7 +28,7 @@ describe('login/consent page', () => {
     const harbor = await startTestHarbor({
       auth: new OidcAuthDriver({ issuer: ISSUER }),
       consent: { publishableKey: 'pk-test-123' },
-      orgName: 'Rowboat <Labs>',
+      name: 'Rowboat <Labs>',
     });
     const res = await fetch(`${harbor.url}/oauth/consent?authorization_id=auth-1`);
     expect(res.status).toBe(200);

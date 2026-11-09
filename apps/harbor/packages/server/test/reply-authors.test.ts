@@ -25,7 +25,7 @@ async function rootOf(id: string): Promise<Message> {
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

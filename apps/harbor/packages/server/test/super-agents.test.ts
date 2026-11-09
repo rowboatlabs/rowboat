@@ -74,7 +74,7 @@ beforeAll(async () => {
   const { store } = await freshStore();
   harbor = await startHarbor({
     store,
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

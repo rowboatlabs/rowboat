@@ -228,7 +228,7 @@ export class MaritimeConnector implements RunningConnector {
     const turn = start.turn!;
     const options = invocation.options ?? {};
     const script = this.runtime.command({
-      orgUrl: this.env.orgUrl,
+      serverUrl: this.env.serverUrl,
       agentKey: await this.env.agentKey(),
       promptPath: turn.files.prompt,
       outPath: turn.files.out,

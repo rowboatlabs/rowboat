@@ -277,6 +277,19 @@ export const routes = {
    * Only you edit your profile; an agent member's name is its owner's choice
    * at creation, so agents are refused. Unchanged fields are a no-op.
    */
+  /**
+   * Account deletion (2026-10-08; on the server itself since 2026-11-09, there
+   * being no apex): the caller is deactivated — out of every space, refused at
+   * sign-in, kept under their name so their messages keep an author — and
+   * their agents with them, the managed ones deleted. The app calls this
+   * before the account API bans the login, while the token is still good.
+   * Idempotent.
+   */
+  deleteMe: {
+    method: 'DELETE',
+    path: '/v1/me',
+    response: z.object({ ok: z.literal(true) }),
+  },
   updateMe: {
     method: 'PUT',
     path: '/v1/me',
@@ -301,24 +314,6 @@ export const routes = {
     method: 'DELETE',
     path: '/v1/me/avatar',
     response: z.object({ member: Member }),
-  },
-  /** The org's logo, or nothing when none is set. Any member. */
-  getOrgLogo: {
-    method: 'GET',
-    path: '/v1/org/logo',
-    response: z.object({ logoUrl: z.string().url().optional() }),
-  },
-  /** Set the org's logo — admins only. Same body rules as setAvatar. */
-  setOrgLogo: {
-    method: 'PUT',
-    path: '/v1/org/logo',
-    response: z.object({ logoUrl: z.string().url() }),
-  },
-  /** Remove the org's logo — admins only. Idempotent. */
-  clearOrgLogo: {
-    method: 'DELETE',
-    path: '/v1/org/logo',
-    response: z.object({ logoUrl: z.string().url().optional() }),
   },
   /** The org's settings (2026-10-19): who may invite, and whether Ro is on (2026-10-30). Any member reads them. */
   getOrgSettings: {

@@ -59,8 +59,8 @@ export function leadingMentionOf(agentId: string): RegExp {
 }
 
 /** One attachment and where to download it, on the agent's key. */
-export function downloadLine(orgUrl: string, spaceId: string, a: Attachment): string {
-  return `- ${a.name} (${a.mime}, ${formatSize(a.size)}): ${orgUrl}/v1/spaces/${spaceId}/blobs/${a.hash}?name=${encodeURIComponent(a.name)}`;
+export function downloadLine(serverUrl: string, spaceId: string, a: Attachment): string {
+  return `- ${a.name} (${a.mime}, ${formatSize(a.size)}): ${serverUrl}/v1/spaces/${spaceId}/blobs/${a.hash}?name=${encodeURIComponent(a.name)}`;
 }
 
 /**
@@ -68,7 +68,7 @@ export function downloadLine(orgUrl: string, spaceId: string, a: Attachment): st
  * where to read each on its own key, and that its value goes where it is
  * used, never back into the thread, which the rest of the space reads.
  */
-export function secretsSection(orgUrl: string, invocation: Invocation): string | undefined {
+export function secretsSection(serverUrl: string, invocation: Invocation): string | undefined {
   const names = invocation.trigger.secrets ?? [];
   if (names.length === 0) return undefined;
   const { spaceId } = invocation.conversation;
@@ -76,7 +76,7 @@ export function secretsSection(orgUrl: string, invocation: Invocation): string |
     'Secrets handed to you in this message, which only the members it mentions can read. Read one when you need it with',
     '`curl -fsSL -H "Authorization: Bearer $ROWBOAT_AGENT_KEY" <url>` (when this environment sets ROWBOAT_AGENT_KEY), straight into where it is used, such as an environment variable;',
     'never write its value in the thread, in a file in the space, or in a commit:',
-    ...names.map((name) => `- ${name}: ${orgUrl}/v1/spaces/${spaceId}/messages/${invocation.trigger.messageId}/secrets/${name}`),
+    ...names.map((name) => `- ${name}: ${serverUrl}/v1/spaces/${spaceId}/messages/${invocation.trigger.messageId}/secrets/${name}`),
   ].join('\n');
 }
 
@@ -88,13 +88,13 @@ export function secretsSection(orgUrl: string, invocation: Invocation): string |
 export const SKILL_URL = 'https://raw.githubusercontent.com/rowboatlabs/rowboat/main/skills/rowboat-spaces/SKILL.md';
 
 /** The standing paragraph: who the agent is and who asked, as tokens, and when to mention (spec §8, 2026-10-01). */
-export function standingParagraph(input: { invocation: Invocation; agentId: string; names: ReadonlyMap<string, string>; orgAddress: string }): string {
+export function standingParagraph(input: { invocation: Invocation; agentId: string; names: ReadonlyMap<string, string>; address: string }): string {
   const { invocation, names } = input;
   const token = (memberId: string) => mentionToken({ kind: 'member', id: memberId, label: names.get(memberId) ?? '' });
   const invoker = names.get(invocation.trigger.authorId) ?? 'a teammate';
   const where =
     invocation.where.spaceKind === 'direct' ? `a direct message with ${invoker}` : `the space "${invocation.where.spaceName}"`;
-  const thread = messageUrl(input.orgAddress, invocation.conversation.spaceId, invocation.conversation.threadRootId);
+  const thread = messageUrl(input.address, invocation.conversation.spaceId, invocation.conversation.threadRootId);
   return (
     `You are ${token(input.agentId)} in Rowboat, and this request comes from ${token(invocation.trigger.authorId)} in ${where}. Respond to the request above. ` +
     'Questions asking for explanation do not authorize code changes. ' +
@@ -156,9 +156,9 @@ export function buildPrompt(input: {
   /** Earlier messages the workspace has not seen, oldest first (never the trigger itself). */
   context: Message[];
   names: ReadonlyMap<string, string>;
-  orgAddress: string;
-  /** The org's address with its scheme: attachment downloads. */
-  orgUrl: string;
+  address: string;
+  /** The server's address with its scheme: attachment downloads. */
+  serverUrl: string;
   attachments: Attachment[];
   /** Attachments on earlier messages in the context, listed for the agent to fetch. */
   earlierAttachments: Attachment[];
@@ -183,11 +183,11 @@ export function buildPrompt(input: {
       [
         'Attached files. Download one when you need it, to disk, with',
         '`curl -fsSL -H "Authorization: Bearer $ROWBOAT_AGENT_KEY" -o <name> <url>` (when this environment sets ROWBOAT_AGENT_KEY):',
-        ...files.map((a) => downloadLine(input.orgUrl, invocation.conversation.spaceId, a)),
+        ...files.map((a) => downloadLine(input.serverUrl, invocation.conversation.spaceId, a)),
       ].join('\n'),
     );
   }
-  const secrets = secretsSection(input.orgUrl, invocation);
+  const secrets = secretsSection(input.serverUrl, invocation);
   if (secrets) parts.push(secrets);
   parts.push(standingParagraph(input));
   parts.push(requestMarker(invocation.trigger.messageId));

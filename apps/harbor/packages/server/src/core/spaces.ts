@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canEditProfile, canInvite, canJoinSpace, canListOnInvite, canOpenDirect, canReachMember, canReachPersonalAgent, canRemoveFromOrg, canRemoveFromSpace, canRenameSpace, canSetDefaultSpace, canSetOrgSettings, canSetRole, canSetSpaceVisibility, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
+import { canArchiveSpace, canDeleteSpace, canChangeMembership, canEditProfile, canInvite, canJoinSpace, canListOnInvite, canOpenDirect, canReachMember, canReachPersonalAgent, canRemoveFromOrg, canRemoveFromSpace, canRenameSpace, canSetDefaultSpace, canSetOrgSettings, canSetRole, canSetSpaceVisibility, canSignIn, canWriteSpace, enforce, isGroupChat } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent, type StoredInvite } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -139,14 +139,14 @@ export class Spaces {
   }
 
   async browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
-    await this.k.requireOrgMember(ctx);
+    await this.k.requireActiveMember(ctx);
     return this.k.store.browseSpaces(ctx.memberId);
   }
 
   async joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
     const result = await this.k.locked(spaceId, async () => {
       const space = await this.k.requireSpace(spaceId);
-      await this.k.requireOrgMember(ctx);
+      await this.k.requireActiveMember(ctx);
       enforce(canJoinSpace(space));
       const existing = await this.k.store.getMembership(spaceId, ctx.memberId);
       if (existing) return { space, membership: existing, created: false };
@@ -566,7 +566,7 @@ export class Spaces {
   }
 
   async getOrgSettings(ctx: ActorCtx): Promise<OrgSettings> {
-    await this.k.requireOrgMember(ctx);
+    await this.k.requireActiveMember(ctx);
     return this.k.store.getOrgSettings();
   }
 
@@ -598,7 +598,7 @@ export class Spaces {
    * checked whole before anything is written.
    */
   async createInvite(ctx: ActorCtx, input: CreateInviteInput): Promise<CreateInviteResult> {
-    await this.k.requireOrgMember(ctx);
+    await this.k.requireActiveMember(ctx);
     enforce(canInvite(await this.me(ctx), (await this.k.store.getOrgSettings()).invitePolicy));
     const spaceIds = [...new Set([...(input.spaceId ? [input.spaceId] : []), ...(input.spaceIds ?? [])])];
     if (spaceIds.length > MAX_INVITE_SPACES) {
@@ -614,7 +614,7 @@ export class Spaces {
     const now = this.k.now();
     const expiresAt = new Date(Date.now() + (input.expiresInHours ?? DEFAULT_INVITE_HOURS) * 3_600_000).toISOString();
     await this.k.store.putInvite({ token, spaceIds, createdBy: ctx.memberId, createdAt: now, expiresAt, revoked: false });
-    return { token, link: inviteUrl(this.k.org.address, token), expiresAt };
+    return { token, link: inviteUrl(this.k.server.address, token), expiresAt };
   }
 
   /** The invite behind a token if it can still be accepted; expired and revoked are states, an unknown token is not_found. */
@@ -656,7 +656,7 @@ export class Spaces {
     const inviter = await this.k.store.getMember(found.invite.createdBy);
     return {
       state: 'ok',
-      org: { address: this.k.org.address, name: this.k.org.name },
+      org: { address: this.k.server.address, name: this.k.server.name },
       ...(spaces[0] ? { space: spaces[0] } : {}),
       spaces,
       invitedBy: inviter?.displayName,
@@ -667,8 +667,8 @@ export class Spaces {
    * The invite-binding ceremony (spec §4, amended 2026-08-19): an
    * authenticated identity + an open bearer invite → member (created on
    * first bind, displayName seeded from IdP profile claims) + memberships.
-   * Every bind-time condition is org policy, checked in policy.ts canBind and
-   * nowhere else — v1 is the email-domain rule. The (iss, sub) → member row written here is
+   * There is no bind-time policy (2026-11-09: possession of the link plus a
+   * sign-in is the whole claim, spec §4 Invites). The (iss, sub) → member row written here is
    * what the oidc auth driver resolves on every later request.
    */
   async bindInvite(identity: BindIdentity, token: string): Promise<AcceptInviteResult> {
@@ -677,7 +677,6 @@ export class Spaces {
       throw new HarborError('forbidden', `invite is ${found.state}`);
     }
     this.k.guardWrite();
-    enforce(canBind(identity, this.k.org));
     let member = await this.k.store.getMemberByIdentity(identity.iss, identity.sub);
     if (member && member.deactivatedAt === undefined && member.removedAt !== undefined) {
       // A removed member comes back as the same row (spec §4 Roles,

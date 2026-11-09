@@ -206,19 +206,6 @@ export function isAuthor(
   return { code: 'forbidden', message: `only the author can ${act}` };
 }
 
-/**
- * The invite-binding ceremony's policy (spec §4, amended 2026-08-19): every
- * bind-time condition is org policy, checked here and nowhere else. v1 is
- * the email-domain rule; empty or absent = no restriction.
- */
-export function canBind(identity: { email?: string }, org: { allowedEmailDomains?: string[] }): Decision {
-  const domains = org.allowedEmailDomains;
-  if (!domains || domains.length === 0) return null;
-  const domain = identity.email?.toLowerCase().split('@')[1];
-  if (domain && domains.some((d) => d.toLowerCase() === domain)) return null;
-  return { code: 'policy_refused', message: `this org admits only ${domains.map((d) => `@${d}`).join(', ')} accounts` };
-}
-
 /** The org's logo is its admins' to set (2026-10-02); a member's avatar is always their own. */
 /**
  * A deleted account's member (2026-10-13): kept for attribution, refused as
@@ -238,11 +225,6 @@ export function canReachMember(member: Member): Decision {
   if (member.deactivatedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
   if (member.removedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} is no longer in this org` };
   return null;
-}
-
-export function canSetOrgLogo(actor: Member): Decision {
-  if (actor.role === 'admin') return null;
-  return { code: 'forbidden', message: 'only an admin can change the org’s logo' };
 }
 
 /**

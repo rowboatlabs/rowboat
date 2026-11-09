@@ -11,7 +11,7 @@ let harbor: RunningHarbor;
 
 async function start(): Promise<void> {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'harsh' }, // lowercase: the sort is case-insensitive

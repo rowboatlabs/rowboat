@@ -16,7 +16,7 @@ const GRACE_MS = 150;
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'gagan', displayName: 'Gagan' },
       { id: 'harsh', displayName: 'Harsh' },

@@ -23,7 +23,7 @@ import { replicasPlatform } from './replicas/index.js';
 export interface ConnectorEnv {
   agent: Member;
   /** The org's public address, with its scheme: links in prompts, and what an agent's tools call. */
-  orgUrl: string;
+  serverUrl: string;
   service: HarborService;
   /** The agent itself: `{ memberId: agent.id, agent: true }`, as its key would resolve. */
   ctx: ActorCtx;

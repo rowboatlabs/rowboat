@@ -552,8 +552,8 @@ export class Agent37Connector implements RunningConnector {
       agentId: this.env.agent.id,
       context,
       names,
-      orgAddress: this.env.service.org.address,
-      orgUrl: this.env.orgUrl,
+      address: this.env.service.server.address,
+      serverUrl: this.env.serverUrl,
       earlierAttachments,
     });
   }

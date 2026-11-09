@@ -50,7 +50,7 @@ describe('Jev', () => {
   const start = async () =>
     startHarbor({
       store: db.store,
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'harsh', displayName: 'Harsh' },

@@ -38,7 +38,7 @@ async function refused(client: Client, name: string, args: Record<string, unknow
 
 async function start(): Promise<void> {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'harsh' }, // lowercase on purpose: the roster sort is case-insensitive
@@ -72,11 +72,11 @@ describe('agent face parity', () => {
     await harbor.close();
   });
 
-  it("whoami is the token's member — the same row /v1/me serves — plus the org's name and address", async () => {
-    const { member, org } = await call<{ member: Member; org: { name: string; address: string } }>(ramAgent, 'whoami');
+  it("whoami is the token's member — the same row /v1/me serves — plus the server's name and address", async () => {
+    const { member, server } = await call<{ member: Member; server: { name: string; address: string } }>(ramAgent, 'whoami');
     expect(member).toMatchObject({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
     expect(member).toEqual((await ramnique.get('/v1/me')).body.member);
-    expect(org).toEqual({ name: harbor.service.org.name, address: harbor.service.org.address });
+    expect(server).toEqual({ name: harbor.service.server.name, address: harbor.service.server.address });
     const other = await call<{ member: Member }>(harshAgent, 'whoami');
     expect(other.member.id).toBe('harsh');
   });

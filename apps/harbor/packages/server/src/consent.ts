@@ -23,7 +23,7 @@ export interface ConsentPageOptions {
   /** The AS's publishable/anon key — public by design; the browser needs it as `apikey`. */
   publishableKey: string;
   /** Shown on the page so people know whose door they're at. */
-  orgName: string;
+  serverName: string;
 }
 
 /** Display names where capitalizing the provider id isn't right. */
@@ -46,13 +46,13 @@ export function consentPageHtml(opts: ConsentPageOptions): string {
     labels: PROVIDER_LABELS,
     nonSocial: NON_SOCIAL,
   });
-  const orgName = escapeHtml(opts.orgName);
+  const serverName = escapeHtml(opts.serverName);
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in — ${orgName}</title>
+<title>Sign in — ${serverName}</title>
 <style>
   :root { color-scheme: light dark; }
   body { margin: 0; font-family: system-ui, sans-serif; display: grid; place-items: center; min-height: 100vh;
@@ -75,7 +75,7 @@ export function consentPageHtml(opts: ConsentPageOptions): string {
 <body>
 <div class="card">
   <h1 id="title">Sign in</h1>
-  <p class="org">${orgName}</p>
+  <p class="org">${serverName}</p>
   <div id="signin" hidden></div>
   <div id="consent" hidden>
     <p class="ask" id="ask"></p>

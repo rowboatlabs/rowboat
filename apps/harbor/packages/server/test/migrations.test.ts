@@ -209,7 +209,8 @@ describe('Agent37 effort key migration', () => {
     const db = await pgliteDb();
     try {
       await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
-      for (const migration of MIGRATIONS.filter((m) => m.id !== '035-agent37-effort-key')) {
+      // Everything before 035, as a database that predates it (later entries re-key these tables, 061).
+      for (const migration of MIGRATIONS.slice(0, MIGRATIONS.findIndex((m) => m.id === '035-agent37-effort-key'))) {
         for (const statement of migration.statements) await db.query(statement);
         await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-10-07T00:00:00Z']);
       }

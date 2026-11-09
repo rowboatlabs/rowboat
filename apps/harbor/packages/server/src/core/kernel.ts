@@ -7,9 +7,10 @@ import { canAccessSpace, canReadSpace, canWrite, canWriteSpace, enforce } from '
 import type { Store, StoredEvent } from '../store.js';
 
 // The transactional core every aggregate is built on: the store and the hub,
-// the org, the space lock with its publish-after-commit outbox, the log append
-// and offset allocation, the access gate and the write guard, attribution.
-// One instance per org; the aggregates (spaces, assets, feed, read-state) hold
+// the server's address, the space lock with its publish-after-commit outbox,
+// the log append and offset allocation, the access gate and the write guard,
+// attribution. One instance per server (orgs were dissolved 2026-11-09, spec
+// §4); the aggregates (spaces, assets, feed, read-state) hold
 // it as `k` and never reach around it — the invariant that every
 // read-decide-write runs inside `locked` lives here and nowhere else.
 
@@ -30,21 +31,16 @@ export interface BindIdentity {
   name?: string;
 }
 
-export interface OrgInfo {
+/** The one server (spec §4, 2026-11-09): what the login page and the landings call it, and the host links are minted on. */
+export interface ServerInfo {
   name: string;
-  /** host[:port] — the org address links are minted on. Set once the listener knows its port. */
+  /** host[:port] — the address links are minted on. Set once the listener knows its port. */
   address: string;
-  /**
-   * Org policy, v1 (spec §4, amended 2026-08-19): restrict membership to
-   * these IdP-verified email domains, checked ONLY at invite bind. Empty or
-   * absent = no restriction. Org-side by design — never on the wire.
-   */
-  allowedEmailDomains?: string[];
 }
 
 export class Kernel {
 
-  readonly org: OrgInfo;
+  readonly server: ServerInfo;
 
   /** Over-limit means read-only, never lockout (spec §4). Flip via the control plane; here a knob for tests. */
   readOnly = false;
@@ -54,16 +50,17 @@ export class Kernel {
   constructor(
     readonly store: Store,
     readonly hub: SpaceHub,
-    org: OrgInfo,
+    server: ServerInfo,
   ) {
-    this.org = org;
+    this.server = server;
   }
 
   now(): string {
     return new Date().toISOString();
   }
 
-  // Profile changes are org facts, sent only to active org members after persistence (2026-10-22).
+  // Profile changes are sent to every active member after persistence (2026-10-22). Narrowing this to the
+  // people who share a space with the member is open: today every member's client refreshes its caches.
   async publishProfile(member: Member): Promise<void> {
     const frame: ServerFrame = { kind: 'profile_updated', member, at: this.now() };
     for (const recipient of await this.store.listAllMembers()) {
@@ -82,23 +79,24 @@ export class Kernel {
   }
 
   /**
-   * Whether the caller is in the org now: a member row that was neither
-   * deactivated nor removed (2026-10-19). A removed member's open socket
-   * still names them, so browsing open spaces asks this, not the row alone.
+   * Whether the caller is an active member of the server now: a member row
+   * that was neither deactivated nor departed (2026-10-19). A departed
+   * member's open socket still names them, so acts that need no space ask
+   * this, not the row alone.
    */
-  async isActiveOrgMember(ctx: ActorCtx): Promise<boolean> {
+  async isActiveMember(ctx: ActorCtx): Promise<boolean> {
     const member = await this.store.getMember(ctx.memberId);
     return !!member && member.deactivatedAt === undefined && member.removedAt === undefined;
   }
 
-  async requireOrgMember(ctx: ActorCtx): Promise<void> {
-    if (!(await this.isActiveOrgMember(ctx))) throw new HarborError('not_a_member', 'you are not a member of this org');
+  async requireActiveMember(ctx: ActorCtx): Promise<void> {
+    if (!(await this.isActiveMember(ctx))) throw new HarborError('not_a_member', 'you are not a member of this server');
   }
 
   async requireReadableSpace(ctx: ActorCtx, spaceId: string): Promise<Space> {
     const space = await this.requireSpace(spaceId);
     const membership = await this.store.getMembership(spaceId, ctx.memberId);
-    const orgMember = membership ? true : await this.isActiveOrgMember(ctx);
+    const orgMember = membership ? true : await this.isActiveMember(ctx);
     enforce(canReadSpace(space, membership, orgMember));
     return space;
   }

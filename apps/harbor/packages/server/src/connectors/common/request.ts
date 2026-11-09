@@ -29,8 +29,8 @@ export async function requestPrompt(env: ConnectorEnv, invocation: Invocation, d
     agentId: env.agent.id,
     context,
     names,
-    orgAddress: env.service.org.address,
-    orgUrl: env.orgUrl,
+    address: env.service.server.address,
+    serverUrl: env.serverUrl,
     attachments,
     earlierAttachments,
   });

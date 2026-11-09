@@ -91,7 +91,7 @@ export interface StoredSpaceBlob {
 }
 
 /** An image the whole org may read (core/images.ts): an avatar or the logo. */
-export interface StoredOrgImage {
+export interface StoredImage {
   hash: string;
   size: number;
   mime: string;
@@ -134,6 +134,8 @@ export interface StoredAgentKey extends AgentKey {
 
 /** A platform credential as stored (spec §8 Connectors, 2026-09-30): what its owner sees, plus the sealed secret. */
 export interface StoredAgentCredential extends AgentCredential {
+  /** What the value was sealed under (sealing.ts): the org's id before 2026-11-09, SEAL_SCOPE since. Reads pass it back; writes may omit it. */
+  sealedScope?: string;
   agentId: string;
   sealed: string;
 }
@@ -245,7 +247,7 @@ export interface UnreadThreadRow {
 }
 
 export interface Store {
-  // members (org-level)
+  // members (server-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
   patchAvailability(id: string, patch: NonNullable<Member['availability']>): Promise<void>;
@@ -255,7 +257,7 @@ export interface Store {
   setAgentSuper(id: string, superAgent: SuperAgent | null): Promise<void>;
   /** An agent's description (its title) and instructions, both whole: null clears one (2026-10-29). */
   setAgentProfile(id: string, profile: { title: string | null; instructions: string | null }): Promise<void>;
-  /** The whole org roster — operator-side reads only (the mentions backfill). */
+  /** Every member on the server — operator-side reads only (the mentions backfill, profile fan-out). */
   listAllMembers(): Promise<Member[]>;
   /** A space's roster in join order — one statement (2026-09-22). */
   listSpaceMembers(spaceId: string): Promise<Member[]>;
@@ -362,17 +364,13 @@ export interface Store {
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
   /** Every hash a space has registered — read before the space is deleted, while the rows exist. */
   listSpaceBlobHashes(spaceId: string): Promise<string[]>;
-  /** Of `hashes`, the ones no space of this org and no profile image or logo still uses: bytes safe to delete. */
+  /** Of `hashes`, the ones no space and no profile image still uses: bytes safe to delete. */
   unreferencedBlobs(hashes: string[]): Promise<string[]>;
 
-  // profile images (org-scoped registry; bytes live in the BlobStore)
+  // profile images (the server's registry; bytes live in the BlobStore)
   /** First write wins, as putSpaceBlob. */
-  putOrgImage(image: StoredOrgImage): Promise<void>;
-  getOrgImage(hash: string): Promise<StoredOrgImage | undefined>;
-  /** The org's logo hash, or undefined when none is set. */
-  getOrgLogo(): Promise<string | undefined>;
-  /** null clears it. */
-  setOrgLogo(hash: string | null, by: string, at: string): Promise<void>;
+  putImage(image: StoredImage): Promise<void>;
+  getImage(hash: string): Promise<StoredImage | undefined>;
 
   // change log (append-only). ChangeSet.assetId is the lineage key: per-file
   // history is a filter instead of a chain walk.
@@ -584,7 +582,7 @@ export interface Store {
   getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
   putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;
   /** The agent key a connector hands its agent's workspaces: which key, and its sealed secret. */
-  getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined>;
+  getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string; sealedScope: string } | undefined>;
   putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void>;
 
   // --- managed agents (spec §8 Maritime, 2026-10-26) ---

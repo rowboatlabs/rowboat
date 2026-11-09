@@ -64,7 +64,7 @@ describe('PushSender.send', () => {
       calls.push(...batch);
       return { json: async () => ({ data: batch.map(() => ({ status: 'ok', id: 't' })) }) } as any;
     }) as typeof fetch;
-    const sender = new PushSender(store, 'org1', { fetchImpl, receiptDelayMs: 0 });
+    const sender = new PushSender(store, { fetchImpl, receiptDelayMs: 0 });
     return { store, s, sender, calls };
   }
 
@@ -75,7 +75,7 @@ describe('PushSender.send', () => {
     await sender.send(s, msg('harsh'), [row('gagan', 'mention')]);
     expect(calls.map((c) => c.to).sort()).toEqual(['ExponentPushToken[g1]', 'ExponentPushToken[g2]']);
     expect(calls[0]).toMatchObject({ title: 't:mention', body: 'note', sound: 'default' });
-    expect(calls[0].data).toMatchObject({ kind: 'space', orgId: 'org1', spaceId: s.id, threadRootId: '01HYYYYYYYYYYYYYYYYYYYYYYY' });
+    expect(calls[0].data).toMatchObject({ kind: 'space', spaceId: s.id, threadRootId: '01HYYYYYYYYYYYYYYYYYYYYYYY' });
   });
 
   it("level 'all' pushes plain messages; 'off' silences mentions", async () => {
@@ -97,7 +97,7 @@ describe('PushSender.send', () => {
     await store.setPushLevel('gagan', 'all');
     const fetchImpl = (async () =>
       ({ json: async () => ({ data: [{ status: 'error', details: { error: 'DeviceNotRegistered' } }] }) }) as any) as typeof fetch;
-    const sender = new PushSender(store, 'org1', { fetchImpl, receiptDelayMs: 0 });
+    const sender = new PushSender(store, { fetchImpl, receiptDelayMs: 0 });
     await sender.send(s, msg('harsh'), [row('gagan', 'message')]);
     expect(await store.listPushTokens('gagan')).toEqual([]);
   });
@@ -107,7 +107,7 @@ describe('wire registration', () => {
   let harbor: RunningHarbor;
   beforeAll(async () => {
     harbor = await startTestHarbor({
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [{ id: 'gagan', displayName: 'Gagan' }],
     });
   });

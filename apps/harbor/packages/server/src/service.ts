@@ -10,7 +10,7 @@ import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
 import { approvalCardBody } from './core/approval-card.js';
 import { Invocations } from './core/invocations.js';
-import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
+import { Kernel, type ActorCtx, type BindIdentity, type ServerInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
 import { SuperAgents } from './core/super-agents.js';
@@ -80,7 +80,7 @@ import type {
 // the faces and the tests see one object with one surface. Add a feature in
 // its aggregate; add its delegate here.
 
-export type { ActorCtx, BindIdentity, OrgInfo } from './core/kernel.js';
+export type { ActorCtx, BindIdentity, ServerInfo } from './core/kernel.js';
 export type { ActingMode };
 
 export class HarborService {
@@ -100,15 +100,15 @@ export class HarborService {
   constructor(
     store: Store,
     hub: SpaceHub,
-    org: OrgInfo,
-    /** Absent = uploads unconfigured on this org (routes refuse loudly, everything else works). */
+    server: ServerInfo,
+    /** Absent = uploads unconfigured (routes refuse loudly, everything else works). */
     blobs?: BlobStore,
-    /** Absent = no notifications on this org (notify.ts: frames + push). */
+    /** Absent = no notifications (notify.ts: frames + push). */
     notifier?: Notifier,
     /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
     options: { presenceGraceMs?: number } = {},
   ) {
-    this.k = new Kernel(store, hub, org);
+    this.k = new Kernel(store, hub, server);
     this.spaces = new Spaces(this.k, blobs);
     this.assets = new Assets(this.k, blobs);
     this.images = new Images(this.k, blobs);
@@ -149,9 +149,9 @@ export class HarborService {
     return this.agents.ensureJev();
   }
 
-  /** The org this service serves — `address` is set once the listener knows its port (server.ts). */
-  get org(): OrgInfo {
-    return this.k.org;
+  /** The server — `address` is set once the listener knows its port (server.ts). */
+  get server(): ServerInfo {
+    return this.k.server;
   }
 
   /** Over-limit means read-only, never lockout (spec §4). Flip via the control plane; here a knob for tests. */
@@ -565,15 +565,6 @@ export class HarborService {
   }
   clearAvatar(ctx: ActorCtx): Promise<Member> {
     return this.images.clearAvatar(ctx);
-  }
-  orgLogoUrl(ctx: ActorCtx, origin: string): Promise<string | undefined> {
-    return this.images.orgLogoUrl(ctx, origin);
-  }
-  setOrgLogo(ctx: ActorCtx, bytes: Uint8Array, origin: string): Promise<{ logoUrl: string }> {
-    return this.images.setOrgLogo(ctx, bytes, origin);
-  }
-  clearOrgLogo(ctx: ActorCtx): Promise<Record<string, never>> {
-    return this.images.clearOrgLogo(ctx);
   }
   getImage(ctx: ActorCtx, hash: string, opts?: { inline?: boolean }): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
     return this.images.getImage(ctx, hash, opts);

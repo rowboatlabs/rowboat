@@ -48,7 +48,7 @@ async function refused(client: Client, name: string, args: Record<string, unknow
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
@@ -250,11 +250,10 @@ describe('invites to the org', () => {
     }
   });
 
-  it('the /join page names the org and the spaces it joins', async () => {
+  it('the /join page names the spaces it joins (2026-11-09: there is no org to name)', async () => {
     const invite = (await gagan().post('/v1/invites', { spaceIds: [secretId] })).body;
     const html = await (await fetch(`${harbor.url}/join/${invite.token}`)).text();
-    expect(html).toContain("You're invited to Rowboat Labs");
-    expect(html).toContain("You'll join Secret and Lobby");
+    expect(html).toContain("You're invited to Secret and Lobby");
   });
 });
 

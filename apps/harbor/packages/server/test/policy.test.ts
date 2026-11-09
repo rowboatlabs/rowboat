@@ -37,7 +37,6 @@ import {
   canClearAgentHook,
   canReadSpace,
   canJoinSpace,
-  canBind,
   canChangeMembership,
   canEditProfile,
   canRenameSpace,
@@ -174,17 +173,6 @@ describe('policy', () => {
       code: 'forbidden',
       message: 'only the author can delete a message',
     });
-  });
-
-  it('canBind: no domain rule admits anyone; a rule matches the email domain case-insensitively', () => {
-    expect(canBind({ email: 'x@else.com' }, {})).toBeNull();
-    expect(canBind({}, { allowedEmailDomains: [] })).toBeNull();
-    expect(canBind({ email: 'Harsh@Rowboatlabs.com' }, { allowedEmailDomains: ['rowboatlabs.com'] })).toBeNull();
-    expect(canBind({ email: 'x@else.com' }, { allowedEmailDomains: ['rowboatlabs.com', 'acme.io'] })).toEqual({
-      code: 'policy_refused',
-      message: 'this org admits only @rowboatlabs.com, @acme.io accounts',
-    });
-    expect(canBind({}, { allowedEmailDomains: ['rowboatlabs.com'] })).toMatchObject({ code: 'policy_refused' });
   });
 
   it('agents: any person adds one; the owner alone creates keys; the owner or an admin revokes', () => {

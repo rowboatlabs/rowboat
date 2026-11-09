@@ -1264,9 +1264,201 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   { id: '061-member-availability', statements: ["alter table members add column if not exists availability jsonb not null default '{}'::jsonb"] },
+  {
+    // One server (spec §4, 2026-11-09): orgs are dissolved. A person is one
+    // member row keyed by (iss, sub); nothing carries an org_id. Existing
+    // deployments carried many orgs, so first the data is folded — a person
+    // who was a member in several orgs keeps their most active row (most
+    // messages, then earliest joined, then the smaller id), their other rows'
+    // access-bearing state (memberships, agent ownership, read marks, push)
+    // is re-pointed to it, and those rows stay as departed members so every
+    // message they wrote keeps its author; no event in any log is touched.
+    // Then the org tables and columns go. org_settings stays until 063 drops
+    // the knobs it held; members.role until roles move to the membership row.
+    // Blob bytes were stored under a per-org prefix: scripts/flatten-blobs.ts
+    // moves them once, before the build that carries this entry starts.
+    id: '062-one-server',
+    statements: [
+      // People an admin had removed from an org are people again: there is no
+      // org to be removed from, and their memberships were already dropped.
+      `update members set removed_at = null where kind = 'human' and removed_at is not null and deactivated_at is null`,
+      // The merge map: every (iss, sub) with more than one member, its winner and its losers.
+      `create table no_orgs_merge as
+         with ranked as (
+           select mi.iss, mi.sub, mi.member_id,
+                  row_number() over (
+                    partition by mi.iss, mi.sub
+                    order by (select count(*) from messages x where x.author_member_id = mi.member_id) desc,
+                             (select min(ms.joined_at) from memberships ms where ms.member_id = mi.member_id) asc nulls last,
+                             mi.member_id asc) as rn
+           from member_identities mi)
+         select l.iss, l.sub, l.member_id as loser_id, w.member_id as winner_id
+         from ranked l join ranked w on w.iss = l.iss and w.sub = l.sub and w.rn = 1
+         where l.rn > 1`,
+      // Access-bearing rows follow the winner; a winner's own row wins a collision.
+      `delete from memberships ms using no_orgs_merge m where ms.member_id = m.loser_id
+         and exists (select 1 from memberships w where w.space_id = ms.space_id and w.member_id = m.winner_id)`,
+      `update memberships ms set member_id = m.winner_id from no_orgs_merge m where ms.member_id = m.loser_id`,
+      `update members mem set owner_id = m.winner_id from no_orgs_merge m where mem.owner_id = m.loser_id`,
+      `delete from space_read_marks r using no_orgs_merge m where r.member_id = m.loser_id
+         and exists (select 1 from space_read_marks w where w.space_id = r.space_id and w.member_id = m.winner_id)`,
+      `update space_read_marks r set member_id = m.winner_id from no_orgs_merge m where r.member_id = m.loser_id`,
+      `delete from thread_read_marks r using no_orgs_merge m where r.member_id = m.loser_id
+         and exists (select 1 from thread_read_marks w where w.space_id = r.space_id and w.root_message_id = r.root_message_id and w.member_id = m.winner_id)`,
+      `update thread_read_marks r set member_id = m.winner_id from no_orgs_merge m where r.member_id = m.loser_id`,
+      `update push_tokens p set member_id = m.winner_id from no_orgs_merge m where p.member_id = m.loser_id`,
+      `delete from push_prefs p using no_orgs_merge m where p.member_id = m.loser_id`,
+      `delete from activity_seen a using no_orgs_merge m where a.member_id = m.loser_id`,
+      // Rows from the single-org era name a member under an org it was never in (found in the
+      // 2026-11-09 rehearsal on a production copy): they would collide once the key is the member
+      // alone. A row is dropped when its member is not in that org; of what remains, the newest stays.
+      `delete from activity_seen a where not exists (select 1 from members m where m.id = a.member_id and m.org_id = a.org_id)`,
+      `delete from activity_seen a where exists (select 1 from activity_seen b where b.member_id = a.member_id
+         and (b.seen_at > a.seen_at or (b.seen_at = a.seen_at and b.org_id > a.org_id)))`,
+      `delete from push_prefs p where not exists (select 1 from members m where m.id = p.member_id and m.org_id = p.org_id)`,
+      `delete from push_prefs p where exists (select 1 from push_prefs q where q.member_id = p.member_id and q.org_id > p.org_id)`,
+      // The losers stay, departed; the identity now names the winner alone.
+      `update members mem set removed_at = coalesce(mem.removed_at, to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+         from no_orgs_merge m where mem.id = m.loser_id`,
+      `delete from member_identities mi using no_orgs_merge m where mi.member_id = m.loser_id`,
+      `drop table no_orgs_merge`,
+      // One row per device token (the same phone registered in two orgs twice): the latest wins.
+      `delete from push_tokens p where exists (select 1 from push_tokens q where q.token = p.token
+         and (q.updated_at > p.updated_at or (q.updated_at = p.updated_at and q.org_id > p.org_id)))`,
+      // The agent tables reference members(org_id, id): let go before members is re-keyed.
+      `alter table agent_keys drop constraint agent_keys_org_id_agent_id_fkey`,
+      `alter table agent_connection_credentials drop constraint agent_connection_credentials_org_id_agent_id_fkey`,
+      `alter table agent_connection_threads drop constraint agent_connection_threads_org_id_agent_id_fkey`,
+      `alter table agent_option_defaults drop constraint agent_option_defaults_org_id_agent_id_fkey`,
+      `alter table agent_connector_keys drop constraint agent_connector_keys_org_id_agent_id_fkey`,
+      `alter table agent_hooks drop constraint agent_hooks_org_id_agent_id_fkey`,
+      // Members: one row per id on the server (ids are ULIDs; a collision here is a loud stop).
+      `alter table members drop constraint members_pkey`,
+      `alter table members add primary key (id)`,
+      `alter table members drop column org_id`,
+      // Identity: (iss, sub) → one member.
+      `alter table member_identities drop constraint member_identities_pkey`,
+      `alter table member_identities drop column org_id`,
+      `alter table member_identities add primary key (iss, sub)`,
+      // Spaces: the DM key is a pair of server-wide ids now; where the same two people had a DM
+      // in two orgs, the older stays the DM and the newer becomes an ordinary two-person space —
+      // unless nothing was ever said in it (notes to self opened in several orgs, found in the
+      // 2026-11-09 rehearsal): an empty duplicate is deleted, its memberships and marks with it.
+      `drop index if exists spaces_org`,
+      `drop index if exists spaces_default`,
+      `drop index if exists spaces_direct_key`,
+      `update spaces s set direct_key = (select '[' || string_agg('"' || ms.member_id || '"', ',' order by ms.member_id) || ']' from memberships ms where ms.space_id = s.id)
+         where s.kind = 'direct'`,
+      `delete from spaces s where s.kind = 'direct' and not exists (select 1 from messages x where x.space_id = s.id)
+         and exists (select 1 from spaces o where o.kind = 'direct' and o.direct_key = s.direct_key
+           and (o.created_at < s.created_at or (o.created_at = s.created_at and o.id < s.id)))`,
+      `update spaces s set kind = 'shared', direct_key = null,
+         name = coalesce((select string_agg(m.display_name, ' & ' order by m.display_name) from memberships ms join members m on m.id = ms.member_id where ms.space_id = s.id), s.name)
+         where s.kind = 'direct' and exists (select 1 from spaces o where o.kind = 'direct' and o.direct_key = s.direct_key
+           and (o.created_at < s.created_at or (o.created_at = s.created_at and o.id < s.id)))`,
+      `create unique index spaces_direct_key on spaces (direct_key) where kind = 'direct'`,
+      `create index if not exists spaces_default on spaces (id) where is_default`,
+      `alter table spaces drop column org_id`,
+      // Invites: resolution goes token → space; the column was only ever the org's.
+      `alter table invites drop column org_id`,
+      // Per-member state, keyed by the member alone.
+      `alter table push_tokens drop constraint push_tokens_pkey`,
+      `drop index if exists push_tokens_member`,
+      `alter table push_tokens drop column org_id`,
+      `alter table push_tokens add primary key (token)`,
+      `create index push_tokens_member on push_tokens (member_id)`,
+      `alter table push_prefs drop constraint push_prefs_pkey`,
+      `alter table push_prefs drop column org_id`,
+      `alter table push_prefs add primary key (member_id)`,
+      `alter table activity_seen drop constraint activity_seen_pkey`,
+      `alter table activity_seen drop column org_id`,
+      `alter table activity_seen add primary key (member_id)`,
+      // Agent tables: re-keyed on the agent, referencing members(id) again.
+      `alter table agent_keys drop constraint agent_keys_pkey`,
+      `drop index if exists agent_keys_agent`,
+      `alter table agent_keys drop column org_id`,
+      `alter table agent_keys add primary key (id)`,
+      `create index agent_keys_agent on agent_keys (agent_id)`,
+      `alter table agent_keys add constraint agent_keys_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table invocations drop constraint invocations_pkey`,
+      `drop index if exists invocations_message_agent`,
+      `drop index if exists invocations_agent_state`,
+      `alter table invocations drop column org_id`,
+      `alter table invocations add primary key (id)`,
+      `create unique index invocations_message_agent on invocations (message_id, agent_id)`,
+      `create index invocations_agent_state on invocations (agent_id, state)`,
+      `alter table agent_capabilities drop constraint agent_capabilities_pkey`,
+      `alter table agent_capabilities drop column org_id`,
+      `alter table agent_capabilities add primary key (agent_id)`,
+      // Sealed values keep the scope they were sealed under (sealing.ts): the org's id for every row from before today.
+      `alter table agent_connection_credentials add column sealed_scope text not null default 'server'`,
+      `update agent_connection_credentials set sealed_scope = org_id`,
+      `alter table agent_connection_credentials drop constraint agent_connection_credentials_pkey`,
+      `alter table agent_connection_credentials drop column org_id`,
+      `alter table agent_connection_credentials add primary key (agent_id)`,
+      `alter table agent_connection_credentials add constraint agent_connection_credentials_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table agent_connection_threads drop constraint agent_connection_threads_pkey`,
+      `alter table agent_connection_threads drop column org_id`,
+      `alter table agent_connection_threads add primary key (agent_id, space_id, thread_root_id)`,
+      `alter table agent_connection_threads add constraint agent_connection_threads_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table approvals drop constraint approvals_pkey`,
+      `drop index if exists approvals_request`,
+      `drop index if exists approvals_agent_state`,
+      `alter table approvals drop column org_id`,
+      `alter table approvals add primary key (id)`,
+      `create unique index approvals_request on approvals (invocation_id, request_key)`,
+      `create index approvals_agent_state on approvals (agent_id, state)`,
+      `alter table agent_option_defaults drop constraint agent_option_defaults_pkey`,
+      `alter table agent_option_defaults drop column org_id`,
+      `alter table agent_option_defaults add primary key (agent_id)`,
+      `alter table agent_option_defaults add constraint agent_option_defaults_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table agent_connector_keys add column sealed_scope text not null default 'server'`,
+      `update agent_connector_keys set sealed_scope = org_id`,
+      `alter table agent_connector_keys drop constraint agent_connector_keys_pkey`,
+      `alter table agent_connector_keys drop column org_id`,
+      `alter table agent_connector_keys add primary key (agent_id)`,
+      `alter table agent_connector_keys add constraint agent_connector_keys_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table agent_hooks drop constraint agent_hooks_pkey`,
+      `alter table agent_hooks drop column org_id`,
+      `alter table agent_hooks add primary key (agent_id)`,
+      `alter table agent_hooks add constraint agent_hooks_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table agent_hosting drop constraint agent_hosting_pkey`,
+      `drop index if exists agent_hosting_agent`,
+      `drop index if exists agent_hosting_status`,
+      `alter table agent_hosting drop column org_id`,
+      `alter table agent_hosting add primary key (id)`,
+      `create unique index agent_hosting_agent on agent_hosting (agent_id) where agent_id is not null`,
+      `create index agent_hosting_status on agent_hosting (status)`,
+      // Profile images: the server's one registry. The org logo is gone (spec §4 Member profile, 2026-11-09).
+      `alter table org_images drop constraint org_images_pkey`,
+      `delete from org_images a where exists (select 1 from org_images b where b.hash = a.hash and b.uploaded_at < a.uploaded_at)`,
+      `delete from org_images a where exists (select 1 from org_images b where b.hash = a.hash and b.uploaded_at = a.uploaded_at and b.org_id < a.org_id)`,
+      `alter table org_images drop column org_id`,
+      `alter table org_images add primary key (hash)`,
+      `alter table org_images rename to images`,
+      `drop table org_logos`,
+      // The knobs org_settings held die in 062; until then one row, keyed by a constant.
+      `delete from org_settings where org_id <> (select min(org_id) from org_settings)`,
+      `update org_settings set org_id = 'server'`,
+      `alter table org_settings alter column org_id set default 'server'`,
+      // The backfill ledger was one row per org; one row now.
+      `insert into schema_migrations (id, applied_at)
+         select distinct on (regexp_replace(id, ':[^:]+$', '')) regexp_replace(id, ':[^:]+$', ''), applied_at
+         from schema_migrations where id like 'backfill:%' and id ~ ':[^:]+:[^:]+$'
+         order by regexp_replace(id, ':[^:]+$', ''), applied_at
+         on conflict (id) do nothing`,
+      // The tenancy itself.
+      `drop table org_domains`,
+      `drop table orgs`,
+    ],
+  },
 ];
 
-export async function migrate(db: SqlDb): Promise<void> {
+/**
+ * Apply the ladder. `upTo` (tests only) stops after the named entry, so a
+ * migration test can seed rows in the shape the next entry expects.
+ */
+export async function migrate(db: SqlDb, opts: { upTo?: string } = {}): Promise<void> {
   await db.exec(
     'create table if not exists schema_migrations (id text primary key, applied_at text not null)',
   );
@@ -1281,5 +1473,6 @@ export async function migrate(db: SqlDb): Promise<void> {
         new Date().toISOString(),
       ]);
     });
+    if (m.id === opts.upTo) return;
   }
 }

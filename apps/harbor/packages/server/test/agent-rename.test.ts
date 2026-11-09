@@ -15,7 +15,7 @@ const rename = (token: string, displayName: string) => as(token).put(`/v1/agents
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rename Test Org',
+    name: 'Rename Test Org',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

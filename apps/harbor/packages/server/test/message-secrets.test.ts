@@ -36,7 +36,7 @@ function postWith(body: string, secrets: unknown[], token = 'dev-gagan', space =
 beforeAll(async () => {
   process.env.HARBOR_INTEGRATION_KEY = TEST_KEY;
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedSpaces: [{ name: 'Lobby', creator: 'gagan' }],
     seedMembers: [
       { id: 'gagan', displayName: 'Gagan' },
@@ -122,7 +122,7 @@ describe('sharing a secret with the members a message mentions', () => {
       createdAt: '2026-11-04T10:00:00.000Z',
       updatedAt: '2026-11-04T10:00:00.000Z',
     };
-    const text = buildPrompt({ invocation, agentId: scout.id, context: [], names: new Map(), orgAddress: 'localhost', orgUrl: 'http://localhost', attachments: [], earlierAttachments: [] });
+    const text = buildPrompt({ invocation, agentId: scout.id, context: [], names: new Map(), address: 'localhost', serverUrl: 'http://localhost', attachments: [], earlierAttachments: [] });
     expect(text).toContain(`- STRIPE_KEY: http://localhost${secretUrl(messageId, 'STRIPE_KEY')}`);
     expect(text).toContain('never write its value in the thread');
   });

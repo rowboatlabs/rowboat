@@ -46,7 +46,7 @@ async function space(name: string, visibility: 'open' | 'private', members: stri
 beforeAll(async () => {
   blobs = new MemoryBlobStore();
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     blobs,
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },

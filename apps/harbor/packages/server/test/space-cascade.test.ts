@@ -52,7 +52,7 @@ describe('space cascade (migration 039)', () => {
         await db.query(`alter table ${table} drop constraint ${table}_space_fk`);
       }
       await db.query(`delete from schema_migrations where id = '039-space-cascade-fks'`);
-      await db.query(`insert into spaces (org_id, id, name, created_at) values ('org-default', 'live', 'Live', '2026-10-13T00:00:00Z')`);
+      await db.query(`insert into spaces (id, name, created_at) values ('live', 'Live', '2026-10-13T00:00:00Z')`);
       for (const space of ['live', 'gone']) {
         await db.query(`insert into memberships (space_id, member_id, joined_at) values ($1, 'm', '2026-10-13T00:00:00Z')`, [space]);
         await db.query(`insert into events (space_id, stream_offset, at, event) values ($1, 1, '2026-10-13T00:00:00Z', '{}'::jsonb)`, [space]);
@@ -78,7 +78,7 @@ describe('deleting a space row', () => {
     db = fresh.db;
     harbor = await startHarbor({
       store: fresh.store,
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'gagan', displayName: 'Gagan' },

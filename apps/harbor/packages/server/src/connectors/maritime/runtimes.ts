@@ -17,7 +17,7 @@ import { activityOf, answerOf, failureOf, type AgentEvent } from '../common/agen
 
 export interface TurnInput {
   /** The org's address with its scheme, and the agent's own Spaces key, for the runtime's MCP server and file downloads. */
-  orgUrl: string;
+  serverUrl: string;
   agentKey: string;
   /** The files for this turn, absolute on the VM: the request, the event stream, stderr, and the final message. */
   promptPath: string;
@@ -146,8 +146,8 @@ const signInOf = (err: string | undefined): 'chatgpt' | 'none' | undefined => {
 };
 
 /** The MCP server every runtime gets: Spaces, acting as this agent. */
-const mcpJson = (orgUrl: string) =>
-  JSON.stringify({ mcpServers: { rowboat: { type: 'http', url: `${orgUrl}/mcp`, headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } } } });
+const mcpJson = (serverUrl: string) =>
+  JSON.stringify({ mcpServers: { rowboat: { type: 'http', url: `${serverUrl}/mcp`, headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } } } });
 
 // --- Hermes ---------------------------------------------------------------------------------
 
@@ -174,7 +174,7 @@ const hermes: Runtime = {
     // so the two values are written there too, with `hermes config set`, whenever they differ.
     return [
       'set -e',
-      `export HERMES_HOME=/opt/data HOME=/opt/data ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      `export HERMES_HOME=/opt/data HOME=/opt/data ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'export PATH="/command:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"',
       'mkdir -p /opt/data/rowboat /opt/data/workspace',
       // The gateway runs as the hermes user; a turn run as root would leave root-owned session files behind.
@@ -238,13 +238,13 @@ const codex: Runtime = {
     const flags = [
       input.model ? `-m ${q(input.model)}` : '',
       input.effort ? `-c ${q(`model_reasoning_effort="${input.effort}"`)}` : '',
-      `-c ${q(`mcp_servers.rowboat.url="${input.orgUrl}/mcp"`)}`,
+      `-c ${q(`mcp_servers.rowboat.url="${input.serverUrl}/mcp"`)}`,
       `-c ${q('mcp_servers.rowboat.bearer_token_env_var="ROWBOAT_AGENT_KEY"')}`,
     ].filter(Boolean).join(' ');
     // The template's own flags (its server.js, read 2026-10-26): the VM is the sandbox, the final message goes to -o.
     return [
       'set -e',
-      `export CODEX_HOME=/data/.codex ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      `export CODEX_HOME=/data/.codex ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
@@ -319,10 +319,10 @@ const claudeCode: Runtime = {
     // the CLI ships inside the Agent SDK the template installs, or on PATH in an image that installs it.
     return [
       'set -e',
-      `export IS_SANDBOX=1 CLAUDE_CONFIG_DIR=/data/.claude ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      `export IS_SANDBOX=1 CLAUDE_CONFIG_DIR=/data/.claude ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
-      `printf '%s' ${q(mcpJson(input.orgUrl))} > /data/rowboat/mcp.json`,
+      `printf '%s' ${q(mcpJson(input.serverUrl))} > /data/rowboat/mcp.json`,
       'CLI="$(command -v claude 2>/dev/null || true)"',
       '[ -n "$CLI" ] || for f in /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /app/node_modules/@anthropic-ai/claude-code/cli.js; do [ -f "$f" ] && CLI="node $f" && break; done',
       '[ -n "$CLI" ] || { echo "no Claude Code CLI found in this VM" >&2; exit 127; }',

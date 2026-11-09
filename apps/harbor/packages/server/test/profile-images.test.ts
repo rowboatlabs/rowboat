@@ -2,12 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Member } from '@rowboat/spaces-protocol';
 import { blobHash } from '../src/blobs.js';
 import { MAX_PROFILE_IMAGE_BYTES } from '../src/core/images.js';
-import { canSetOrgLogo } from '../src/policy.js';
 import type { RunningHarbor } from '../src/server.js';
 import { liveClient, startTestHarbor } from './helpers.js';
 
 // Profile images over the render face (2026-10-02): a member's avatar, the
-// org's logo, and the one route that serves both to the whole org.
+// the one route that serves them to every member (the org's logo went with the orgs, 2026-11-09).
 
 // A real 1×1 PNG (sniffable magic bytes), and a second one that differs.
 const PNG_A = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -34,7 +33,7 @@ let gagan: ReturnType<typeof api>;
 describe('profile images over the render face', () => {
   beforeAll(async () => {
     harbor = await startTestHarbor({
-      orgName: 'Image Test Org',
+      name: 'Image Test Org',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'gagan', displayName: 'Gagan' },
@@ -105,33 +104,5 @@ describe('profile images over the render face', () => {
     expect(cleared.body.member.avatarUrl).toBeUndefined();
     expect((await gagan.del('/v1/me/avatar')).body.member.avatarUrl).toBeUndefined();
     expect((await gagan.get('/v1/me')).body.member.avatarUrl).toBeUndefined();
-  });
-
-  it('lets an admin set the org logo, and every member read it', async () => {
-    expect((await gagan.get('/v1/org/logo')).body).toEqual({});
-
-    const refused = await gagan.putImage('/v1/org/logo', PNG_B);
-    expect(refused.status).toBe(403);
-    expect((await gagan.get('/v1/org/logo')).body).toEqual({});
-
-    const set = await admin.putImage('/v1/org/logo', PNG_B);
-    expect(set.status).toBe(200);
-    const logoUrl = `${harbor.url}/v1/images/${blobHash(PNG_B)}`;
-    expect(set.body).toEqual({ logoUrl });
-    expect((await gagan.get('/v1/org/logo')).body).toEqual({ logoUrl });
-    expect((await gagan.raw(logoUrl)).status).toBe(200);
-  });
-
-  it('lets only an admin clear the logo, idempotently', async () => {
-    expect((await gagan.del('/v1/org/logo')).status).toBe(403);
-    expect((await admin.del('/v1/org/logo')).body).toEqual({});
-    expect((await admin.del('/v1/org/logo')).body).toEqual({});
-    expect((await gagan.get('/v1/org/logo')).body).toEqual({});
-  });
-
-  it('policy: the logo is an admin’s', () => {
-    const member = (role: Member['role']): Member => ({ id: 'm', displayName: 'M', role, kind: 'human' });
-    expect(canSetOrgLogo(member('admin'))).toBeNull();
-    expect(canSetOrgLogo(member('member'))?.code).toBe('forbidden');
   });
 });

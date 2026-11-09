@@ -17,7 +17,7 @@ const INSTRUCTIONS = 'You are Scout, the team’s reviewer.\n- Be brief.\n- Run 
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'gagan', displayName: 'Gagan' },
       { id: 'harsh', displayName: 'Harsh' },
@@ -105,7 +105,7 @@ describe('the prompt a coding connector sends', () => {
     updatedAt: '2026-10-29T10:00:00.000Z',
   });
   const prompt = (inv: Invocation, inSystem = false) =>
-    buildPrompt({ invocation: inv, agentId: 'a1', context: [], names: new Map([['gagan', 'Gagan']]), orgAddress: 'localhost', orgUrl: 'http://localhost', attachments: [], earlierAttachments: [], instructionsInSystemPrompt: inSystem });
+    buildPrompt({ invocation: inv, agentId: 'a1', context: [], names: new Map([['gagan', 'Gagan']]), address: 'localhost', serverUrl: 'http://localhost', attachments: [], earlierAttachments: [], instructionsInSystemPrompt: inSystem });
 
   it('puts the instructions right after the request, which stays first for its commands', () => {
     const text = prompt(invocation('Be brief.'));

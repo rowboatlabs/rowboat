@@ -38,7 +38,7 @@ beforeAll(async () => {
   process.env.HARBOR_INTEGRATION_KEY = TEST_KEY;
   PLATFORMS.replicas = standIn;
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
     seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
     seedMembers: [
@@ -153,7 +153,7 @@ describe('an agent Harbor reaches through a platform', () => {
   it('starts, at boot, a connector for every platform agent already there', async () => {
     envs.clear();
     const { SpaceHub } = await import('../src/hub.js');
-    const host = new HostedConnectors({ store: harbor.store, hub: new SpaceHub(), service: harbor.service, orgId: 'org-default' });
+    const host = new HostedConnectors({ store: harbor.store, hub: new SpaceHub(), service: harbor.service});
     await host.startAll();
     expect([...envs.keys()]).toEqual([agent.id]);
     await host.stopAll();

@@ -14,7 +14,7 @@ const as = (token: string) => restClient(harbor, token);
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Profile Test Org',
+    name: 'Profile Test Org',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
