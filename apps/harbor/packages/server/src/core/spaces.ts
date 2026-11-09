@@ -599,17 +599,33 @@ export class Spaces {
     if (found.state !== 'ok') {
       throw new HarborError('forbidden', `invite is ${found.state}`);
     }
-    this.k.guardWrite();
-    let member = await this.k.store.getMemberByIdentity(identity.iss, identity.sub);
-    if (member) enforce(canSignIn(member));
-    if (!member) {
-      // Minted id, NOT the raw sub: issuer subjects live only in the mapping
-      // table, so the server can change AS someday without rewriting history.
-      member = { id: this.k.ulid(), displayName: seedDisplayName(identity), kind: 'human' };
-      await this.k.store.putMember(member);
-      await this.k.store.putIdentity(identity.iss, identity.sub, member.id);
-    }
+    const { member } = await this.memberForIdentity(identity);
     return this.acceptInvite({ memberId: member.id }, token);
+  }
+
+  /**
+   * A signed-in account becomes a member on first contact (POST /v1/me,
+   * 2026-11-09, spec §4 Joining): the cold start with no invite link. The
+   * same binding an invite does, without the space.
+   */
+  async enroll(identity: BindIdentity): Promise<{ member: Member; created: boolean }> {
+    this.k.guardWrite();
+    return this.memberForIdentity(identity);
+  }
+
+  /** The member behind an identity, made on first sight; a deactivated one is refused as at sign-in. */
+  private async memberForIdentity(identity: BindIdentity): Promise<{ member: Member; created: boolean }> {
+    const existing = await this.k.store.getMemberByIdentity(identity.iss, identity.sub);
+    if (existing) {
+      enforce(canSignIn(existing));
+      return { member: existing, created: false };
+    }
+    // Minted id, NOT the raw sub: issuer subjects live only in the mapping
+    // table, so the server can change AS someday without rewriting history.
+    const member: Member = { id: this.k.ulid(), displayName: seedDisplayName(identity), kind: 'human' };
+    await this.k.store.putMember(member);
+    await this.k.store.putIdentity(identity.iss, identity.sub, member.id);
+    return { member, created: true };
   }
 
   /**

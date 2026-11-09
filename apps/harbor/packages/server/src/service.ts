@@ -469,6 +469,9 @@ export class HarborService {
   bindInvite(identity: BindIdentity, token: string): Promise<AcceptInviteResult> {
     return this.spaces.bindInvite(identity, token);
   }
+  enroll(identity: BindIdentity): Promise<{ member: Member; created: boolean }> {
+    return this.spaces.enroll(identity);
+  }
   acceptInvite(ctx: ActorCtx, token: string): Promise<AcceptInviteResult> {
     return this.spaces.acceptInvite(ctx, token);
   }

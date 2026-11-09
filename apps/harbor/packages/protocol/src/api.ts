@@ -273,6 +273,18 @@ export const routes = {
     response: z.object({ member: Member }),
   },
   /**
+   * Become a member (2026-11-09, spec §4 Joining): a signed-in account with
+   * no member row yet gets one, seeded from its IdP claims — the cold start
+   * with no invite link. An existing member gets their row back (idempotent);
+   * a deactivated one is refused like any sign-in. With `acceptInvite`'s bind,
+   * one of the two routes a token with no mapping may call.
+   */
+  enroll: {
+    method: 'POST',
+    path: '/v1/me',
+    response: z.object({ member: Member, created: z.boolean() }),
+  },
+  /**
    * Your own display name and title (spec §4 Member profile, 2026-10-19).
    * Only you edit your profile; an agent member's name is its owner's choice
    * at creation, so agents are refused. Unchanged fields are a no-op.

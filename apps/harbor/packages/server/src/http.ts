@@ -174,7 +174,8 @@ export function buildHttpApp(deps: {
       : sessionToken({ cookie: c.req.header('cookie'), origin: c.req.header('origin') }, session.webOrigins, { originless: blobRead(c.req.method, c.req.path) });
     if (cookie) c.set('viaSession', true);
     const credentials = { authorization, queryToken: query ?? cookie };
-    if (c.req.path === routes.acceptInvite.path) {
+    // The two routes a signed-in stranger may call: accepting an invite, and becoming a member (2026-11-09).
+    if (c.req.path === routes.acceptInvite.path || (c.req.path === routes.enroll.path && c.req.method === 'POST')) {
       const { identity, member } = await authenticateRequest(auth, credentials, { allowUnmapped: true });
       c.set('identity', identity);
       if (member) c.set('memberId', member.id);
@@ -211,6 +212,16 @@ export function buildHttpApp(deps: {
   });
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
+
+  // Becoming a member (2026-11-09, spec §4 Joining): the cold start with no invite link. A member already
+  // (the dev driver, an agent key, a mapped identity) gets their row back.
+  app.post(routes.enroll.path, async (c) => {
+    const memberId = c.get('memberId');
+    const result = memberId
+      ? { member: await service.me({ memberId }), created: false }
+      : await service.enroll(c.get('identity')!);
+    return reply(c, routes.enroll.response, result);
+  });
 
   // Account deletion (2026-10-08; here since 2026-11-09, there being no apex): the app calls it before the
   // account API bans the login, while the token is still good. Idempotent.
