@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowRight, Bot, Hash, Link as LinkIcon, Loader2, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -9,15 +9,19 @@ import { openServerDialog } from '@/lib/server-dialog'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 
-// New chat (spec §10, 2026-11-09): the one sheet behind the chat list's +.
-// A group, a message to a contact or one of your agents, a new agent, or a
-// group you were sent a link to. It opens where the result is.
+// New chat (spec §10, 2026-11-09): the one sheet behind the sidebar's New
+// space button and its section +'s. A group, a message to a contact or one
+// of your agents, a new agent, or a group you were sent a link to. It opens
+// where the result is; `start` opens it straight on a screen.
 
 type Screen = 'menu' | 'group'
+export type NewChatStart = Screen | 'message'
 
-export function NewChatDialog({ org, open, onOpenChange, onOpenSpace, onOpenAgents }: {
+export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenSpace, onOpenAgents }: {
     org: OrgWithSpaces
     open: boolean
+    /** The screen to open on: the menu, the group form, or the message picker. */
+    start?: NewChatStart
     onOpenChange: (open: boolean) => void
     onOpenSpace: (orgId: string, spaceId: string) => void
     onOpenAgents?: (orgId: string) => void
@@ -26,6 +30,11 @@ export function NewChatDialog({ org, open, onOpenChange, onOpenSpace, onOpenAgen
     const [messaging, setMessaging] = useState(false)
     const [name, setName] = useState('')
     const [busy, setBusy] = useState(false)
+    useEffect(() => {
+        if (!open) return
+        setScreen(start === 'group' ? 'group' : 'menu')
+        setMessaging(start === 'message')
+    }, [open, start])
     const close = (next: boolean) => {
         onOpenChange(next)
         if (!next) {

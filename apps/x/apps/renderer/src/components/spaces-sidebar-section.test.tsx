@@ -5,9 +5,9 @@ import { SidebarProvider } from '@/components/ui/sidebar'
 import { forgetOrg } from '@/lib/spaces-read-state'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
-// The chat list (spec §10, 2026-11-09): one list, newest activity first, with
-// chips to narrow it; New chat behind the +; your link at the foot. The app
-// sidebar carries one Spaces row with the unread across every chat.
+// The sidebar (spec §10, 2026-11-09, sections since the evening's design
+// pass): New space leads, Activity and Threads above, then Agents (highlighted),
+// Groups and People, each newest first with its own +; your link at the foot.
 
 const { org, topics, activity } = vi.hoisted(() => ({
     org: {
@@ -41,7 +41,7 @@ vi.mock('@/hooks/use-space-members', () => ({
 }))
 vi.mock('@/components/spaces-view', () => ({}))
 vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: ({ name, online }: { name: string; online?: boolean }) => <span data-testid={`avatar-${name}`} data-online={online} />, MemberStatus: () => null }))
-vi.mock('@/components/spaces/new-chat-dialog', () => ({ NewChatDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="New chat" /> : null }))
+vi.mock('@/components/spaces/new-chat-dialog', () => ({ NewChatDialog: ({ open, start }: { open: boolean; start?: string }) => open ? <div role="dialog" aria-label="New chat" data-start={start} /> : null }))
 vi.mock('@/components/spaces/personal-link-dialog', () => ({ PersonalLinkDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Your link" /> : null }))
 vi.mock('@/components/spaces/remove-server-dialog', () => ({ RemoveServerDialog: () => null }))
 vi.mock('@/lib/spaces-direct', () => ({
@@ -64,43 +64,45 @@ afterEach(() => {
 
 const nav = (props: Partial<Parameters<typeof ServerSpaceNavigation>[0]> = {}) =>
     render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main" onOpenSpace={vi.fn()} showDiscussions={false} {...props} /></SidebarProvider>)
-// The rows' own buttons: a group row also carries its ⋯ options button.
-const chatNames = () => within(screen.getByRole('tablist', { name: 'Show' }).nextElementSibling as HTMLElement).getAllByRole('button')
-    .filter((b) => !b.getAttribute('aria-label')?.startsWith('Options for')).map((b) => b.textContent?.replace(/you$|opening…$/, '').trim())
+// A section's rows: a group row also carries its ⋯ options button, a header its +.
+const names = (section: string) => within(screen.getByRole('region', { name: section })).getAllByRole('button')
+    .filter((b) => { const label = b.getAttribute('aria-label') ?? ''; return !label.startsWith('Options for') && !['New group', 'New message'].includes(label) })
+    .map((b) => b.textContent?.replace(/you$|opening…$/, '').replace(/^(Agents)\d+$/, '$1').trim())
 
 
 describe('the chat list', () => {
-    it('is one list, newest activity first, groups and people alike, with the self row waiting at the end', () => {
+    it('splits chats into Agents, Groups and People, each newest activity first, the self row last among people', () => {
         activity.dm1 = '2026-10-03'
         activity.founders = '2026-10-02'
         activity.main = '2026-10-01'
-        nav()
-        expect(chatNames()).toEqual(['Person 1', 'founders', 'main', 'Claude', 'Person 0', 'Me'])
+        nav({ onOpenAgents: vi.fn() })
+        expect(names('Agents')).toEqual(['Agents', 'Claude', 'Add an agent'])
+        expect(names('Groups')).toEqual(['founders', 'main'])
+        expect(names('People')).toEqual(['Person 1', 'Person 0', 'Me'])
     })
 
-    it('narrows by chip — groups, people, your agents — and remembers the chip', () => {
+    it('leads with New space, then Activity, Threads and the Agents header, and pins your link to the foot', () => {
+        const openActivity = vi.fn()
+        const openAgents = vi.fn()
+        nav({ onOpenActivity: openActivity, onOpenAgents: openAgents, onOpenThreads: vi.fn() })
+        const order = ['New space', 'Activity', 'Threads', /^Agents/, 'Share your link'].map((name) => screen.getByRole('button', { name }))
+        for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        fireEvent.click(order[1])
+        expect(openActivity).toHaveBeenCalledWith(org.id)
+        fireEvent.click(order[3])
+        expect(openAgents).toHaveBeenCalledWith(org.id)
+        fireEvent.click(screen.getByRole('button', { name: 'Add an agent' }))
+        expect(openAgents).toHaveBeenCalledTimes(2)
+    })
+
+    it('opens the new-chat sheet on the screen the click meant: New space on the group form, the People + on a message', () => {
         nav()
-        fireEvent.click(screen.getByRole('tab', { name: 'Groups' }))
-        expect(chatNames()).toEqual(['founders', 'main'])
-        fireEvent.click(screen.getByRole('tab', { name: 'People' }))
-        expect(chatNames()).toEqual(['Person 1', 'Person 0', 'Me'])
-        fireEvent.click(screen.getByRole('tab', { name: 'Agents' }))
-        expect(chatNames()).toEqual(['Claude'])
-        expect(localStorage.getItem('spaces:chatFilter')).toBe('agents')
+        fireEvent.click(screen.getByRole('button', { name: 'New space' }))
+        expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute('data-start', 'group')
         cleanup()
         nav()
-        expect(screen.getByRole('tab', { name: 'Agents' })).toHaveAttribute('aria-selected', 'true')
-    })
-
-    it('leads with Activity, Threads and Agents, and pins your link to the foot', () => {
-        const openActivity = vi.fn()
-        nav({ onOpenActivity: openActivity, onOpenAgents: vi.fn(), onOpenThreads: vi.fn() })
-        const order = ['Activity', 'Threads', 'Agents', 'New chat', 'Share your link'].map((name) => screen.getByRole('button', { name }))
-        for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-        fireEvent.click(order[0])
-        expect(openActivity).toHaveBeenCalledWith(org.id)
-        fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
-        expect(screen.getByRole('dialog', { name: 'New chat' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'New message' }))
+        expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute('data-start', 'message')
     })
 
     it('shares your link from the foot row', () => {

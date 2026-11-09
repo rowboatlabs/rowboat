@@ -7,9 +7,6 @@ import { useRowboatConfig } from '@/hooks/use-rowboat-config'
 import { ACCOUNT_ROW, tokenEmail } from '@/lib/spaces-account'
 import { SHORTCUTS } from '@/lib/shortcuts'
 
-/** The Spaces mode's rail, the web app's w-12. */
-export const SPACES_RAIL_PX = 48
-
 /** Your Rowboat sign-in, kept current as you sign in and out. */
 function useRowboatEmail(): { signedIn: boolean; email: string | null; refresh: () => void } {
   const [account, setAccount] = useState<{ signedIn: boolean; email: string | null }>({ signedIn: false, email: null })
@@ -26,14 +23,14 @@ function useRowboatEmail(): { signedIn: boolean; email: string | null; refresh: 
 }
 
 /**
- * The Spaces mode's left rail (2026-11-06): the Rowboat mark where the
- * sidebar was, and your Spaces account at its foot (2026-11-09), as the web
- * app's rail has them (web/account-menu.tsx). It starts below the titlebar
- * band, which the traffic lights own. The rows under the shared menu are the
- * desktop's: the web's notification switch and download link have no
- * meaning here, and Settings is how Local's things stay one click away.
+ * Your Spaces account on the desktop (2026-11-09): the row at the foot of the
+ * Spaces sidebar, where the thin mode rail of 2026-11-06 used to stand with
+ * the logo and this menu — the rail went the same evening, the logo moved to
+ * the sidebar's head. The rows under the shared menu are the desktop's: the
+ * web's notification switch and download link have no meaning here, and
+ * Settings is how Local's things stay one click away.
  */
-export function SpacesModeRail({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function SpacesAccount({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { signedIn, email, refresh } = useRowboatEmail()
   const appUrl = useRowboatConfig()?.appUrl ?? null
   const signIn = () => void window.ipc.invoke('oauth:connect', { provider: 'rowboat' })
@@ -43,10 +40,7 @@ export function SpacesModeRail({ onOpenSettings }: { onOpenSettings: () => void 
     .then((r) => { if (r.success) { refresh(); toast.success('Signed out of Rowboat') } else toast.error('Failed to sign out of Rowboat') })
     .catch(() => toast.error('Failed to sign out of Rowboat'))
   return (
-    <nav aria-label="Rowboat" className="fixed bottom-0 left-0 top-10 z-10 flex flex-col items-center border-r border-border bg-[var(--rowboat-panel-soft)] py-3" style={{ width: SPACES_RAIL_PX }}>
-      <img src="/logo-only.png" alt="Rowboat" className="size-6 rounded-md" />
-      <div className="flex-1" />
-      <SpacesAccountMenu email={email}>
+      <SpacesAccountMenu email={email} variant="row">
         {/* The account app's plan page, as Local's account menu opens it. */}
         {signedIn && appUrl && (
           <a href={`${appUrl}?intent=upgrade`} target="_blank" rel="noreferrer" className={ACCOUNT_ROW}>
@@ -67,6 +61,5 @@ export function SpacesModeRail({ onOpenSettings }: { onOpenSettings: () => void 
           </button>
         )}
       </SpacesAccountMenu>
-    </nav>
   )
 }

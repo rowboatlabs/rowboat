@@ -1,3 +1,4 @@
+import { EmptySpaceStart } from '@/components/spaces/empty-space-start'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { useSpaceAccess, ArchivedNotice } from '@/lib/spaces-access'
@@ -115,7 +116,7 @@ const AUTO_POST_HOLD_MS = 5_000
 const shortLabel = (label: string, max = 40): string => (label.length > max ? `${label.slice(0, max - 1)}…` : label)
 
 export function GeneralStream({
-    org, space, stream, presence, memberNames, onOpenThread, onOpenThreadIn, openThreadId, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
+    org, space, stream, presence, memberNames, onOpenThread, onOpenThreadIn, openThreadId, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true, onAddPeople, onOpenFiles
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -142,6 +143,9 @@ export function GeneralStream({
     composeActive?: boolean
     /** The content strip already labels a lone stream; split panes retain their headings. */
     showHeader?: boolean
+    /** A group with no messages yet shows its first-run page (EmptySpaceStart, 2026-11-09): these are its actions. */
+    onAddPeople?: () => void
+    onOpenFiles?: () => void
 }) {
     const { writable } = useSpaceAccess()
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
@@ -1213,7 +1217,10 @@ export function GeneralStream({
                 {(!stream.ready || snapping) && (
                     <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
                 )}
-                {stream.ready && !snapping && messageRows === 0 && (
+                {stream.ready && !snapping && messageRows === 0 && space.kind === 'shared' && !space.archived && (
+                    <EmptySpaceStart orgId={org.id} space={space} onAddPeople={onAddPeople} onOpenFiles={onOpenFiles} />
+                )}
+                {stream.ready && !snapping && messageRows === 0 && !(space.kind === 'shared' && !space.archived) && (
                     <div className="px-2 py-6 text-sm text-muted-foreground">
                         {space.kind === 'direct' && (space.participants ?? []).length === 1
                             ? `Your notes to self — drafts, links, files for later. Only you can see this${LOCAL_RUNTIME ? ', and @rowboat works here too' : ''}.`

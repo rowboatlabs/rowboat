@@ -8,7 +8,7 @@ import '@/styles/spaces-header.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Rows3, Trash2, UserPlus, Users } from 'lucide-react'
@@ -126,7 +126,7 @@ const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 // Root view: the selected space (the chat list lives in the rail)
 // ---------------------------------------------------------------------------
 
-export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, onOpenAgents, onOpenThreads, active = true }: {
+export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, onOpenAgents, onOpenThreads, active = true, accountMenu }: {
     selection: SpaceSelection
     onSelect: (selection: SpaceSelection) => void
     /** Navigate to the destination and its rail together, without using the current space's selection. */
@@ -148,6 +148,8 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
      * "viewing" or mark arriving messages read.
      */
     active?: boolean
+    /** Your account row at the sidebar's foot, from the host (2026-11-09). */
+    accountMenu?: ReactNode
 }) {
     const { orgs, loading } = useSpacesOrgs()
     // No Rowboat session → the empty state offers the sign-in first (one
@@ -209,6 +211,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 onOpenActivity={onOpenActivity}
                 onOpenAgents={onOpenAgents}
                 onOpenThreads={onOpenThreads}
+                accountMenu={accountMenu}
                 active={active}
             />
             </SpaceAccessContext.Provider>
@@ -219,7 +222,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         const empty = selectedOrg.spaces.length === 0 && selectedOrg.directs.length === 0
         return <div className="spaces-surface flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1">
-            <OrgRail org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace}
+            <OrgRail org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} account={accountMenu}
                 onOpenThreads={onOpenThreads} threadsActive={selection?.view === 'threads'}
                 onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'} onOpenActivity={onOpenActivity} activityActive={selection?.view === 'activity'} />
             {selection?.spaceId ? (
@@ -293,9 +296,11 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenAgents, onOpenThreads, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenAgents, onOpenThreads, active = true, accountMenu }: {
     org: OrgWithSpaces
     space: spaces.Space
+    /** Your account row at the sidebar's foot (2026-11-09). */
+    accountMenu?: ReactNode
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     /** The quick switcher can land on another space entirely. */
@@ -1183,6 +1188,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     open={railOpen}
                     onTogglePin={toggleRailPin}
                     peekRef={railPeekRef}
+                    account={accountMenu}
                     edgeless
                 />
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
@@ -1235,6 +1241,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 visible={active && !collectionOpen && !threadsListOpen && showChat && (!chatRootId || threadBesideStream)}
                                 composeActive={!chatRootId}
                                 showHeader={threadBesideStream || split || !!stream.error}
+                                onAddPeople={() => setAddMembersOpen(true)}
+                                onOpenFiles={() => select({ kind: 'files' })}
                             />
                         </div>
                     </div>
