@@ -5,7 +5,7 @@ import { AgentBadge, MemberAvatar, MemberProfilePopover } from './atoms'
 import { cn } from '@/lib/utils'
 
 export function MemberDirectory({ members, here, selfId }: {
-    members: readonly spaces.Member[]
+    members: readonly spaces.SpaceMember[]
     here: ReadonlySet<string>
     selfId: string
 }) {
@@ -46,6 +46,7 @@ export function MemberDirectory({ members, here, selfId }: {
                                     </span>
                                     {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
                                     {m.role === 'admin' && <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>}
+                                    {m.kind === 'agent' && m.invocableBy === 'owner' && <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground" title="Only its owner can ask it here">owner only</span>}
                                     {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
                                 </button>
                             </MemberProfilePopover>

@@ -5,14 +5,14 @@ import { Input } from '@/components/ui/input'
 import { AgentBadge, MemberAvatar } from '@/components/spaces/atoms'
 import { useOrgRoster } from '@/hooks/use-space-members'
 import { refreshSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { isDeparted, isOthersPersonalAgent, isSelfDirect, isSwitchedOff, otherParticipant } from '@/lib/spaces-direct'
-import { useOrgSettings } from '@/hooks/use-org-settings'
+import { canMessageDirect, isDeparted, isSelfDirect, otherParticipant } from '@/lib/spaces-direct'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
-// "New message": pick a person, land in the DM. Get-or-create on the org, so
-// picking someone you already talk to just opens that conversation. The
-// candidates are everyone on this org (the org-wide roster, 2026-09-29).
+// "New message": pick a person, land in the DM. Get-or-create on the server,
+// so picking someone you already talk to just opens that conversation. The
+// candidates are your contacts (2026-11-09): the people you share a space
+// with, and your own agents.
 
 export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
     org: OrgWithSpaces
@@ -37,19 +37,18 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
         }
         return set
     }, [org.directs, org.memberId])
-    const settings = useOrgSettings(org.id)
     // You are always first: notes to self is the one DM everyone has.
     const candidates = useMemo(() => {
         const q = query.trim().toLowerCase()
         const me = roster.find((m) => m.id === org.memberId)
         const self = me && (!q || 'you'.includes(q) || 'me'.includes(q) || me.displayName.toLowerCase().includes(q)) ? [me] : []
         const others = roster
-            // A deleted account, or someone else's personal agent, is never offered
-            // (2026-10-13, 2026-10-26): Harbor refuses the DM. Nor is Ro while it is off (2026-10-30).
-            .filter((m) => m.id !== org.memberId && !isDeparted(m) && !isOthersPersonalAgent(m, org.memberId) && !isSwitchedOff(m, settings) && (!q || m.displayName.toLowerCase().includes(q)))
+            // A deleted account is never offered (2026-10-13), nor an agent that is
+            // not yours (2026-11-09): Harbor refuses the DM.
+            .filter((m) => m.id !== org.memberId && !isDeparted(m) && canMessageDirect(m, org.memberId) && (!q || m.displayName.toLowerCase().includes(q)))
             .sort((a, b) => Number(existing.has(b.id)) - Number(existing.has(a.id)))
         return self.concat(others)
-    }, [roster, org.memberId, query, existing, settings])
+    }, [roster, org.memberId, query, existing])
 
     useEffect(() => {
         if (!open) return
@@ -86,7 +85,7 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
             <DialogContent className="max-w-sm gap-0 p-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                 <DialogHeader className="px-4 pb-2 pt-4">
                     <DialogTitle className="text-sm">New message</DialogTitle>
-                    <DialogDescription className="text-xs">A private conversation with someone in {org.name}.</DialogDescription>
+                    <DialogDescription className="text-xs">A private conversation with someone you share a group with, or one of your agents.</DialogDescription>
                 </DialogHeader>
                 <div className="px-3 pb-2">
                     <Input
@@ -117,7 +116,7 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                     {candidates.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
                             {roster.length === 0
-                                ? `Nobody else is in ${org.name} yet — you can still message yourself.`
+                                ? 'Nobody to message yet — share a group with someone, or add an agent. You can still message yourself.'
                                 : 'No one matches.'}
                         </div>
                     ) : (

@@ -1,6 +1,6 @@
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
-import { useSpaceAccess, JoinSpacePrompt } from '@/lib/spaces-access'
+import { useSpaceAccess, ArchivedNotice } from '@/lib/spaces-access'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
@@ -103,7 +103,7 @@ export function ThreadPane({
     /** False while kept mounted but off screen (read mode, hidden Spaces view) — no presence, no read marks. */
     visible?: boolean
 }) {
-    const { member, writable } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     // The cached copy from the last open — plus any replies that streamed in
     // live while the pane was closed. Seeding paints the whole thread in the
     // first frame; the fetch below reconciles right behind it. A PARTIAL
@@ -144,7 +144,7 @@ export function ThreadPane({
     const parkedTopRef = useRef<number | null>(null)
     /** Composer prefill (quote-reply, mention-from-profile); a new nonce re-applies it. */
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
-    const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible && member)
+    const { onType } = usePresenceSender(org.id, space.id, rootMessageId, visible)
     // The plain-text faces (quotes, titles, copies) name a space token by its current name.
     const spaceNames = useSpaceNames(org.id)
 
@@ -329,7 +329,7 @@ export function ThreadPane({
                     setHasMore(res.hasMore)
                 }
                 setLoaded(true)
-                if (member && visibleRef.current) markThreadRead(org.id, space.id, rootMessageId, newestOffset(res.messages, res.root.offset))
+                if (visibleRef.current) markThreadRead(org.id, space.id, rootMessageId, newestOffset(res.messages, res.root.offset))
             })
             .catch(() => {})
         return () => {
@@ -354,7 +354,7 @@ export function ThreadPane({
     // Marks only advance, so a detached window never regresses one, and
     // paging forward (or snapping back) moves it on.
     useEffect(() => {
-        if (member && visible && loaded && root) markThreadRead(org.id, space.id, rootMessageId, newestOffset(messages, root.offset))
+        if (visible && loaded && root) markThreadRead(org.id, space.id, rootMessageId, newestOffset(messages, root.offset))
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [visible, loaded, org.id, space.id, rootMessageId, messages.length, hasMoreAfter])
 
@@ -426,7 +426,7 @@ export function ThreadPane({
     const ownActivity = useSpaceAgentActivity(org.id, space.id)
     // Your own agent, blocked mid-turn on a tool permission: surface it here
     // instead of letting it idle behind a "working…" spinner (or silence).
-    const permissionWait = useTopicAgentPermissionWait(org.id, space.id, rootMessageId, visible && member)
+    const permissionWait = useTopicAgentPermissionWait(org.id, space.id, rootMessageId, visible)
     // While blocked, the amber pill replaces the own-agent spinner.
     const spinningAgents = permissionWait.length > 0 ? workingAgents.filter((id) => id !== org.memberId) : workingAgents
 
@@ -1109,7 +1109,7 @@ export function ThreadPane({
                         variant="ghost"
                         size="xs"
                         className={cn('gap-1 px-2', following ? 'text-foreground' : 'text-muted-foreground')}
-                        disabled={!member} onClick={() => void toggleFollow()}
+                        onClick={() => void toggleFollow()}
                         title={following ? 'Following — new replies here badge you. Click to stop.' : 'Follow — new replies here will badge you.'}
                     >
                         {following ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />} {following ? 'Following' : 'Follow'}
@@ -1526,7 +1526,7 @@ export function ThreadPane({
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceIds: [space.id] })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
@@ -1536,7 +1536,7 @@ export function ThreadPane({
                         },
                     },
                 ]}
-            /> : <JoinSpacePrompt />}
+            /> : <ArchivedNotice />}
 
         </div>
     )

@@ -1,4 +1,3 @@
-import { canActInSpace } from '@/lib/spaces-access'
 import { useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
@@ -191,7 +190,6 @@ export function loadUnread(orgId: string, memberId: string): Promise<void> {
             const prev = orgs.get(orgId)
             const next = new Map<string, SpaceReadState>()
             for (const s of snapshot.spaces) {
-                if (!canActInSpace(orgId, s.spaceId)) continue
                 const threads = new Map<string, ThreadReadState>()
                 // The org lists only followed threads with unread replies; a
                 // followed thread we learned about from its pane and that the
@@ -271,7 +269,6 @@ function queueMark(orgId: string, spaceId: string, threadRootId: string | undefi
         offset,
         timer: setTimeout(() => {
             pendingMarks.delete(key)
-            if (!canActInSpace(orgId, spaceId)) return
             void window.ipc
                 .invoke('spaces:markRead', { orgId, spaceId, ...(threadRootId ? { threadRootId } : {}), offset: entry.offset })
                 .catch(() => {
@@ -288,7 +285,6 @@ function queueMark(orgId: string, spaceId: string, threadRootId: string | undefi
  * hears about it debounced. `sync: false` = the org already knows (a post).
  */
 export function markStreamRead(orgId: string, spaceId: string, offset: number, opts?: { sync?: boolean }): void {
-    if (!canActInSpace(orgId, spaceId)) return
     const s = space(orgId, spaceId, true)
     if (offset > s.head) s.head = offset
     if (offset <= s.readOffset) return
@@ -319,7 +315,6 @@ function threadCaughtUp(t: ThreadReadState): void {
  * unfollowed entry so the mark still reaches the org.
  */
 export function markThreadRead(orgId: string, spaceId: string, rootMessageId: string, offset: number, opts?: { sync?: boolean }): void {
-    if (!canActInSpace(orgId, spaceId)) return
     const s = space(orgId, spaceId, true)
     let t = s.threads.get(rootMessageId)
     if (!t) {
@@ -339,7 +334,6 @@ export function markThreadRead(orgId: string, spaceId: string, rootMessageId: st
 
 /** The stream's mark as a page read carried it (listStream) — merged, never regressed. */
 export function noteStreamReadOffset(orgId: string, spaceId: string, readOffset: number): void {
-    if (!canActInSpace(orgId, spaceId)) return
     const s = space(orgId, spaceId, true)
     if (readOffset <= s.readOffset) return
     s.readOffset = readOffset
@@ -356,7 +350,6 @@ export function noteThread(
     rootMessageId: string,
     info: { following: boolean; readOffset: number | null; lastReplyOffset?: number },
 ): void {
-    if (!canActInSpace(orgId, spaceId)) return
     const s = space(orgId, spaceId, true)
     const prev = s.threads.get(rootMessageId)
     const readOffset = Math.max(prev?.readOffset ?? 0, info.readOffset ?? 0)
@@ -371,7 +364,6 @@ export function noteThread(
 // --- the live fold ----------------------------------------------------------
 
 function applyFrame(orgId: string, frame: spaces.ServerFrame): void {
-    if ('spaceId' in frame && frame.spaceId && !canActInSpace(orgId, frame.spaceId)) return
     switch (frame.kind) {
         case 'read_mark': {
             // One of our other connections moved a mark.

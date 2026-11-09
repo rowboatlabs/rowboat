@@ -18,7 +18,7 @@ import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentati
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { MemberAdminActions } from '@/components/spaces/member-admin'
-import { isOthersPersonalAgent } from '@/lib/spaces-direct'
+import { answersOwnerOnly, canMessageDirect } from '@/lib/spaces-direct'
 
 // Shared atoms for the Spaces surfaces: identity visuals, the segmented
 // control, and the @rowboat trigger. The server dialogs live in server-dialogs.tsx.
@@ -149,8 +149,9 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
     const [editing, setEditing] = useState(false)
     const peopleOnline = usePeopleOnline(refs?.orgId ?? '')
     const isHere = member?.kind === 'agent' ? here.has(id) : peopleOnline.has(id) && !member?.availability?.manualAway
-    // Someone else's personal agent answers its owner only (2026-10-30): no Mention or Message for it.
-    const reachable = !member || !isOthersPersonalAgent(member, selfId ?? undefined)
+    // An agent that is not yours takes no DM (2026-11-09, the reach rule); one whose seat here is its owner's alone takes no mention.
+    const messageable = !member || canMessageDirect(member, selfId ?? undefined)
+    const reachable = !member || !answersOwnerOnly(member, selfId ?? undefined)
     const copyId = () => {
         void navigator.clipboard.writeText(id).then(
             () => toast('Member id copied', 'success'),
@@ -206,7 +207,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                 </div>
                 <div className="flex flex-col gap-2 text-sm">
                     {id === selfId && refs && member?.kind !== 'agent' && <button type="button" className="rounded-md border px-3 py-2 text-left font-medium hover:bg-accent" onClick={() => { setOpen(false); setEditing(true) }}>Edit profile</button>}
-                    {id !== selfId && reachable && message && (
+                    {id !== selfId && messageable && message && (
                         <button
                             type="button"
                             onClick={message}

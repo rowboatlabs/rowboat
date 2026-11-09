@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode, useMemo } from 'react'
 import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, ScrollText, SlidersHorizontal, Sparkles, SquareTerminal, Terminal, Trash2, TriangleAlert } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
@@ -6,11 +6,11 @@ import { Input } from '@/components/ui/input'
 import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SizeBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
 import { HOME, useHostingState, type HostingState } from '@/components/spaces/agent-hosting-state'
 import { TerminalScreen } from '@/components/spaces/agent-terminal'
-import { AccessChoice } from '@/components/spaces/agent-access'
+import { SeatChoice, type Seat } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
 import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
-import { refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
+import { refreshMembers, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
 import { PersonalitySection } from '@/components/spaces/agent-personality'
 import { SuperAgentSection } from '@/components/spaces/agent-super'
@@ -64,17 +64,17 @@ function Section({ title, note, children }: { title: string; note?: string; chil
     )
 }
 
-export function AgentPage({ org, listing, isAdmin, onChanged }: {
+export function AgentPage({ org, listing, onChanged }: {
     org: OrgWithSpaces
     listing: spaces.AgentListing
-    isAdmin: boolean
     /** Reload the listing after a change to keys or the platform key. */
     onChanged: () => Promise<void>
 }) {
     const { agent, keys, credential, hook, hosting } = listing
     const setup = setupFor(agent)
     const mine = agent.ownerId === org.memberId
-    const canManage = mine || isAdmin
+    // Nothing stands above the owner (2026-11-09).
+    const canManage = mine
     const live = keys.filter((k) => !k.revokedAt)
     const ready = hosting?.status === 'ready'
     const gone = hosting?.status === 'deleting' || hosting?.status === 'deleted'
@@ -143,8 +143,8 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                     {/* Keyed on the saved values: a save elsewhere resets the form to them. */}
                     {agent.ownerId && <PersonalitySection key={`${agent.title ?? ''}|${agent.instructions ?? ''}`} orgId={org.id} agent={agent} canEdit={mine} onSaved={onChanged} />}
                     {isLocal && <LocalAgentSection orgId={org.id} agent={agent} mine={mine} ownerName={ownerName} />}
-                    {agent.ownerId && !isLocal && <AccessSection orgId={org.id} agent={agent} canSwitch={mine} onChanged={onChanged} />}
-                    {agent.ownerId && <SuperAgentSection orgId={org.id} agent={agent} isAdmin={isAdmin} ownerName={ownerName} onChanged={onChanged} />}
+                    {agent.ownerId && <SeatsSection org={org} agent={agent} mine={mine} ownerName={ownerName} />}
+                    {agent.ownerId && <SuperAgentSection orgId={org.id} agent={agent} canSwitch={mine} ownerName={ownerName} onChanged={onChanged} />}
                     {isLocal && (
                         <div className="flex flex-col gap-0.5">
                             <h3 className="text-sm font-semibold text-foreground">Who can use it</h3>
@@ -219,7 +219,7 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
                             )
                         }
                     />
-                    <ConnectAgent org={org} setup={setup} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} canAddToSpaces={mine || !agent.personal} />
+                    <ConnectAgent org={org} setup={setup} {...(agent.agentKind ? { agentKind: agent.agentKind } : {})} {...(agent.agentInstance ? { agentInstance: agent.agentInstance } : {})} agentId={agent.id} agentName={agent.displayName} agentKey={secret ?? KEY_PLACEHOLDER} canAddToSpaces={mine} />
                 </>
             ),
         })
@@ -285,41 +285,56 @@ export function AgentPage({ org, listing, isAdmin, onChanged }: {
     return <AgentTabs tabs={tabs} value={tab} onChange={setTab} />
 }
 
-/** Channel or personal: its owner switches it; everyone else reads which it is. */
-function AccessSection({ orgId, agent, canSwitch, onChanged }: { orgId: string; agent: spaces.Member; canSwitch: boolean; onChanged: () => Promise<void> }) {
-    const [busy, setBusy] = useState(false)
-    const personal = agent.personal === true
-    const choose = async (next: boolean) => {
+/**
+ * Where it works, and who may ask it there (Harbor spec §4 Agent members,
+ * 2026-11-09: a seat per space). The owner flips each seat between everyone
+ * in the group and themselves alone; everyone else reads it. A local agent's
+ * seats are the owner's alone wherever it sits, so they show without a switch.
+ */
+function SeatsSection({ org, agent, mine, ownerName }: { org: OrgWithSpaces; agent: spaces.Member; mine: boolean; ownerName: string }) {
+    const spaceIds = useMemo(() => org.spaces.filter((s) => !s.archived).map((s) => s.id), [org.spaces])
+    const rosters = useSpaceRosters(org.id, spaceIds)
+    const [busy, setBusy] = useState<string | null>(null)
+    const seats = org.spaces
+        .filter((s) => !s.archived)
+        .map((space) => ({ space, row: rosters.get(space.id)?.find((m) => m.id === agent.id) }))
+        .filter((entry): entry is { space: spaces.Space; row: spaces.SpaceMember } => entry.row !== undefined)
+    const local = agent.agentConnection === LOCAL_CONNECTION
+    const setSeat = async (spaceId: string, seat: Seat) => {
         if (busy) return
-        setBusy(true)
+        setBusy(spaceId)
         try {
-            await window.ipc.invoke('spaces:setAgentPersonal', { orgId, agentId: agent.id, personal: next })
-            // Pickers read the roster: someone else's personal agent leaves them, a channel one comes back.
-            refreshOrgRoster(orgId)
-            await onChanged()
-            toast(next ? `${agent.displayName} is now personal` : `${agent.displayName} is now a channel agent`, 'success')
+            await window.ipc.invoke('spaces:setAgentAccess', { orgId: org.id, spaceId, agentId: agent.id, invocableBy: seat })
+            refreshMembers(org.id, spaceId, { force: true })
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not change who can use it', 'error')
+            toast(err instanceof Error ? err.message : 'Could not change who can ask it', 'error')
         } finally {
-            setBusy(false)
+            setBusy(null)
         }
     }
-    if (canSwitch) {
-        return (
-            <AccessChoice
-                personal={personal}
-                onChange={(next) => void choose(next)}
-                disabled={busy}
-                note={personal ? 'It stays in its spaces; others see it and its replies but can’t ask it anything.' : 'Anyone who shares a space with it can mention it or DM it.'}
-            />
-        )
-    }
     return (
-        <div className="flex flex-col gap-0.5">
-            <h3 className="text-sm font-semibold text-foreground">Who can use it</h3>
-            <p className="text-xs leading-snug text-muted-foreground">
-                {personal ? 'Personal: only its owner can mention it or DM it. You see it and its replies.' : 'Channel: anyone who shares a space with it can mention it or DM it.'}
-            </p>
+        <div className="flex flex-col gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Where it works</h3>
+            {seats.length === 0 ? (
+                <p className="text-xs leading-snug text-muted-foreground">
+                    {mine ? 'Not in any of your groups yet. Add it from a group’s member list, or mention it there.' : `In none of the groups you share with ${ownerName}.`}
+                </p>
+            ) : (
+                <ul className="flex flex-col gap-2">
+                    {seats.map(({ space, row }) => (
+                        <li key={space.id} className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2">
+                            <span className="text-sm font-medium">#{space.name}</span>
+                            {mine && !local ? (
+                                <SeatChoice seat={row.invocableBy ?? 'members'} disabled={busy === space.id} onChange={(seat) => void setSeat(space.id, seat)} />
+                            ) : (
+                                <span className="text-xs text-muted-foreground">
+                                    {(row.invocableBy ?? 'members') === 'owner' ? `Only ${mine ? 'you' : ownerName} can ask it here${local ? ' (it runs on their computer)' : ''}.` : 'Anyone in the group can mention it.'}
+                                </span>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
         </div>
     )
 }

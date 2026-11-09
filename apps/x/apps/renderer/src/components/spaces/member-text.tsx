@@ -49,8 +49,11 @@ export function MemberText({ text }: { text: string }) {
 // names, and the roster's shape (roles, presence, self) shouldn't ride
 // along with every markdown render.
 
+/** A member as the pane knows them: a contact, or this space's row with its role and an agent's seat (2026-11-09). */
+export type Profile = spaces.Member & Partial<Pick<spaces.SpaceMember, 'role' | 'joinedAt' | 'invocableBy'>>
+
 export interface SpaceProfiles {
-    byId: ReadonlyMap<string, spaces.Member>
+    byId: ReadonlyMap<string, Profile>
     /** Members present right now (already filtered to known members). */
     here: ReadonlySet<string>
     selfId: string | null
@@ -59,7 +62,7 @@ export interface SpaceProfiles {
 const SpaceProfilesContext = createContext<SpaceProfiles>({ byId: new Map(), here: new Set(), selfId: null })
 
 export function SpaceProfilesProvider({ members, here, selfId, children }: {
-    members: readonly spaces.Member[]
+    members: readonly Profile[]
     here: ReadonlySet<string>
     selfId: string | null
     children: ReactNode

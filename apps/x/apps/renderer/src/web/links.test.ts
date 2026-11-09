@@ -13,26 +13,26 @@ describe('shared links in the web app', () => {
     })
 
     it('are put aside on /open and the address bar goes back to the root', () => {
-        window.history.replaceState(null, '', `/open?type=spaces&spaceId=${SPACE}&org=acme.spaces.test`)
+        window.history.replaceState(null, '', `/open?type=spaces&spaceId=${SPACE}&server=acme.spaces.test`)
         captureOpenLink()
         expect(window.location.pathname).toBe('/')
-        expect(takeOpenLink(true)).toEqual({ orgAddress: 'acme.spaces.test', spaceId: SPACE })
+        expect(takeOpenLink(true)).toEqual({ address: 'acme.spaces.test', spaceId: SPACE })
         expect(takeOpenLink(true)).toBeNull()
     })
 
     it('wait for a sign-in, except an invite, whose card shows first', () => {
-        window.history.replaceState(null, '', `/open?type=spaces&spaceId=${SPACE}&org=acme.spaces.test`)
+        window.history.replaceState(null, '', `/open?type=spaces&spaceId=${SPACE}&server=acme.spaces.test`)
         captureOpenLink()
         expect(takeOpenLink(false)).toBeNull()
         expect(takeOpenLink(true)).toMatchObject({ spaceId: SPACE })
 
         window.history.replaceState(null, '', inviteOpenPath('acme.spaces.test', 'tok'))
         captureOpenLink()
-        expect(takeOpenLink(false)).toEqual({ orgAddress: 'acme.spaces.test', inviteToken: 'tok' })
+        expect(takeOpenLink(false)).toEqual({ address: 'acme.spaces.test', inviteToken: 'tok' })
     })
 
     it('ignore anything that is not a spaces link', () => {
-        window.history.replaceState(null, '', '/open?type=chat&org=acme.spaces.test')
+        window.history.replaceState(null, '', '/open?type=chat&server=acme.spaces.test')
         captureOpenLink()
         expect(window.location.pathname).toBe('/')
         expect(takeOpenLink(true)).toBeNull()

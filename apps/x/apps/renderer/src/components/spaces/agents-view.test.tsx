@@ -17,18 +17,15 @@ const agent = (id: string, displayName: string, ownerId: string | undefined, age
 let roster: spaces.Member[]
 let online: string[] = []
 let spaceMembers: Record<string, spaces.Member[]>
-// Create agent (2026-10-26): the kinds this org's Harbor creates on Rowboat's own account; none = the card reads New agent.
+// Create agent (2026-10-26): the kinds this server creates on Rowboat's own account; none = the card reads New agent.
 let managedKinds: string[] = []
-// Ro's switch (2026-11-03: off by default): these tests have it on unless they say.
-let jevEnabled = true
 const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
     switch (channel) {
-        case 'spaces:listOrgMembers': return { members: roster, online }
+        case 'spaces:listContacts': return { members: roster, online }
         case 'spaces:listMembers': return { members: spaceMembers[args.spaceId!] ?? [] }
         case 'spaces:listAgents': return { agents: roster.filter((m) => m.kind === 'agent' && m.ownerId === 'me').map((a) => ({ agent: a, keys: [] })) }
         case 'spaces:getAgentCapabilities': return { capabilities: { stop: false, options: [] }, defaults: {} }
         case 'spaces:managedAgentKinds': return { kinds: managedKinds }
-        case 'spaces:getOrgSettings': return { settings: { invitePolicy: 'members', jevEnabled } }
         case 'spaces:renameAgent':
             roster = roster.map((m) => (m.id === args.agentId ? { ...m, displayName: args.displayName! } : m))
             return { agent: roster.find((m) => m.id === args.agentId) }
@@ -56,7 +53,6 @@ const gone = agent('gone', 'Gone', 'harsh', 'custom', 'contract', { removedAt: '
 beforeEach(() => {
     invoke.mockClear()
     managedKinds = []
-    jevEnabled = true
     window.localStorage.clear()
     roster = [person('me', 'Ramnique'), person('harsh', 'Harsh'), hermes, scout, ro, gone]
     spaceMembers = { S1: [person('me', 'Ramnique'), hermes, scout], S2: [hermes] }
@@ -82,20 +78,9 @@ describe('AgentsView', () => {
         expect(screen.queryByText('Gone')).toBeNull()
     })
 
-    it('marks each card with a people or lock icon, naming Channel or Personal on hover and saying whose a personal one is; a built-in agent has neither (2026-10-27)', async () => {
-        roster = roster.map((m) => (m.id === 'scout' ? { ...m, personal: true } : m))
-        show()
-        await screen.findByText('Scout')
-        const card = (name: string) => screen.getByTitle(name).closest('li')!
-        // Icons only: the word is on hover (and in the accessible name).
-        expect(within(card('Herald')).getByRole('img', { name: /^Channel: Anyone who shares a space with it/ })).toHaveTextContent('')
-        expect(within(card('Scout')).getByRole('img', { name: /^Personal: Only Harsh can use it/ })).toHaveTextContent('')
-        expect(within(card('Ro')).queryByLabelText(/^(Channel|Personal):/)).toBeNull()
-    })
-
     it('says when a local agent’s computer isn’t running it', async () => {
-        const mac = agent('mac', 'Ramnique’s Claude Code', 'me', 'claude-code', 'local', { personal: true })
-        const box = agent('box', 'Harsh’s Codex', 'harsh', 'codex', 'local', { personal: true })
+        const mac = agent('mac', 'Ramnique’s Claude Code', 'me', 'claude-code', 'local')
+        const box = agent('box', 'Harsh’s Codex', 'harsh', 'codex', 'local')
         roster = [...roster, mac, box]
         online = ['box']
         show()
@@ -134,20 +119,11 @@ describe('AgentsView', () => {
         expect(await screen.findByText('Herald Prime')).toBeInTheDocument()
     })
 
-    it('offers no options on someone else’s agent, unless you are an admin', async () => {
+    it('offers no options on someone else’s agent: nothing stands above the owner (2026-11-09)', async () => {
         show()
         await screen.findByText('Scout')
         expect(screen.queryByRole('button', { name: 'Scout options' })).toBeNull()
         expect(screen.queryByRole('button', { name: 'Open Scout' })).toBeNull()
-        cleanup()
-
-        roster = roster.map((m) => (m.id === 'me' ? { ...m, role: 'admin' } : m))
-        org = orgWith()
-        show()
-        await screen.findByRole('button', { name: 'Scout options' })
-        openMenu('Scout')
-        expect(await screen.findByRole('menuitem', { name: 'Remove from server' })).toBeInTheDocument()
-        expect(screen.queryByRole('menuitem', { name: 'Rename' })).toBeNull()
         // Ro is built in: nothing to manage.
         expect(screen.queryByRole('button', { name: 'Ro options' })).toBeNull()
     })
@@ -167,7 +143,7 @@ describe('AgentsView', () => {
         await waitFor(() => expect(screen.queryByRole('heading', { name: 'Run an agent on this computer' })).toBeNull())
     })
 
-    it('the card names the ways it offers; Rowboat runs it only when the org’s Harbor creates agents', async () => {
+    it('the card names the ways it offers; Rowboat runs it only when the server creates agents', async () => {
         show()
         expect(await screen.findByText('On this computer or one you already run')).toBeInTheDocument()
         cleanup()
@@ -179,13 +155,5 @@ describe('AgentsView', () => {
         fireEvent.click(await screen.findByRole('button', { name: /^Rowboat runs it/ }))
         const kinds = await screen.findByRole('radiogroup', { name: 'Agent' })
         expect(within(kinds).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Hermes', 'Claude Code', 'Codex'])
-    })
-
-    it('leaves Ro out while an admin has it off (2026-10-30)', async () => {
-        jevEnabled = false
-        show()
-        await screen.findByText('Scout')
-        expect(screen.getByRole('heading', { name: /Agents/ })).toHaveTextContent('Agents2')
-        expect(screen.queryByText('Ro')).toBeNull()
     })
 })

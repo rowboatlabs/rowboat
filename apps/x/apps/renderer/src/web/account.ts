@@ -11,7 +11,7 @@ import {
     type SpacesTokens,
 } from '@x/spaces-client'
 import { tokenEmail } from '@/lib/spaces-account'
-import { APEX_URL, DEV_HARBOR } from './config'
+import { DEV_HARBOR, SERVER_URL } from './config'
 
 // The browser's Rowboat session (2026-10-09, the Spaces web app): the phone's
 // journey, as a full-page redirect. The apex names the authorization server;
@@ -103,7 +103,7 @@ async function clientIdFor(issuer: string): Promise<string> {
 
 /** Leave for the authorization server; the callback lands back on `returnTo`. Never resolves. */
 export async function beginSignIn(returnTo: string): Promise<never> {
-    const issuer = await discoverIssuer(APEX_URL)
+    const issuer = await discoverIssuer(SERVER_URL)
     if (!issuer) throw new Error('This Spaces server names no sign-in provider.')
     const meta = await authServerMetadata(issuer)
     const clientId = await clientIdFor(meta.issuer)
@@ -137,7 +137,7 @@ export async function completeSignIn(url: URL): Promise<string> {
 export function signOut(): void {
     writeSession(null)
     // Harbor's cookie (session.ts) holds the same token; clear it too.
-    void fetch(`${DEV_HARBOR ?? APEX_URL}/v1/session`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
+    void fetch(`${DEV_HARBOR ?? SERVER_URL}/v1/session`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
     for (const listener of sessionListeners) listener()
 }
 

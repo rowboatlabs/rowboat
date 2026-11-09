@@ -1,15 +1,15 @@
 import { isOrgView, type OrgView } from '@/lib/spaces-navigation'
 import type { RailSelection } from '@/lib/spaces-selection'
 
-// The web app's addresses: the desktop's Spaces navigation (an org, a space,
-// what is open inside it, or an org-level surface) as a path, so a reload, a
-// shared link and the browser's back button all land where they should. The
-// shapes follow Harbor's own org links where one exists (/s/<space>,
-// /s/<space>/a/<asset>), under the org's slug.
+// The web app's addresses: the desktop's Spaces navigation (a space, what is
+// open inside it, or a server-level surface) as a path, so a reload, a shared
+// link and the browser's back button all land where they should. The shapes
+// follow Harbor's own links where one exists (/s/<space>, /s/<space>/a/<asset>).
+// One server since 2026-11-09: nothing prefixes the path (it was the org's slug).
 //
-//   /<org>                      the org (its first space opens)
-//   /<org>/activity | /threads | /browse | /agents   an org-level surface
-//   /<org>/s/<space>            the stream
+//   /                           the server (its last chat opens)
+//   /activity | /threads | /agents   a server-level surface
+//   /s/<space>                  the stream
 //   …/discussions | …/files     the space's lists
 //   …/discussions/t/<root>      a thread beside the Threads list (2026-11-03)
 //   …/t/<root>                  a thread
@@ -19,7 +19,6 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // and a reload lands on its space.
 
 export interface WebRoute {
-    orgKey?: string
     spaceId?: string
     view?: OrgView
     rail: RailSelection
@@ -29,25 +28,24 @@ const GENERAL: RailSelection = { kind: 'general' }
 
 export function parseRoute(pathname: string): WebRoute {
     const parts = pathname.split('/').filter(Boolean).map(decodeURIComponent)
-    const [orgKey, section, spaceId, kind, id] = parts
-    if (!orgKey) return { rail: GENERAL }
-    if (isOrgView(section)) return { orgKey, view: section, rail: GENERAL }
-    if (section !== 's' || !spaceId) return { orgKey, rail: GENERAL }
+    const [section, spaceId, kind, id] = parts
+    if (!section) return { rail: GENERAL }
+    if (isOrgView(section)) return { view: section, rail: GENERAL }
+    if (section !== 's' || !spaceId) return { rail: GENERAL }
     const rail: RailSelection =
-        kind === 'discussions' ? { kind: 'discussions', ...(id === 't' && parts[5] ? { rootMessageId: parts[5] } : {}) }
+        kind === 'discussions' ? { kind: 'discussions', ...(id === 't' && parts[4] ? { rootMessageId: parts[4] } : {}) }
         : kind === 'files' ? { kind: 'files' }
         : kind === 't' && id ? { kind: 'thread', rootMessageId: id }
         : kind === 'a' && id ? { kind: 'file', assetId: id }
         : kind === 'w' && id ? { kind: 'whiteboard', assetId: id }
         : GENERAL
-    return { orgKey, spaceId, rail }
+    return { spaceId, rail }
 }
 
-export function routePath(orgKey: string, target: { spaceId?: string; view?: OrgView; rail?: RailSelection }): string {
-    const org = `/${encodeURIComponent(orgKey)}`
-    if (target.view) return `${org}/${target.view}`
-    if (!target.spaceId) return org
-    const space = `${org}/s/${encodeURIComponent(target.spaceId)}`
+export function routePath(target: { spaceId?: string; view?: OrgView; rail?: RailSelection }): string {
+    if (target.view) return `/${target.view}`
+    if (!target.spaceId) return '/'
+    const space = `/s/${encodeURIComponent(target.spaceId)}`
     const rail = target.rail ?? GENERAL
     switch (rail.kind) {
         case 'discussions':

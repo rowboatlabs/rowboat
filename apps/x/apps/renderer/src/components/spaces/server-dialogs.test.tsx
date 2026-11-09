@@ -1,29 +1,19 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ServerDialogs } from './server-dialogs'
 import { consumeServerDialog, openServerDialog } from '@/lib/server-dialog'
-import { AddServerDialog } from './add-server-dialog'
-import { useState } from 'react'
 
-function DialogFlow() {
-    const [choosing, setChoosing] = useState(true)
-    return <>
-        {choosing && <AddServerDialog onClose={() => setChoosing(false)} onChoose={(kind) => {
-            setChoosing(false)
-            openServerDialog({ kind })
-        }} />}
-        <ServerDialogs onDone={vi.fn()} />
-    </>
-}
+// Joining with a link (2026-11-09: the one server dialog left — there is no
+// server to create): the card names the group, or the person whose link it
+// is, and Join lands there.
 
 vi.mock('@/hooks/use-spaces', () => ({
     useSpacesAccountState: () => ({ hasSession: true }),
-    refreshSpacesAccountState: vi.fn(),
     refreshSpacesOrgs: vi.fn(async () => {}),
 }))
 
 beforeEach(() => {
-    vi.stubGlobal('ipc', { invoke: vi.fn(async () => ({ apexDomain: 'spaces.example.com' })) })
+    vi.stubGlobal('ipc', { invoke: vi.fn(async () => ({})) })
 })
 afterEach(() => {
     cleanup()
@@ -31,31 +21,11 @@ afterEach(() => {
     vi.unstubAllGlobals()
 })
 
-it.each([
-    ['Create a group chat', 'Create a group chat'],
-    ['Join a server', 'Join a server'],
-])('routes %s from the chooser to the existing dialog', async (label, destination) => {
-    render(<DialogFlow />)
-    expect(screen.getByRole('dialog', { name: 'New group chat' })).toBeVisible()
-    await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: new RegExp(label) }))
-    })
-    expect(screen.getAllByRole('dialog')).toHaveLength(1)
-    expect(screen.getByRole('dialog', { name: destination })).toBeVisible()
-    expect(screen.queryByRole('dialog', { name: 'New group chat' })).toBeNull()
-})
-
-it('dismisses the chooser without entering either flow', () => {
-    render(<DialogFlow />)
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    expect(screen.queryByRole('dialog')).toBeNull()
-})
-
-it('joining an invite that lands nowhere opens the server', async () => {
+it('joining an invite that lands nowhere opens the last chat', async () => {
     const onDone = vi.fn()
     const invoke = vi.fn(async (channel: string) => {
-        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', org: { name: 'Acme' }, spaces: [] } }
-        if (channel === 'spaces:joinInvite') return { org: { id: 'o', name: 'Acme' } }
+        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok' } }
+        if (channel === 'spaces:joinInvite') return { org: { id: 'server', name: 'Spaces' } }
         return { orgs: [] }
     })
     vi.stubGlobal('ipc', { invoke })
@@ -64,7 +34,7 @@ it('joining an invite that lands nowhere opens the server', async () => {
         openServerDialog({ kind: 'join', inviteUrl: 'https://acme.test/join/tok', autoJoin: true })
     })
     await act(async () => {})
-    await vi.waitFor(() => expect(onDone).toHaveBeenCalledWith('o', undefined))
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalledWith('server', undefined))
 })
 
 // Back from a sign-in that Join started (the web app, 2026-10-15): the card
@@ -74,8 +44,8 @@ it.each([
     [false, 0],
 ])('with autoJoin %s, joins %i time(s) once the invite resolves', async (autoJoin, joins) => {
     const invoke = vi.fn(async (channel: string) => {
-        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', org: { name: 'Acme' }, space: { name: 'launch' }, spaces: [{ name: 'launch' }, { name: 'general' }] } }
-        if (channel === 'spaces:joinInvite') return { org: { id: 'o', name: 'Acme' }, space: { id: 's', name: 'launch' } }
+        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', space: { id: 's', name: 'launch' }, invitedBy: 'Gagan' } }
+        if (channel === 'spaces:joinInvite') return { org: { id: 'server', name: 'Spaces' }, space: { id: 's', name: 'launch' } }
         return {}
     })
     vi.stubGlobal('ipc', { invoke })
@@ -85,6 +55,24 @@ it.each([
     })
     await act(async () => {})
     expect(invoke.mock.calls.filter(([channel]) => channel === 'spaces:joinInvite')).toHaveLength(joins)
-    // An invite is to the org (2026-10-19): the card names it, then every space it joins.
-    if (!autoJoin) expect(screen.getByText('You’ll join launch and general')).toBeVisible()
+    // An invite is to one group (2026-11-09): the card names it and who sent it.
+    if (!autoJoin) {
+        expect(screen.getByText('#launch')).toBeVisible()
+        expect(screen.getByText('Invited by Gagan')).toBeVisible()
+    }
+})
+
+it('a person’s link says whose direct message it opens', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'spaces:resolveInviteLink') return { baseUrl: 'https://acme.test', resolved: { state: 'ok', direct: { id: 'g', displayName: 'Gagan' } } }
+        return {}
+    })
+    vi.stubGlobal('ipc', { invoke })
+    render(<ServerDialogs onDone={vi.fn()} />)
+    await act(async () => {
+        openServerDialog({ kind: 'join', inviteUrl: 'https://acme.test/join/tok' })
+    })
+    await act(async () => {})
+    expect(screen.getByText('Gagan')).toBeVisible()
+    expect(screen.getByText(/opens a direct message with/)).toBeVisible()
 })

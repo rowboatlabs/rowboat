@@ -94,7 +94,7 @@ describe('ApprovalCard', () => {
     describe('a super agent’s request', () => {
         const request: spaces.Approval = { ...open, agentId: 'boss', title: 'Create a Hermes agent named Helper', choices: ['allow_once', 'deny'], action: { kind: 'create_agent', displayName: 'Helper', agentKind: 'hermes' } }
         beforeEach(() => {
-            roster.members = [{ id: 'boss', displayName: 'Boss', role: 'member', kind: 'agent', ownerId: 'harsh' }]
+            roster.members = [{ id: 'boss', displayName: 'Boss', kind: 'agent', ownerId: 'harsh' }]
         })
 
         it('offers the choices to its owner only', () => {

@@ -7,13 +7,13 @@ const eng: SpaceRef = { orgId: 'org', orgName: 'Acme', spaceId: 'eng', name: 'en
 
 const pat = { memberId: 'pat', actingMode: 'direct' as const }
 function message(id: string, postedAt: string): spaces.MessageSearchHit {
-    return { messageId: id, threadRootId: id, author: pat, snippet: id, postedAt, offset: 1 }
+    return { spaceId: 'x', messageId: id, threadRootId: id, author: pat, snippet: id, postedAt, offset: 1 }
 }
 function topic(id: string): spaces.TopicSearchHit {
     return { topic: { id, spaceId: 'x', rootMessageId: id, title: id, createdBy: pat, createdAt: '2026-09-01T00:00:00Z', archived: false } }
 }
 function asset(path: string, updatedAt: string): spaces.AssetSearchHit {
-    return { id: `id:${path}`, path, version: 1, updatedAt }
+    return { spaceId: 'x', id: `id:${path}`, path, version: 1, updatedAt }
 }
 function page(space: SpaceRef, partial: Partial<spaces.SearchResults>, truncated = false) {
     return {

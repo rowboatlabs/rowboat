@@ -2,16 +2,20 @@ import { SpacesClient, SpacesLive } from '@x/spaces-client'
 import type { spaces } from '@x/shared'
 import { registerOrgOrigin } from '@/lib/spaces-presentation'
 import { hasSession } from './account'
-import { APEX_HOST, APEX_URL, DEV_HARBOR, DEV_MEMBER } from './config'
+import { DEV_HARBOR, DEV_MEMBER, SERVER_URL } from './config'
 import { harborSession } from './session'
 
-// The orgs this browser is signed into, and one REST client and live socket
-// per org: the desktop's core/spaces/orgs.ts without a registry on disk. The
-// apex's "my orgs" is the list (as on the phone), refreshed on every listing;
-// under a dev Harbor it is that one org. Every call rides Harbor's session
-// cookie (session.ts), dev tokens included.
+// The server this browser is signed into, and its REST client and live
+// socket: the desktop's core/spaces/orgs.ts without a registry on disk. One
+// server since 2026-11-09 (the record keeps the many-org name of the shared
+// summary type): the deployment's, reached on Harbor's session cookie
+// (session.ts), or a dev Harbor on a dev token. The account becomes a member
+// on first contact (POST /v1/me), so the list is one entry once signed in.
 
 export type WebOrg = spaces.SpacesOrgSummary
+
+/** The one record's id, as core names it (SPACES_SERVER_ID). */
+export const SERVER_ID = 'server'
 
 interface Runtime {
     client: SpacesClient
@@ -26,38 +30,27 @@ const resetListeners = new Set<(orgId: string) => void>()
 async function fetchOrgs(): Promise<WebOrg[]> {
     if (DEV_HARBOR) {
         const health = await new SpacesClient({ baseUrl: DEV_HARBOR, token: harborSession }).health()
-        return [{ id: 'dev', name: health.org.name, address: new URL(DEV_HARBOR).host, baseUrl: DEV_HARBOR, memberId: DEV_MEMBER, authKind: 'dev' }]
+        return [{ id: SERVER_ID, name: health.server.name, address: new URL(DEV_HARBOR).host, baseUrl: DEV_HARBOR, memberId: DEV_MEMBER, authKind: 'dev' }]
     }
     if (!hasSession()) return []
-    const send = async (refresh?: { forceRefresh: true }) => {
-        await harborSession.ensure(refresh)
-        return fetch(`${APEX_URL}/v1/orgs`, { credentials: 'include' })
-    }
-    let res = await send()
-    if (res.status === 401) res = await send({ forceRefresh: true })
-    if (!res.ok) throw new Error(`Could not list your servers (${res.status}).`)
-    const { orgs: listed } = (await res.json()) as { orgs: Array<{ id: string; name: string; address: string; memberId: string }> }
-    return listed.map((org) => ({
-        id: org.id,
-        name: org.name,
-        address: org.address,
-        baseUrl: `https://${org.address}`,
-        memberId: org.memberId,
-        authKind: 'session' as const,
-    }))
+    await harborSession.ensure()
+    const client = new SpacesClient({ baseUrl: SERVER_URL, token: harborSession })
+    const [health, { member }] = await Promise.all([client.health(), client.enroll()])
+    return [{ id: SERVER_ID, name: health.server.name, address: new URL(SERVER_URL).host, baseUrl: SERVER_URL, memberId: member.id, authKind: 'session' as const }]
 }
 
-/** Refresh the list from the apex; a runtime whose org left the list is closed. */
+/** Refresh the record; a runtime whose server is gone (signed out) is closed. */
 export async function loadOrgs(): Promise<WebOrg[]> {
     const next = await fetchOrgs()
     for (const [id, runtime] of runtimes) {
-        if (next.some((org) => org.id === id)) continue
+        const current = orgs.find((org) => org.id === id)
+        if (current && next.some((org) => org.id === id && org.baseUrl === current.baseUrl)) continue
         runtime.live.close()
         runtimes.delete(id)
         for (const listener of resetListeners) listener(id)
     }
     orgs = next
-    // Blob URLs are the org's own Harbor URLs (spaces-presentation).
+    // Blob URLs are the server's own Harbor URLs (spaces-presentation).
     for (const org of orgs) registerOrgOrigin(org.id, org.baseUrl)
     return orgs
 }
@@ -66,17 +59,11 @@ export function listOrgs(): WebOrg[] {
     return orgs
 }
 
-/** The path segment that names an org: its slug on the deployment, `dev` for a dev Harbor, else its whole address. */
-export function orgKey(org: Pick<WebOrg, 'address' | 'authKind'>): string {
-    if (org.authKind === 'dev') return 'dev'
-    return org.address.endsWith(`.${APEX_HOST}`) ? org.address.slice(0, -(APEX_HOST.length + 1)) : org.address
-}
-
 function runtime(orgId: string): Runtime {
     const cached = runtimes.get(orgId)
     if (cached) return cached
     const org = orgs.find((o) => o.id === orgId)
-    if (!org) throw new Error(`unknown org ${orgId}`)
+    if (!org) throw new Error(`unknown server ${orgId}`)
     const created: Runtime = {
         client: new SpacesClient({ baseUrl: org.baseUrl, token: harborSession }),
         live: new SpacesLive({ baseUrl: org.baseUrl, token: harborSession }),

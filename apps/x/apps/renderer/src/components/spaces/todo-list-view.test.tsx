@@ -90,11 +90,11 @@ describe('todo list files', () => {
         expect(await screen.findByText('Their new item')).toBeInTheDocument()
     })
 
-    it('offers no one else’s personal agent as an assignee, since assigning mentions it (2026-10-30)', async () => {
+    it('offers no agent whose seat here is someone else’s alone as an assignee, since assigning mentions it (2026-11-09)', async () => {
         const roster = [
             { id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' },
-            { id: 'theirs', displayName: 'Their Claude', role: 'member', kind: 'agent', personal: true, ownerId: 'harsh' },
-            { id: 'mine', displayName: 'My Claude', role: 'member', kind: 'agent', personal: true, ownerId: 'me' },
+            { id: 'theirs', displayName: 'Their Claude', role: 'member', kind: 'agent', invocableBy: 'owner', ownerId: 'harsh' },
+            { id: 'mine', displayName: 'My Claude', role: 'member', kind: 'agent', invocableBy: 'owner', ownerId: 'me' },
         ]
         invoke.mockImplementation(async (channel) => {
             if (channel === 'spaces:readAsset') return { ...asset }
