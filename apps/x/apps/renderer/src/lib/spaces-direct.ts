@@ -31,8 +31,8 @@ export function selfDirectRefused(err: unknown): boolean {
 }
 
 /** The user-facing reason a self-DM could not be opened. */
-export function selfDirectFailureMessage(orgName: string, err: unknown): string {
-    if (selfDirectRefused(err)) return `Notes to self need a newer server — ${orgName} hasn't been updated yet`
+export function selfDirectFailureMessage(err: unknown): string {
+    if (selfDirectRefused(err)) return 'Notes to self need a newer server'
     return err instanceof Error ? err.message : 'Could not open your notes'
 }
 
@@ -80,25 +80,31 @@ export function memberLabel(member: Pick<spaces.Member, 'displayName' | 'deactiv
     return member.displayName
 }
 
-/** No longer in the org — a deleted account, or removed by an admin. Pickers leave them out. */
+/** No longer on the server — a deleted account, or a row the one-server migration folded away (2026-11-09). Pickers leave them out. */
 export function isDeparted(member: Pick<spaces.Member, 'deactivatedAt' | 'removedAt'>): boolean {
     return !!member.deactivatedAt || !!member.removedAt
 }
 
-/**
- * Ro while an admin has it off (2026-10-30, Harbor's `OrgSettings.jevEnabled`):
- * it tags no one, so the agent list and every picker leave it out, as for a
- * departed member. Its old messages still show it by name.
- */
-export function isSwitchedOff(member: Pick<spaces.Member, 'agentKind'>, settings: Pick<spaces.OrgSettings, 'jevEnabled'>): boolean {
-    return member.agentKind === 'jev' && !settings.jevEnabled
+/** An agent this person owns (Harbor spec §4 Agent members): the only agents they may DM or add to a space (2026-11-09). */
+export function isOwnAgent(member: Pick<spaces.Member, 'kind' | 'ownerId'>, selfMemberId: string | undefined): boolean {
+    return member.kind === 'agent' && member.ownerId !== undefined && member.ownerId === selfMemberId
 }
 
 /**
- * Someone else's personal agent (Harbor spec §4 Agent members, 2026-10-26):
- * only its owner can mention it, add it or DM it, so everyone else's pickers
- * leave it out. It still shows on rosters and on its replies.
+ * May this person open a DM with the member (Harbor spec §4, the reach rule,
+ * 2026-11-09)? A person: yes, when they are a contact (the server checks the
+ * shared space). An agent: its owner only. Pickers offer exactly these.
  */
-export function isOthersPersonalAgent(member: Pick<spaces.Member, 'personal' | 'ownerId'>, selfMemberId: string | undefined): boolean {
-    return member.personal === true && member.ownerId !== selfMemberId
+export function canMessageDirect(member: Pick<spaces.Member, 'kind' | 'ownerId'>, selfMemberId: string | undefined): boolean {
+    return member.kind !== 'agent' || isOwnAgent(member, selfMemberId)
+}
+
+/**
+ * An agent whose seat in this space is its owner's alone (Harbor spec §4
+ * Agent members, 2026-11-09: `Membership.invocableBy`), seen by someone else:
+ * a mention of it is refused, so the composer's hints and the follow-up rule
+ * say so. Everyone still sees it and its replies.
+ */
+export function answersOwnerOnly(member: Pick<spaces.Member, 'kind' | 'ownerId'> & { invocableBy?: 'owner' | 'members' }, selfMemberId: string | undefined): boolean {
+    return member.kind === 'agent' && member.invocableBy === 'owner' && member.ownerId !== selfMemberId
 }

@@ -3,8 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { LiveStats } from './stats.js';
 
 // The operator face, as far as it exists (2026-09-22): GET /internal/stats,
-// host-independent (the platform probes the service's own hostname, which
-// routes to no org), behind one bearer the operator sets — HARBOR_INTERNAL_KEY.
+// host-independent (the platform probes the service's own hostname), behind one bearer the operator sets — HARBOR_INTERNAL_KEY.
 // No key configured = the route does not exist. Spec §9 parks the rest of
 // /internal (provisioning, limit knobs) until there is a control plane to call it.
 

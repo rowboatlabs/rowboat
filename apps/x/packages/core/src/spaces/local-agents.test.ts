@@ -64,7 +64,7 @@ async function startTestHarbor(): Promise<RunningHarbor> {
   const db = await pgliteDb();
   const store = new PgStore(db);
   await store.init();
-  const started = await startHarbor({ store, orgName: 'Local Test Org', seedMembers: [{ id: 'gagan', displayName: 'Gagan' }, { id: 'harsh', displayName: 'Harsh' }] });
+  const started = await startHarbor({ store, name: 'Local Test Org', seedMembers: [{ id: 'gagan', displayName: 'Gagan' }, { id: 'harsh', displayName: 'Harsh' }] });
   return { ...started, close: async () => (await started.close(), await db.close()) };
 }
 
@@ -111,9 +111,9 @@ beforeEach(() => {
 });
 
 describe('adding one', () => {
-  it('makes a personal local agent and keeps its key on this computer only', async () => {
+  it('makes a local agent (owner-only wherever it sits, 2026-11-09) and keeps its key on this computer only', async () => {
     const [listing] = await gagan.listAgents();
-    expect(listing!.agent).toMatchObject({ agentKind: 'claude-code', agentConnection: 'local', personal: true, ownerId: 'gagan' });
+    expect(listing!.agent).toMatchObject({ agentKind: 'claude-code', agentConnection: 'local', ownerId: 'gagan' });
     const saved = JSON.parse(fs.readFileSync(path.join(workDir, 'config', 'spaces_local_agents.json'), 'utf-8'));
     expect(saved.agents[0]).toMatchObject({ orgId: 'org-1', agentId, kind: 'claude-code', cwd: workDir, policy: 'yolo' });
     expect(saved.agents[0].key).toMatch(/^rbk_/);
@@ -123,7 +123,7 @@ describe('adding one', () => {
   });
 
   it('is online on the roster while this computer runs it', async () => {
-    expect((await gagan.orgRoster()).online).toEqual([agentId]);
+    expect((await gagan.listContacts()).online).toEqual([agentId]);
   });
 
   it('offers Stop, and its engine’s models and efforts in the composer', async () => {
@@ -241,7 +241,7 @@ describe('forgetting it', () => {
     forgetLocalAgent({ orgId: 'org-1', agentId });
     expect(listLocalAgents()).toEqual([]);
     // Harbor waits out its grace before saying offline; the connection itself is gone at once.
-    await until(async () => (await gagan.orgRoster()).online !== undefined, 'the roster');
+    await until(async () => (await gagan.listContacts()).online !== undefined, 'the contacts');
   });
 });
 

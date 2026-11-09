@@ -1,4 +1,4 @@
-import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
 import type { ActorCtx } from '../core/kernel.js';
 import type { CredentialTarget, PlatformSetup } from '../core/agents.js';
 import type { HarborService } from '../service.js';
@@ -6,7 +6,6 @@ import { agent37Platform } from './agent37/index.js';
 import { attioPlatform } from './attio/index.js';
 import { calPlatform } from './cal/index.js';
 import { conductorPlatform } from './conductor/index.js';
-import { jevPlatform } from './jev/index.js';
 import { maritimePlatform } from './maritime/index.js';
 import { posthogPlatform } from './posthog/index.js';
 import { replicasPlatform } from './replicas/index.js';
@@ -22,8 +21,8 @@ import { replicasPlatform } from './replicas/index.js';
 /** What Harbor hands a running connector: its agent, the contract, and the connector's own storage. */
 export interface ConnectorEnv {
   agent: Member;
-  /** The org's public address, with its scheme: links in prompts, and what an agent's tools call. */
-  orgUrl: string;
+  /** The server's public address, with its scheme: links in prompts, and what an agent's tools call. */
+  serverUrl: string;
   service: HarborService;
   /** The agent itself: `{ memberId: agent.id, agent: true }`, as its key would resolve. */
   ctx: ActorCtx;
@@ -77,7 +76,7 @@ export interface ConnectorPlatform {
   alert?(payload: unknown): string | undefined;
 }
 
-/** One entry per connection in HARBOR_RUN_CONNECTIONS, and Jev's, the one built in (2026-10-07). */
+/** One entry per connection in HARBOR_RUN_CONNECTIONS. */
 export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
   agent37: agent37Platform(),
@@ -86,8 +85,7 @@ export const PLATFORMS: Record<string, ConnectorPlatform> = {
   posthog: posthogPlatform(),
   cal: calPlatform(),
   attio: attioPlatform(),
-  [BUILT_IN_CONNECTION]: jevPlatform(),
 };
 
-/** Every connection whose connector Harbor runs: the platforms it calls, and the agent it is. */
-export const HOSTED_CONNECTIONS: readonly string[] = [...HARBOR_RUN_CONNECTIONS, BUILT_IN_CONNECTION];
+/** Every connection whose connector Harbor runs: the platforms it calls. */
+export const HOSTED_CONNECTIONS: readonly string[] = HARBOR_RUN_CONNECTIONS;

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ConnectorCapabilities, Invocation, InvocationOption, InvocationUpdate, Message, ServerFrame } from '@rowboat/spaces-protocol';
 import { HarborError } from '../../errors.js';
+import { namedIn } from '../common/request.js';
 import type { ConnectorEnv, RunningConnector } from '../platforms.js';
 import { attachmentLinks, requestMarker, type Attachment } from '../thread-prompt.js';
 import { Agent37Error, type Agent37Api, type Agent37Model, type HistoryEntry, type TurnEvent, type TurnRequest } from './api.js';
@@ -533,7 +534,6 @@ export class Agent37Connector implements RunningConnector {
   /** The prompt for this invocation: the request, the thread since the session last heard it, earlier files. */
   private async prompt(invocation: Invocation, record: ThreadRecord): Promise<string> {
     const { spaceId, threadRootId } = invocation.conversation;
-    const names = new Map((await this.safe(() => this.env.service.listOrgMembers(this.env.ctx), [])).map((m) => [m.id, m.displayName]));
     const trigger = await this.safe(() => this.env.service.getMessage(this.env.ctx, spaceId, invocation.trigger.messageId), undefined);
     const after = record.deliveredOffset ?? 0;
     const context: Message[] = [];
@@ -547,13 +547,14 @@ export class Agent37Connector implements RunningConnector {
       }
     }
     const earlierAttachments = (await Promise.all(context.map((m) => this.attachments(spaceId, m.body)))).flat();
+    const names = await this.safe(() => this.env.service.namesFor(namedIn([...(trigger ? [trigger] : []), ...context], invocation)), new Map<string, string>());
     return buildPrompt({
       invocation,
       agentId: this.env.agent.id,
       context,
       names,
-      orgAddress: this.env.service.org.address,
-      orgUrl: this.env.orgUrl,
+      address: this.env.service.server.address,
+      serverUrl: this.env.serverUrl,
       earlierAttachments,
     });
   }

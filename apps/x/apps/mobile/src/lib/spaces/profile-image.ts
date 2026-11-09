@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
-// Pick a square photo and shrink it to what a profile image needs. The org
+// Pick a square photo and shrink it to what a profile image needs. The server
 // stores bytes as sent and caps them at 1 MiB (Harbor core/images.ts), so the
 // phone does the resizing: 512px JPEG is a few tens of kilobytes.
 const EDGE = 512;

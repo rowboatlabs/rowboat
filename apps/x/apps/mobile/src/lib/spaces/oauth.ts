@@ -6,7 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 // discovery via RFC 9728 metadata → DCR → PKCE in an auth session with a
 // deep-link redirect (rowboat://oauth-callback — verified accepted by
 // Supabase DCR, 2026-09-03) → token exchange. Tokens are realm-generic:
-// the one sign-in works at the apex and every org on the deployment.
+// the one sign-in works at the server (one server since 2026-11-09).
 
 export const REDIRECT_URI = 'rowboat://oauth-callback';
 const SCOPES = 'openid email profile';

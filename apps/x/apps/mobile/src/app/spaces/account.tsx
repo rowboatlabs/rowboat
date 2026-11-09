@@ -12,7 +12,7 @@ import { setMyAvatar, useMyAvatar } from '@/lib/spaces/my-avatar';
 import { pickProfileImage } from '@/lib/spaces/profile-image';
 import { useColors } from '@/theme/colors';
 
-// Account (iOS Settings shape): who you are, your orgs, notifications, sign
+// Account (iOS Settings shape): who you are, your server, notifications, sign
 // out — and, last and quiet, Delete account (App Store 5.1.1(v)).
 export default function AccountScreen() {
   const colors = useColors();
@@ -23,8 +23,7 @@ export default function AccountScreen() {
   const [savingPhoto, setSavingPhoto] = useState(false);
   const clientFor = (org: SpacesOrg) => new SpacesClient({ baseUrl: `https://${org.address}`, token: (opts) => account.getAccessToken(opts) });
 
-  // Name and title as saved, and as being typed. The title isn't on the org
-  // listing, so both come from GET /v1/me.
+  // Name and title as saved, and as being typed, from GET /v1/me.
   const [profile, setProfile] = useState<Profile | null>(null);
   const [draft, setDraft] = useState<Profile>({ displayName: '', title: '' });
   const [savingProfile, setSavingProfile] = useState(false);
@@ -43,11 +42,11 @@ export default function AccountScreen() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per org, not per render's client
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per server, not per render's client
   }, [me?.id, me?.address]);
   const name = profile?.displayName || me?.displayName || 'Your account';
 
-  // Like the photo, your name and title are set on every org you're in.
+  // Your name and title live on the server.
   const saveProfile = async (field: keyof Profile) => {
     if (!profile) return;
     const value = draft[field].replace(/\s+/g, ' ').trim();
@@ -70,8 +69,7 @@ export default function AccountScreen() {
     }
   };
 
-  // Your photo is per org on the server; set it on every org you're in so
-  // you look the same everywhere.
+  // Your photo lives on the server.
   const eachOrg = async (work: (client: SpacesClient) => Promise<{ avatarUrl?: string }>) => {
     setSavingPhoto(true);
     try {
@@ -144,7 +142,7 @@ export default function AccountScreen() {
     if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(
       'Delete your account?',
-      "You'll be signed out and removed from all your orgs right away. Your account and its data are permanently deleted within 30 days.",
+      "You'll be signed out and removed from Spaces right away. Your account and its data are permanently deleted within 30 days.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -154,7 +152,7 @@ export default function AccountScreen() {
             if (process.env.EXPO_OS === 'ios') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             Alert.alert(
               'Are you sure?',
-              "You'll leave every org, your agents will stop working, and you won't be able to sign in again. Your messages stay, marked as deactivated. This can't be undone.",
+              "You'll leave every chat, your agents will stop working, and you won't be able to sign in again. Your messages stay, marked as deactivated. This can't be undone.",
               [
                 { text: 'Cancel', style: 'cancel' },
                 { text: 'Continue', style: 'destructive', onPress: typeToConfirm },
@@ -189,7 +187,7 @@ export default function AccountScreen() {
       </View>
 
       {profile ? (
-        <Group label="Profile" footer="How your teammates see you in every org you're in.">
+        <Group label="Profile" footer="How people see you across Spaces.">
           <Row first>
             <Text style={{ width: 56, fontSize: 16, color: colors.label }}>Name</Text>
             <TextInput
@@ -227,11 +225,11 @@ export default function AccountScreen() {
       ) : null}
 
       {account.orgs?.length ? (
-        <Group label="Orgs">
+        <Group label="Server">
           {account.orgs.map((org, i) => (
             <Row key={org.id} first={i === 0}>
               <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{org.name}</Text>
-              <Text style={{ fontSize: 15, color: colors.tertiaryLabel }}>{org.role === 'admin' ? 'Admin' : 'Member'}</Text>
+              <Text style={{ fontSize: 15, color: colors.tertiaryLabel }}>{org.address}</Text>
             </Row>
           ))}
         </Group>
@@ -255,7 +253,7 @@ export default function AccountScreen() {
         </Row>
       </Group>
 
-      <Group footer="Signs you out, removes you from every org, and permanently deletes your Rowboat account within 30 days.">
+      <Group footer="Signs you out, removes you from Spaces, and permanently deletes your Rowboat account within 30 days.">
         <Row first onPress={deleting ? undefined : confirmDelete}>
           <Text style={{ flex: 1, fontSize: 16, color: colors.destructive }}>Delete account</Text>
           {deleting ? <ActivityIndicator size="small" /> : null}

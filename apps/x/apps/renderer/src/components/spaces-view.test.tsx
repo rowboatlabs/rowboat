@@ -21,11 +21,9 @@ vi.mock('@/hooks/use-space-chat', () => ({
     useStream: () => fixture.stream, useSpacePresence: () => fixture.presence,
     useSpacesUnreadCounts: () => fixture.map, prefetchThread: vi.fn(), STREAM_READ_KEY: '__stream__',
 }))
-vi.mock('@/hooks/use-space-directory', () => ({ useSpaceDirectory: () => ({ entries: fixture.empty }) }))
 vi.mock('@/hooks/use-space-members', () => ({ useSpaceMembers: () => fixture.members, useOrgRoster: () => fixture.members, refreshMembers: vi.fn() }))
 vi.mock('@/hooks/use-space-invocations', () => ({ useSpaceInvocations: () => fixture.map }))
 vi.mock('@/hooks/use-space-boards', () => ({ noteListingFromEntries: vi.fn() }))
-vi.mock('@/hooks/use-org-settings', () => ({ useOrgSettings: () => ({}), canInvite: () => false }))
 vi.mock('@/lib/spaces-read-state', () => ({
     useStreamReadOffset: () => 0, useReadStateVersion: () => 0,
     streamBadge: () => ({ unread: 0, forYou: 0 }), threadsBadge: () => ({ unread: 0, forYou: 0 }), threadBadge: () => ({ unread: 0, forYou: 0 }),
@@ -37,21 +35,19 @@ vi.mock('@/components/spaces/thread-pane', () => ({ ThreadPane: ({ rootMessageId
     <div data-testid="thread" data-visible={visible}>{rootMessageId}<button onClick={onBack}>Back to list</button></div>,
 }))
 vi.mock('@/components/spaces/member-directory', () => ({ MemberDirectory: () => null }))
-vi.mock('@/components/spaces/space-browser', () => ({ SpaceBrowser: () => null }))
 vi.mock('@/components/spaces/agents-view', () => ({ AgentsView: () => null }))
 vi.mock('@/components/spaces/bookmarks', () => ({ BookmarksPanel: () => null }))
 vi.mock('@/components/spaces/files-tab', () => ({ FileColumn: () => null, TrashDialog: () => null, UploadFilesDialog: () => null }))
 vi.mock('@/components/spaces/scheduled-dialog', () => ({ ScheduledDialog: () => null }))
 vi.mock('@/components/spaces/add-members-dialog', () => ({ AddMembersDialog: () => null }))
-vi.mock('@/components/spaces/space-admin-dialogs', () => ({ ArchiveSpaceDialog: () => null, DeleteSpaceDialog: () => null, SpaceVisibilityDialog: () => null }))
+vi.mock('@/components/spaces/space-admin-dialogs', () => ({ ArchiveSpaceDialog: () => null, DeleteSpaceDialog: () => null }))
 vi.mock('@/components/spaces/invite-link', () => ({ InviteLinkPanel: () => null }))
 vi.mock('@/components/spaces/selection-copy', () => ({ SelectionCopy: () => null }))
-vi.mock('@/components/spaces/server-switcher', () => ({ ServerSwitcher: () => null }))
 vi.mock('@/components/spaces/activity-view', () => ({ ActivityView: () => null }))
 vi.mock('@/components/spaces/space-rail', () => ({ OrgRail: () => null, SpaceRail: () => null }))
 vi.mock('@/components/spaces/space-files-view', () => ({ SpaceFilesView: () => null }))
 vi.mock('@/components/spaces/space-search', () => ({ SpaceSearch: () => null }))
-vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null, OrgMonogram: () => null }))
+vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null }))
 vi.mock('@/components/spaces/member-admin', () => ({ MemberAdminProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('@/components/spaces/invocation-lines', () => ({ SpaceInvocationsProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('@/components/spaces/member-text', () => ({ SpaceMembersProvider: ({ children }: { children: ReactNode }) => children, SpaceProfilesProvider: ({ children }: { children: ReactNode }) => children }))

@@ -14,10 +14,9 @@ import type {
   InvocationState,
   BlobInfo,
   ChangeSet,
-  InvitePolicy,
   Member,
   MemberRole,
-  OrgSettings,
+  SpaceMember,
   Membership,
   MentionStamps,
   Message,
@@ -72,10 +71,10 @@ export interface AssetVersionData {
 
 /**
  * The space-level read gate for uploaded bytes (the analogue of Buzz's
- * per-community sidecar): bytes dedup per org in the BlobStore underneath,
+ * per-community sidecar): bytes dedup per server in the BlobStore underneath,
  * but a blob is referencable and servable only in spaces it was uploaded to.
  */
-/** Notify level (push.ts): what a member wants pushed, org-wide. */
+/** Notify level (push.ts): what a member wants pushed, server-wide. */
 export type PushLevel = 'off' | 'mentions' | 'dms' | 'all';
 
 export interface StoredSpaceBlob {
@@ -90,8 +89,8 @@ export interface StoredSpaceBlob {
   uploadedAt: string;
 }
 
-/** An image the whole org may read (core/images.ts): an avatar or the logo. */
-export interface StoredOrgImage {
+/** An image every member may read (core/images.ts): an avatar; the org logo went 2026-11-09. */
+export interface StoredImage {
   hash: string;
   size: number;
   mime: string;
@@ -103,8 +102,10 @@ export interface StoredOrgImage {
 
 export interface StoredInvite {
   token: string;
-  /** The spaces it lists, in the order given; empty = the org and its default spaces only (2026-10-19). */
-  spaceIds: string[];
+  /** The space it invites to; absent for a personal link (2026-11-09). */
+  spaceId?: string;
+  /** A personal link: accepting opens a DM with its maker (2026-11-09). */
+  direct: boolean;
   createdBy: string;
   createdAt: string;
   expiresAt?: string;
@@ -134,6 +135,8 @@ export interface StoredAgentKey extends AgentKey {
 
 /** A platform credential as stored (spec §8 Connectors, 2026-09-30): what its owner sees, plus the sealed secret. */
 export interface StoredAgentCredential extends AgentCredential {
+  /** What the value was sealed under (sealing.ts): the server's id before 2026-11-09, SEAL_SCOPE since. Reads pass it back; writes may omit it. */
+  sealedScope?: string;
   agentId: string;
   sealed: string;
 }
@@ -200,6 +203,7 @@ export interface MessageSearchRow {
 
 /** An asset search hit: snippet present only for extracted-content matches. */
 export interface AssetSearchRow {
+  spaceId: string;
   record: AssetRecord;
   snippet?: string;
 }
@@ -245,20 +249,27 @@ export interface UnreadThreadRow {
 }
 
 export interface Store {
-  // members (org-level)
+  // members (server-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
   patchAvailability(id: string, patch: NonNullable<Member['availability']>): Promise<void>;
-  /** Switch an agent between channel and personal (2026-10-27): the one write of the flag after creation. */
-  setAgentPersonal(id: string, personal: boolean): Promise<void>;
   /** Make an agent a super agent or an ordinary one again (2026-11-02): the one write of the setting. */
   setAgentSuper(id: string, superAgent: SuperAgent | null): Promise<void>;
   /** An agent's description (its title) and instructions, both whole: null clears one (2026-10-29). */
   setAgentProfile(id: string, profile: { title: string | null; instructions: string | null }): Promise<void>;
-  /** The whole org roster — operator-side reads only (the mentions backfill). */
+  /** Every member on the server — operator-side reads only (the mentions backfill, profile fan-out). */
   listAllMembers(): Promise<Member[]>;
-  /** A space's roster in join order — one statement (2026-09-22). */
-  listSpaceMembers(spaceId: string): Promise<Member[]>;
+  /** A space's roster in join order, each with their role there — one statement (2026-09-22; roles 2026-11-09). */
+  listSpaceMembers(spaceId: string): Promise<SpaceMember[]>;
+  /**
+   * A member's contacts (spec §3, 2026-11-09): every active person who shares
+   * a space with them now, DMs and archived spaces included, plus the agents
+   * they own — one statement, sorted by display name (case-insensitive, id
+   * breaks ties). The member themself is not in it.
+   */
+  listContacts(memberId: string): Promise<Member[]>;
+  /** The rows for these ids, departed included — names for authors on a page (2026-11-09; the roster used to serve this). One statement. */
+  listMembersByIds(ids: readonly string[]): Promise<Member[]>;
   /**
    * Every member who shares a space (DMs included) with `memberId`, plus the
    * member themself — one statement (2026-09-22). The store answers the
@@ -281,49 +292,28 @@ export interface Store {
    * refuses the next sign-in (policy.ts canSignIn). Idempotent.
    */
   deactivateMember(memberId: string, at: string): Promise<void>;
-  /**
-   * An admin removes a member from the org (spec §4 Roles, 2026-10-19): the
-   * row stays, stamped removed_at, and an admin's role drops to member so a
-   * removed admin never counts toward, or comes back as, an admin. Push
-   * tokens go; keys of the member (an agent) and of agents they own are
-   * revoked. The identity row stays: it is how an invite finds the same row
-   * again (reactivateMember). Idempotent.
-   */
-  removeMemberFromOrg(memberId: string, at: string): Promise<void>;
-  /** Clear removed_at: the same identity accepted an invite (2026-10-19). */
-  reactivateMember(memberId: string): Promise<void>;
-  /**
-   * Set the admin bit. Demoting the org's last active admin answers
-   * 'last_admin' and writes nothing, decided under a row lock so two admins
-   * demoting each other cannot both pass (spec §4 Roles: at least one admin).
-   */
-  setMemberRole(memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'>;
-
-  // org settings (2026-10-19): one row per org once an admin sets one; no row = the defaults.
-  getOrgSettings(): Promise<OrgSettings>;
-  setInvitePolicy(policy: InvitePolicy, by: string, at: string): Promise<void>;
-  /** Ro on or off for the org (spec §8 Jev, 2026-10-30). */
-  setJevEnabled(enabled: boolean, by: string, at: string): Promise<void>;
 
   // spaces — `kind` (migration 014) rides the row; a direct space also
   // stores its direct key, and putSpace MUST refuse a second direct space
   // with the same key (the get-or-create race guard the service relies on).
   putSpace(space: Space): Promise<void>;
   getSpace(id: string): Promise<Space | undefined>;
-  /** Shared spaces only unless `includeDirect` — the listing's compatibility posture (api.ts). */
-  browseSpaces(memberId: string): Promise<Array<{ space: Space; joined: boolean }>>;
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
-  /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
+  /** Every space on the server, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;
-  /** The org's default spaces (spec §5 answer 3), oldest first — archived ones included; the caller skips them. */
-  listDefaultSpaces(): Promise<Space[]>;
-  /** How many spaces of each kind the org holds — what makes it a group chat (policy.ts isGroupChat). */
-  countSpacesByKind(): Promise<{ shared: number; direct: number }>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
   getDirectSpace(directKey: string): Promise<Space | undefined>;
 
   // membership
   getMembership(spaceId: string, memberId: string): Promise<Membership | undefined>;
+  /**
+   * Set the admin bit on one row (spec §4 Roles, 2026-11-09). Demoting the
+   * space's only admin answers 'last_admin' and writes nothing, decided
+   * under a row lock so two admins demoting each other cannot both pass.
+   */
+  setMembershipRole(spaceId: string, memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'>;
+  /** Set an agent's seat in a space (spec §4 Agent members, 2026-11-09): the one write of the field after the row is made. */
+  setMembershipAccess(spaceId: string, agentId: string, invocableBy: 'owner' | 'members'): Promise<void>;
   listMemberships(spaceId: string): Promise<Membership[]>;
   putMembership(membership: Membership): Promise<void>;
   /** Delete the space row; every space-keyed table cascades from it (migration 039). */
@@ -331,7 +321,7 @@ export interface Store {
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
   // push (push.ts): per-device Expo tokens, per-member notify level.
-  // A token is org-scoped and unique; re-registering moves it to its member.
+  // A token is server-scoped and unique; re-registering moves it to its member.
   putPushToken(memberId: string, token: string, updatedAt: string): Promise<void>;
   /** Operator-side prune (push.ts): Expo names a dead device by token alone. */
   deletePushToken(token: string): Promise<void>;
@@ -362,17 +352,13 @@ export interface Store {
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
   /** Every hash a space has registered — read before the space is deleted, while the rows exist. */
   listSpaceBlobHashes(spaceId: string): Promise<string[]>;
-  /** Of `hashes`, the ones no space of this org and no profile image or logo still uses: bytes safe to delete. */
+  /** Of `hashes`, the ones no space and no profile image still uses: bytes safe to delete. */
   unreferencedBlobs(hashes: string[]): Promise<string[]>;
 
-  // profile images (org-scoped registry; bytes live in the BlobStore)
+  // profile images (the server's registry; bytes live in the BlobStore)
   /** First write wins, as putSpaceBlob. */
-  putOrgImage(image: StoredOrgImage): Promise<void>;
-  getOrgImage(hash: string): Promise<StoredOrgImage | undefined>;
-  /** The org's logo hash, or undefined when none is set. */
-  getOrgLogo(): Promise<string | undefined>;
-  /** null clears it. */
-  setOrgLogo(hash: string | null, by: string, at: string): Promise<void>;
+  putImage(image: StoredImage): Promise<void>;
+  getImage(hash: string): Promise<StoredImage | undefined>;
 
   // change log (append-only). ChangeSet.assetId is the lineage key: per-file
   // history is a filter instead of a chain walk.
@@ -454,11 +440,11 @@ export interface Store {
   // protocol search.ts for ordering semantics). Tombstones never match
   // (their bodies are blank); deleted assets are filtered, not de-indexed.
   /** Body matches, newest first. */
-  searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]>;
+  searchMessages(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<MessageSearchRow[]>;
   /** Title matches, best first. */
-  searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]>;
+  searchTopics(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<Topic[]>;
   /** Live assets by extracted content or path; path matches rank first. */
-  searchAssets(spaceId: string, query: SearchQuery, limit: number): Promise<AssetSearchRow[]>;
+  searchAssets(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<AssetSearchRow[]>;
 
   // reactions — per-(member, emoji) toggles on messages
   getReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<StoredReaction | undefined>;
@@ -556,7 +542,7 @@ export interface Store {
 
   // --- agent keys (spec §4 Agent members, 2026-09-29) ---
   /** Agent members, by display name: every one, or those `ownerId` owns. */
-  listAgents(ownerId: string | null): Promise<Member[]>;
+  listAgents(ownerId: string): Promise<Member[]>;
   putAgentKey(key: StoredAgentKey): Promise<void>;
   getAgentKey(id: string): Promise<StoredAgentKey | undefined>;
   getAgentKeyByHash(hash: string): Promise<StoredAgentKey | undefined>;
@@ -584,7 +570,7 @@ export interface Store {
   getConnectionThread(agentId: string, spaceId: string, threadRootId: string): Promise<unknown | undefined>;
   putConnectionThread(agentId: string, spaceId: string, threadRootId: string, data: unknown, at: string): Promise<void>;
   /** The agent key a connector hands its agent's workspaces: which key, and its sealed secret. */
-  getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string } | undefined>;
+  getConnectorKey(agentId: string): Promise<{ keyId: string; sealed: string; sealedScope: string } | undefined>;
   putConnectorKey(agentId: string, keyId: string, sealed: string, at: string): Promise<void>;
 
   // --- managed agents (spec §8 Maritime, 2026-10-26) ---
@@ -608,9 +594,6 @@ export interface Store {
   listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]>;
   /** A space's invocations (one thread's, when given), newest message first. */
   listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]>;
-  /** The hand-off depth an agent a message mentions is invoked at (spec §8 Jev, 2026-10-07); 0 when none was recorded. */
-  getMessageHops(spaceId: string, messageId: string): Promise<number>;
-  putMessageHops(spaceId: string, messageId: string, depth: number): Promise<void>;
   /** Whether two members share a shared (not direct) space. */
   sharesSharedSpace(a: string, b: string): Promise<boolean>;
 
@@ -635,7 +618,7 @@ export interface Store {
   listMembershipEvents(spaceId: string, afterOffset: number, upToOffset: number | null): Promise<StoredEvent[]>;
 
   // one-time passes (the mentions backfill): a ledger so a pass that rewrites
-  // content runs exactly once per org, not on every boot
+  // content runs exactly once per server, not on every boot
   backfillDone(id: string): Promise<boolean>;
   markBackfillDone(id: string, at: string): Promise<void>;
 

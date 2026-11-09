@@ -20,7 +20,6 @@ import { WebRail } from './account-menu'
 import { takeJoinClick, takeOpenLink } from './links'
 import { startNotifications } from './notifications'
 import { NotificationsPrompt } from './notifications-prompt'
-import { orgKey } from './orgs'
 import { parseRoute, routePath } from './routes'
 import { SignedOut } from './signed-out'
 import { useTabBadge } from './tab-badge'
@@ -70,16 +69,16 @@ export function WebApp({ signInError }: { signInError: string | null }) {
     }, [])
 
     const route = useMemo(() => parseRoute(location.path), [location.path])
-    const org = route.orgKey ? orgs.find((o) => orgKey(o) === route.orgKey) : undefined
-    const selection: SpaceSelection = org
+    // One server (2026-11-09): the path names the place; the server is the one signed into.
+    const org = orgs[0]
+    const selection: SpaceSelection = org && (route.spaceId || route.view)
         ? { orgId: org.id, spaceId: route.spaceId ?? '', ...(route.view ? { view: route.view } : {}) }
         : null
     const rail = route.rail.kind === 'general' && location.rail?.kind === 'attachment' ? location.rail : route.rail
 
     const go = useCallback((orgId: string, target: { spaceId?: string; view?: OrgView; rail?: RailSelection }, replace = false) => {
-        const found = getSpacesOrgs().find((o) => o.id === orgId)
-        if (!found) return
-        const path = routePath(orgKey(found), target)
+        if (!getSpacesOrgs().some((o) => o.id === orgId)) return
+        const path = routePath(target)
         const state = target.rail?.kind === 'attachment' ? { rail: target.rail } : null
         if (replace) window.history.replaceState(state, '', path)
         else window.history.pushState(state, '', path)
@@ -136,8 +135,8 @@ export function WebApp({ signInError }: { signInError: string | null }) {
                     // Back from the sign-in Join started: the card joins without a second click.
                     openServerDialog({ kind: 'join', inviteUrl: outcome.inviteUrl, ...(takeJoinClick(outcome.inviteUrl) ? { autoJoin: true } : {}) })
                     return
-                case 'unknown-org':
-                    toast.error(`This link is for ${outcome.orgAddress}, which isn't one of your servers.`)
+                case 'unknown-server':
+                    toast.error(`This link is for ${outcome.address}, which is not this server.`)
                     return
                 case 'refused':
                     toast.error(outcome.message)
@@ -177,7 +176,6 @@ export function WebApp({ signInError }: { signInError: string | null }) {
                                 onRailSelect={(next) => { if (selection?.spaceId) go(selection.orgId, { spaceId: selection.spaceId, rail: next }) }}
                                 onOpenMessage={onOpenMessage}
                                 onOpenActivity={(id) => go(id, { view: 'activity' })}
-                                onOpenBrowse={(id) => go(id, { view: 'browse' })}
                                 onOpenAgents={(id) => go(id, { view: 'agents' })}
                                 onOpenThreads={(id) => go(id, { view: 'threads' })}
                             />

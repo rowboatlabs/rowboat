@@ -8,7 +8,7 @@ const members = [
     { id: 'ram', displayName: 'Ramnique', kind: 'human', role: 'member' },
     { id: 'ai', displayName: 'Assistant', kind: 'agent', agentKind: 'claude-code', agentConnection: 'replicas', role: 'member' },
     { id: 'bot', displayName: 'Analytics', kind: 'agent', agentKind: 'posthog', agentConnection: 'posthog', role: 'member' },
-] as spaces.Member[]
+] as spaces.SpaceMember[]
 afterEach(cleanup)
 
 it('defaults to actual people and separates both AI agents and service bots with independent counts', () => {

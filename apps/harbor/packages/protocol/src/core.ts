@@ -20,8 +20,9 @@ export const Attribution = z.object({
 export type Attribution = z.infer<typeof Attribution>;
 
 /**
- * The org-level admin bit (spec §4, amended 2026-08-19): admin powers are
- * membership and policy, never content — the content plane is role-flat.
+ * The admin bit (spec §4 Roles, rewritten 2026-11-09): on a MEMBERSHIP row,
+ * meaning admin of that space. Until 2026-11-09 it sat on the member and
+ * meant admin of the org.
  */
 export const MemberRole = z.enum(['admin', 'member']);
 export type MemberRole = z.infer<typeof MemberRole>;
@@ -54,12 +55,11 @@ export type SuperAgent = z.infer<typeof SuperAgent>;
 export const Member = z.object({
   availability: Availability.optional(),
   id: MemberId,
-  /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
+  /** Display-only, server-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
   /** What they do, as the roster shows it (spec §4 Member profile; built 2026-10-19). Absent = none. */
   title: z.string().min(1).max(128).optional(),
   avatarUrl: z.string().url().optional(),
-  role: MemberRole.default('member'),
   /** Absent from servers before 2026-09-29, whose members are all people. */
   kind: MemberKind.default('human'),
   /**
@@ -83,13 +83,6 @@ export const Member = z.object({
    */
   agentInstance: z.string().min(1).max(128).optional(),
   /**
-   * A personal agent (spec §4 Agent members, 2026-10-26): only its owner may
-   * invoke it, add it to a space or DM it; everyone still sees it and its
-   * replies. Absent = a channel agent, which anyone sharing a space with it
-   * may invoke. Fixed at creation; independent of the kind and connection.
-   */
-  personal: z.boolean().optional(),
-  /**
    * A super agent (spec §4 Agent members, 2026-11-02): an agent an admin let
    * create agents, and delete the managed ones it created.
    * Absent = an ordinary agent, which creates none. Set only by an admin.
@@ -99,7 +92,7 @@ export const Member = z.object({
    * An agent's instructions from its owner (2026-10-29, agent personalities):
    * how it should behave, in its owner's words, which its connector gives the
    * agent with every invocation (Invocation.instructions). Optional, set only
-   * by the owner, read by every org member like the rest of the profile.
+   * by the owner, read by every member like the rest of the profile.
    * Absent for people and for agents without any.
    */
   instructions: z.string().min(1).max(AGENT_INSTRUCTIONS_MAX).optional(),
@@ -111,35 +104,15 @@ export const Member = z.object({
    */
   deactivatedAt: z.string().optional(),
   /**
-   * When an admin removed the member from the org (spec §4 Roles, built
-   * 2026-10-19): the member's state is `removed`. Like a deactivated
-   * account, the row stays so their messages keep their author, and clients
-   * mark them and leave them out of pickers. Unlike it, an invite accepted
-   * by the same identity reactivates the row and clears this. Absent = active.
+   * A row that departed: built 2026-10-19 for an org admin's removal; since
+   * 2026-11-09 a duplicate identity the one-server migration folded into
+   * another member, or the retired Jev. Like a deactivated account, the row
+   * stays so their messages keep their author, and clients mark them and
+   * leave them out of pickers. Absent = active.
    */
   removedAt: z.string().optional(),
 });
 export type Member = z.infer<typeof Member>;
-
-/**
- * Who may create invites (spec §4 Invites and Roles, built 2026-10-19): any
- * member, Slack's default, or admins only. An admin sets it.
- */
-export const InvitePolicy = z.enum(['members', 'admins']);
-export type InvitePolicy = z.infer<typeof InvitePolicy>;
-
-/** The org's settings any member may read and an admin sets (2026-10-19). */
-export const OrgSettings = z.object({
-  invitePolicy: InvitePolicy.default('members'),
-  /**
-   * Whether Ro, the built-in Jev agent, is on (spec §8 Jev, 2026-10-30): off,
-   * it tags no one and clients leave it out of their agent lists and pickers.
-   * It keeps its spaces, so on again it carries on there. Off until an admin
-   * turns it on (2026-11-03, Arjun's call).
-   */
-  jevEnabled: z.boolean().default(false),
-});
-export type OrgSettings = z.infer<typeof OrgSettings>;
 
 /**
  * Edit your own profile (spec §4 Member profile; built 2026-10-19): a field
@@ -214,25 +187,15 @@ export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37',
  */
 export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37', 'maritime'];
 /**
- * Connections whose agents are always personal (2026-10-28): a local agent
- * runs commands on its owner's computer, so only its owner may invoke it.
- * Added personal whatever the request says, and never switched to channel.
+ * Connections whose agents answer their owner only, in every space (2026-10-28;
+ * seats since 2026-11-09): a local agent runs commands on its owner's
+ * computer, so its seats are locked to `owner` whatever is asked.
  */
-export const PERSONAL_ONLY_CONNECTIONS: readonly string[] = [LOCAL_CONNECTION];
-/**
- * An agent Harbor itself is (2026-10-07, Jev): built into the org, on the
- * deployment's own key, so no person adds it, owns it or holds a key for it.
- * Never in AGENT_PAIRS: people add it to spaces like any agent, but never
- * create one. Jev is TypeSafe's decision model; it reads every message in
- * its spaces and tags whoever a message needs (spec §8 Jev).
- */
-export const BUILT_IN_CONNECTION = 'builtin';
-export const JEV_KIND = 'jev';
-
+export const OWNER_ONLY_CONNECTIONS: readonly string[] = [LOCAL_CONNECTION];
 /**
  * What a super agent may ask for (spec §4 Agent members, 2026-11-02): an
  * agent Rowboat runs (no connection, one of MARITIME_AGENTS), or any pair in
- * AGENT_PAIRS but a local one, which is personal and so can't be handed work.
+ * AGENT_PAIRS but a local one, which answers its owner only and so can't be handed work.
  */
 export function superAgentMayCreate(kind: string, connection?: string): boolean {
   if (connection === undefined) return (MARITIME_AGENTS as readonly string[]).includes(kind);
@@ -256,7 +219,7 @@ export function isAgentPair(kind: string, connection: string): boolean {
 
 /**
  * A credential an agent member presents as itself (spec §4, 2026-09-29): a
- * bearer secret the org stores only as a hash. The secret is shown once, at
+ * bearer secret the server stores only as a hash. The secret is shown once, at
  * creation (AgentKeySecret); every other read is this metadata.
  */
 export const AgentKey = z.object({
@@ -291,7 +254,7 @@ export type AgentCredential = z.infer<typeof AgentCredential>;
 /**
  * Where a platform agent's alerts land (spec §8 Alerts, 2026-10-03): the
  * service posts to a secret address, and the agent posts what it says into
- * this space. The address is shown once, when it is set; the org keeps its hash.
+ * this space. The address is shown once, when it is set; the server keeps its hash.
  */
 export const AgentHook = z.object({
   spaceId: SpaceId,
@@ -528,7 +491,7 @@ export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), c
 export type AgentListing = z.infer<typeof AgentListing>;
 
 /**
- * What a space IS at the org level (direct messages, 2026-09-07). `shared` =
+ * What a space IS at the server level (direct messages, 2026-09-07). `shared` =
  * the ordinary space: invites, leave, files, feed. `direct` = a DM: the SAME
  * container on the same substrate (stream, threads, files, offsets, agent
  * sessions all unchanged), with a FIXED membership — exactly `participants`,
@@ -538,9 +501,6 @@ export type AgentListing = z.infer<typeof AgentListing>;
  */
 export const SpaceKind = z.enum(['shared', 'direct']);
 export type SpaceKind = z.infer<typeof SpaceKind>;
-
-export const SpaceVisibility = z.enum(['private', 'open']);
-export type SpaceVisibility = z.infer<typeof SpaceVisibility>;
 
 export const Space = z.object({
   id: SpaceId,
@@ -552,8 +512,6 @@ export const Space = z.object({
   name: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
   kind: SpaceKind.default('shared'),
-  /** Old payloads and existing spaces stay private (spec §5, 2026-09-22). */
-  visibility: SpaceVisibility.default('private'),
   /**
    * Direct spaces only: the fixed member set, sorted — the DM's identity.
    * Absent on shared spaces. ONE element = the member's self-DM (notes to
@@ -567,13 +525,6 @@ export const Space = z.object({
    * payloads and every existing space are live. A DM is never archived.
    */
   archived: z.boolean().default(false),
-  /**
-   * A default space (spec §5 answer 3, built 2026-10-19): everyone who
-   * accepts an invite to the org joins it. Only a shared open space can be
-   * one, and only an admin sets it. Old payloads and every existing space
-   * are not defaults.
-   */
-  isDefault: z.boolean().default(false),
 });
 export type Space = z.infer<typeof Space>;
 
@@ -581,8 +532,31 @@ export const Membership = z.object({
   spaceId: SpaceId,
   memberId: MemberId,
   joinedAt: z.iso.datetime(),
+  /**
+   * Admin of this space (spec §4 Roles, 2026-11-09): the creator at birth,
+   * given and taken by admins, inherited by the longest-standing human when
+   * the last admin goes. Never on an agent's row. Older payloads parse as
+   * members.
+   */
+  role: MemberRole.default('member'),
+  /**
+   * An agent's seat (spec §4 Agent members, 2026-11-09): who may ask it in
+   * this space — everyone here, or its owner only. Set by the owner when
+   * they add it, changed by the owner any time; locked to `owner` for an
+   * agent on its owner's own computer, and in a DM. Absent on a person's row.
+   */
+  invocableBy: z.enum(['owner', 'members']).optional(),
 });
 export type Membership = z.infer<typeof Membership>;
+
+/** A space's roster entry (listMembers, 2026-11-09): the member with their seat in this space. */
+export const SpaceMember = Member.extend({
+  role: MemberRole,
+  joinedAt: z.iso.datetime(),
+  /** An agent's seat here (Membership.invocableBy); absent on a person. */
+  invocableBy: z.enum(['owner', 'members']).optional(),
+});
+export type SpaceMember = z.infer<typeof SpaceMember>;
 
 /**
  * The deliberate conversation object (spec §7, annotation model 2026-09-01):
@@ -701,7 +675,7 @@ export type Poll = z.infer<typeof Poll>;
 
 /**
  * One member's vote toggle on one poll answer — the payload of `poll_vote`.
- * Per-(member, answer), reaction semantics; on single-select polls the org
+ * Per-(member, answer), reaction semantics; on single-select polls the server
  * moves a vote by emitting a `removed` then an `added` under one lock.
  */
 export const PollVote = z.object({
@@ -781,7 +755,7 @@ export const Message = z.object({
   /**
    * The write-once reply pointer (annotation model): absent = a root message
    * in the space's one stream; present = a reply in the flat thread under
-   * that root. Always a ROOT's id — never a reply's (the org normalizes), so
+   * that root. Always a ROOT's id — never a reply's (the server normalizes), so
    * threads are flat by shape, not convention. Set at post time, immutable.
    */
   threadRoot: MessageId.optional(),
@@ -798,7 +772,7 @@ export const Message = z.object({
   /**
    * Reply denorm on ROOT messages: live (non-tombstoned) replies in this
    * message's thread, so every listing can render the reply chip without a
-   * reverse lookup. Maintained by the org; 0 on replies and on stored
+   * reverse lookup. Maintained by the server; 0 on replies and on stored
    * message events (reads carry the current truth, like reactions).
    */
   replyCount: z.number().int().nonnegative().default(0),
@@ -869,7 +843,7 @@ export const Message = z.object({
    */
   session: SessionMark.optional(),
   /**
-   * Who this message addresses — STAMPED by the org at post and edit from the
+   * Who this message addresses — STAMPED by the server at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that
    * are members of the space. Unread counts, Activity, and push read these;
    * nothing anywhere re-parses text. Defaults keep pre-stamp payloads parsing.

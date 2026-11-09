@@ -4,26 +4,23 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { refreshSpacesAccountState, refreshSpacesOrgs, useSpacesAccountState } from '@/hooks/use-spaces'
+import { refreshSpacesOrgs, useSpacesAccountState } from '@/hooks/use-spaces'
 import { consumeServerDialog, subscribeServerDialog, type ServerDialogRequest } from '@/lib/server-dialog'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
-import { listNames } from '@/lib/spaces-invites'
 
 // The server dialogs, one host for the whole app (lib/server-dialog.ts is
-// how anything opens one). Two intents, two dialogs: CREATE a server, or
-// JOIN one you were invited to — each focused on its own single act, each
-// carrying a small link to the other in its footer. Two rarer ways in — a
-// server by address, a dev server — are their own small screens reached
-// from Join's ··· menu, with a way back.
+// how anything opens one). One intent: JOIN a group (or a person's DM) you
+// were sent a link to. Two rarer ways in — a self-hosted server by address,
+// a dev server — are their own small screens reached from Join's ··· menu,
+// with a way back. Creating a server went with the orgs (2026-11-09).
 //
-// Sign-in (one session, two uses) is folded into the intent rather than a
-// door of its own: Create needs a Rowboat session first, so without one it
-// offers the sign-in in place of the form; Join needs none up front — the
-// join itself signs the person in, and the dialog just says so.
+// Sign-in (one session, two uses) is folded in rather than a door of its
+// own: Join needs none up front — the join itself signs the person in, and
+// the dialog just says so.
 
-/** What a finished dialog hands back: the org, and the space to land in when one is known. */
+/** What a finished dialog hands back: the server, and the space (or DM) to land in when one is known. */
 export type ServerDialogDone = (orgId: string, spaceId?: string) => void
 
 export function ServerDialogs({ onDone }: { onDone: ServerDialogDone }) {
@@ -56,8 +53,6 @@ export function ServerDialogs({ onDone }: { onDone: ServerDialogDone }) {
     }
     const key = `${request.kind}-${seq}`
     switch (request.kind) {
-        case 'create':
-            return <CreateServerDialog key={key} onClose={close} onDone={done} onJoinInstead={() => swap({ kind: 'join' })} />
         case 'join':
             return (
                 <JoinServerDialog
@@ -66,7 +61,6 @@ export function ServerDialogs({ onDone }: { onDone: ServerDialogDone }) {
                     autoJoin={request.autoJoin === true}
                     onClose={close}
                     onDone={done}
-                    onCreateInstead={() => swap({ kind: 'create' })}
                     onByAddress={() => swap({ kind: 'address' })}
                     onDev={() => swap({ kind: 'dev' })}
                 />
@@ -133,119 +127,14 @@ function BrowserWait() {
 // Create
 // ---------------------------------------------------------------------------
 
-function CreateServerDialog({ onClose, onDone, onJoinInstead }: {
-    onClose: () => void
-    onDone: ServerDialogDone
-    onJoinInstead: () => void
-}) {
-    const account = useSpacesAccountState()
-    const [name, setName] = useState('')
-    // The apex (/v1/config via core) gates Create. null = no spaces fleet for
-    // this environment; undefined = loading.
-    const [apexDomain, setApexDomain] = useState<string | null | undefined>(undefined)
-    const [busy, setBusy] = useState<'create' | 'signin' | null>(null)
+/** What the card says: the group the link joins, or the person it opens a DM with (2026-11-09). */
+type InvitePreview = { space?: string; person?: string; invitedBy?: string }
 
-    useEffect(() => {
-        void window.ipc.invoke('spaces:apexInfo', null)
-            .then(({ apexDomain: domain }) => setApexDomain(domain))
-            .catch(() => setApexDomain(null))
-    }, [])
-
-    const signIn = async () => {
-        setBusy('signin')
-        try {
-            const { orgs } = await window.ipc.invoke('spaces:signInRowboat', null)
-            refreshSpacesAccountState()
-            if (orgs.length > 0) {
-                // Signing in surfaced the servers they already belong to — that
-                // is the outcome; creating another can wait.
-                toast(`Signed in — ${orgs.length} ${orgs.length === 1 ? 'server' : 'servers'} ready`, 'success')
-                onDone(orgs[0].id)
-            } else {
-                toast('Signed in to Rowboat', 'success')
-            }
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Sign-in failed', 'error')
-        } finally {
-            setBusy(null)
-        }
-    }
-
-    const create = async () => {
-        if (!name.trim() || !apexDomain) return
-        setBusy('create')
-        try {
-            const { org } = await window.ipc.invoke('spaces:createOrg', { name: name.trim() })
-            analytics.spacesServerCreated()
-            toast(`Created ${org.name} — you're the admin`, 'success')
-            onDone(org.id)
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not create the server', 'error')
-        } finally {
-            setBusy(null)
-        }
-    }
-
-    const needsSignIn = account !== null && !account.hasSession
-    return (
-        <Shell
-            title="Create a group chat"
-            description="Name it and you’re in. Invite people from the chat, and add channels whenever it grows into a team. Free, and you’re its admin."
-            onClose={onClose}
-            footerLeft={<FooterLink onClick={onJoinInstead}>Have an invite? Join a server</FooterLink>}
-            footerRight={
-                <>
-                    <Button variant="ghost" onClick={onClose}>Cancel</Button>
-                    {needsSignIn ? (
-                        <Button onClick={() => void signIn()} disabled={busy !== null}>
-                            {busy === 'signin' && <Loader2 className="size-3.5 mr-1 animate-spin" />} Sign in with Rowboat
-                        </Button>
-                    ) : (
-                        <Button onClick={() => void create()} disabled={busy !== null || !name.trim() || !apexDomain}>
-                            {busy === 'create' && <Loader2 className="size-3.5 mr-1 animate-spin" />} Create
-                        </Button>
-                    )}
-                </>
-            }
-        >
-            {needsSignIn ? (
-                <p className="text-sm text-muted-foreground">
-                    Sign in with your Rowboat account first — the chat is yours, so it needs to know who you are. Any servers you already belong to appear right after.
-                </p>
-            ) : (
-                <div>
-                    <label htmlFor="server-name" className="text-xs font-medium text-muted-foreground">Group name</label>
-                    <Input
-                        id="server-name"
-                        autoFocus
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="Family, book club, Acme…"
-                        onKeyDown={(e) => e.key === 'Enter' && void create()}
-                    />
-                    {apexDomain === null && (
-                        <p className="mt-1.5 text-xs text-muted-foreground">Spaces isn’t available for this environment yet.</p>
-                    )}
-                </div>
-            )}
-            {busy === 'signin' && <BrowserWait />}
-        </Shell>
-    )
-}
-
-// ---------------------------------------------------------------------------
-// Join
-// ---------------------------------------------------------------------------
-
-/** An invite is to the org (2026-10-19): the org, and every space accepting joins. */
-interface InvitePreview { org: string; spaces: string[]; invitedBy?: string }
-
-function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, onDone, onCreateInstead, onByAddress, onDev }: {
+function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, onDone, onByAddress, onDev }: {
     inviteUrl?: string
     autoJoin?: boolean
     onClose: () => void
     onDone: ServerDialogDone
-    onCreateInstead: () => void
     onByAddress: () => void
     onDev: () => void
 }) {
@@ -267,7 +156,11 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
         try {
             const { resolved } = await window.ipc.invoke('spaces:resolveInviteLink', { url: next.trim() })
             if (resolved.state === 'ok') {
-                setPreview({ org: resolved.org.name, spaces: (resolved.spaces ?? []).map((s) => s.name), ...(resolved.invitedBy ? { invitedBy: resolved.invitedBy } : {}) })
+                setPreview({
+                    ...(resolved.space ? { space: resolved.space.name } : {}),
+                    ...(resolved.direct ? { person: resolved.direct.displayName } : {}),
+                    ...(resolved.invitedBy ? { invitedBy: resolved.invitedBy } : {}),
+                })
                 return true
             }
             toast(`This invite is ${resolved.state}`, 'error')
@@ -334,7 +227,6 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
                             </DropdownMenuContent>
                         </DropdownMenu>
                     )}
-                    <FooterLink onClick={onCreateInstead}>New here? Create a server</FooterLink>
                 </>
             }
             footerRight={
@@ -354,7 +246,7 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
                         autoFocus
                         value={url}
                         onChange={(e) => void resolve(e.target.value)}
-                        placeholder="https://org.example/join/…"
+                        placeholder="https://spaces.example/join/…"
                         onKeyDown={(e) => e.key === 'Enter' && void join()}
                     />
                     <p className="mt-1 text-xs text-muted-foreground">Paste the link someone sent you.</p>
@@ -363,12 +255,13 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
             {preview ? (
                 <div className="rounded-md border px-3 py-2.5 text-sm">
                     <div>
-                        You’re invited to <span className="font-medium">{preview.org}</span>
+                        {preview.space
+                            ? <>You’re invited to <span className="font-medium">#{preview.space}</span></>
+                            : preview.person
+                                ? <>This link opens a direct message with <span className="font-medium">{preview.person}</span></>
+                                : 'This invite no longer leads anywhere.'}
                     </div>
-                    {preview.spaces.length > 0 && (
-                        <div className="text-xs text-muted-foreground">You’ll join {listNames(preview.spaces)}</div>
-                    )}
-                    {preview.invitedBy && <div className="text-xs text-muted-foreground">Invited by {preview.invitedBy}</div>}
+                    {preview.invitedBy && preview.space && <div className="text-xs text-muted-foreground">Invited by {preview.invitedBy}</div>}
                 </div>
             ) : resolving ? (
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

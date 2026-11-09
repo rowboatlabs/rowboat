@@ -11,14 +11,14 @@ export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
  * rather than dropping the reader back on the stream.
  */
 /**
- * The org-level surfaces that replace a space in the pane: Activity, Browse
- * spaces, Agents (2026-10-21, every agent in the org), and Threads
- * (2026-11-05, every thread you are in, sessions among them).
+ * The server-level surfaces that replace a space in the pane: Activity, Agents
+ * (2026-10-21, every agent you own), and Threads (2026-11-05, every thread you
+ * are in, sessions among them). Browse spaces went with open spaces (2026-11-09).
  */
-export type OrgView = 'activity' | 'browse' | 'agents' | 'threads'
+export type OrgView = 'activity' | 'agents' | 'threads'
 
 export function isOrgView(value: unknown): value is OrgView {
-    return value === 'activity' || value === 'browse' || value === 'agents' || value === 'threads'
+    return value === 'activity' || value === 'agents' || value === 'threads'
 }
 
 export type SpaceLocation = {
@@ -43,7 +43,7 @@ export function serverLandingSpaceId(org: Pick<OrgWithSpaces, 'id' | 'spaces' | 
     return lastVisitedSpaceId(org.id, rooms.map((room) => room.id)) ?? rooms[0]?.id ?? ''
 }
 
-/** Restore the destination; the view resolves membership or open-space access asynchronously (spec §5, 2026-09-28). */
+/** Restore the destination; the view resolves membership asynchronously (spec §5, 2026-09-28). */
 export function resolveSpacesLocation(orgs: OrgWithSpaces[], previous: unknown): SpaceLocation | null {
     const saved = readLocation(previous)
     const previousOrg = saved ? orgs.find((org) => org.id === saved.orgId) : undefined
@@ -51,7 +51,6 @@ export function resolveSpacesLocation(orgs: OrgWithSpaces[], previous: unknown):
     // there is the whole of it.
     if (previousOrg && saved?.view) return { orgId: previousOrg.id, spaceId: '', view: saved.view }
     if (previousOrg && saved && saved.spaceId) {
-        // A missing membership may mean an open preview, so preserve its content target.
         return { orgId: previousOrg.id, spaceId: saved.spaceId, ...(saved.rail ? { rail: saved.rail } : {}) }
     }
     // Landing on a different space than the saved one: its rail selection named
@@ -94,14 +93,15 @@ export function lastSpaceLocation(): SpaceLocation | null {
 }
 
 /**
- * The org link landings (Harbor http.ts) hand a browser-opened link into the
- * app as rowboat://open?type=spaces&org=<address>&…, and into the web app as
- * its /open with the same query (2026-10-13): a space, a file in it, a
- * message in it (root or reply), a person, or an invite. What they name is
- * resolved before navigating (spaces-link-open.ts).
+ * The link landings (Harbor http.ts) hand a browser-opened link into the
+ * app as rowboat://open?type=spaces&server=<address>&… (`org=` until
+ * 2026-11-09), and into the web app as its /open with the same query
+ * (2026-10-13): a space, a file in it, a message in it (root or reply), a
+ * person, or an invite. What they name is resolved before navigating
+ * (spaces-link-open.ts).
  */
 export interface SpacesLinkTarget {
-  orgAddress: string
+  address: string
   spaceId?: string
   assetId?: string
   messageId?: string
@@ -116,10 +116,10 @@ export function parseSpacesLink(input: string): SpacesLinkTarget | null {
   const m = /^rowboat:\/\/open\/?\?(.*)$/.exec(input)
   if (!m) return null
   const params = new URLSearchParams(m[1]!)
-  const orgAddress = params.get('org')
-  if (params.get('type') !== 'spaces' || !orgAddress) return null
+  const address = params.get('server')
+  if (params.get('type') !== 'spaces' || !address) return null
   const pick = (k: string) => params.get(k) || undefined
-  const target: SpacesLinkTarget = { orgAddress }
+  const target: SpacesLinkTarget = { address }
   const spaceId = pick('spaceId'), assetId = pick('assetId'), messageId = pick('messageId'), memberId = pick('memberId')
   const inviteToken = pick('invite')
   if (spaceId) target.spaceId = spaceId
@@ -130,16 +130,3 @@ export function parseSpacesLink(input: string): SpacesLinkTarget | null {
   return target
 }
 
-
-/**
- * A group chat (2026-10-07, spec §4): the server says so — one space and no
- * DMs, the same for every member — and shows as one conversation, with DMs
- * off. A second space makes it a workspace for everyone. A server too old
- * to say gets the same rule from what this member can see.
- */
-export function isGroupChat(org: Pick<OrgWithSpaces, 'spaces' | 'directs' | 'groupChat' | 'error'>): boolean {
-    // The row opens your one space: a member of none (left it through their
-    // agent, say) has nothing to open, so it is not a chat to them.
-    if (org.error || org.spaces.length !== 1) return false
-    return org.groupChat ?? org.directs.length === 0
-}

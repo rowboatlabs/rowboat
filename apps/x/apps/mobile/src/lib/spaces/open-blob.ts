@@ -3,7 +3,7 @@ import * as Sharing from 'expo-sharing';
 
 import type { SpacesClient } from '@/lib/spaces/client';
 
-// Opening an attached file from a message (2026-10-05). The org serves blobs
+// Opening an attached file from a message (2026-10-05). The server serves blobs
 // to members only, so a browser can't follow the link: fetch the bytes with
 // the bearer, drop them in the cache under the file's own name, and hand them
 // to the iOS share sheet — Quick Look, Save to Files, open in another app.

@@ -1,37 +1,53 @@
-import { MemberStatus } from '@/components/spaces/atoms'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, Bot, ChevronDown, ChevronRight, Compass, CornerDownRight, Hash, Lock, MessagesSquare, LogIn, MoreHorizontal, Pencil, Plus, RotateCw, UserPlus } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Archive, Bell, Bot, ChevronDown, ChevronRight, CornerDownRight, Hash, Link as LinkIcon, LogIn, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { type SpaceSelection } from '@/components/spaces-view'
 import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import { NO_BADGE, streamBadge, threadBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
-import { MemberAvatar } from '@/components/spaces/atoms'
-import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
-import { InviteDialog } from '@/components/spaces/invite-dialog'
+import { MemberAvatar, MemberStatus } from '@/components/spaces/atoms'
+import { NewChatDialog } from '@/components/spaces/new-chat-dialog'
+import { PersonalLinkDialog } from '@/components/spaces/personal-link-dialog'
+import { RemoveServerDialog } from '@/components/spaces/remove-server-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
 import { prefetchMembers, useOrgRoster, useSelfDisplayName, usePeopleOnline } from '@/hooks/use-space-members'
-import { canInvite, useOrgSettings } from '@/hooks/use-org-settings'
 import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
-import * as analytics from '@/lib/analytics'
-import { isGroupChat } from '@/lib/spaces-navigation'
 import { needsYouCount, useMyThreads } from '@/lib/spaces-my-threads'
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+/** The chip over the chat list (spec §10, 2026-11-09): everything, groups, people, or your agents. */
+type ChatFilter = 'all' | 'groups' | 'people' | 'agents'
+const FILTERS: ReadonlyArray<{ value: ChatFilter; label: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'groups', label: 'Groups' },
+    { value: 'people', label: 'People' },
+    { value: 'agents', label: 'Agents' },
+]
+const FILTER_KEY = 'spaces:chatFilter'
+function readFilter(): ChatFilter {
+    try {
+        const stored = localStorage.getItem(FILTER_KEY)
+        return FILTERS.some((f) => f.value === stored) ? (stored as ChatFilter) : 'all'
+    } catch { return 'all' }
+}
+
+/**
+ * The chat list (spec §10, 2026-11-09): one list, newest activity first —
+ * groups and direct messages alike, as WhatsApp lists them — with chips to
+ * narrow it, New chat behind the +, and your personal link at the foot. The
+ * server-level rows sit above it: Activity, Threads, Agents.
+ */
+function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
-    /** Your threads across the org's spaces, sessions among them (2026-11-05); absent = no row. */
+    /** Your threads across the server's spaces, sessions among them (2026-11-05); absent = no row. */
     onOpenThreads?: (orgId: string) => void
     threadsActive?: boolean
     activeSpace: SpaceSelection
@@ -40,71 +56,46 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
     activeDiscussionCount?: number
     renderDiscussions?: (spaceId: string) => ReactNode
     onOpenSpace: (orgId: string, spaceId: string) => void
-    /** The org's Activity surface (layer 3); absent = no row. */
-    onOpenBrowse?: (orgId: string) => void
-    browseActive?: boolean
-    /** Every agent in the org (2026-10-21); absent = no row. */
+    /** Your agents (2026-10-21); absent = no row. */
     onOpenAgents?: (orgId: string) => void
     agentsActive?: boolean
+    /** The Activity surface (layer 3); absent = no row. */
     onOpenActivity?: (orgId: string) => void
     activityActive?: boolean
     onChanged: () => void
 }) {
-    // The Activity row's number: everything for me across the org's spaces —
-    // the same "for you" the space rows show, summed.
+    // The Activity row's number: everything for me across every chat — the
+    // same "for you" the chat rows show, summed.
     let forYou = 0
     for (const [key, badge] of unread) if (key.startsWith(`${org.id}/`)) forYou += badge.forYou
-    const [creating, setCreating] = useState(false)
-    const [newName, setNewName] = useState('')
-    const [visibility, setVisibility] = useState<'private' | 'open'>('private')
-    const [submitting, setSubmitting] = useState(false)
-    const directory = useSpaceDirectory(org.id, creating)
-    // Rename-in-place: the row's label becomes an input (same shape as create).
+    const [filter, setFilterState] = useState<ChatFilter>(readFilter)
+    const setFilter = (next: ChatFilter) => {
+        setFilterState(next)
+        try { localStorage.setItem(FILTER_KEY, next) } catch { /* private window: the chip just isn't remembered */ }
+    }
+    const [newChatOpen, setNewChatOpen] = useState(false)
+    const [linkOpen, setLinkOpen] = useState(false)
+    const [disconnecting, setDisconnecting] = useState(false)
+    // Rename-in-place: the row's label becomes an input.
     const [renamingId, setRenamingId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState('')
-    const [newDirectOpen, setNewDirectOpen] = useState(false)
-    const [inviteOpen, setInviteOpen] = useState(false)
-    // Under an admins-only invite policy (2026-10-19) a member's invite is refused, so Invite hides.
-    const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
-    const profileRoster = useOrgRoster(org.id, orgSpaceIds)
+    const spaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
+    const contacts = useOrgRoster(org.id, spaceIds)
     const peopleOnline = usePeopleOnline(org.id)
-    const selfIsAdmin = profileRoster.find((m) => m.id === org.memberId)?.role === 'admin'
-    const mayInvite = canInvite(useOrgSettings(org.id), selfIsAdmin)
     // A dead OAuth session shows as a gentle "Sign in again" (org.authError, from core);
-    // an unreachable org shows Retry.
+    // an unreachable server shows Retry.
     const needsSignIn = !!org.authError
     const [signingIn, setSigningIn] = useState(false)
     const signInAgain = async () => {
         setSigningIn(true)
         try {
             await window.ipc.invoke('spaces:signInOrg', { orgId: org.id })
-            toast(`Signed back into ${org.name}`, 'success')
+            toast('Signed back in', 'success')
             onChanged()
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Sign-in failed', 'error')
         } finally {
             setSigningIn(false)
-        }
-    }
-
-    const createSpace = async () => {
-        const name = newName.trim()
-        if (!name || submitting || (visibility === 'open' && (!directory.loaded || !directory.supported || directory.error))) return
-        setSubmitting(true)
-        try {
-            const { space } = await window.ipc.invoke('spaces:createSpace', { orgId: org.id, name, visibility })
-            if (space.visibility !== visibility) toast('The server created this space as private. Update the server to create open spaces.', 'info')
-            invalidateSpaceDirectory(org.id)
-            setVisibility('private')
-            analytics.spacesSpaceCreated()
-            setCreating(false)
-            setNewName('')
-            onChanged()
-            onOpenSpace(org.id, space.id)
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not create the space', 'error')
-        } finally {
-            setSubmitting(false)
         }
     }
 
@@ -116,23 +107,19 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
             await window.ipc.invoke('spaces:renameSpace', { orgId: org.id, spaceId, name })
             onChanged()
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not rename the space', 'error')
+            toast(err instanceof Error ? err.message : 'Could not rename the group', 'error')
         }
     }
 
-    // DMs: people, most recent conversation first. Warm their streams so
-    // unread and recency can read the loaded tail.
+    // Warm every chat's tail so recency (and its unread) can read it.
     useEffect(() => {
-        for (const dm of org.directs) prefetchStream(org.id, dm.id)
-    }, [org.id, org.directs])
-    // Your notes-to-self DM sits in the list like anyone else's, sorted by
-    // activity, labelled the way conversation lists do: your name, then a quiet "you".
-    // It shows before it exists — the org creates it on the first click.
+        for (const room of [...org.spaces, ...org.directs]) prefetchStream(org.id, room.id)
+    }, [org.id, org.spaces, org.directs])
+
+    // Your notes-to-self DM sits in the list like anyone else's, labelled the way
+    // conversation lists do: your name, then a quiet "you". It shows before it
+    // exists — the server creates it on the first click.
     const selfDm = org.directs.find((dm) => isSelfDirect(dm, org.memberId))
-    // DMs are off in a group chat, notes to self included (2026-10-07).
-    const directsOn = !org.error && !isGroupChat(org)
-    const directs = [...org.directs].sort((a, b) =>
-        (spaceLastActivityAt(org.id, b.id) ?? b.createdAt).localeCompare(spaceLastActivityAt(org.id, a.id) ?? a.createdAt))
     const selfRosterIds = useMemo(
         () => (selfDm ? [selfDm.id] : org.spaces.slice(0, 1).map((s) => s.id)),
         [selfDm, org.spaces],
@@ -152,24 +139,42 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                 markSelfDirectUnsupported(org.id)
                 setSelfUnsupported(true)
             }
-            toast(selfDirectFailureMessage(org.name, err), 'error')
+            toast(selfDirectFailureMessage(err), 'error')
         } finally {
             setOpeningSelf(false)
         }
     }
 
-    // Archived spaces (harbor #1186, 2026-10-14) leave the list for a
+    // One list, newest activity first. A DM is a person or an agent (its other
+    // participant's kind, from your contacts); a group is a shared space.
+    type Row = { kind: 'group'; space: OrgWithSpaces['spaces'][number] } | { kind: 'direct'; space: OrgWithSpaces['directs'][number]; otherId: string; agent: boolean }
+    const rows: Row[] = [
+        ...org.spaces.filter((space) => !space.archived).map((space): Row => ({ kind: 'group', space })),
+        ...org.directs.map((space): Row => {
+            const otherId = directAvatarId(space, org.memberId)
+            return { kind: 'direct', space, otherId, agent: contacts.find((m) => m.id === otherId)?.kind === 'agent' }
+        }),
+    ]
+    const lastActivity = (space: { id: string; createdAt: string }) => spaceLastActivityAt(org.id, space.id) ?? space.createdAt
+    rows.sort((a, b) => lastActivity(b.space).localeCompare(lastActivity(a.space)))
+    const shown = rows.filter((row) =>
+        filter === 'all' ? true
+        : filter === 'groups' ? row.kind === 'group'
+        : filter === 'people' ? row.kind === 'direct' && !row.agent
+        : row.kind === 'direct' && row.agent)
+    const selfShown = !selfDm && (filter === 'all' || filter === 'people')
+
+    // Archived groups (harbor #1186, 2026-10-14) leave the list for a
     // collapsed section at its foot — still readable, out of the way.
-    const liveSpaces = org.spaces.filter((space) => !space.archived)
-    const archivedSpaces = org.spaces.filter((space) => space.archived)
+    const archivedSpaces = filter === 'all' || filter === 'groups' ? org.spaces.filter((space) => space.archived) : []
     const [archivedOpen, setArchivedOpen] = useState(false)
-    // Viewing an archived space keeps its row in sight.
+    // Viewing an archived group keeps its row in sight.
     const archivedShown = archivedOpen || archivedSpaces.some((space) => activeSpace?.orgId === org.id && activeSpace.spaceId === space.id)
     const startRename = (space: OrgWithSpaces['spaces'][number]) => {
         setRenameValue(space.name)
         setRenamingId(space.id)
     }
-    const spaceRow = (space: OrgWithSpaces['spaces'][number]) => {
+    const groupRow = (space: OrgWithSpaces['spaces'][number]) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
         // Collapsed, the row carries the stream plus every followed
         // discussion; expanded, the discussions show their own and the
@@ -188,10 +193,10 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
             </SidebarMenuItem>
         }
         return (
-                <CollapsibleSpace key={space.id} orgId={org.id} spaceId={space.id} name={space.name}
+            <CollapsibleSpace key={space.id} orgId={org.id} spaceId={space.id} name={space.name}
                 showArchived={showArchived} countOverride={active ? activeDiscussionCount : undefined} enabled={!!renderDiscussions}
                 discussions={() => renderDiscussions?.(space.id)}>
-                    {(expanded) => { const badge = expanded ? streamBadge(org.id, space.id, false) : summed; return (<>
+                {(expanded) => { const badge = expanded ? streamBadge(org.id, space.id, false) : summed; return (<>
                     <ContextMenu>
                         <ContextMenuTrigger asChild>
                             <SidebarMenuButton
@@ -206,15 +211,15 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                                 // The row behind it carries the hover and the selection (CollapsibleSpace).
                                 className={cn('min-w-0 flex-1 hover:bg-transparent active:bg-transparent data-[active=true]:bg-transparent', renderDiscussions && 'pl-1')}
                             >
-                                {/* A space is a channel — # says so. */}
-                                {space.visibility === 'open' ? <Hash className="size-3.5 shrink-0 text-muted-foreground" /> : <Lock aria-label="Private space" className="size-3.5 shrink-0 text-muted-foreground" />}
+                                {/* A group is a channel — # says so. */}
+                                <Hash className="size-3.5 shrink-0 text-muted-foreground" />
                                 <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-semibold text-foreground')}>{space.name}</span>
                                 {!active && <UnreadBadge badge={badge} />}
                             </SidebarMenuButton>
                         </ContextMenuTrigger>
                         <ContextMenuContent>
                             <ContextMenuItem disabled={space.archived} onClick={() => startRename(space)}>
-                                <Pencil className="mr-2 size-3.5" /> Rename space
+                                <Pencil className="mr-2 size-3.5" /> Rename group
                             </ContextMenuItem>
                         </ContextMenuContent>
                     </ContextMenu>
@@ -222,7 +227,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                         ⋯ on hover opens the same menu so it can be found. */}
                     {!space.archived && <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <button type="button" aria-label={`Options for ${space.name}`} title="Space options"
+                            <button type="button" aria-label={`Options for ${space.name}`} title="Group options"
                                 className="spaces-row-more mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
                                 <MoreHorizontal className="size-3.5" />
                             </button>
@@ -230,20 +235,47 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                         {/* Focus returning to the trigger would blur the rename input and commit it. */}
                         <DropdownMenuContent align="start" onCloseAutoFocus={(event) => event.preventDefault()}>
                             <DropdownMenuItem onSelect={() => startRename(space)}>
-                                <Pencil className="size-3.5" /> Rename space
+                                <Pencil className="size-3.5" /> Rename group
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>}
-                    </>) }}
+                </>) }}
             </CollapsibleSpace>
         )
     }
+    const directRow = (row: Extract<Row, { kind: 'direct' }>) => {
+        const { space: dm, otherId } = row
+        const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
+        const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
+        const self = isSelfDirect(dm, org.memberId)
+        const contact = contacts.find((m) => m.id === otherId)
+        const label = self ? selfName : contact?.displayName ?? spaceDisplayName(org, dm)
+        return (
+            <SidebarMenuItem key={dm.id}>
+                <SidebarMenuButton
+                    isActive={active}
+                    onClick={() => onOpenSpace(org.id, dm.id)}
+                    onMouseEnter={() => {
+                        prefetchStream(org.id, dm.id)
+                        prefetchMembers(org.id, dm.id)
+                    }}
+                    className="spaces-rail-row"
+                >
+                    <MemberAvatar orgId={org.id} avatarUrl={contact?.avatarUrl} id={otherId} name={label} size="sm" online={peopleOnline.has(otherId)} availability={contact?.availability} agent={row.agent} agentKind={contact?.agentKind} />
+                    <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-semibold text-foreground')}>
+                        {label}<MemberStatus member={contact} />
+                        {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
+                    </span>
+                    {!active && <UnreadBadge badge={badge} direct />}
+                </SidebarMenuButton>
+            </SidebarMenuItem>
+        )
+    }
 
-    const navRows = !!(onOpenActivity || onOpenThreads || onOpenAgents || onOpenBrowse || needsSignIn || org.error)
+    const navRows = !!(onOpenActivity || onOpenThreads || onOpenAgents || needsSignIn || org.error)
     return (
         <>
-            {/* Spaces redesign (2026-10-21): Activity is a nav row like Agents and
-                Browse (no more bottom panel), in that order, all on one left edge. */}
+            {/* Spaces redesign (2026-10-21): Activity is a nav row like Agents, all on one left edge. */}
             {navRows && <SidebarMenu className="gap-0.5">
                 {/* A dead session or an unreachable server leads the rail, so it is seen. */}
                 {needsSignIn ? (
@@ -280,18 +312,64 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                         </SidebarMenuButton>
                     </SidebarMenuItem>
                 )}
-                {onOpenBrowse && (
-                    <SidebarMenuItem>
-                        <SidebarMenuButton isActive={browseActive} onClick={() => onOpenBrowse(org.id)} className="spaces-rail-row">
-                            <Compass className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="flex-1 truncate">Browse spaces</span>
-                        </SidebarMenuButton>
-                    </SidebarMenuItem>
-                )}
             </SidebarMenu>}
-            <RailSection section="spaces" label="Spaces" addLabel="New space" onAdd={() => setCreating(true)}>
-                <SidebarMenu className="gap-0.5">
-                    {liveSpaces.map(spaceRow)}
+            <div className="spaces-sec mt-3.5">
+                <div className="flex items-center gap-0.5">
+                    <span className="flex h-6.5 min-w-0 flex-1 items-center pl-1.5 pr-1 text-xs font-semibold text-muted-foreground">Chats</span>
+                    <button type="button" onClick={() => setNewChatOpen(true)} aria-label="New chat" title="New chat"
+                        className="spaces-sec-add flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                        <Plus className="size-3.5" />
+                    </button>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button type="button" aria-label="Spaces options" title="Options"
+                                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                                <MoreHorizontal className="size-3.5" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => setLinkOpen(true)}><LinkIcon className="size-3.5" /> Your link</DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDisconnecting(true)}>
+                                <Trash2 className="size-3.5" /> Sign out of Spaces on this device
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
+                <div role="tablist" aria-label="Show" className="mt-1 flex gap-1 px-1">
+                    {FILTERS.map((f) => (
+                        <button key={f.value} type="button" role="tab" aria-selected={filter === f.value} onClick={() => setFilter(f.value)}
+                            className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+                                filter === f.value ? 'bg-sidebar-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                            {f.label}
+                        </button>
+                    ))}
+                </div>
+                <SidebarMenu className="mt-1 gap-0.5">
+                    {shown.map((row) => row.kind === 'group' ? groupRow(row.space) : directRow(row))}
+                    {/* Not created yet: the same row, waiting for its first click. */}
+                    {selfShown && (
+                        <SidebarMenuItem>
+                            <SidebarMenuButton
+                                onClick={() => void openSelf()}
+                                className={cn('spaces-rail-row', selfUnsupported && 'opacity-50')}
+                                title={selfUnsupported
+                                    ? 'Notes to self need a newer server'
+                                    : 'Notes to self — only you (and your agents) can see this'}
+                            >
+                                <MemberAvatar orgId={org.id} avatarUrl={contacts.find((m) => m.id === org.memberId)?.avatarUrl} id={org.memberId} name={selfName} size="sm" online={peopleOnline.has(org.memberId)} availability={contacts.find((m) => m.id === org.memberId)?.availability} />
+                                <span className="flex-1 truncate">
+                                    {selfName}<MemberStatus member={contacts.find((m) => m.id === org.memberId)} />
+                                    <span className="ml-1.5 font-normal text-muted-foreground">{openingSelf ? 'opening…' : 'you'}</span>
+                                </span>
+                            </SidebarMenuButton>
+                        </SidebarMenuItem>
+                    )}
+                    {shown.length === 0 && !selfShown && (
+                        <li className="px-2 py-3 text-xs text-muted-foreground">
+                            {filter === 'groups' ? 'No groups yet.' : filter === 'agents' ? 'No agent chats yet. Add an agent and it gets one.' : filter === 'people' ? 'Nobody yet. Share a group, or your link.' : 'Nothing yet.'}
+                        </li>
+                    )}
                     {archivedSpaces.length > 0 && (
                         <SidebarMenuItem>
                             <SidebarMenuButton onClick={() => setArchivedOpen((open) => !open)} aria-expanded={archivedShown}
@@ -304,103 +382,34 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threads
                     )}
                 </SidebarMenu>
                 {archivedSpaces.length > 0 && <RailCollapse open={archivedShown}>
-                    <SidebarMenu className="gap-0.5 pt-0.5">{archivedSpaces.map(spaceRow)}</SidebarMenu>
+                    <SidebarMenu className="gap-0.5 pt-0.5">{archivedSpaces.map(groupRow)}</SidebarMenu>
                 </RailCollapse>}
-            </RailSection>
-            <Dialog open={creating} onOpenChange={(open) => { if (!submitting) { setCreating(open); if (!open) { setNewName(''); setVisibility('private') } } }}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Create a space</DialogTitle><DialogDescription>Choose who can discover and read this space.</DialogDescription></DialogHeader>
-                    <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void createSpace() }}>
-                        <label className="text-sm">Name<Input autoFocus maxLength={128} value={newName} onChange={event => setNewName(event.target.value)} placeholder="Space name" /></label>
-                        <fieldset className="space-y-3" disabled={submitting}><legend className="mb-2 text-sm font-medium">Visibility</legend>
-                            <label className="flex items-start gap-2 text-sm"><input type="radio" name="visibility" checked={visibility === 'private'} onChange={() => setVisibility('private')} /><span>Private<span className="block text-xs text-muted-foreground">Only space members can read and participate.</span></span></label>
-                            <label className="flex items-start gap-2 text-sm"><input type="radio" name="visibility" checked={visibility === 'open'} disabled={!directory.loaded || !directory.supported || !!directory.error} onChange={() => setVisibility('open')} /><span>Open<span className="block text-xs text-muted-foreground">Anyone in the team can browse and join.</span></span></label>
-                        </fieldset>
-                        {directory.error && <p role="alert" className="text-sm text-muted-foreground">Could not check open-space support. You can still create a private space.</p>}
-                        {directory.loaded && !directory.supported && <p className="text-sm text-muted-foreground">Update this server to create open spaces.</p>}
-                        <Button type="submit" disabled={!newName.trim() || submitting}>{submitting ? 'Creating…' : 'Create space'}</Button>
-                    </form>
-                </DialogContent>
-            </Dialog>
-            {/* Direct messages: the org's people you talk to, most recent first.
-                A DM is a space with a two-person roster (contract 2026-09-07);
-                the row is the person, not a channel. */}
-            {directsOn && <RailSection section="directs" label="Direct messages" addLabel="New direct message" onAdd={() => setNewDirectOpen(true)}>
-                <SidebarMenu className="gap-0.5">
-                    {directs.map((dm) => {
-                        const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
-                        const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
-                        const self = isSelfDirect(dm, org.memberId)
-                        const other = directAvatarId(dm, org.memberId)
-                        const label = self ? selfName : profileRoster.find(m => m.id === other)?.displayName ?? spaceDisplayName(org, dm)
-                        return (
-                            <SidebarMenuItem key={dm.id}>
-                                <SidebarMenuButton
-                                    isActive={active}
-                                    onClick={() => onOpenSpace(org.id, dm.id)}
-                                    onMouseEnter={() => {
-                                        prefetchStream(org.id, dm.id)
-                                        prefetchMembers(org.id, dm.id)
-                                    }}
-                                    className="spaces-rail-row"
-                                >
-                                    <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === other)?.avatarUrl} id={other} name={label} size="sm" online={peopleOnline.has(other)} availability={profileRoster.find(m => m.id === other)?.availability} />
-                                    <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-semibold text-foreground')}>
-                                        {label}<MemberStatus member={profileRoster.find(m => m.id === other)} />
-                                        {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
-                                    </span>
-                                    {!active && <UnreadBadge badge={badge} direct />}
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                        )
-                    })}
-                    {/* Not created yet: the same row, waiting for its first click. */}
-                    {!selfDm && (
-                        <SidebarMenuItem>
-                            <SidebarMenuButton
-                                onClick={() => void openSelf()}
-                                className={cn('spaces-rail-row', selfUnsupported && 'opacity-50')}
-                                title={selfUnsupported
-                                    ? `Notes to self need a newer server — ${org.name} hasn't been updated yet`
-                                    : 'Notes to self — only you (and your agent) can see this'}
-                            >
-                                <MemberAvatar orgId={org.id} avatarUrl={profileRoster.find(m => m.id === org.memberId)?.avatarUrl} id={org.memberId} name={selfName} size="sm" online={peopleOnline.has(org.memberId)} availability={profileRoster.find(m => m.id === org.memberId)?.availability} />
-                                <span className="flex-1 truncate">
-                                    {selfName}<MemberStatus member={profileRoster.find(m => m.id === org.memberId)} />
-                                    <span className="ml-1.5 font-normal text-muted-foreground">{openingSelf ? 'opening…' : 'you'}</span>
-                                </span>
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
-                    )}
-                </SidebarMenu>
-            </RailSection>}
-            {/* An invite is to the server (harbor, 2026-10-19), so it lives with the server, not a space.
-                Spaces redesign (2026-10-21): a full row pinned to the rail's foot. */}
-            {!needsSignIn && !org.error && mayInvite && (
+            </div>
+            {/* Your personal link (spec §4 Invites, 2026-11-09): how someone outside your groups reaches you. A full row pinned to the rail's foot. */}
+            {!needsSignIn && !org.error && (
                 <div className="sticky bottom-0 mt-auto bg-[var(--rowboat-panel-soft)] pb-2 pt-3" title={`You are ${org.memberId}`}>
                     <SidebarMenu>
                         <SidebarMenuItem>
-                            <SidebarMenuButton onClick={() => setInviteOpen(true)} title={`Invite people to ${org.name}`} className="spaces-rail-row text-muted-foreground">
-                                <UserPlus className="size-4 shrink-0" />
-                                <span className="flex-1 truncate">Invite people</span>
+                            <SidebarMenuButton onClick={() => setLinkOpen(true)} title="Share a link that opens a direct message with you" className="spaces-rail-row text-muted-foreground">
+                                <LinkIcon className="size-4 shrink-0" />
+                                <span className="flex-1 truncate">Share your link</span>
                             </SidebarMenuButton>
                         </SidebarMenuItem>
                     </SidebarMenu>
                 </div>
             )}
-            <NewDirectDialog org={org} open={newDirectOpen} onOpenChange={setNewDirectOpen} onOpened={onOpenSpace} />
-            <InviteDialog org={org} open={inviteOpen} onOpenChange={setInviteOpen} />
+            <NewChatDialog org={org} open={newChatOpen} onOpenChange={setNewChatOpen} onOpenSpace={onOpenSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
+            <PersonalLinkDialog orgId={org.id} open={linkOpen} onOpenChange={setLinkOpen} />
+            <RemoveServerDialog org={org} open={disconnecting} onOpenChange={setDisconnecting} onRemoved={onChanged} />
         </>
     )
 }
 
-// Spaces redesign (2026-10-21): each rail section remembers whether it is open,
-// across launches; every section starts open.
 /**
  * Threads (2026-11-05, "coding session: threads" in Main): one row for every
- * thread you are in across the server's spaces, sessions among them. The
- * rail is for places, so it lists no threads itself; its number is the
- * threads that need you (an agent waiting on you, or replies you haven't read).
+ * thread you are in across your chats, sessions among them. The rail is for
+ * places, so it lists no threads itself; its number is the threads that need
+ * you (an agent waiting on you, or replies you haven't read).
  */
 function ThreadsRow({ orgId, active, onOpen }: { orgId: string; active: boolean; onOpen: () => void }) {
     const { threads } = useMyThreads(orgId)
@@ -414,42 +423,6 @@ function ThreadsRow({ orgId, active, onOpen }: { orgId: string; active: boolean;
     </SidebarMenuItem>
 }
 
-function readSectionOpen(key: string) {
-    try { return localStorage.getItem(key) !== 'false' } catch { return true }
-}
-
-/** A collapsible rail section: a quiet header with a chevron, and a + that shows on hover. */
-function RailSection({ section, label, addLabel, onAdd, children }: {
-    section: 'spaces' | 'directs'
-    label: string
-    addLabel: string
-    onAdd: () => void
-    children: ReactNode
-}) {
-    const key = `spaces:sectionOpen:${section}`
-    const [open, setOpen] = useState(() => readSectionOpen(key))
-    const bodyId = useId()
-    const toggle = () => {
-        const next = !open
-        setOpen(next)
-        try { localStorage.setItem(key, String(next)) } catch { /* private window: open state just isn't remembered */ }
-    }
-    return <div className="spaces-sec mt-3.5">
-        <div className="flex items-center gap-0.5">
-            <button type="button" onClick={toggle} aria-expanded={open} aria-controls={bodyId}
-                className="spaces-sec-h flex h-6.5 min-w-0 flex-1 items-center gap-1 rounded-md pl-1.5 pr-1 text-left text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-                <ChevronDown data-closed={!open || undefined} className="spaces-chev size-3 shrink-0" />
-                <span className="truncate">{label}</span>
-            </button>
-            <button type="button" onClick={onAdd} aria-label={addLabel} title={addLabel}
-                className="spaces-sec-add flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-                <Plus className="size-3.5" />
-            </button>
-        </div>
-        <RailCollapse id={bodyId} open={open}>{children}</RailCollapse>
-    </div>
-}
-
 /** Animated height via grid rows (spaces.css); closed content is inert, so it can't take focus. */
 function RailCollapse({ id, open, children }: { id?: string, open: boolean, children: ReactNode }) {
     return <div id={id} data-open={open} inert={!open} className="spaces-collapse">
@@ -457,16 +430,14 @@ function RailCollapse({ id, open, children }: { id?: string, open: boolean, chil
     </div>
 }
 
-/** Space and DM destinations; nested discussions are optional for legacy consumers. */
-export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
+/** The Spaces rail's navigation: the server-level rows, then the chat list; nested discussions are optional for legacy consumers. */
+export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
     onOpenThreads?: (orgId: string) => void
     threadsActive?: boolean
-    onOpenBrowse?: (orgId: string) => void
-    browseActive?: boolean
-    /** Every agent in the org (2026-10-21); absent = no row. */
+    /** Your agents (2026-10-21); absent = no row. */
     onOpenAgents?: (orgId: string) => void
     agentsActive?: boolean
     onOpenActivity?: (orgId: string) => void
@@ -480,10 +451,10 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenThreads
     const { refresh } = useSpacesOrgs()
     const unread = useSpacesUnreadCounts()
     // A hair between rows (gap-0.5 on each list), so a hovered row's highlight never touches the selected one's.
-    // A column that fills its scroller, so the Invite row can sit at the foot.
+    // A column that fills its scroller, so the link row can sit at the foot.
     return <div className="spaces-rail-nav flex min-h-full flex-1 flex-col">
-        <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
-            onOpenSpace={onOpenSpace} onOpenThreads={onOpenThreads} threadsActive={threadsActive} onOpenActivity={onOpenActivity} onOpenBrowse={onOpenBrowse} browseActive={browseActive} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
+        <ChatList org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
+            onOpenSpace={onOpenSpace} onOpenThreads={onOpenThreads} threadsActive={threadsActive} onOpenActivity={onOpenActivity} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
             renderDiscussions={showDiscussions && renderActiveDiscussions ? (id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}
                 onSelect={(selection) => onOpenDiscussion?.(id, selection)} /> : undefined} />
@@ -539,7 +510,7 @@ function CollapsibleSpace({ orgId, spaceId, name, showArchived, countOverride, d
     const expanded = enabled && isSpaceExpanded(orgId, spaceId)
     const count = !enabled ? 0 : countOverride ?? feed.topics.filter((topic) => showArchived || !topic.archived).length
     // The highlight spans the whole row, arrow gutter included (2026-10-21), so it
-    // lines up with the full-width rows above (Browse spaces, Agents). Without
+    // lines up with the full-width rows above (Activity, Agents). Without
     // discussions there is no gutter (spaces redesign, 2026-10-21): one left edge.
     return <SidebarMenuItem>
         <div className="spaces-row spaces-rail-row flex items-center rounded-md hover:bg-sidebar-accent has-[[data-active=true]]:bg-sidebar-accent">

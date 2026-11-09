@@ -38,7 +38,7 @@ async function refused(client: Client, name: string, args: Record<string, unknow
 
 async function start(): Promise<void> {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'harsh' }, // lowercase on purpose: the roster sort is case-insensitive
@@ -54,8 +54,9 @@ async function start(): Promise<void> {
   spaceId = created.body.space.id;
   const inv = await ramnique.post('/v1/invites', { spaceId });
   await harsh.post('/v1/invites/accept', { token: inv.body.token });
-  // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
-  await ramnique.post('/v1/spaces', { name: 'Lobby' });
+  // Lobby = {ramnique, gagan}: the reach rule needs a shared space before a DM (2026-11-09).
+  const lobby = (await ramnique.post('/v1/spaces', { name: 'Lobby' })).body.space.id;
+  await ramnique.post(`/v1/spaces/${lobby}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
   dmWithGagan = (await ramnique.post('/v1/direct', { memberId: 'gagan' })).body.space.id;
   ramAgent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
   harshAgent = await agentClient(harbor, 'dev-harsh', { agentName: 'Claude' });
@@ -72,33 +73,28 @@ describe('agent face parity', () => {
     await harbor.close();
   });
 
-  it("whoami is the token's member — the same row /v1/me serves — plus the org's name and address", async () => {
-    const { member, org } = await call<{ member: Member; org: { name: string; address: string } }>(ramAgent, 'whoami');
-    expect(member).toMatchObject({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
+  it("whoami is the token's member — the same row /v1/me serves — plus the server's name and address", async () => {
+    const { member, server } = await call<{ member: Member; server: { name: string; address: string } }>(ramAgent, 'whoami');
+    expect(member).toMatchObject({ id: 'ramnique', displayName: 'Ramnique', kind: 'human' });
     expect(member).toEqual((await ramnique.get('/v1/me')).body.member);
-    expect(org).toEqual({ name: harbor.service.org.name, address: harbor.service.org.address });
+    expect(server).toEqual({ name: harbor.service.server.name, address: harbor.service.server.address });
     const other = await call<{ member: Member }>(harshAgent, 'whoami');
     expect(other.member.id).toBe('harsh');
   });
 
-  it('list_members without spaceId is the whole org roster, the same for everyone (2026-09-29)', async () => {
-    const everyone = ['gagan', 'harsh', 'loner', 'ramnique'];
-    const mine = await call<{ members: Member[] }>(ramAgent, 'list_members');
-    // Sorted by display name, case-insensitively.
-    expect(mine.members.map((m) => m.id)).toEqual(everyone);
-    // harsh shares no space with gagan, and still finds him.
-    const harshs = await call<{ members: Member[] }>(harshAgent, 'list_members');
-    expect(harshs.members.map((m) => m.id)).toEqual(everyone);
-    // A member of nothing finds everyone too.
+  it('list_contacts is who you share a space with, each their own (2026-11-09); list_members needs a space', async () => {
+    const mine = await call<{ members: Member[] }>(ramAgent, 'list_contacts');
+    expect(mine.members.map((m) => m.id)).toEqual(['gagan', 'harsh']);
+    const harshs = await call<{ members: Member[] }>(harshAgent, 'list_contacts');
+    expect(harshs.members.map((m) => m.id)).toEqual(['ramnique']);
     const lonerAgent = await agentClient(harbor, 'dev-loner');
     try {
-      const alone = await call<{ members: Member[] }>(lonerAgent, 'list_members');
-      expect(alone.members.map((m) => m.id)).toEqual(everyone);
+      expect((await call<{ members: Member[] }>(lonerAgent, 'list_contacts')).members).toEqual([]);
     } finally {
       await lonerAgent.close();
     }
     // Same answer as the render face.
-    expect((await ramnique.get('/v1/members')).body.members).toEqual(mine.members);
+    expect((await ramnique.get('/v1/contacts')).body.members).toEqual(mine.members);
   });
 
   it('list_members with spaceId matches REST listMembers, and refuses non-members', async () => {

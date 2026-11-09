@@ -3,7 +3,7 @@ import type { SpaceHub } from './hub.js';
 import type { PushSender } from './push.js';
 import type { Store } from './store.js';
 
-// Notifications (2026-09-10, the unread arc's delivery slice): the org
+// Notifications (2026-09-10, the unread arc's delivery slice): the server
 // decides ONCE who a message should reach and why, and the one decision is
 // delivered twice — as a `notify` frame on each recipient's member channel
 // (desktops, and any other live connection) and as a push to their phones
@@ -11,7 +11,7 @@ import type { Store } from './store.js';
 // client only shows it. Mattermost, Discord and Zulip instead ship the facts
 // and let each client apply its own preferences; we deliberately do not,
 // because a phone and a desktop must agree, and the policy that will gate
-// these rows later (levels, DND, presence) belongs to the org too.
+// these rows later (levels, DND, presence) belongs to the server too.
 //
 // The decision reads the message's STAMP (protocol mentions.ts) and the
 // thread's followers — never the text. Priority when several reasons hold:
@@ -27,7 +27,7 @@ const EXCERPT_MAX = 140;
 /** A frame reason, plus the plain case only push's `all` level consumes. */
 export type NotifyKind = NotifyReason | 'message';
 
-/** One recipient of one message: why, and the org's rendering of it. */
+/** One recipient of one message: why, and the server's rendering of it. */
 export interface Notification {
   memberId: string;
   kind: NotifyKind;
@@ -104,7 +104,7 @@ export class Notifier {
   constructor(
     private readonly store: Store,
     private readonly hub: SpaceHub,
-    /** Absent = no push on this org; frames still flow. */
+    /** Absent = no push on this server; frames still flow. */
     private readonly push?: PushSender,
   ) {}
 

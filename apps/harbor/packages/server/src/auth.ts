@@ -7,7 +7,7 @@ import type { Store } from './store.js';
 // The auth-driver boundary (spec §4). Two steps the dev stub used to conflate:
 //
 //   authenticate(token)        → identity (iss, sub, profile claims)
-//   resolveMember(identity)    → member of THIS org, or not_a_member
+//   resolveMember(identity)    → member of this server, or not_a_member
 //
 // The `dev` driver below keeps the stub behavior (bearer `dev-<memberId>` IS
 // the identity; first sight creates the member) — it runs every existing test
@@ -42,21 +42,21 @@ export interface AuthDriver {
 }
 
 /**
- * A driver bound to one org's store — what the faces receive. They
+ * A driver bound to the server's store — what the faces receive. They
  * authenticate and resolve; the store never reaches them, so the service is
  * the only door to data by construction (CONTRACT.md "one core, three doors").
  */
-export interface OrgAuth {
+export interface ServerAuth {
   authenticate(authorization: string | undefined, queryToken?: string | null): Promise<AuthIdentity>;
   resolveMember(identity: AuthIdentity): Promise<Member>;
   /** RFC 9728 metadata; undefined under the dev driver (no AS). */
   metadata(): { authorizationServers: string[] } | undefined;
 }
 
-export function bindAuth(driver: AuthDriver, store: Store): OrgAuth {
+export function bindAuth(driver: AuthDriver, store: Store): ServerAuth {
   return {
     authenticate: async (authorization, queryToken) => {
-      // Agent keys (spec §4 Agent members, 2026-09-29) are the org's own
+      // Agent keys (spec §4 Agent members, 2026-09-29) are the server's own
       // credential, checked ahead of any driver: an rbk_ bearer is never a
       // JWT or a dev token, and every face (REST, live, MCP) gets agents
       // through this one door.
@@ -99,7 +99,7 @@ async function resolveAgentKey(store: Store, keyId: string): Promise<Member> {
   return agent;
 }
 
-/** What a request's credentials resolve to on an org. */
+/** What a request's credentials resolve to on the server. */
 export interface Principal {
   identity: AuthIdentity;
   member: Member;
@@ -113,19 +113,19 @@ export interface RequestCredentials {
 
 /**
  * The two-step dance every face runs, in one place: bearer → identity →
- * member of THIS org. Throws the driver's HarborErrors (unauthorized,
+ * member of this server. Throws the driver's HarborErrors (unauthorized,
  * not_a_member). `allowUnmapped` is for the one route whose caller may be
  * authenticated-but-not-yet-a-member — accept-invite — where the identity
  * comes back with no member instead of not_a_member.
  */
-export async function authenticateRequest(auth: OrgAuth, credentials: RequestCredentials): Promise<Principal>;
+export async function authenticateRequest(auth: ServerAuth, credentials: RequestCredentials): Promise<Principal>;
 export async function authenticateRequest(
-  auth: OrgAuth,
+  auth: ServerAuth,
   credentials: RequestCredentials,
   opts: { allowUnmapped: true },
 ): Promise<{ identity: AuthIdentity; member?: Member }>;
 export async function authenticateRequest(
-  auth: OrgAuth,
+  auth: ServerAuth,
   credentials: RequestCredentials,
   opts?: { allowUnmapped: true },
 ): Promise<{ identity: AuthIdentity; member?: Member }> {
@@ -145,7 +145,7 @@ export function wwwAuthenticate(origin: string): string {
   return `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`;
 }
 
-/** The protected-resource metadata document: the org (or the apex) names its authorization server(s). */
+/** The protected-resource metadata document: the server names its authorization server(s). */
 export function protectedResourceMetadata(
   origin: string,
   authorizationServers: string[],
@@ -172,7 +172,7 @@ export function parseDevToken(authorization: string | undefined, queryToken?: st
 export async function ensureMember(store: Store, memberId: string): Promise<Member> {
   const existing = await store.getMember(memberId);
   if (existing) return existing;
-  const member: Member = { id: memberId, displayName: prettify(memberId), role: 'member', kind: 'human' };
+  const member: Member = { id: memberId, displayName: prettify(memberId), kind: 'human' };
   await store.putMember(member);
   return member;
 }

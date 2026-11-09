@@ -15,8 +15,6 @@ export const SESSION_COOKIE = 'harbor_session';
 export interface SessionCookieConfig {
   /** Origins whose requests may carry the session (the CORS list, cors.ts). */
   webOrigins: ReadonlySet<string>;
-  /** The apex domain on a deployment, so one cookie covers every org; absent = host-only. */
-  domain?: string;
 }
 
 /**
@@ -44,14 +42,13 @@ export function sessionCookie(token: string, config: SessionCookieConfig, now = 
     'HttpOnly',
     'Secure',
     'SameSite=Lax',
-    ...(config.domain ? [`Domain=${config.domain}`] : []),
     ...(maxAge !== undefined ? [`Max-Age=${maxAge}`] : []),
   ];
   return { header: parts.join('; '), ...(exp !== undefined ? { expiresAt: new Date(exp * 1000).toISOString() } : {}) };
 }
 
 export function clearedSessionCookie(config: SessionCookieConfig): string {
-  return [`${SESSION_COOKIE}=`, 'Path=/', 'HttpOnly', 'Secure', 'SameSite=Lax', ...(config.domain ? [`Domain=${config.domain}`] : []), 'Max-Age=0'].join('; ');
+  return [`${SESSION_COOKIE}=`, 'Path=/', 'HttpOnly', 'Secure', 'SameSite=Lax', 'Max-Age=0'].join('; ');
 }
 
 function readCookie(header: string | undefined, name: string): string | undefined {

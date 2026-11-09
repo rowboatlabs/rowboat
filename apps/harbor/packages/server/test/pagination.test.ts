@@ -36,7 +36,7 @@ let ramnique: ReturnType<typeof api>;
 describe('windowed reads', () => {
   beforeAll(async () => {
     harbor = await startTestHarbor({
-      orgName: 'Page Test Org',
+      name: 'Page Test Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
     });
     ramnique = api('dev-ramnique');

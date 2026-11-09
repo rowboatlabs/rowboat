@@ -237,7 +237,7 @@ it('delivers profile updates on the member channel without a space subscription'
   await settle();
   const socket = FakeWebSocket.instances[0]!;
   socket.open();
-  const frame = { kind: 'profile_updated', member: { id: 'person', displayName: 'Updated', title: 'Engineer', kind: 'human', role: 'member' }, at: '2026-10-22T00:00:00.000Z' };
+  const frame = { kind: 'profile_updated', member: { id: 'person', displayName: 'Updated', title: 'Engineer', kind: 'human' }, at: '2026-10-22T00:00:00.000Z' };
   socket.emit('message', { data: JSON.stringify(frame) });
   expect(handler).toHaveBeenCalledWith(frame);
   off();

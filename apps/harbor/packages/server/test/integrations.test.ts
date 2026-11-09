@@ -135,7 +135,7 @@ beforeAll(async () => {
   PLATFORMS.cal = calPlatform(cal.url);
   harbor = await startHarbor({
     store: (await freshStore()).store,
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },
@@ -143,7 +143,7 @@ beforeAll(async () => {
     ],
     blobs: new MemoryBlobStore(),
   });
-  await harbor.store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'admin', kind: 'human' });
+  await harbor.store.putMember({ id: 'gagan', displayName: 'Gagan', kind: 'human' });
   spaceId = (await as('dev-ramnique').post('/v1/spaces', { name: 'Growth' })).body.space.id;
   await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh'], actingMode: 'direct' });
 });
@@ -291,7 +291,8 @@ describe('alert hooks', () => {
     const fresh = new URL(again.body.url).pathname;
     expect((await send(fresh)).status).toBe(200);
     expect(await remove('dev-harsh', `/v1/agents/${agent.id}/hook`)).toBe(403);
-    expect(await remove('dev-gagan', `/v1/agents/${agent.id}/hook`)).toBe(200);
+    expect(await remove('dev-gagan', `/v1/agents/${agent.id}/hook`)).toBe(403); // nothing stands above the owner (2026-11-09)
+    expect(await remove('dev-ramnique', `/v1/agents/${agent.id}/hook`)).toBe(200);
     expect((await send(fresh)).status).toBe(404);
   });
 });

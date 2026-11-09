@@ -39,7 +39,7 @@ class Org {
   async start(): Promise<this> {
     this.harbor = await startHarbor({
       store: this.store.store,
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'harsh', displayName: 'Harsh' },
@@ -143,11 +143,10 @@ describe('managed Maritime agents', () => {
     expect(listed?.credential?.hint).toBeDefined(); // the deployment's key, sealed for this agent
   });
 
-  it('creates a personal agent when asked, as Add does; a channel one otherwise', async () => {
-    const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Ramnique’s Hermes', kind: 'hermes', personal: true });
+  it('creates an agent its maker owns; who may ask it is a seat, set when it is added to a space (2026-11-09)', async () => {
+    const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Ramnique’s Hermes', kind: 'hermes' });
     expect(r.status).toBe(200);
-    expect(r.body.agent).toMatchObject({ ownerId: 'ramnique', personal: true });
-    expect(await org.harbor.store.getMember(r.body.agent.id)).toMatchObject({ personal: true });
+    expect(r.body.agent).toMatchObject({ ownerId: 'ramnique' });
   });
 
   it('follows the deploy to ready and then runs a turn on it', async () => {

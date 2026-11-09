@@ -134,8 +134,8 @@ function PushRegistrar() {
   return null;
 }
 
-// A tapped push lands on its conversation: the payload carries orgId /
-// spaceId / threadRootId (push.ts on the org); the org list maps id → address.
+// A tapped push lands on its conversation: the payload carries spaceId /
+// threadRootId (push.ts on the server); the one server record names the host.
 function PushNavigator() {
   const account = useSpacesAccount();
   const pathname = usePathname();
@@ -163,15 +163,14 @@ function PushNavigator() {
     // pathname '/' = Home has not redirected into Spaces yet.
     if (!pending || !navReady || pathname === '/') return;
     const data = pending.notification.request.content.data as Record<string, unknown> | undefined;
-    const orgId = typeof data?.orgId === 'string' ? data.orgId : null;
     const spaceId = typeof data?.spaceId === 'string' ? data.spaceId : null;
     const threadRootId = typeof data?.threadRootId === 'string' ? data.threadRootId : null;
     if (!spaceId) {
       setPending(null);
       return;
     }
-    // Not in the org list yet: wait for the cached or refreshed list.
-    const org = account.orgs?.find((o) => o.id === orgId);
+    // No server record yet: wait for the cached or refreshed one.
+    const org = account.orgs?.[0];
     if (!org) return;
     handled.current.add(responseKey(pending));
     setPending(null);

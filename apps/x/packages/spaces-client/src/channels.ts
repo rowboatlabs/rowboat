@@ -7,22 +7,22 @@ import type { SpaceSubscriptions } from './subscriptions.js';
 // wherever they run. The desktop's main process and rowboat-server each
 // carried this table verbatim until 2026-10-09; one copy now, and the browser
 // host of the Spaces web-app plan serves it too. Channels that depend on the
-// host stay with the host: signing in, the org registry, uploads by file
+// host stay with the host: signing in, the server record, uploads by file
 // path, save dialogs, link previews, the local agent, scheduled sends.
 //
 // Everything a person does through these is attributed 'direct': the app is
-// the human surface; agents write through the org's MCP face.
+// the human surface; agents write through the server's MCP face.
 
 type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
   | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
-  | 'spaces:listSpaces' | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:createSpace' | 'spaces:renameSpace'
-  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace' | 'spaces:setSpaceVisibility' | 'spaces:setDefaultSpace'
-  | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy' | 'spaces:setJevEnabled'
-  | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
+  | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:renameSpace'
+  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
+  | 'spaces:removeMember' | 'spaces:setMemberRole' | 'spaces:setAgentAccess'
+  | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listContacts'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
-  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
+  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower' | 'spaces:getHostingSize' | 'spaces:setHostingSize'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
@@ -46,12 +46,13 @@ export type HarborChannelHandlers = {
 };
 
 export interface HarborChannelDeps {
+  /** Whether this host counts as active now (desktop: system idle time); absent, the renderer's report stands (2026-11-05). */
   isActive?: () => boolean;
-  /** The org's REST client; throws for an org the host doesn't know. */
+  /** The server's REST client; throws for an id the host doesn't know (SPACES_SERVER_ID since 2026-11-09). */
   getClient(orgId: string): SpacesClient;
-  /** The org's live socket. */
+  /** The server's live socket. */
   getLive(orgId: string): Pick<SpacesLive, 'activity' | 'presence' | 'whiteboard'>;
-  /** The host's per-space subscriptions (one per org and space). */
+  /** The host's per-space subscriptions. */
   subscriptions: SpaceSubscriptions;
   /** Where a subscribed space's frames go: every window on the desktop. */
   emit(event: spacesShared.SpacesBusEvent): void;
@@ -69,17 +70,10 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
       for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
       return { src: `data:${mime};base64,${btoa(binary)}` };
     },
-    'spaces:listSpaces': async (args) => {
-      const { spaces, groupChat } = await getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
-      return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
-    },
-
-    'spaces:browseSpaces': async (args) => getClient(args.orgId).browseSpaces(),
-
-    'spaces:joinSpace': async (args) => getClient(args.orgId).joinSpace(args.spaceId),
+    'spaces:listSpaces': async (args) => getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false }),
 
     'spaces:createSpace': async (args) => ({
-      space: await getClient(args.orgId).createSpace(args.name, args.visibility),
+      space: await getClient(args.orgId).createSpace(args.name),
     }),
 
     'spaces:renameSpace': async (args) => ({
@@ -94,45 +88,25 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
       space: await getClient(args.orgId).unarchiveSpace(args.spaceId),
     }),
 
-    'spaces:setDefaultSpace': async (args) => ({
-      space: await getClient(args.orgId).setDefaultSpace(args.spaceId, args.isDefault),
-    }),
-
     'spaces:deleteSpace': async (args) => {
       await getClient(args.orgId).deleteSpace(args.spaceId);
       return { deleted: true as const };
     },
 
-    'spaces:setSpaceVisibility': async (args) => ({
-      space: await getClient(args.orgId).setSpaceVisibility(args.spaceId, args.visibility),
-    }),
-
     'spaces:removeMember': async (args) => ({
       removed: await getClient(args.orgId).removeMember(args.spaceId, args.memberId),
     }),
 
-    'spaces:removeOrgMember': async (args) => ({
-      member: await getClient(args.orgId).removeOrgMember(args.memberId),
-    }),
-
     'spaces:setMemberRole': async (args) => ({
-      member: await getClient(args.orgId).setMemberRole(args.memberId, args.role),
+      membership: await getClient(args.orgId).setSpaceRole(args.spaceId, args.memberId, args.role),
     }),
 
-    'spaces:getOrgSettings': async (args) => ({
-      settings: await getClient(args.orgId).getOrgSettings(),
-    }),
-
-    'spaces:setInvitePolicy': async (args) => ({
-      settings: await getClient(args.orgId).setInvitePolicy(args.invitePolicy),
-    }),
-
-    'spaces:setJevEnabled': async (args) => ({
-      settings: await getClient(args.orgId).setJevEnabled(args.jevEnabled),
+    'spaces:setAgentAccess': async (args) => ({
+      membership: await getClient(args.orgId).setAgentAccess(args.spaceId, args.agentId, args.invocableBy),
     }),
 
     'spaces:addMembers': async (args) => ({
-      memberships: await getClient(args.orgId).addMembers(args.spaceId, args.memberIds),
+      memberships: await getClient(args.orgId).addMembers(args.spaceId, args.memberIds, args.invocableBy),
     }),
 
     'spaces:openDirect': async (args) => getClient(args.orgId).openDirect(args.memberId),
@@ -141,7 +115,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
       members: await getClient(args.orgId).listMembers(args.spaceId),
     }),
 
-    'spaces:listOrgMembers': async (args) => getClient(args.orgId).orgRoster(),
+    'spaces:listContacts': async (args) => getClient(args.orgId).listContacts(),
 
     'spaces:listAgents': async (args) => ({ agents: await getClient(args.orgId).listAgents() }),
     'spaces:addAgent': async ({ orgId, ...input }) => getClient(orgId).addAgent(input),
@@ -155,7 +129,6 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
     'spaces:revokeAgentKey': async (args) => ({ key: await getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
     'spaces:renameAgent': async (args) => ({ agent: await getClient(args.orgId).renameAgent(args.agentId, args.displayName) }),
     'spaces:setAgentProfile': async ({ orgId, agentId, ...profile }) => ({ agent: await getClient(orgId).setAgentProfile(agentId, profile) }),
-    'spaces:setAgentPersonal': async (args) => ({ agent: await getClient(args.orgId).setAgentPersonal(args.agentId, args.personal) }),
     'spaces:setAgentSuper': async (args) => ({ agent: await getClient(args.orgId).setAgentSuper(args.agentId, args.superAgent) }),
     'spaces:setupInstances': async (args) => ({ instances: await getClient(args.orgId).setupInstances(args.connection, args.key) }),
     'spaces:createSetupInstance': async ({ orgId, connection, ...input }) => ({ instance: await getClient(orgId).createSetupInstance(connection, input) }),
@@ -203,11 +176,12 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
     'spaces:deleteHostingTrigger': async (args) => ({ triggers: await getClient(args.orgId).deleteHostingTrigger(args.agentId, args.triggerId) }),
 
     'spaces:createInvite': async (args) => getClient(args.orgId).createInvite({
-      ...(args.spaceIds ? { spaceIds: args.spaceIds } : {}),
+      ...(args.spaceId ? { spaceId: args.spaceId } : {}),
+      ...(args.direct ? { direct: true as const } : {}),
       ...(args.expiresInHours !== undefined ? { expiresInHours: args.expiresInHours } : {}),
     }),
 
-    // Pre-auth: works before the org has been added, so the join flow can show
+    // Pre-auth: works before this install has signed in, so the join flow can show
     // what's being joined (spec §4). The token is unused on this route.
     'spaces:resolveInvite': async (args) =>
       new SpacesClient({ baseUrl: args.baseUrl, token: 'dev-preauth' }).resolveInvite(args.token),

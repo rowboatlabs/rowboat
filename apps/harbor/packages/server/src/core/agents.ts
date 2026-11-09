@@ -1,8 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
-import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
+import { canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
 import type { StoredAgentKey } from '../store.js';
 import type { Kernel, ActorCtx } from './kernel.js';
 import { oneLine, type Spaces } from './spaces.js';
@@ -10,15 +10,15 @@ import { oneLine, type Spaces } from './spaces.js';
 // Agent members and their keys (spec §4 Agent members, 2026-09-29). Any
 // person adds an agent and owns it; the owner alone creates its keys; the
 // owner or an admin revokes them. A key is a bearer secret presented as the
-// agent itself — auth.ts resolves it on every face — and the org keeps only
+// agent itself — auth.ts resolves it on every face — and the server keeps only
 // its hash. Render face only: a secret never passes through a tool.
 //
 // An agent's kind and connection (2026-09-30) are set here and never change.
 // A platform connection's credential is checked and stored by the connector
-// host (connectors/host.ts), which seals it for this org; this module keeps
+// host (connectors/host.ts), which seals it for this server; this module keeps
 // the rules: who may set it, and that only a platform agent has one.
 
-/** What the connector host does for agent creation. Absent = this org runs no connectors. */
+/** What the connector host does for agent creation. Absent = this server runs no connectors. */
 /** What a platform credential is checked against: the agent's kind and, for an instance connection, its instance. */
 export interface CredentialTarget {
   kind: string;
@@ -58,7 +58,7 @@ export class Agents {
 
   private async actor(ctx: ActorCtx): Promise<Member> {
     const member = await this.k.store.getMember(ctx.memberId);
-    if (!member) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!member) throw new HarborError('not_a_member', 'not a member of this server');
     return member;
   }
 
@@ -68,10 +68,10 @@ export class Agents {
     return agent;
   }
 
-  /** The agents the caller manages, each with its keys (never their secrets). */
+  /** The caller's own agents, each with its keys (never their secrets). Nothing stands above the owner (2026-11-09). */
   async list(ctx: ActorCtx): Promise<AgentListing[]> {
     const actor = await this.actor(ctx);
-    const agents = await this.k.store.listAgents(agentsManagedBy(actor) === 'all' ? null : actor.id);
+    const agents = await this.k.store.listAgents(actor.id);
     const keys = await this.k.store.listAgentKeys(agents.map((a) => a.id));
     const credentials = await this.k.store.listAgentCredentials(agents.map((a) => a.id));
     const hooks = await this.k.store.listAgentHooks(agents.map((a) => a.id));
@@ -95,7 +95,7 @@ export class Agents {
    */
   async add(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
     enforce(canAddAgent(await this.actor(ctx)));
     if (!isAgentPair(input.kind, input.connection)) {
@@ -118,26 +118,11 @@ export class Agents {
       agentKind: input.kind,
       agentConnection: input.connection,
       ...(input.instance ? { agentInstance: input.instance } : {}),
-      // A local agent runs on its owner's computer: always personal (2026-10-28).
-      ...(input.personal || PERSONAL_ONLY_CONNECTIONS.includes(input.connection) ? { personal: true } : {}),
     });
     if (platform) await this.hooks!.save(agent.id, input.credential!, ctx.memberId);
     const key = await this.mint(ctx, agent.id);
     this.hooks?.added(agent);
     return { agent, key };
-  }
-
-  /**
-   * Jev (spec §8 Jev, 2026-10-07): built into the org, never added by a
-   * person, so it has no owner, takes no keys, and is in no space until
-   * someone adds it. Created on the first boot with the deployment's key;
-   * a read-only org gets it once it can write again.
-   */
-  async ensureJev(): Promise<Member | undefined> {
-    const existing = (await this.k.store.listAgentsByConnection([BUILT_IN_CONNECTION])).find((a) => a.agentKind === JEV_KIND);
-    if (existing || this.k.readOnly) return existing;
-    // People meet it as Ro (2026-10-07, Arjun's call): Jev is the model it runs on, not its name.
-    return this.spaces.createAgent({ displayName: 'Ro', agentKind: JEV_KIND, agentConnection: BUILT_IN_CONNECTION });
   }
 
   /** Replace a platform agent's credential: the owner only, checked with the platform first; clears a rejection. */
@@ -155,7 +140,7 @@ export class Agents {
 
   /**
    * Rename an agent (spec §4 Agent members, amended 2026-10-21): the owner
-   * only. An org fact, like a person's rename: no event, no lock, and history
+   * only. A server fact, like a person's rename: no event, no lock, and history
    * keeps its attribution because it keys on the id.
    */
   async rename(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
@@ -174,7 +159,7 @@ export class Agents {
    * Set an agent's description and instructions (spec §4 Agent members,
    * 2026-10-29): the owner only. A field left out keeps its value; an empty
    * one clears it. The description is one line, like a person's title; the
-   * instructions keep their lines. An org fact like a rename, told to every
+   * instructions keep their lines. A server fact like a rename, told to every
    * member as a profile change so rosters show the new description.
    */
   async setProfile(ctx: ActorCtx, agentId: string, input: { title?: string; instructions?: string }): Promise<Member> {
@@ -188,25 +173,6 @@ export class Agents {
     const updated = await this.agent(agentId);
     await this.k.publishProfile(updated);
     return updated;
-  }
-
-  /**
-   * Switch an agent between channel and personal (spec §4 Agent members,
-   * amended 2026-10-27): the owner only. Like a rename, an org fact with no
-   * event. The invocation rule reads the flag when a message arrives, so what
-   * is already queued finishes and everything asked after follows the new
-   * setting; Jev's candidates read it the same way.
-   */
-  async setPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
-    const agent = await this.agent(agentId);
-    enforce(canSetAgentPersonal(await this.actor(ctx), agent));
-    if ((agent.personal === true) === input.personal) return agent; // idempotent no-op: no write
-    if (!input.personal && PERSONAL_ONLY_CONNECTIONS.includes(agent.agentConnection ?? '')) {
-      throw new HarborError('invalid_request', `${agent.displayName} runs on its owner’s computer, so only its owner can use it`);
-    }
-    this.k.guardWrite();
-    await this.k.store.setAgentPersonal(agentId, input.personal);
-    return this.agent(agentId);
   }
 
   /**

@@ -125,7 +125,7 @@ describe('managed agents on a deployment that bills', () => {
     const store = await freshStore();
     harbor = await startHarbor({
       store: store.store,
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'harsh', displayName: 'Harsh' },

@@ -26,7 +26,7 @@ import type { z } from 'zod';
 import { HarborError } from '../errors.js';
 import { legacyToTokens } from '../mentions-backfill.js';
 import type { Notifier } from '../notify.js';
-import { canHandSecrets, canReadSecret, enforce, isAuthor } from '../policy.js';
+import { canHandSecrets, canReadSecret, enforce, isAuthor, seatOf, type Seat } from '../policy.js';
 import { assertSealingConfigured, seal, unseal } from '../sealing.js';
 import { parseSearchQuery } from '../search.js';
 import type { MessageWindow, StoredPollVote, StoredReaction } from '../store.js';
@@ -89,14 +89,14 @@ export class Feed {
   constructor(
     private readonly k: Kernel,
     private readonly assets: Assets,
-    /** Absent = no notifications on this org (notify.ts: frames + push). */
+    /** Absent = no notifications on this server (notify.ts: frames + push). */
     private readonly notifier?: Notifier,
     /** Absent = no agent invocations (core/invocations.ts). */
     private readonly invocations?: Invocations,
   ) {}
 
   // --- mentions (protocol mentions.ts, 2026-09-10) -----------------------------
-  // The org stamps who a message addresses from its mention TOKENS alone —
+  // The server stamps who a message addresses from its mention TOKENS alone —
   // never from names — and only ids that are members of the space. Every
   // consumer (unread, Activity, push, chips) reads the stamp.
 
@@ -109,7 +109,7 @@ export class Feed {
     return { members, here: parsed.here, rowboat: parsed.rowboat };
   }
 
-  /** A mention follows you into the thread (the org's rule; @here follows nobody). */
+  /** A mention follows you into the thread (the server's rule; @here follows nobody). */
   private async followMentioned(spaceId: string, rootMessageId: string, stamps: MentionStamps, authorId: string, at: string): Promise<void> {
     for (const id of stamps.members) {
       if (id === authorId) continue;
@@ -157,7 +157,7 @@ export class Feed {
   }
 
   async listTopics(ctx: ActorCtx, spaceId: string, includeArchived = false): Promise<TopicListing[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const topics = await this.k.store.listTopics(spaceId, includeArchived);
     // Every consumer needs the root message (reply chips, parent cards,
     // unread anchors) — always folded in; activity computes from its denorm.
@@ -239,7 +239,7 @@ export class Feed {
     spaceId: string,
     opts?: PageOpts & { replies?: boolean },
   ): Promise<{ messages: Message[]; topics: Topic[]; threadRoots: Message[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     // Newest page by default — never the full history. With replies (the
     // inline view, 2026-10-25) a page is every message in offset order.
     const { rows, hasMore, hasMoreAfter, span } = await this.pageOf(
@@ -301,7 +301,7 @@ export class Feed {
     readOffset: number | null;
     following: boolean;
   }> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const root = await this.resolveRoot(spaceId, rootMessageId);
     const { rows: replies, hasMore, hasMoreAfter } = await this.pageOf((w) => this.k.store.listThread(spaceId, root.id, w), opts);
     const [foldedRoot] = await this.foldPage(spaceId, [root]);
@@ -320,7 +320,7 @@ export class Feed {
 
   /** One message by id, folded — the read behind a message link. */
   async getMessage(ctx: ActorCtx, spaceId: string, messageId: string): Promise<Message> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const message = await this.k.store.getMessage(spaceId, messageId);
     if (!message) throw new HarborError('not_found', 'no such message');
     return this.foldLive(spaceId, message);
@@ -348,15 +348,12 @@ export class Feed {
    * (in-process only): this message is the agent's approval card, and the
    * approval rides on it, raised in the same transaction (spec §8 part 4);
    * with an `action`, Harbor's own for a super agent's request (2026-11-02).
-   * `relayOf` (in-process only): this message is Jev's tags for that one,
-   * and the agents it mentions take that message's hand-off depth (spec §8
-   * Jev, 2026-10-07).
    */
   async postMessage(
     ctx: ActorCtx,
     spaceId: string,
     input: NewMessage,
-    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest; action?: ApprovalAction }; relayOf?: string } = {},
+    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest; action?: ApprovalAction } } = {},
   ): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
@@ -372,10 +369,7 @@ export class Feed {
     let raising: Invocation | undefined;
     const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => {
       if (!this.invocations) return { message, invocations: [] };
-      // Recorded before the answer below finishes its turn: Jev may tag
-      // someone for this message later, at this depth (spec §8 Jev, 2026-10-07).
-      const depth = await this.invocations.handOffDepth(ctx, spaceId, opts.relayOf);
-      if (depth > 0) await this.k.store.putMessageHops(spaceId, message.id, depth);
+      const depth = await this.invocations.handOffDepth(ctx);
       const invocations = await this.invocations.onMessage(ctx, space, message, input.agentOptions, depth, outbox);
       if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
       return { message, invocations: invocations.map(forPeople) };
@@ -391,7 +385,7 @@ export class Feed {
         raising = await this.invocations.assertCanRaise(ctx, opts.approval.invocationId, spaceId, input.threadRoot);
       }
       const at = this.k.now();
-      // The org stamps the poll from its own clock: answer ids 1..n, a
+      // The server stamps the poll from its own clock: answer ids 1..n, a
       // duration in becomes an expiry out (the Discord create asymmetry).
       const poll: Poll | undefined = input.poll
         ? {
@@ -521,10 +515,11 @@ export class Feed {
     if (twice) throw new HarborError('invalid_request', `${twice} is in the message twice`);
     const ids = new Set([...mentions, ...(space.kind === 'direct' ? space.participants ?? [] : [])]);
     ids.delete(ctx.memberId);
-    const readers: Member[] = [];
+    const readers: Array<{ member: Member; seat: Seat }> = [];
     for (const id of ids) {
       const member = await this.k.store.getMember(id);
-      if (member && (await this.k.store.getMembership(space.id, id))) readers.push(member);
+      const membership = member ? await this.k.store.getMembership(space.id, id) : undefined;
+      if (member && membership) readers.push({ member, seat: seatOf(membership) });
     }
     enforce(canHandSecrets(ctx.memberId, readers));
     for (const secret of values) {
@@ -532,7 +527,7 @@ export class Feed {
         throw new HarborError('invalid_request', `the message's text contains the value of ${secret.name}: take it out, so only its readers see it`);
       }
     }
-    return { card: { names, readers: readers.map((m) => m.id) }, values };
+    return { card: { names, readers: readers.map((r) => r.member.id) }, values };
   }
 
   /** Seals each value apart from the message row and the log, bound to its message and name. */
@@ -550,7 +545,7 @@ export class Feed {
    * it, and only while they can read the space and the message stands.
    */
   async readMessageSecret(ctx: ActorCtx, spaceId: string, messageId: string, name: string): Promise<string> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const message = await this.k.store.getMessage(spaceId, messageId);
     enforce(canReadSecret(ctx.memberId, message?.secrets, name));
     const sealed = await this.k.store.getMessageSecret(spaceId, messageId, name);
@@ -681,9 +676,9 @@ export class Feed {
    * log shows an edit by them and the "(edited)" mark appears; titles go
    * through retitle the same way. Rows that carry tokens but stale stamps
    * are restamped in place (derived data, no event). Idempotent: a second
-   * run finds nothing — and a ledger row makes it run ONCE per org, so a
+   * run finds nothing — and a ledger row makes it run ONCE per server, so a
    * later bare "@<id>" typed as prose is never rewritten behind the author.
-   * Runs at boot, per org, before the faces serve.
+   * Runs at boot, per server, before the faces serve.
    */
   async migrateMentions(opts: { force?: boolean } = {}): Promise<{ messages: number; titles: number; restamped: number }> {
     const out = { messages: 0, titles: 0, restamped: 0 };
@@ -1004,7 +999,7 @@ export class Feed {
   }
 
   async listArchivedThreads(ctx: ActorCtx, spaceId: string): Promise<Message[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     return this.foldPage(spaceId, await this.k.store.listArchivedRoots(spaceId));
   }
 
@@ -1079,17 +1074,34 @@ export class Feed {
    * (which thread a hit lives in, which topic annotates it) is joined at
    * query time, never copied into any index.
    */
+  /**
+   * One space, or every space the caller is in when `spaceId` is undefined
+   * (2026-11-09): DMs and archived spaces included, every hit saying which.
+   * Names in `from:` and `mentions:` resolve against the space's roster, or
+   * the caller's contacts and themself across spaces.
+   */
   async search(
     ctx: ActorCtx,
-    spaceId: string,
+    spaceId: string | undefined,
     rawQuery: string,
     opts?: { kinds?: SearchKind[]; limit?: number },
   ): Promise<SearchResults> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    let spaceIds: string[];
+    let roster: Member[];
+    if (spaceId !== undefined) {
+      await this.k.requireMember(ctx, spaceId);
+      spaceIds = [spaceId];
+      roster = await this.k.store.listSpaceMembers(spaceId);
+    } else {
+      await this.k.requireActiveMember(ctx);
+      spaceIds = (await this.k.store.listSpacesFor(ctx.memberId, { includeDirect: true })).map((s) => s.id);
+      const me = await this.k.store.getMember(ctx.memberId);
+      roster = [...(me ? [me] : []), ...(await this.k.store.listContacts(ctx.memberId))];
+    }
     const limit = Math.min(opts?.limit ?? 10, 50);
     const kinds = new Set<SearchKind>(opts?.kinds ?? ['messages', 'topics', 'assets']);
 
-    const query = parseSearchQuery(rawQuery, await this.k.store.listSpaceMembers(spaceId), ctx.memberId);
+    const query = parseSearchQuery(rawQuery, roster, ctx.memberId);
 
     const empty: SearchResults = {
       messages: [],
@@ -1097,7 +1109,7 @@ export class Feed {
       assets: [],
       truncated: { messages: false, topics: false, assets: false },
     };
-    if (query.terms.length === 0 && !query.filtered) return empty;
+    if ((query.terms.length === 0 && !query.filtered) || spaceIds.length === 0) return empty;
     const results = empty;
     // A filter is about messages (search.ts SearchFilters): who wrote one,
     // whom it mentions, its thread, its links. Discussions and files have
@@ -1109,17 +1121,19 @@ export class Feed {
 
     if (kinds.has('messages')) {
       // limit+1 detects truncation without a count query.
-      const rows = await this.k.store.searchMessages(spaceId, query, limit + 1);
+      const rows = await this.k.store.searchMessages(spaceIds, query, limit + 1);
       results.truncated.messages = rows.length > limit;
       const titleByRoot = new Map<string, string>();
       for (const { message, snippet } of rows.slice(0, limit)) {
         const rootId = message.threadRoot ?? message.id;
-        if (!titleByRoot.has(rootId)) {
-          const topic = await this.k.store.getTopicByRoot(spaceId, rootId);
-          if (topic) titleByRoot.set(rootId, topic.title);
+        const rootKey = `${message.spaceId}/${rootId}`;
+        if (!titleByRoot.has(rootKey)) {
+          const topic = await this.k.store.getTopicByRoot(message.spaceId, rootId);
+          if (topic) titleByRoot.set(rootKey, topic.title);
         }
-        const topicTitle = titleByRoot.get(rootId);
+        const topicTitle = titleByRoot.get(rootKey);
         results.messages.push({
+          spaceId: message.spaceId,
           messageId: message.id,
           threadRootId: rootId,
           ...(topicTitle !== undefined ? { topicTitle } : {}),
@@ -1131,16 +1145,16 @@ export class Feed {
       }
     }
     if (kinds.has('topics')) {
-      const rows = await this.k.store.searchTopics(spaceId, query, limit + 1);
+      const rows = await this.k.store.searchTopics(spaceIds, query, limit + 1);
       results.truncated.topics = rows.length > limit;
       results.topics = rows.slice(0, limit).map((topic) => ({ topic }));
     }
     if (kinds.has('assets')) {
-      const rows = await this.k.store.searchAssets(spaceId, query, limit + 1);
+      const rows = await this.k.store.searchAssets(spaceIds, query, limit + 1);
       results.truncated.assets = rows.length > limit;
-      results.assets = rows.slice(0, limit).map(({ record, snippet }) => {
+      results.assets = rows.slice(0, limit).map(({ spaceId: hitSpaceId, record, snippet }) => {
         const { state: _live, ...asset } = this.assets.toAsset(record);
-        return { ...asset, ...(snippet !== undefined ? { snippet } : {}) };
+        return { spaceId: hitSpaceId, ...asset, ...(snippet !== undefined ? { snippet } : {}) };
       });
     }
     return results;
@@ -1183,7 +1197,7 @@ function foldReactions(reactions: StoredReaction[]): ReactionGroup[] {
 /**
  * What a message's sealed secret is bound to beside its space (sealing.ts): a
  * value copied to another message or name does not open. Space ids are
- * global, so the space stands in for the org (2026-11-04).
+ * global, so the space stands in for the server (2026-11-04).
  */
 function secretBinding(messageId: string, name: string): string {
   return `message-secret:${messageId}:${name}`;

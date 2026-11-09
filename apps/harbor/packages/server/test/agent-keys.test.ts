@@ -4,7 +4,7 @@ import type { RunningHarbor } from '../src/server.js';
 import { agentClient, liveClient, restClient, startTestHarbor } from './helpers.js';
 
 // Agent keys (spec §4 Agent members, 2026-09-29): any person adds an agent
-// and owns it; the owner alone creates its keys; the owner or an admin
+// and owns it; the owner alone creates and revokes its keys (2026-11-09: nothing stands above the owner);
 // revokes them. A key is presented as the agent itself on every face — REST,
 // live, MCP — and always acts direct, never "via".
 
@@ -16,7 +16,7 @@ const as = (token: string) => restClient(harbor, token);
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },
@@ -24,7 +24,6 @@ beforeAll(async () => {
     ],
   });
   const ram = (await harbor.store.getMember('ramnique'))!;
-  await harbor.store.putMember({ ...ram, role: 'admin' });
   spaceId = (await as('dev-harsh').post('/v1/spaces', { name: 'Payments' })).body.space.id;
   const created = await as('dev-harsh').post('/v1/agents', { displayName: '  Hermes ' });
   expect(created.status).toBe(200);
@@ -39,25 +38,24 @@ afterAll(async () => {
 
 describe('adding an agent', () => {
   it('makes the caller its owner and shows the first key once', () => {
-    expect(agent).toMatchObject({ displayName: 'Hermes', kind: 'agent', role: 'member', ownerId: 'harsh' });
+    expect(agent).toMatchObject({ displayName: 'Hermes', kind: 'agent', ownerId: 'harsh' });
     expect(firstKey.secret).toMatch(/^rbk_[A-Za-z0-9_-]{43}$/);
   });
 
-  it('lists agents with their keys, never a secret: yours, or every one for an admin', async () => {
+  it('lists your own agents with their keys, never a secret; nobody sees another person’s (2026-11-09)', async () => {
     const mine = (await as('dev-harsh').get('/v1/agents')).body.agents as AgentListing[];
     expect(mine.map((a) => a.agent.id)).toEqual([agent.id]);
     expect(mine[0]!.keys.map((k) => k.id)).toEqual([firstKey.id]);
     expect(JSON.stringify(mine)).not.toContain(firstKey.secret);
     expect((await as('dev-gagan').get('/v1/agents')).body.agents).toEqual([]);
-    const all = (await as('dev-ramnique').get('/v1/agents')).body.agents as AgentListing[];
-    expect(all.map((a) => a.agent.id)).toContain(agent.id);
+    expect((await as('dev-ramnique').get('/v1/agents')).body.agents).toEqual([]);
   });
 
-  it('puts a new agent, in no space yet, on the org roster — so anyone can add it to a space', async () => {
+  it('a new agent, in no space yet, is its owner’s contact and nobody else’s; the owner adds it to a space (2026-11-09)', async () => {
     const fresh = (await as('dev-harsh').post('/v1/agents', { displayName: 'Fresh' })).body.agent as Member;
-    const roster = (token: string) => as(token).get('/v1/members').then((r) => (r.body.members as Member[]).map((m) => m.id));
-    expect(await roster('dev-harsh')).toContain(fresh.id);
-    expect(await roster('dev-gagan')).toContain(fresh.id);
+    const contacts = (token: string) => as(token).get('/v1/contacts').then((r) => (r.body.members as Member[]).map((m) => m.id));
+    expect(await contacts('dev-harsh')).toContain(fresh.id);
+    expect(await contacts('dev-gagan')).not.toContain(fresh.id);
     expect((await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [fresh.id], actingMode: 'direct' })).status).toBe(200);
   });
 
@@ -111,7 +109,7 @@ describe('the key, on every face', () => {
 });
 
 describe('who controls the keys', () => {
-  it('lets only the owner create a key — not another member, not an admin', async () => {
+  it('lets only the owner create a key — not another member', async () => {
     expect((await as('dev-gagan').post(`/v1/agents/${agent.id}/keys`)).status).toBe(403);
     expect((await as('dev-ramnique').post(`/v1/agents/${agent.id}/keys`)).status).toBe(403);
   });
@@ -128,10 +126,11 @@ describe('who controls the keys', () => {
     expect(again.body.key.revokedAt).toBe(revoked.body.key.revokedAt);
   });
 
-  it('lets an admin revoke — the off switch — but not another member', async () => {
+  it('lets only the owner revoke — nothing stands above the owner (2026-11-09)', async () => {
     const third = (await as('dev-harsh').post(`/v1/agents/${agent.id}/keys`)).body.key;
     expect((await as('dev-gagan').post(`/v1/agents/${agent.id}/keys/${third.id}/revoke`)).status).toBe(403);
-    expect((await as('dev-ramnique').post(`/v1/agents/${agent.id}/keys/${third.id}/revoke`)).status).toBe(200);
+    expect((await as('dev-ramnique').post(`/v1/agents/${agent.id}/keys/${third.id}/revoke`)).status).toBe(403);
+    expect((await as('dev-harsh').post(`/v1/agents/${agent.id}/keys/${third.id}/revoke`)).status).toBe(200);
     expect((await as(third.secret).get('/v1/me')).status).toBe(401);
   });
 

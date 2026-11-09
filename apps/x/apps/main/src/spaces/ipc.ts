@@ -27,7 +27,7 @@ type InvokeHandler<K extends keyof IPCChannels> = (
 // call each come from the shared table (@x/spaces-client channels.ts).
 type SpacesHostChannel =
   | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite' | 'spaces:signInOrg'
-  | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress' | 'spaces:createOrg' | 'spaces:apexInfo'
+  | 'spaces:accountState' | 'spaces:signInRowboat' | 'spaces:addOrgByAddress'
   | 'spaces:removeOrg' | 'spaces:uploadBlob'
   | 'spaces:saveBlob' | 'spaces:saveAsset' | 'spaces:saveImageUrl' | 'spaces:linkPreview' | 'spaces:invokeRowboat'
   | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat' | 'spaces:schedule'
@@ -49,26 +49,26 @@ async function orgSummary(record: orgs.OrgRecord): Promise<spacesShared.SpacesOr
 
 const orgSummaries = (records: orgs.OrgRecord[]) => Promise.all(records.map(orgSummary));
 
-// A Rowboat sign-in or sign-out changes what the apex would list for us:
-// the next org listing re-syncs instead of trusting a recent one.
+// A Rowboat sign-in or sign-out changes whether Rowboat's server is ours:
+// the next listing re-syncs instead of trusting a recent one.
 oauthConnectBus.subscribe((event) => {
-  if (event.provider === 'rowboat') spacesOAuth.invalidateManagedOrgsSync();
+  if (event.provider === 'rowboat') spacesOAuth.invalidateManagedSync();
 });
 
 const openBrowser = (url: string) => shell.openExternal(url);
 
 // Member-addressed frames (space_added: someone opened a DM with us) have no
 // space subscription to ride — relay them to every window as they arrive; the
-// renderer's orgs store refreshes its listing on them.
+// renderer's store refreshes its listing on them.
 orgs.onMemberFrame((orgId, frame) => broadcastSpacesEvent({ orgId, frame }));
 
 // The agent-activity feed ("my Rowboat is working on this thread"): core
-// folds turn/session bus events into per-org lists and emits each whole list
+// folds turn/session bus events into one list and emits the whole list
 // on change; windows replace their copy. Started here, before any mention
 // can be sent.
 onSpaceAgentActivity((event) => broadcastSpacesEvent(event));
 void startSpaceAgentActivity().catch((err) => console.error('[spaces] agent activity feed failed to start:', err));
-// The org's `notify` frames become OS notifications (unread arc, 2026-09-10).
+// The server's `notify` frames become OS notifications (unread arc, 2026-09-10).
 startSpaceNotifications();
 // Local agents (2026-10-28): this computer answers for its owner's Claude Code
 // or Codex agents while the app runs, window or not; windows hear every change.
@@ -90,10 +90,10 @@ function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
   }
 }
 
-// One core-level live subscription per (org, space), fanned out to all windows.
+// One core-level live subscription per space, fanned out to all windows.
 // The renderer's afterOffset drives replay on first subscribe; after that the
 // registry tracks each entry's resume point and re-subscribes on a fresh
-// client whenever core replaces an org's socket (@x/spaces-client subscriptions.ts).
+// client whenever core replaces the socket (@x/spaces-client subscriptions.ts).
 const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
 
 // The table's handlers take the request alone; main's take the IPC event first.
@@ -110,16 +110,16 @@ const harborIpcHandlers = Object.fromEntries(
  * `registerIpcHandlers({...})` call in ipc.ts — same convention as
  * `browserIpcHandlers`. Handlers delegate to core (spaces/orgs.js); everything
  * the renderer does is attributed 'direct' (the app is the human surface;
- * agents write through the org's MCP face).
+ * agents write through the server's MCP face).
  */
 export const spacesIpcHandlers: SpacesHandlers = {
   ...harborIpcHandlers,
 
-  // The listing first makes the managed orgs match the apex (cheap when a
-  // sync ran moments ago; a failed sync keeps the cached records and logs).
+  // The listing first makes the record match the Rowboat session (cheap when a
+  // sync ran moments ago; a failed sync keeps the record and logs).
   'spaces:listOrgs': async () => {
-    await spacesOAuth.syncManagedOrgs({ maxAgeMs: 30_000 }).catch((err) => {
-      console.warn('[spaces] managed org sync failed:', err instanceof Error ? err.message : err);
+    await spacesOAuth.syncManagedServer({ maxAgeMs: 30_000 }).catch((err) => {
+      console.warn('[spaces] server sync failed:', err instanceof Error ? err.message : err);
     });
     return { orgs: await orgSummaries(orgs.listOrgs()) };
   },
@@ -149,22 +149,9 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:signInOrg': async (_event, args) => {
     const record = orgs.getOrg(args.orgId);
-    if (!record) throw new Error(`unknown org ${args.orgId}`);
-    const updated = await spacesOAuth.signInOrg({ baseUrl: record.baseUrl, openBrowser, orgId: record.id });
+    if (!record) throw new Error(`unknown server ${args.orgId}`);
+    const updated = await spacesOAuth.signInOrg({ baseUrl: record.baseUrl, openBrowser });
     return { org: await orgSummary(updated) };
-  },
-
-  'spaces:createOrg': async (_event, args) => {
-    const org = await orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
-    return { org };
-  },
-
-  'spaces:apexInfo': async () => {
-    try {
-      return { apexDomain: new URL(await spacesOAuth.apexUrl()).host };
-    } catch {
-      return { apexDomain: null };
-    }
   },
 
   'spaces:removeOrg': async (_event, args) => {

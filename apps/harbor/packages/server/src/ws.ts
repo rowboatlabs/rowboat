@@ -1,14 +1,14 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientFrame, type ServerFrame } from '@rowboat/spaces-protocol';
-import { authenticateRequest, type OrgAuth } from './auth.js';
+import { authenticateRequest, type ServerAuth } from './auth.js';
 import { HarborError } from './errors.js';
 import { sessionToken } from './session.js';
 import type { SpaceHub } from './hub.js';
 import type { HarborService } from './service.js';
 import type { LiveStats } from './stats.js';
 
-// The live face (CONTRACT.md decision 2): one WebSocket per org, per-space
+// The live face (CONTRACT.md decision 2): one WebSocket per member, per-space
 // subscriptions, offset-based resume. subscribe{afterOffset} replays durable
 // events after that offset then goes live; presence is ephemeral pass-through.
 //
@@ -30,7 +30,7 @@ import type { LiveStats } from './stats.js';
 export interface LiveDeps {
   service: HarborService;
   hub: SpaceHub;
-  auth: OrgAuth;
+  auth: ServerAuth;
   /** Origins whose upgrades may authenticate with the session cookie (session.ts). */
   webOrigins: ReadonlySet<string>;
 }
@@ -43,12 +43,8 @@ interface LiveSocket extends WebSocket {
   sawLifeSinceLastBeat?: boolean;
 }
 
-/**
- * Resolves the org runtime for a connection — multi-org deployments route by
- * Host (spec §4 tenancy); the single-org server ignores the host. Undefined =
- * no org on that domain.
- */
-export type LiveDepsResolver = (host: string | undefined) => LiveDeps | undefined | Promise<LiveDeps | undefined>;
+/** What a connection needs, resolved when it opens (the server's runtime is built after the listener; server.ts). */
+export type LiveDepsResolver = () => LiveDeps | undefined | Promise<LiveDeps | undefined>;
 
 export function attachLive(
   server: Server,
@@ -89,7 +85,7 @@ export function attachLive(
       let memberId: string;
       try {
         const forwarded = req.headers['x-forwarded-host'];
-        deps = await resolve(typeof forwarded === 'string' ? forwarded : req.headers.host);
+        deps = await resolve();
         if (!deps) {
           socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
           socket.destroy();

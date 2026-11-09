@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { agentOnlyMcpToolNames, mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
-import { authenticateRequest, wwwAuthenticate, type OrgAuth } from './auth.js';
+import { authenticateRequest, wwwAuthenticate, type ServerAuth } from './auth.js';
 import { HarborError } from './errors.js';
 import { publicOriginOf } from './origin.js';
 import type { ActorCtx, HarborService } from './service.js';
@@ -23,7 +23,7 @@ import type { ActorCtx, HarborService } from './service.js';
 
 interface Deps {
   service: HarborService;
-  auth: OrgAuth;
+  auth: ServerAuth;
 }
 
 interface McpActor {
@@ -155,17 +155,14 @@ async function dispatch(
     // --- identity & people --------------------------------------------------
     case 'whoami': {
       // The same row /v1/me serves.
-      return { member: await service.me(ctx), org: { name: service.org.name, address: service.org.address } };
+      return { member: await service.me(ctx), server: { name: service.server.name, address: service.server.address } };
     }
     case 'update_profile':
       return { member: await service.updateProfile(ctx, args as { displayName?: string; title?: string }) };
-    case 'list_members': {
-      const a = args as { spaceId?: string };
-      const members = a.spaceId !== undefined
-        ? await service.listMembers(ctx, a.spaceId)
-        : await service.listOrgMembers(ctx);
-      return { members };
-    }
+    case 'list_members':
+      return { members: await service.listMembers(ctx, (args as { spaceId: string }).spaceId) };
+    case 'list_contacts':
+      return { members: await service.listContacts(ctx) };
     // --- spaces & membership --------------------------------------------------
     case 'open_direct': {
       const a = args as { memberId: string };
@@ -175,13 +172,9 @@ async function dispatch(
       const a = args as { spaceId: string; includeDeleted?: boolean };
       return { entries: await service.listAssets(ctx, a.spaceId, a.includeDeleted) };
     }
-    case 'browse_spaces':
-      return { spaces: await service.browseSpaces(ctx) };
-    case 'join_space':
-      return service.joinSpace(ctx, (args as { spaceId: string }).spaceId);
     case 'create_space': {
-      const a = args as { name: string; visibility?: 'private' | 'open' };
-      return { space: await service.createSpace(ctx, a.name, a.visibility) };
+      const a = args as { name: string };
+      return { space: await service.createSpace(ctx, a.name) };
     }
     case 'rename_space': {
       const a = args as { spaceId: string; name: string };
@@ -194,33 +187,21 @@ async function dispatch(
       return { deleted: true };
     case 'unarchive_space':
       return { space: await service.unarchiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
-    case 'set_default_space': {
-      const a = args as { spaceId: string; isDefault: boolean };
-      return { space: await service.setDefaultSpace(ctx, a.spaceId, { isDefault: a.isDefault, ...attribution }) };
-    }
-    case 'set_space_visibility': {
-      const a = args as { spaceId: string; visibility: 'private' | 'open' };
-      return { space: await service.setSpaceVisibility(ctx, a.spaceId, { visibility: a.visibility, ...attribution }) };
-    }
     case 'remove_member': {
       const a = args as { spaceId: string; memberId: string };
       return service.removeMember(ctx, a.spaceId, a.memberId, attribution);
     }
-    case 'remove_org_member':
-      return { member: await service.removeOrgMember(ctx, (args as { memberId: string }).memberId, attribution) };
     case 'set_member_role': {
-      const a = args as { memberId: string; role: 'admin' | 'member' };
-      return { member: await service.setMemberRole(ctx, a.memberId, { role: a.role, ...attribution }) };
+      const a = args as { spaceId: string; memberId: string; role: 'admin' | 'member' };
+      return { membership: await service.setSpaceRole(ctx, a.spaceId, a.memberId, { role: a.role, ...attribution }) };
     }
-    case 'get_org_settings':
-      return { settings: await service.getOrgSettings(ctx) };
-    case 'set_invite_policy':
-      return { settings: await service.updateOrgSettings(ctx, { invitePolicy: (args as { invitePolicy: 'members' | 'admins' }).invitePolicy }) };
-    case 'set_jev_enabled':
-      return { settings: await service.updateOrgSettings(ctx, { jevEnabled: (args as { jevEnabled: boolean }).jevEnabled }) };
     case 'add_members': {
-      const a = args as { spaceId: string; memberIds: string[] };
-      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
+      const a = args as { spaceId: string; memberIds: string[]; invocableBy?: 'owner' | 'members' };
+      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...(a.invocableBy ? { invocableBy: a.invocableBy } : {}), ...attribution }) };
+    }
+    case 'set_agent_access': {
+      const a = args as { spaceId: string; agentId: string; invocableBy: 'owner' | 'members' };
+      return { membership: await service.setAgentAccess(ctx, a.spaceId, a.agentId, { invocableBy: a.invocableBy, ...attribution }) };
     }
     case 'leave_space': {
       const a = args as { spaceId: string };
@@ -240,13 +221,11 @@ async function dispatch(
             id: space.id,
             name: space.name,
             kind: space.kind,
-            visibility: space.visibility,
             ...(space.participants ? { participants: space.participants, self: space.participants.length === 1 } : {}),
             memberCount: (await service.listMembers(ctx, space.id)).length,
             assets: await service.listAssets(ctx, space.id),
           })),
         ),
-        groupChat: await service.isGroupChat(),
       };
     }
     case 'read_stream': {
@@ -532,7 +511,7 @@ async function dispatch(
     case 'delete_agent':
       return service.superAgentDelete(ctx, args as { spaceId: string; threadRootId: string; agentId: string; reason: string });
     case 'search_space': {
-      const a = args as { spaceId: string; query: string; kinds?: SearchKind[]; limit?: number };
+      const a = args as { spaceId?: string; query: string; kinds?: SearchKind[]; limit?: number };
       return service.search(ctx, a.spaceId, a.query, {
         ...(a.kinds !== undefined ? { kinds: a.kinds } : {}),
         ...(a.limit !== undefined ? { limit: a.limit } : {}),

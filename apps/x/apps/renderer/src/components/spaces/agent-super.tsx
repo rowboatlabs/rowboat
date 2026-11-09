@@ -3,21 +3,23 @@ import type { spaces } from '@x/shared'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/lib/toast'
 
-// Super agents (Harbor spec §4 Agent members, 2026-11-02): an admin lets an
-// agent create agents to hand work to, which belong to its owner; the owner
-// fills in anything secret on a card in the thread. Per agent, two plain
-// switches (named in Arjun's words, 2026-11-02): ask permission before
-// creating, and before deleting one it created. Everyone else reads them.
+// Super agents (Harbor spec §4 Agent members, 2026-11-02; the owner's own
+// switch since 2026-11-09): an owner lets their agent create agents to hand
+// work to, which belong to them; they fill in anything secret on a card in
+// the thread. Per agent, two plain switches (named in Arjun's words,
+// 2026-11-02): ask permission before creating, and before deleting one it
+// created. Everyone else reads them.
 
 type Setting = { askBeforeCreate: boolean; askBeforeDelete: boolean }
 const DEFAULT: Setting = { askBeforeCreate: true, askBeforeDelete: true }
 const CREATE_LABEL = 'Ask permission before creating agents'
 const DELETE_LABEL = 'Ask permission before deleting agents it creates'
 
-export function SuperAgentSection({ orgId, agent, isAdmin, ownerName, onChanged }: {
+export function SuperAgentSection({ orgId, agent, canSwitch, ownerName, onChanged }: {
     orgId: string
     agent: spaces.Member
-    isAdmin: boolean
+    /** The viewer owns it. */
+    canSwitch: boolean
     ownerName: string
     onChanged: () => Promise<void>
 }) {
@@ -37,7 +39,7 @@ export function SuperAgentSection({ orgId, agent, isAdmin, ownerName, onChanged 
     }
 
     const intro = `Lets it create agents for ${ownerName} and hand them work.`
-    if (!isAdmin) {
+    if (!canSwitch) {
         if (!current) return null
         return (
             <div className="flex flex-col gap-0.5">

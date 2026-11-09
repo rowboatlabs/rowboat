@@ -10,12 +10,12 @@ import { ACCOUNT_ROW } from '@/lib/spaces-account'
 import { avatarColorClass, initials } from '@/lib/spaces-presentation'
 import { cn } from '@/lib/utils'
 
-// Your Spaces account, at the foot of the Spaces rail: who you are, your
-// role on each server, and your profile. The web app's rail had it first
+// Your Spaces account, at the foot of the Spaces rail: who you are, the
+// server, and your profile (one server since 2026-11-09, so no roles here). The web app's rail had it first
 // (2026-10-13); the desktop's Spaces mode shares it (2026-11-09). Each host
 // adds its own rows below, the things only it can do.
 
-/** Your member record on each server: name and role are per server (spec §4). */
+/** Your member record on the server (spec §4). */
 function useMyMembers(): Map<string, spaces.Member> {
     const { orgs } = useSpacesOrgs()
     const rosters = useOrgRosters(orgs.map(org => ({ id: org.id, spaceIds: org.spaces.map(s => s.id) })))
@@ -65,16 +65,12 @@ export function SpacesAccountMenu({ email, children }: { email: string | null; c
                     <AvailabilityMenu />
                     {orgs.length > 0 && (
                         <div className="border-t border-border px-3 py-2">
-                            <div className="pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Servers</div>
-                            {orgs.map((org) => {
-                                const role = members.get(org.id)?.role
-                                return (
-                                    <div key={org.id} className="flex items-center justify-between gap-2 py-1 text-sm">
-                                        <span className="truncate">{org.name}</span>
-                                        {role && <span className="shrink-0 text-xs text-muted-foreground">{role === 'admin' ? 'Admin' : 'Member'}</span>}
-                                    </div>
-                                )
-                            })}
+                            <div className="pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Server</div>
+                            {orgs.map((org) => (
+                                <div key={org.id} className="flex items-center justify-between gap-2 py-1 text-sm">
+                                    <span className="truncate">{org.name}</span>
+                                </div>
+                            ))}
                         </div>
                     )}
                     <div className="border-t border-border p-1">

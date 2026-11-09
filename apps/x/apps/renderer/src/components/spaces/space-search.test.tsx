@@ -7,9 +7,9 @@ import type { spaces } from '@x/shared'
 // filters on focus, a filter's values while it is half-typed.
 
 const roster: spaces.Member[] = [
-    { id: 'me1', displayName: 'Ramnique Singh', role: 'admin', kind: 'human' },
-    { id: 'harsh', displayName: 'Harsh Verma', role: 'member', kind: 'human' },
-    { id: 'arjun', displayName: 'Arjun Maheswaran', role: 'member', kind: 'human' },
+    { id: 'me1', displayName: 'Ramnique Singh', kind: 'human' },
+    { id: 'harsh', displayName: 'Harsh Verma', kind: 'human' },
+    { id: 'arjun', displayName: 'Arjun Maheswaran', kind: 'human' },
 ] as spaces.Member[]
 
 vi.mock('@/hooks/use-space-members', () => ({ useSpaceMembers: () => roster }))

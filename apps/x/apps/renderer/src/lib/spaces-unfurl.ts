@@ -1,4 +1,4 @@
-import { parseOrgUrl } from '@x/shared/dist/spaces.js'
+import { parseSpacesUrl } from '@x/shared/dist/spaces.js'
 import { isDirectImageUrl } from '@/components/spaces/space-markdown'
 
 // Which links in a message body get an unfurl card (link-preview-card.tsx
@@ -10,11 +10,11 @@ export const MAX_UNFURLS = 3
 
 /**
  * The message's links worth a card, in order: skips code (fences and inline),
- * image embeds, direct image links (those already render as images), and org
- * links (a space, file, message, or person renders as a chip — and the org's
- * hand-off page would only ever unfurl as "Open in Rowboat").
+ * image embeds, direct image links (those already render as images), and
+ * Spaces links (a space, file, message, or person renders as a chip — and the
+ * server's hand-off page would only ever unfurl as "Open in Rowboat").
  */
-export function previewUrls(body: string, orgAddresses: readonly string[] = []): string[] {
+export function previewUrls(body: string, serverAddresses: readonly string[] = []): string[] {
     const stripped = body
         .replace(/```[\s\S]*?```/g, ' ')
         .replace(/`[^`\n]*`/g, ' ')
@@ -23,10 +23,10 @@ export function previewUrls(body: string, orgAddresses: readonly string[] = []):
     for (const m of stripped.matchAll(/https:\/\/[^\s<>)"'\]]+/g)) {
         const url = m[0]!.replace(/[.,;:!?]+$/, '')
         if (isDirectImageUrl(url)) continue
-        const link = parseOrgUrl(url)
-        // Every HTTPS homepage matches the org-root grammar. Only a known
-        // org address identifies its hand-off page; other homepages unfurl.
-        if (link && (link.kind !== 'org' || orgAddresses.includes(link.orgAddress))) continue
+        const link = parseSpacesUrl(url)
+        // Every HTTPS homepage matches the server-root grammar. Only the known
+        // server address identifies its hand-off page; other homepages unfurl.
+        if (link && (link.kind !== 'server' || serverAddresses.includes(link.address))) continue
         if (!found.includes(url)) found.push(url)
         if (found.length >= MAX_UNFURLS) break
     }

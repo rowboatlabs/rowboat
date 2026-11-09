@@ -49,7 +49,7 @@ const decide = (approval: Approval, body: Record<string, unknown>, token = 'dev-
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

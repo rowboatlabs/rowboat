@@ -2,7 +2,7 @@ import type { MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 
 // Browser clients (2026-10-09, the Spaces web-app plan): the web app is served
-// from its own origin and calls every org's host and the apex cross-origin.
+// from its own origin and calls Harbor cross-origin.
 // Only the listed origins get CORS headers. Credentials are allowed for them
 // (2026-10-12): the web app calls with Harbor's session cookie (session.ts),
 // which counts only from these same origins. Mounted

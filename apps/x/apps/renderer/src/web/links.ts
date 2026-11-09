@@ -32,8 +32,8 @@ export function takeOpenLink(signedIn: boolean): SpacesLinkTarget | null {
 }
 
 /** The web app's own address for an invite, which a sign-in started from the join dialog returns to. */
-export function inviteOpenPath(orgAddress: string, token: string): string {
-    return `${OPEN_PATH}?${new URLSearchParams({ type: 'spaces', org: orgAddress, invite: token })}`
+export function inviteOpenPath(address: string, token: string): string {
+    return `${OPEN_PATH}?${new URLSearchParams({ type: 'spaces', server: address, invite: token })}`
 }
 
 // Join, clicked while signed out, signs in first (2026-10-15). The click is

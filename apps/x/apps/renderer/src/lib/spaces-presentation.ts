@@ -320,7 +320,7 @@ export function formatBytes(size: number): string {
 // The token → person faces live in @x/shared (the phone renders through the
 // same code); re-exported to keep the renderer's import path.
 export { decorateMentions, resolveMentions } from '@x/shared/dist/spaces.js'
-import { mapMentionTokens, parseOrgUrl } from '@x/shared/dist/spaces.js'
+import { mapMentionTokens, parseSpacesUrl } from '@x/shared/dist/spaces.js'
 
 /**
  * Mention tokens → app:// links the space anchor renders as chips (Streamdown's
@@ -368,20 +368,20 @@ export function parseSpaceRefAppUrl(url: string): string | null {
  * under the space is not one.
  */
 export function parseSpaceWireUrl(url: string): { orgAddress: string; spaceId: string } | null {
-    const link = parseOrgUrl(url)
-    return link?.kind === 'space' ? { orgAddress: link.orgAddress, spaceId: link.spaceId } : null
+    const link = parseSpacesUrl(url)
+    return link?.kind === 'space' ? { orgAddress: link.address, spaceId: link.spaceId } : null
 }
 
 /** The contract's link to a PERSON (https://<org>/u/<memberId>) — renders as an @Name chip that opens the DM with them. */
 export function parseMemberWireUrl(url: string): { orgAddress: string; memberId: string } | null {
-    const link = parseOrgUrl(url)
-    return link?.kind === 'member' ? { orgAddress: link.orgAddress, memberId: link.memberId } : null
+    const link = parseSpacesUrl(url)
+    return link?.kind === 'member' ? { orgAddress: link.address, memberId: link.memberId } : null
 }
 
 /** The contract's link to a MESSAGE (https://<org>/s/<spaceId>/m/<messageId>) — "Copy link" writes it; a chip jumps to it. */
 export function parseMessageWireUrl(url: string): { orgAddress: string; spaceId: string; messageId: string } | null {
-    const link = parseOrgUrl(url)
-    return link?.kind === 'message' ? { orgAddress: link.orgAddress, spaceId: link.spaceId, messageId: link.messageId } : null
+    const link = parseSpacesUrl(url)
+    return link?.kind === 'message' ? { orgAddress: link.address, spaceId: link.spaceId, messageId: link.messageId } : null
 }
 
 // ---------------------------------------------------------------------------
@@ -441,8 +441,8 @@ export function assetWireUrl(refs: { orgAddress: string; spaceId: string }, asse
 
 /** A canonical asset link → its org address, space and asset id (any space, any org); null for anything else. */
 export function parseAssetWireUrl(url: string): { orgAddress: string; spaceId: string; assetId: string } | null {
-    const link = parseOrgUrl(url)
-    return link?.kind === 'asset' ? { orgAddress: link.orgAddress, spaceId: link.spaceId, assetId: link.assetId } : null
+    const link = parseSpacesUrl(url)
+    return link?.kind === 'asset' ? { orgAddress: link.address, spaceId: link.spaceId, assetId: link.assetId } : null
 }
 
 /**

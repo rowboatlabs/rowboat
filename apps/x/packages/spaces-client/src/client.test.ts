@@ -28,7 +28,7 @@ async function startTestHarbor(options: Omit<Parameters<typeof startHarbor>[0], 
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Client Test Org',
+    name: 'Client Test Org',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
@@ -53,10 +53,10 @@ describe('SpacesClient', () => {
     expect(cleared.title).toBeUndefined();
   });
 
-  it('health probe reports the org', async () => {
+  it('health probe reports the server', async () => {
     const health = await ramnique.health();
     expect(health.ok).toBe(true);
-    expect(health.org.name).toBe('Client Test Org');
+    expect(health.server.name).toBe('Client Test Org');
   });
 
   it('space + invite + membership round-trip', async () => {
@@ -64,7 +64,7 @@ describe('SpacesClient', () => {
     spaceId = space.id;
     expect((await ramnique.listSpaces()).map((s) => s.id)).toContain(spaceId);
 
-    const invite = await ramnique.createInvite({ spaceIds: [spaceId] });
+    const invite = await ramnique.createInvite({ spaceId });
     const resolved = await gagan.resolveInvite(invite.token);
     expect(resolved.state).toBe('ok');
     await gagan.acceptInvite(invite.token);
@@ -299,12 +299,7 @@ describe('SpacesClient', () => {
     expect((await ramnique.readAsset(spaceId, scratch)).content).toBe('scratch\n');
   });
 
-  it('direct messages: off in a group chat, then get-or-create from either side, hidden unless asked, fixed membership', async () => {
-    // One space is a group chat (2026-10-07): the listing says so and a DM is refused, until a second space.
-    expect((await ramnique.listing()).groupChat).toBe(true);
-    await expect(ramnique.openDirect('gagan')).rejects.toBeInstanceOf(SpacesRequestError);
-    await ramnique.createSpace('Second');
-    expect((await gagan.listing()).groupChat).toBe(false);
+  it('direct messages: get-or-create from either side, hidden unless asked, fixed membership; contacts are who you share a space with', async () => {
     const opened = await ramnique.openDirect('gagan');
     expect(opened.created).toBe(true);
     expect(opened.space.kind).toBe('direct');
@@ -313,14 +308,16 @@ describe('SpacesClient', () => {
     expect(again).toMatchObject({ created: false, space: { id: opened.space.id } });
     expect((await ramnique.listSpaces()).some((s) => s.id === opened.space.id)).toBe(false);
     expect((await gagan.listSpaces({ includeDirect: true })).some((s) => s.id === opened.space.id)).toBe(true);
-    await expect(ramnique.createInvite({ spaceIds: [opened.space.id] })).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(ramnique.createInvite({ spaceId: opened.space.id })).rejects.toMatchObject({ code: 'invalid_request' });
     await expect(gagan.leaveSpace(opened.space.id)).rejects.toMatchObject({ code: 'invalid_request' });
     // Your own id = your self-DM, one participant.
     const notes = await ramnique.openDirect('ramnique');
     expect(notes.space).toMatchObject({ kind: 'direct', participants: ['ramnique'] });
     expect((await ramnique.openDirect('ramnique')).created).toBe(false);
-    // The org roster is the union of your spaces (DMs included), deduped, A–Z.
-    expect((await ramnique.listOrgMembers()).map((m) => m.id)).toEqual(['gagan', 'ramnique']);
+    // Your contacts are the people you share a space with (DMs included) and your own agents, A–Z (2026-11-09).
+    expect((await ramnique.listContacts()).members.map((m) => m.id)).toEqual(['gagan']);
+    const outsider = new SpacesClient({ baseUrl: harbor.url, token: 'dev-loner' });
+    expect((await outsider.listContacts()).members).toEqual([]);
   });
 
   it('errors carry the wire code', async () => {
@@ -333,11 +330,12 @@ describe('SpacesClient', () => {
   });
 });
 
-describe('SpacesClient.listOrgMembers', () => {
-  // The org computes the roster (union of the caller's spaces, DMs included,
-  // deduped, A–Z); the client's job is one GET on the route's path with the
-  // bearer, and the contract check on the way back. Mocked fetch: the route
-  // is protocol-declared, and this pins the wire shape the app relies on.
+describe('SpacesClient.listContacts', () => {
+  // The server computes the contacts (the people the caller shares a space
+  // with, DMs included, and their agents, A–Z); the client's job is one GET
+  // on the route's path with the bearer, and the contract check on the way
+  // back. Mocked fetch: the route is protocol-declared, and this pins the
+  // wire shape the app relies on.
   function fakeFetch(body: unknown, status = 200) {
     const calls: { url: string; init: RequestInit | undefined }[] = [];
     const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -347,17 +345,17 @@ describe('SpacesClient.listOrgMembers', () => {
     return { calls, fetchImpl };
   }
 
-  it('GETs /v1/members with the bearer and returns the members list', async () => {
+  it('GETs /v1/contacts with the bearer and returns the members list', async () => {
     // A server from before agent members (2026-09-29) sends no kind: everyone is a person.
     const members = [
-      { id: 'gagan', displayName: 'Gagan', role: 'member' },
-      { id: 'ramnique', displayName: 'Ramnique', role: 'member' },
+      { id: 'gagan', displayName: 'Gagan' },
+      { id: 'ramnique', displayName: 'Ramnique' },
     ];
     const { calls, fetchImpl } = fakeFetch({ members });
     const client = new SpacesClient({ baseUrl: 'http://org.test/', token: 'dev-ramnique', fetchImpl });
-    expect(await client.listOrgMembers()).toEqual(members.map((m) => ({ ...m, kind: 'human' })));
+    expect((await client.listContacts()).members).toEqual(members.map((m) => ({ ...m, kind: 'human' })));
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('http://org.test/v1/members');
+    expect(calls[0].url).toBe('http://org.test/v1/contacts');
     expect(calls[0].init?.method).toBe('GET');
     expect((calls[0].init?.headers as Record<string, string>).authorization).toBe('Bearer dev-ramnique');
   });
@@ -365,13 +363,13 @@ describe('SpacesClient.listOrgMembers', () => {
   it('rejects a response that breaks the contract', async () => {
     const { fetchImpl } = fakeFetch({ people: [] });
     const client = new SpacesClient({ baseUrl: 'http://org.test', token: 'dev-ramnique', fetchImpl });
-    await expect(client.listOrgMembers()).rejects.toMatchObject({ name: 'SpacesRequestError', code: 'internal' });
+    await expect(client.listContacts()).rejects.toMatchObject({ name: 'SpacesRequestError', code: 'internal' });
   });
 
-  it('surfaces the wire error for an org that does not serve the route', async () => {
+  it('surfaces the wire error for a server that does not serve the route', async () => {
     const { fetchImpl } = fakeFetch({ code: 'not_found', message: 'no such route', retryable: false }, 404);
     const client = new SpacesClient({ baseUrl: 'http://org.test', token: 'dev-ramnique', fetchImpl });
-    await expect(client.listOrgMembers()).rejects.toMatchObject({ status: 404, code: 'not_found' });
+    await expect(client.listContacts()).rejects.toMatchObject({ status: 404, code: 'not_found' });
   });
 });
 
@@ -445,7 +443,10 @@ describe('SpacesLive', () => {
   });
 
   it('a member-addressed space_added frame reaches the other participant without any subscription', async () => {
-    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' });
+    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', kind: 'human' });
+    // The reach rule (2026-11-09): a DM needs a shared space first.
+    const shared = await ramnique.createSpace('Reach');
+    await ramnique.addMembers(shared.id, ['harsh']);
     const harsh = new SpacesLive({ baseUrl: harbor.url, token: 'dev-harsh' });
     const added: Array<{ spaceId: string; by: string }> = [];
     harsh.onMemberFrame((frame) => {
@@ -461,7 +462,7 @@ describe('SpacesLive', () => {
 
   it('whiteboard frames round-trip: opaque payload out, sender-stamped frame in', async () => {
     const space = await ramnique.createSpace('Board Space');
-    const invite = await ramnique.createInvite({ spaceIds: [space.id] });
+    const invite = await ramnique.createInvite({ spaceId: space.id });
     await gagan.acceptInvite(invite.token);
 
     const watcher = new SpacesLive({ baseUrl: harbor.url, token: 'dev-ramnique' });
@@ -492,7 +493,7 @@ describe('SpacesLive liveness', () => {
     // A harbor whose heartbeat effectively never fires is the client's-eye
     // view of a half-open socket after sleep: OPEN, silent, no close coming.
     const silent = await startTestHarbor({
-      orgName: 'Silent Org',
+      name: 'Silent Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       liveHeartbeatMs: 3_600_000,
     });
@@ -539,7 +540,7 @@ async function waitFor(pred: () => boolean, label: string, timeoutMs = 3000): Pr
 describe('read state', () => {
   it('marks are org-owned offsets: posting reads, marking clears, the snapshot agrees', async () => {
     const space = await ramnique.createSpace('Read marks');
-    const invite = await ramnique.createInvite({ spaceIds: [space.id] });
+    const invite = await ramnique.createInvite({ spaceId: space.id });
     await gagan.acceptInvite(invite.token);
 
     const { message } = await ramnique.postMessage(space.id, { body: 'hello', actingMode: 'direct' });
@@ -558,28 +559,5 @@ describe('read state', () => {
     ]);
     expect(await ramnique.followThread(space.id, message.id, false)).toEqual({ following: false, readOffset: message.offset });
     expect((await ramnique.unread()).spaces.find((s) => s.spaceId === space.id)!.threads).toEqual([]);
-  });
-});
-
-
-describe('open spaces through the desktop client', () => {
-  it('browses and reads before joining, then posts after an idempotent join', async () => {
-    const open = await ramnique.createSpace('Client open space', 'open');
-    const privateSpace = await ramnique.createSpace('Client private space');
-    expect(privateSpace.visibility).toBe('private');
-    const directory = await gagan.browseSpaces();
-    expect(directory.supported).toBe(true);
-    expect(directory.spaces).toContainEqual({ space: open, joined: false });
-    expect(directory.spaces.some(e => e.space.id === privateSpace.id)).toBe(false);
-    expect((await gagan.listSpaces()).some(s => s.id === open.id)).toBe(false);
-    await expect(gagan.listMembers(open.id)).resolves.toBeDefined();
-    await expect(gagan.postMessage(open.id, { body: 'not joined', actingMode: 'direct' })).rejects.toMatchObject({ code: 'forbidden' });
-    const joined = await gagan.joinSpace(open.id);
-    expect(joined.space.id).toBe(open.id);
-    await expect(gagan.postMessage(open.id, { body: 'joined', actingMode: 'direct' })).resolves.toHaveProperty('message.body', 'joined');
-    const again = await gagan.joinSpace(open.id);
-    expect(again.membership).toEqual(joined.membership);
-    expect((await gagan.listSpaces()).some(s => s.id === open.id)).toBe(true);
-    expect((await gagan.browseSpaces()).spaces).toContainEqual({ space: open, joined: true });
   });
 });

@@ -225,7 +225,7 @@ describe('stream store — join lines', () => {
     const line = (offset: number, memberId: string): spaces.StreamEvent => ({
         offset,
         at: '2026-09-14T09:00:00Z',
-        event: { type: 'membership', action: 'joined', membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z' } },
+        event: { type: 'membership', action: 'joined', membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z', role: 'member' } },
     })
     const offsets = (events: readonly spaces.StreamEvent[]) => events.map((e) => e.offset)
 

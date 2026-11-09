@@ -26,10 +26,10 @@ beforeAll(async () => {
   await store.init();
   service = new HarborService(store, new SpaceHub(), { name: 'Search Org', address: 'search.test' });
   await ensureMember(store, 'ramnique');
-  await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member', kind: 'human' });
+  await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', kind: 'human' });
   const space = await service.createSpace(ram, 'Search Space');
   spaceId = space.id;
-  const invite = await service.createInvite(ram, { spaceIds: [spaceId] });
+  const invite = await service.createInvite(ram, { spaceId: spaceId });
   await service.acceptInvite(harsh, invite.token);
 });
 
@@ -72,10 +72,10 @@ describe('message search', () => {
 
     // Rename: the index never stored a name, so the new name works instantly
     // and the old one stops matching.
-    await store.putMember({ id: 'harshv01', displayName: 'Hrsvrn', role: 'member', kind: 'human' });
+    await store.putMember({ id: 'harshv01', displayName: 'Hrsvrn', kind: 'human' });
     expect((await service.search(ram, spaceId, 'hrsvrn review')).messages.length).toBe(1);
     expect((await service.search(ram, spaceId, 'verma')).messages.length).toBe(0);
-    await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member', kind: 'human' });
+    await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', kind: 'human' });
   });
 
   it('tombstones and edits reindex via the generated column, no code involved', async () => {
@@ -207,6 +207,21 @@ describe('asset search', () => {
   });
 });
 
+describe('across every space you are in (2026-11-09)', () => {
+  it('searches every space the caller is in when no space is given, each hit saying which; a stranger’s space is not searched', async () => {
+    const other = await service.createSpace(ram, 'Elsewhere');
+    await service.postMessage(ram, other.id, { body: 'shipping the elsewhere build', actingMode: 'direct' });
+    await service.postMessage(ram, spaceId, { body: 'shipping the main build', actingMode: 'direct' });
+    const everywhere = await service.search(ram, undefined, 'shipping', { kinds: ['messages'] });
+    expect(everywhere.messages.map((h) => h.spaceId).sort()).toEqual([other.id, spaceId].sort());
+    const one = await service.search(ram, spaceId, 'shipping', { kinds: ['messages'] });
+    expect(one.messages.map((h) => h.spaceId)).toEqual([spaceId]);
+    // Harsh is not in Elsewhere: his everywhere-search never reaches it.
+    const harshs = await service.search(harsh, undefined, 'shipping', { kinds: ['messages'] });
+    expect(harshs.messages.map((h) => h.spaceId)).toEqual([spaceId]);
+  });
+});
+
 describe('shape and scoping', () => {
   it('honors kinds and per-category limit with truncated flags', async () => {
     for (let i = 0; i < 4; i++) {
@@ -237,7 +252,7 @@ describe('filters and word prefixes (2026-11-06)', () => {
 
   beforeAll(async () => {
     filterSpace = (await service.createSpace(ram, 'Filter Space')).id;
-    const invite = await service.createInvite(ram, { spaceIds: [filterSpace] });
+    const invite = await service.createInvite(ram, { spaceId: filterSpace });
     await service.acceptInvite(harsh, invite.token);
   });
 

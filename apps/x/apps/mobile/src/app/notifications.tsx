@@ -28,7 +28,7 @@ export default function NotificationsScreen() {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     setLevel(next);
     await setPushLevel(next);
-    // Harbor (the org servers) is the sender; a paired Mac is the fallback relay.
+    // Harbor is the sender; a paired Mac is the fallback relay.
     const result = account.orgs?.length
       ? await registerWithHarbor(account.orgs, account.getAccessToken).catch(() => 'error' as const)
       : 'no-orgs' as const;
@@ -37,7 +37,7 @@ export default function NotificationsScreen() {
       result === 'registered' ? null
       : result === 'no-permission' ? 'Notifications are off in iOS Settings — enable them for Rowboat to get pushes.'
       : result === 'unavailable' ? 'Simulators can’t receive pushes — try on a real device.'
-      : result === 'no-orgs' ? 'Sign in to Spaces first — notifications come from your orgs.'
+      : result === 'no-orgs' ? 'Sign in to Spaces first — notifications come from it.'
       : 'Could not save this right now — it will retry on the next launch.',
     );
   };

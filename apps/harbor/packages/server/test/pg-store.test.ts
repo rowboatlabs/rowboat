@@ -30,7 +30,7 @@ beforeAll(async () => {
   await ensureMember(store, 'gagan');
   const space = await service.createSpace(ram, 'PG Space');
   spaceId = space.id;
-  const invite = await service.createInvite(ram, { spaceIds: [spaceId] });
+  const invite = await service.createInvite(ram, { spaceId: spaceId });
   await service.acceptInvite(gagan, invite.token);
 });
 
@@ -173,7 +173,7 @@ describe('PgStore through the service', () => {
   });
 
   it('invite expiry round-trips through storage', async () => {
-    const invite = await service.createInvite(ram, { spaceIds: [spaceId], expiresInHours: 1 });
+    const invite = await service.createInvite(ram, { spaceId: spaceId, expiresInHours: 1 });
     const stored = await store.getInvite(invite.token);
     expect(stored?.expiresAt).toBe(invite.expiresAt);
     await store.putInvite({ ...stored!, expiresAt: new Date(Date.now() - 1000).toISOString() });
@@ -308,10 +308,10 @@ describe('PgStore through the service', () => {
 describe('migration 022 — hygiene', () => {
   it('the enum-shaped columns refuse values the code never writes', async () => {
     await expect(
-      db.query(`insert into spaces (org_id, id, name, created_at, kind) values ('org-default', '01HZCHECK00000000000000000', 'x', '2026-01-01T00:00:00.000Z', 'weird')`),
+      db.query(`insert into spaces (id, name, created_at, kind) values ('01HZCHECK00000000000000000', 'x', '2026-01-01T00:00:00.000Z', 'weird')`),
     ).rejects.toThrow(/spaces_kind_check/);
-    await expect(db.query(`insert into push_prefs (org_id, member_id, level) values ('org-default', 'x', 'loud')`)).rejects.toThrow(/push_prefs_level_check/);
-    await expect(db.query(`update members set role = 'owner' where id = 'ramnique'`)).rejects.toThrow(/members_role_check/);
+    await expect(db.query(`insert into push_prefs (member_id, level) values ('x', 'loud')`)).rejects.toThrow(/push_prefs_level_check/);
+    await expect(db.query(`update memberships set role = 'owner' where member_id = 'ramnique'`)).rejects.toThrow(/memberships_role_check/);
   });
 
   it('author_member_id is the author, computed by the database on every row', async () => {
@@ -322,14 +322,5 @@ describe('migration 022 — hygiene', () => {
     expect(rows[0]!.drift).toBe(0);
     // Nothing may write it — the column is the expression, not a field.
     await expect(db.query(`update messages set author_member_id = 'someone-else'`)).rejects.toThrow(/can only be updated to DEFAULT/);
-  });
-
-  it('activity seen marks are org-scoped: the same member id in two orgs keeps two marks', async () => {
-    const alpha = new PgStore(db, 'org-alpha');
-    const beta = new PgStore(db, 'org-beta');
-    expect(await alpha.advanceActivitySeenAt('shared-id', '2026-09-21T10:00:00.000Z')).toBe('2026-09-21T10:00:00.000Z');
-    expect(await beta.getActivitySeenAt('shared-id')).toBeUndefined();
-    expect(await beta.advanceActivitySeenAt('shared-id', '2026-09-21T09:00:00.000Z')).toBe('2026-09-21T09:00:00.000Z');
-    expect(await alpha.getActivitySeenAt('shared-id')).toBe('2026-09-21T10:00:00.000Z');
   });
 });

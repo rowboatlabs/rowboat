@@ -35,12 +35,11 @@ import {
   type InvocationUpdate,
   type ApprovalRequest,
   type ApprovalClose,
-  type InvitePolicy,
   type Member,
   type SuperAgent,
   type PlatformInstance,
   type MemberRole,
-  type OrgSettings,
+  type SpaceMember,
   type Membership,
   type StreamEvent,
   type Message,
@@ -61,7 +60,7 @@ import {
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 
-// Typed client for one org's render face. Thin by design: every method is one
+// Typed client for the server's render face. Thin by design: every method is one
 // route from the protocol's api.ts, request/response validated with the
 // contract schemas — the same drift tripwire the stub server runs, from the
 // other side of the wire.
@@ -283,18 +282,28 @@ export class SpacesClient {
 
   // --- health ---------------------------------------------------------------
 
-  /** Also the connectivity probe for "org unreachable" states. */
-  async health(): Promise<{ ok: boolean; org: { name: string; address: string } }> {
+  /** Also the connectivity probe for "server unreachable" states. `server` since 2026-11-09 (`org` before). */
+  async health(): Promise<{ ok: boolean; server: { name: string; address: string } }> {
     const res = await this.transport(`${this.baseUrl}/v1/health`);
     if (!res.ok) throw new SpacesRequestError(res.status, { code: 'internal', message: 'health check failed', retryable: true });
-    return (await res.json()) as { ok: boolean; org: { name: string; address: string } };
+    return (await res.json()) as { ok: boolean; server: { name: string; address: string } };
   }
 
   // --- identity -------------------------------------------------------------
 
-  /** Who this token is on the org — the only client-side source of our memberId under OAuth. */
+  /** Who this token is on the server — the only client-side source of our memberId under OAuth. */
   async me(): Promise<{ member: Member }> {
     return this.request('GET', routes.me.path, routes.me.response);
+  }
+
+  /** Become a member on first contact (api.ts enroll, 2026-11-09): the row is made if the account has none, else returned. */
+  async enroll(): Promise<{ member: Member; created: boolean }> {
+    return this.request('POST', routes.enroll.path, routes.enroll.response, {});
+  }
+
+  /** Leave the server for good (api.ts deleteMe): out of every space, agents deactivated. Idempotent. */
+  async deleteMe(): Promise<void> {
+    await this.request('DELETE', routes.deleteMe.path, routes.deleteMe.response);
   }
 
   /** Your name and title on this org (CONTRACT.md, 2026-10-19). Leave a field out to keep it; an empty title removes it. */
@@ -322,20 +331,6 @@ export class SpacesClient {
     return (await this.request('DELETE', routes.clearAvatar.path, routes.clearAvatar.response)).member;
   }
 
-  /** The org's logo URL, or undefined when none is set. */
-  async getOrgLogo(): Promise<string | undefined> {
-    return (await this.request('GET', routes.getOrgLogo.path, routes.getOrgLogo.response)).logoUrl;
-  }
-
-  /** Admins only (the org refuses anyone else). */
-  async setOrgLogo(image: { bytes: Uint8Array; mime: string }): Promise<string> {
-    return (await this.putBytes(routes.setOrgLogo.path, routes.setOrgLogo.response, image.bytes, { 'content-type': image.mime })).logoUrl;
-  }
-
-  async clearOrgLogo(): Promise<void> {
-    await this.request('DELETE', routes.clearOrgLogo.path, routes.clearOrgLogo.response);
-  }
-
   // --- push (CONTRACT.md, the push bullet) -----------------------------------
 
   /** Register this device's push token and the member's level. */
@@ -354,8 +349,8 @@ export class SpacesClient {
     return (await this.listing(opts)).spaces;
   }
 
-  /** The listing whole: the spaces, and whether the org is a group chat (absent from older servers). */
-  async listing(opts: { includeDirect?: boolean } = {}): Promise<{ spaces: Space[]; groupChat?: boolean }> {
+  /** The listing whole (api.ts listSpaces). */
+  async listing(opts: { includeDirect?: boolean } = {}): Promise<{ spaces: Space[] }> {
     const qs = opts.includeDirect ? '?includeDirect=true' : '';
     return this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response);
   }
@@ -365,24 +360,9 @@ export class SpacesClient {
     return this.request('POST', routes.openDirect.path, routes.openDirect.response, { memberId });
   }
 
-  async browseSpaces() {
-    try {
-      const result = await this.request('GET', routes.browseSpaces.path, routes.browseSpaces.response);
-      return { supported: true as const, ...result };
-    } catch (error) {
-      if (error instanceof SpacesRequestError && error.status === 404) {
-        return { supported: false as const, spaces: [] };
-      }
-      throw error;
-    }
-  }
-
-  async joinSpace(spaceId: string) {
-    return this.request('POST', this.space(spaceId, '/join'), routes.joinSpace.response);
-  }
-
-  async createSpace(name: string, visibility?: Space['visibility']): Promise<Space> {
-    return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name, ...(visibility ? { visibility } : {}) })).space;
+  /** A new group; its creator is its admin (api.ts createSpace; spec §4 Roles, 2026-11-09). */
+  async createSpace(name: string): Promise<Space> {
+    return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
   }
 
   /** Rename a shared space (api.ts renameSpace). Identical name = idempotent no-op. */
@@ -404,19 +384,9 @@ export class SpacesClient {
     return (await this.request('POST', this.space(spaceId, '/unarchive'), routes.unarchiveSpace.response, { actingMode: 'direct' })).space;
   }
 
-  /** Open or close a shared space, admin only (api.ts setSpaceVisibility, 2026-10-19). Same value = no-op. */
-  async setSpaceVisibility(spaceId: string, visibility: Space['visibility']): Promise<Space> {
-    return (await this.request('POST', this.space(spaceId, '/visibility'), routes.setSpaceVisibility.response, { visibility, actingMode: 'direct' })).space;
-  }
-
   /** Remove someone from a shared space, admin only (api.ts removeMember, 2026-10-19). Not in it = `false`. */
   async removeMember(spaceId: string, memberId: string): Promise<boolean> {
     return (await this.request('POST', this.space(spaceId, `/members/${encodeURIComponent(memberId)}/remove`), routes.removeMember.response, { actingMode: 'direct' })).removed;
-  }
-
-  /** Make a shared open space a default space, or take it off, admin only (api.ts setDefaultSpace, 2026-10-19). */
-  async setDefaultSpace(spaceId: string, isDefault: boolean): Promise<Space> {
-    return (await this.request('POST', this.space(spaceId, '/default'), routes.setDefaultSpace.response, { isDefault, actingMode: 'direct' })).space;
   }
 
   /** Delete a shared space and everything in it, admin only (api.ts deleteSpace, 2026-10-14). No undo. */
@@ -434,15 +404,15 @@ export class SpacesClient {
    * secret, the only time it is shown. `kind`/`connection` say what it is and
    * how Harbor reaches it (2026-09-30); a platform agent (Replicas) also
    * brings the platform's `credential`, which Harbor checks and seals, and an
-   * Agent37 agent its `instance` (2026-10-05). `personal` makes it usable
-   * by this member only (2026-10-26).
+   * Agent37 agent its `instance` (2026-10-05). Who may ask it is set per
+   * space when it is added there (addMembers, 2026-11-09).
    */
-  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string; personal?: boolean }): Promise<{ agent: Member; key: AgentKeySecret }> {
+  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string; request?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
     return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
   }
 
   /**
-   * The kinds of agent this org's Harbor creates on Rowboat's own platform account (api.ts managedAgentKinds,
+   * The kinds of agent this server creates on Rowboat's own platform account (api.ts managedAgentKinds,
    * 2026-10-26); none = no managed hosting. `billed` (2026-11-04): they bill to their creator's Rowboat plan.
    */
   async managedAgentKinds(): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
@@ -455,7 +425,7 @@ export class SpacesClient {
     kind: string;
     anthropicApiKey?: string;
     env?: Array<{ key: string; value: string; secret?: boolean }>;
-    personal?: boolean;
+    request?: string;
   }): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
     return this.request('POST', routes.createManagedAgent.path, routes.createManagedAgent.response, input);
   }
@@ -601,64 +571,45 @@ export class SpacesClient {
     return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/super`, routes.setAgentSuper.response, { superAgent })).agent;
   }
 
-  /** Switch an agent this member owns between channel and personal (api.ts setAgentPersonal, 2026-10-27). */
-  async setAgentPersonal(agentId: string, personal: boolean): Promise<Member> {
-    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/personal`, routes.setAgentPersonal.response, { personal })).agent;
-  }
-
   async revokeAgentKey(agentId: string, keyId: string): Promise<AgentKey> {
     return (
       await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys/${encodeURIComponent(keyId)}/revoke`, routes.revokeAgentKey.response)
     ).key;
   }
 
-  /** Add existing org members, people or agents, to a space the caller is in (api.ts addMembers). */
-  async addMembers(spaceId: string, memberIds: string[]): Promise<Membership[]> {
+  /**
+   * Add your contacts, people or your own agents, to a space the caller is in
+   * (api.ts addMembers). `invocableBy` is an agent's seat there — who may ask
+   * it, default everyone (2026-11-09).
+   */
+  async addMembers(spaceId: string, memberIds: string[], invocableBy?: 'owner' | 'members'): Promise<Membership[]> {
     return (
       await this.request('POST', this.space(spaceId, '/members'), routes.addMembers.response, {
         memberIds,
+        ...(invocableBy ? { invocableBy } : {}),
         actingMode: 'direct',
       })
     ).memberships;
   }
 
-  async listMembers(spaceId: string): Promise<Member[]> {
+  /** A space's members with their role, join time and, for agents, their seat (api.ts listMembers, 2026-11-09). */
+  async listMembers(spaceId: string): Promise<SpaceMember[]> {
     return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
   }
 
-  /** Remove someone from the org, admin only (api.ts removeOrgMember, 2026-10-19). A later invite brings them back. */
-  async removeOrgMember(memberId: string): Promise<Member> {
-    return (await this.request('POST', `/v1/members/${encodeURIComponent(memberId)}/remove`, routes.removeOrgMember.response, { actingMode: 'direct' })).member;
+  /** Promote or demote an admin of a space, admins only (api.ts setSpaceRole, 2026-11-09). The space keeps at least one. */
+  async setSpaceRole(spaceId: string, memberId: string, role: MemberRole): Promise<Membership> {
+    return (await this.request('POST', this.space(spaceId, `/members/${encodeURIComponent(memberId)}/role`), routes.setSpaceRole.response, { role, actingMode: 'direct' })).membership;
   }
 
-  /** Promote or demote an admin (api.ts setMemberRole, 2026-10-19). The org keeps at least one. */
-  async setMemberRole(memberId: string, role: MemberRole): Promise<Member> {
-    return (await this.request('POST', `/v1/members/${encodeURIComponent(memberId)}/role`, routes.setMemberRole.response, { role, actingMode: 'direct' })).member;
+  /** Who may ask an agent in a space, its owner only (api.ts setAgentAccess, 2026-11-09). */
+  async setAgentAccess(spaceId: string, agentId: string, invocableBy: 'owner' | 'members'): Promise<Membership> {
+    return (await this.request('PUT', this.space(spaceId, `/members/${encodeURIComponent(agentId)}/access`), routes.setAgentAccess.response, { invocableBy, actingMode: 'direct' })).membership;
   }
 
-  /** The org's settings any member reads (api.ts getOrgSettings, 2026-10-19). */
-  async getOrgSettings(): Promise<OrgSettings> {
-    return (await this.request('GET', routes.getOrgSettings.path, routes.getOrgSettings.response)).settings;
-  }
-
-  /** Set who may invite, admin only (api.ts updateOrgSettings, 2026-10-19). */
-  async setInvitePolicy(invitePolicy: InvitePolicy): Promise<OrgSettings> {
-    return (await this.request('PATCH', routes.updateOrgSettings.path, routes.updateOrgSettings.response, { invitePolicy })).settings;
-  }
-
-  /** Turn Ro on or off for the org, admin only (api.ts updateOrgSettings, 2026-10-30). */
-  async setJevEnabled(jevEnabled: boolean): Promise<OrgSettings> {
-    return (await this.request('PATCH', routes.updateOrgSettings.path, routes.updateOrgSettings.response, { jevEnabled })).settings;
-  }
-
-  /** The org roster: every member, people and agents, sorted by displayName (api.ts listOrgMembers; org-wide since 2026-09-29). */
-  async listOrgMembers(): Promise<Member[]> {
-    return (await this.orgRoster()).members;
-  }
-
-  /** The roster with the agents connected now (`online`, local agents 2026-10-28; absent from older servers). */
-  async orgRoster(): Promise<{ members: Member[]; online?: string[]; onlinePeople?: string[] }> {
-    return this.request('GET', routes.listOrgMembers.path, routes.listOrgMembers.response);
+  /** Your contacts: the people you share a space with and the agents you own, A–Z (api.ts listContacts, 2026-11-09). */
+  async listContacts(): Promise<{ members: Member[]; online?: string[]; onlinePeople?: string[] }> {
+    return this.request('GET', routes.listContacts.path, routes.listContacts.response);
   }
 
   // --- the connector's side (spec §8 Invoking agent members), on an agent's own key ---
@@ -701,15 +652,16 @@ export class SpacesClient {
 
   // --- invites --------------------------------------------------------------
 
-  /** An invite to the org, listing spaces the caller is in (api.ts createInvite, 2026-10-19). None = the org's default spaces only. */
-  async createInvite(opts: { spaceIds?: string[]; expiresInHours?: number } = {}): Promise<CreateInviteResult> {
+  /** An invite to one space, or your personal link (`direct`) whose target is a DM with you (api.ts createInvite, 2026-11-09). */
+  async createInvite(opts: { spaceId?: string; direct?: true; expiresInHours?: number }): Promise<CreateInviteResult> {
     return this.request('POST', routes.createInvite.path, routes.createInvite.response, {
-      ...(opts.spaceIds ? { spaceIds: opts.spaceIds } : {}),
+      ...(opts.spaceId ? { spaceId: opts.spaceId } : {}),
+      ...(opts.direct ? { direct: true } : {}),
       ...(opts.expiresInHours !== undefined ? { expiresInHours: opts.expiresInHours } : {}),
     });
   }
 
-  /** Pre-auth: works before the org has been added. */
+  /** Pre-auth: works before this install has signed in to the server. */
   async resolveInvite(token: string): Promise<ResolveInviteResult> {
     return this.request('POST', routes.resolveInvite.path, routes.resolveInvite.response, { token }, false);
   }
@@ -826,14 +778,19 @@ export class SpacesClient {
     return (await this.request('GET', this.space(spaceId, `/topics${qs}`), routes.listTopics.response)).topics;
   }
 
-  /** Categorized space search (protocol search.ts): messages / topics / assets, top-N each. */
+  /**
+   * Categorized search (protocol search.ts): messages / topics / assets, top-N
+   * each, in one space or — `spaceId` undefined — across every space the
+   * caller is in (api.ts searchAll, 2026-11-09).
+   */
   async search(
-    spaceId: string,
+    spaceId: string | undefined,
     opts: { q: string; kinds?: SearchKind[]; limit?: number },
   ): Promise<SearchResults> {
     const qs = new URLSearchParams({ q: opts.q });
     if (opts.kinds !== undefined) qs.set('kinds', opts.kinds.join(','));
     if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
+    if (spaceId === undefined) return this.request('GET', `${routes.searchAll.path}?${qs.toString()}`, routes.searchAll.response);
     return this.request('GET', this.space(spaceId, `/search?${qs.toString()}`), routes.search.response);
   }
 

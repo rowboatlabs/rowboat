@@ -1,5 +1,4 @@
 import { useState, type RefObject } from 'react'
-import { isGroupChat } from '@/lib/spaces-navigation'
 import { SpaceRailSections } from '@/components/spaces/space-rail-sections'
 import { SecondaryRailToggle } from '@/components/secondary-rail-toggle'
 import { SecondaryRail, type SecondaryRailPeek } from '@/components/secondary-rail'
@@ -8,15 +7,13 @@ import { useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 /** Stable space/people navigation. Space contents live in the top strip. */
-export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, activityActive = false, onOpenBrowse, browseActive = false, onOpenAgents, agentsActive = false, open, onTogglePin, peekRef, edgeless = false }: {
+export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, activityActive = false, onOpenAgents, agentsActive = false, open, onTogglePin, peekRef, edgeless = false }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
     /** Your threads across the org (2026-11-05); absent = no row. */
     onOpenThreads?: (orgId: string) => void
     threadsActive?: boolean
-    onOpenBrowse?: (orgId: string) => void
-    browseActive?: boolean
     onOpenAgents?: (orgId: string) => void
     agentsActive?: boolean
     onOpenActivity?: (orgId: string) => void
@@ -32,15 +29,15 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsAct
     return <SecondaryRail edgeDot={hasUnread} edgeless={edgeless} open={open} onTogglePin={onTogglePin} peekRef={peekRef} widthStorageKey="spaces:railWidth">
         {({ togglePin }) => <SpaceRailSections>
             <div className="flex shrink-0 items-center gap-0.5 px-2 py-1">
-                {/* The section below is "Spaces", so the rail's own header names the server (2026-10-21). */}
-                <span className="min-w-0 flex-1 truncate px-1 text-[13px] font-semibold text-muted-foreground">{org.name}</span>
+                {/* One server (2026-11-09): the rail's header is the product, not a server name. */}
+                <span className="min-w-0 flex-1 truncate px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                 {/* Previewed from the header button, the rail needs no lock of its
                     own: that button docks it (2026-10-22). */}
                 {(open || !edgeless) && <SecondaryRailToggle open={open} onToggle={togglePin} />}
             </div>
             {/* A column, so the navigation can pin its Invite row to the foot. */}
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2">
-                <ServerSpaceNavigation onOpenActivity={onOpenActivity} activityActive={activityActive} onOpenBrowse={onOpenBrowse} browseActive={browseActive}
+                <ServerSpaceNavigation onOpenActivity={onOpenActivity} activityActive={activityActive}
                     onOpenAgents={onOpenAgents} agentsActive={agentsActive} org={org} spaceId={spaceId} onOpenSpace={onOpenSpace} onOpenThreads={onOpenThreads} threadsActive={threadsActive} showDiscussions={false} />
             </div>
         </SpaceRailSections>}
@@ -48,13 +45,13 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsAct
 }
 
 /**
- * The same rail for the org's own pages — Activity, Agents, Browse spaces
+ * The same rail for the server's own pages — Activity, Agents, Threads
  * (2026-10-21) — so it collapses there too. It shares the space view's pin,
  * so docking or tucking it away holds as you move between them.
  */
 export function OrgRail(props: Omit<Parameters<typeof SpaceRail>[0], 'open' | 'onTogglePin'>) {
-    const key = isGroupChat(props.org) ? 'spaces:chatRailOpen' : 'spaces:railOpen'
-    const [open, setOpen] = useState(() => isGroupChat(props.org) ? localStorage.getItem(key) === '1' : localStorage.getItem(key) !== '0')
+    const key = 'spaces:railOpen'
+    const [open, setOpen] = useState(() => localStorage.getItem(key) !== '0')
     const togglePin = () => {
         localStorage.setItem(key, open ? '0' : '1')
         setOpen(!open)

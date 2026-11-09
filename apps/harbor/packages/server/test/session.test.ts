@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import WebSocket from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startHarborDeployment, type RunningDeployment } from '../src/deployment.js';
 import type { RunningHarbor } from '../src/server.js';
 import { pgliteDb } from '../src/sql-pglite.js';
 import type { SqlDb } from '../src/sql.js';
@@ -132,40 +131,5 @@ describe('the session cookie on an org', () => {
     const res = await fetch(`${harbor.url}/v1/session`, { method: 'DELETE', headers: { origin: WEB } });
     expect(res.status).toBe(200);
     expect(res.headers.get('set-cookie')).toMatch(/^harbor_session=;.*Max-Age=0/);
-  });
-});
-
-describe('the session cookie on a deployment', () => {
-  let db: SqlDb;
-  let as: FakeAs;
-  let dep: RunningDeployment;
-
-  beforeAll(async () => {
-    db = await pgliteDb();
-    as = await startFakeAs();
-    dep = await startHarborDeployment({ db, apexDomain: 'spaces.test', issuer: as.issuer, webOrigins: [WEB] });
-    await dep.createOrg({ name: 'Acme', domains: ['acme.spaces.test'], issuer: as.issuer, firstAdmin: { iss: as.issuer, sub: 'sub-ram', displayName: 'Ramnique' } });
-  });
-
-  afterAll(async () => {
-    await dep.close();
-    await new Promise<void>((resolve) => as.server.close(() => resolve()));
-  });
-
-  it('is scoped to the apex, expires with the token, and opens every org and "my orgs"', async () => {
-    const token = await as.mint({ sub: 'sub-ram' });
-    const start = await fetch(`${dep.url}/v1/session`, { method: 'POST', headers: { 'x-forwarded-host': 'spaces.test', origin: WEB, authorization: `Bearer ${token}` } });
-    const header = start.headers.get('set-cookie') ?? '';
-    expect(header).toContain('Domain=spaces.test');
-    expect(header).toMatch(/Max-Age=\d+/);
-    expect(((await start.json()) as { expiresAt?: string }).expiresAt).toBeDefined();
-    const cookie = cookieOf(start);
-
-    const mine = await fetch(`${dep.url}/v1/orgs`, { headers: { 'x-forwarded-host': 'spaces.test', origin: WEB, cookie } });
-    expect(mine.status).toBe(200);
-    expect(((await mine.json()) as { orgs: Array<{ name: string }> }).orgs.map((o) => o.name)).toEqual(['Acme']);
-
-    const spaces = await fetch(`${dep.url}/v1/spaces`, { headers: { 'x-forwarded-host': 'acme.spaces.test', origin: WEB, cookie } });
-    expect(spaces.status).toBe(200);
   });
 });

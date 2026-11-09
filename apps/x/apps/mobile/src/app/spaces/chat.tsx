@@ -27,7 +27,7 @@ import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/lin
 const TAIL_ROWS = 8;
 const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
-import { isDeparted, isOthersPersonalAgent, memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { isDeparted, answersOwnerOnly, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
 import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
@@ -319,7 +319,7 @@ export default function SpaceChatScreen() {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 250);
       return true;
     } catch (err) {
-      // Offline is said by the composer ("Not sent"); anything else is the org's words.
+      // Offline is said by the composer ("Not sent"); anything else is the server's words.
       if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
       return false;
     } finally {
@@ -447,7 +447,7 @@ export default function SpaceChatScreen() {
   );
   const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
 
-  // A tapped attachment: this org's videos play in the app; other files
+  // A tapped attachment: the server's videos play in the app; other files
   // download with the bearer and open in the share sheet (Quick Look, Save to
   // Files); other hosts go to the browser.
   const [openingFile, setOpeningFile] = useState(false);
@@ -471,7 +471,7 @@ export default function SpaceChatScreen() {
     [client, org, openingFile],
   );
 
-  // A file link in a message: this org's files open in the file screen (by
+  // A file link in a message: the server's files open in the file screen (by
   // id, so a rename never breaks it); any other host goes to the browser.
   const openAssetLink = useCallback(
     (link: { host: string; spaceId: string; assetId: string }) => {
@@ -617,7 +617,7 @@ export default function SpaceChatScreen() {
         <SpaceComposer
           ref={composerRef}
           placeholder={`Message #${title ?? ''}`}
-          members={[...members.values()].filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, me))}
+          members={[...members.values()].filter((m) => !isDeparted(m) && !answersOwnerOnly(m, me))}
           me={me}
           sending={sending}
           onSend={send}

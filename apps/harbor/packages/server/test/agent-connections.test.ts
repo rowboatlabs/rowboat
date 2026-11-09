@@ -38,7 +38,7 @@ beforeAll(async () => {
   process.env.HARBOR_INTEGRATION_KEY = TEST_KEY;
   PLATFORMS.replicas = standIn;
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
     seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
     seedMembers: [
@@ -48,7 +48,6 @@ beforeAll(async () => {
     ],
   });
   const gagan = (await harbor.store.getMember('gagan'))!;
-  await harbor.store.putMember({ ...gagan, role: 'admin' });
   spaceId = (await as('dev-ramnique').post('/v1/spaces', { name: 'Payments' })).body.space.id;
   await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh', 'gagan'], actingMode: 'direct' });
 });
@@ -67,10 +66,10 @@ describe('the registry', () => {
 });
 
 describe('kind and connection', () => {
-  it('defaults to custom/contract, and everyone sees them on the roster', async () => {
+  it('defaults to custom/contract, and its owner sees them in their contacts', async () => {
     const created = await as('dev-ramnique').post('/v1/agents', { displayName: 'Scout' });
     expect(created.body.agent).toMatchObject({ agentKind: 'custom', agentConnection: 'contract' });
-    const roster = (await as('dev-harsh').get('/v1/members')).body.members as Member[];
+    const roster = (await as('dev-ramnique').get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === created.body.agent.id)).toMatchObject({ agentKind: 'custom', agentConnection: 'contract' });
     expect(roster.find((m) => m.id === 'harsh')?.agentKind).toBeUndefined();
   });
@@ -153,7 +152,7 @@ describe('an agent Harbor reaches through a platform', () => {
   it('starts, at boot, a connector for every platform agent already there', async () => {
     envs.clear();
     const { SpaceHub } = await import('../src/hub.js');
-    const host = new HostedConnectors({ store: harbor.store, hub: new SpaceHub(), service: harbor.service, orgId: 'org-default' });
+    const host = new HostedConnectors({ store: harbor.store, hub: new SpaceHub(), service: harbor.service});
     await host.startAll();
     expect([...envs.keys()]).toEqual([agent.id]);
     await host.stopAll();
@@ -168,14 +167,14 @@ describe('a DM with an agent', () => {
   beforeAll(async () => {
     hermes = (await as('dev-harsh').post('/v1/agents', { displayName: 'Harsh’s Hermes', kind: 'hermes', connection: 'plugin' })).body.agent;
     await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [hermes.id], actingMode: 'direct' });
-    dm = (await as('dev-ramnique').post('/v1/direct', { memberId: hermes.id })).body.space.id;
+    dm = (await as('dev-harsh').post('/v1/direct', { memberId: hermes.id })).body.space.id; // the owner's DM (2026-11-09)
   });
 
   const postIn = async (space: string, token: string, body: string, extra: Record<string, unknown> = {}) =>
     routes.postMessage.response.parse((await as(token).post(`/v1/spaces/${space}/messages`, { body, actingMode: 'direct', ...extra })).body);
 
   it('every message the person posts invokes it, mention or not, with its options', async () => {
-    const { invocations } = await postIn(dm, 'dev-ramnique', 'what is on my plate today?', { agentOptions: { [hermes.id]: { plan_first: true } } });
+    const { invocations } = await postIn(dm, 'dev-harsh', 'what is on my plate today?', { agentOptions: { [hermes.id]: { plan_first: true } } });
     expect(invocations).toHaveLength(1);
     expect(invocations[0]).toMatchObject({ agentId: hermes.id, state: 'pending', where: { spaceKind: 'direct' }, options: { plan_first: true } });
   });

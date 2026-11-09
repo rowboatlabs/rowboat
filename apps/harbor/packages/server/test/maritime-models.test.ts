@@ -3,7 +3,7 @@ import { RUNTIMES } from '../src/connectors/maritime/runtimes.js';
 
 // Model lists come from the harness (2026-11-01), in a separate execution after the turn is settled.
 // The runtime reads them into the composer's choices, and nothing is listed in Harbor itself.
-const input = { orgUrl: 'http://localhost:1', agentKey: 'rbk_x', promptPath: '/p', outPath: '/o.jsonl', errPath: '/e.err', lastPath: '/l' };
+const input = { serverUrl: 'http://localhost:1', agentKey: 'rbk_x', promptPath: '/p', outPath: '/o.jsonl', errPath: '/e.err', lastPath: '/l' };
 const EFFORT = { type: 'select', key: 'effort', label: 'Effort', choices: [{ id: 'low', label: 'Low' }, { id: 'medium', label: 'Medium' }, { id: 'high', label: 'High' }] };
 
 describe('model lists from the harness', () => {

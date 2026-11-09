@@ -6,17 +6,18 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { AgentBadge, MemberAvatar } from '@/components/spaces/atoms'
+import { SeatChoice, type Seat } from '@/components/spaces/agent-access'
 import { refreshMembers, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
-import { isDeparted, isOthersPersonalAgent, isSwitchedOff } from '@/lib/spaces-direct'
-import { useOrgSettings } from '@/hooks/use-org-settings'
+import { isDeparted, isOwnAgent } from '@/lib/spaces-direct'
 
-// "Add people" (2026-09-29): any member adds existing org members, people or
-// agents, to a space they are in. The candidates are the org roster (the
-// whole org since 2026-09-29) minus who is already here. They learn of it by
-// their sidebar and the stream's join line; no notification in v1.
+// "Add people" (2026-09-29): any member adds their contacts, people or their
+// own agents, to a space they are in (2026-11-09: only an agent's owner adds
+// it, choosing who may ask it there). The candidates are your contacts minus
+// who is already here. They learn of it by their sidebar and the stream's
+// join line; no notification in v1.
 
 export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
     org: OrgWithSpaces
@@ -30,21 +31,22 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
     const roster = useOrgRoster(org.id, spaceIds)
     const [query, setQuery] = useState('')
     const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set())
+    const [seat, setSeat] = useState<Seat>('members')
     const [adding, setAdding] = useState(false)
 
     const inSpace = useMemo(() => new Set(members.map((m) => m.id)), [members])
-    const settings = useOrgSettings(org.id)
     const candidates = useMemo(() => {
         const q = query.trim().toLowerCase()
-        // A deleted account, or someone else's personal agent, is never offered
-        // (2026-10-13, 2026-10-26): Harbor refuses the add. Nor is Ro while it is off (2026-10-30).
-        return roster.filter((m) => !inSpace.has(m.id) && !isDeparted(m) && !isOthersPersonalAgent(m, org.memberId) && !isSwitchedOff(m, settings) && (!q || m.displayName.toLowerCase().includes(q)))
-    }, [roster, inSpace, query, org.memberId, settings])
+        // A deleted account is never offered (2026-10-13), nor an agent that is not yours (2026-11-09): Harbor refuses the add.
+        return roster.filter((m) => !inSpace.has(m.id) && !isDeparted(m) && (m.kind !== 'agent' || isOwnAgent(m, org.memberId)) && (!q || m.displayName.toLowerCase().includes(q)))
+    }, [roster, inSpace, query, org.memberId])
+    const pickedAgents = useMemo(() => roster.filter((m) => picked.has(m.id) && m.kind === 'agent').length, [roster, picked])
 
     useEffect(() => {
         if (!open) return
         setQuery('')
         setPicked(new Set())
+        setSeat('members')
         setAdding(false)
     }, [open])
 
@@ -59,7 +61,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
         if (picked.size === 0 || adding) return
         setAdding(true)
         try {
-            await invokeSpace('spaces:addMembers', { orgId: org.id, spaceId: space.id, memberIds: [...picked] })
+            await invokeSpace('spaces:addMembers', { orgId: org.id, spaceId: space.id, memberIds: [...picked], ...(pickedAgents > 0 ? { invocableBy: seat } : {}) })
             refreshMembers(org.id, space.id, { force: true })
             toast(picked.size === 1 ? `Added to #${space.name}` : `Added ${picked.size} to #${space.name}`, 'success')
             onOpenChange(false)
@@ -75,7 +77,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
             <DialogContent className="max-w-sm gap-0 p-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                 <DialogHeader className="px-4 pb-2 pt-4">
                     <DialogTitle className="text-sm">Add people to #{space.name}</DialogTitle>
-                    <DialogDescription className="text-xs">People and agents in {org.name}. They’ll see #{space.name} in their sidebar.</DialogDescription>
+                    <DialogDescription className="text-xs">People you share a group with, and your own agents. They’ll see #{space.name} in their sidebar.</DialogDescription>
                 </DialogHeader>
                 <div className="px-3 pb-2">
                     <Input
@@ -89,7 +91,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
                 <div className="max-h-72 overflow-y-auto border-t border-border p-1.5">
                     {candidates.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                            {query.trim() ? 'No one matches.' : `Everyone in ${org.name} is already in #${space.name}.`}
+                            {query.trim() ? 'No one matches.' : `Everyone you know is already in #${space.name}. Invite someone new with the group’s link.`}
                         </div>
                     ) : (
                         candidates.map((m) => {
@@ -114,6 +116,11 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
                         })
                     )}
                 </div>
+                {pickedAgents > 0 && (
+                    <div className="border-t border-border px-3 py-2">
+                        <SeatChoice seat={seat} onChange={setSeat} note={pickedAgents === 1 ? 'For the agent you picked. You can change it later from the member list.' : 'For the agents you picked. You can change each later from the member list.'} />
+                    </div>
+                )}
                 <DialogFooter className="border-t border-border px-3 py-2">
                     <Button size="sm" disabled={picked.size === 0 || adding} onClick={() => void add()}>
                         {adding && <Loader2 className="size-3.5 animate-spin" />}

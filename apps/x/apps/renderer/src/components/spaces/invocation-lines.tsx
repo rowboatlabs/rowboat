@@ -1,4 +1,4 @@
-import { useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
+import { useSpaceAccess } from '@/lib/spaces-access'
 import { createContext, useContext, useMemo, useState, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { AlertCircle, Ban, Clock, ExternalLink, Hand, Loader2, XCircle } from 'lucide-react'
 import type { spaces } from '@x/shared'
@@ -44,7 +44,6 @@ export function InvocationLines({ messageId }: { messageId: string }) {
     if (list.length === 0) return null
 
     const cancel = async (invocation: spaces.Invocation) => {
-        if (!canActInSpace(orgId, invocation.conversation.spaceId)) return
         setBusy(invocation.id)
         try {
             const { invocation: updated } = await window.ipc.invoke('spaces:cancelInvocation', { orgId, invocationId: invocation.id })

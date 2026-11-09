@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Asset } from './changeset.js';
 import { Attribution, Topic } from './core.js';
-import { MessageId, StreamOffset } from './ids.js';
+import { MessageId, StreamOffset, SpaceId } from './ids.js';
 
 // Space search (2026-09-02): one contract, served identically on both faces
 // (GET /v1/spaces/:spaceId/search and the search_space MCP tool). Results come
@@ -33,6 +33,8 @@ export type SearchKind = z.infer<typeof SearchKind>;
 
 /** A body match. Navigate: open the thread at `threadRootId`, land on `messageId`. */
 export const MessageSearchHit = z.object({
+  /** The space the hit lives in (2026-11-09): a search runs over every space you are in. */
+  spaceId: SpaceId,
   messageId: MessageId,
   /** The thread the hit lives in: its root's id (the hit's own id when it IS a root). */
   threadRootId: MessageId,
@@ -52,6 +54,8 @@ export type TopicSearchHit = z.infer<typeof TopicSearchHit>;
 
 /** A file match: by extracted content (snippet present) or by path (snippet absent). Live files only. */
 export const AssetSearchHit = Asset.omit({ state: true }).extend({
+  /** The space the file lives in (2026-11-09). */
+  spaceId: SpaceId,
   /** Excerpt of the extracted searchable text around the first matched term. */
   snippet: z.string().optional(),
 });

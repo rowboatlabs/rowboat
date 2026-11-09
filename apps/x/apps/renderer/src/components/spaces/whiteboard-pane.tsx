@@ -1,5 +1,5 @@
 import { invokeSpace } from '@/lib/spaces-invoke'
-import { useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
+import { useSpaceAccess } from '@/lib/spaces-access'
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, Link as LinkIcon, Loader2, PenTool, X } from 'lucide-react'
 import {
@@ -144,7 +144,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     /** Closes the board's column; the chat takes the width. */
     onClose: () => void
 }) {
-    const { member, writable } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const { resolvedTheme } = useTheme()
     const [load, setLoad] = useState<LoadState>({ phase: 'loading' })
     const [retryTick, setRetryTick] = useState(0)
@@ -190,7 +190,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     memberNamesRef.current = memberNames
 
     const send = (payload: spaces.SpacesWhiteboardPayload) => {
-        if (!canActInSpace(org.id, space.id)) return
         void invokeSpace('spaces:whiteboard', { orgId: org.id, spaceId: space.id, boardId, payload })
             .catch(() => {}) // fire-and-forget like presence; full sync heals
     }
@@ -257,7 +256,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
             const saver = saverRef.current
             saverRef.current = null
             if (saver) {
-                if (canActInSpace(org.id, space.id)) saver.flush()
+                saver.flush()
                 saver.dispose()
             }
             send({ t: 'idle', clientId, state: 'away' })
@@ -270,7 +269,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     // cursors from onPointerUpdate, snapshot saves.
     // ------------------------------------------------------------------
     const broadcastAll = () => {
-        if (!canActInSpace(org.id, space.id)) return
         const api = apiRef.current
         if (!api) return
         const elements = api.getSceneElementsIncludingDeleted()
@@ -279,7 +277,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     }
 
     const scheduleFullSync = () => {
-        if (!canActInSpace(org.id, space.id)) return
         if (fullSyncTimerRef.current) return
         fullSyncTimerRef.current = setTimeout(() => {
             fullSyncTimerRef.current = null
@@ -295,7 +292,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
      * One number for every writer (shared/spaces.ts).
      */
     const proposeSnapshot = async (json: string, baseVersion: number): Promise<spaces.ProposeChangeResult> => {
-        if (!canActInSpace(org.id, space.id)) throw new Error('Join this space to edit')
         const encoded = new TextEncoder().encode(json)
         let input: spaces.SpacesProposeInput
         if (encoded.length <= spaces.WHITEBOARD_TEXT_SNAPSHOT_MAX_BYTES) {
@@ -453,7 +449,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         }
     }
 
-    useSpaceLive(member || active ? org.id : null, member || active ? space.id : null, (frame) => {
+    useSpaceLive(org.id, space.id, (frame) => {
         if (frame.kind === 'subscribed') { void pullSnapshot(); return }
         if (frame.kind === 'whiteboard') {
             if (frame.boardId !== boardId) return

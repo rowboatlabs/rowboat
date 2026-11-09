@@ -110,10 +110,14 @@ it('opens a DM with another member from the profile panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Message' }))
     expect(openDirect).toHaveBeenCalledWith('profile-org', 'other')
 })
-it('offers no Mention or Message for someone else’s personal agent, and both to its owner (2026-10-30)', () => {
-    const agent = { id: 'claude', displayName: 'Claude Code', role: 'member', kind: 'agent', agentConnection: 'local', personal: true, ownerId: 'owner' } as spaces.Member
+it('offers no Message for someone else’s agent, no Mention when its seat here is the owner’s alone, and both to its owner (2026-11-09)', () => {
+    const agent = { id: 'claude', displayName: 'Claude Code', kind: 'agent', agentConnection: 'local', invocableBy: 'owner', ownerId: 'owner' } as spaces.Member
     profile(agent, 'me')
     expect(screen.queryByRole('button', { name: 'Mention' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Message' })).not.toBeInTheDocument()
+    cleanup()
+    profile({ ...agent, invocableBy: 'members' } as spaces.Member, 'me')
+    expect(screen.getByRole('button', { name: 'Mention' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Message' })).not.toBeInTheDocument()
     cleanup()
     profile(agent, 'owner')

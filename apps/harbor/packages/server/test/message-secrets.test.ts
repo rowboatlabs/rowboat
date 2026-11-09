@@ -36,7 +36,7 @@ function postWith(body: string, secrets: unknown[], token = 'dev-gagan', space =
 beforeAll(async () => {
   process.env.HARBOR_INTEGRATION_KEY = TEST_KEY;
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedSpaces: [{ name: 'Lobby', creator: 'gagan' }],
     seedMembers: [
       { id: 'gagan', displayName: 'Gagan' },
@@ -51,9 +51,11 @@ beforeAll(async () => {
   const b = await as('dev-harsh').post('/v1/agents', { displayName: 'Other' });
   other = b.body.agent;
   otherKey = b.body.key.secret;
-  mine = (await as('dev-harsh').post('/v1/agents', { displayName: "Harsh's Claude", personal: true })).body.agent;
-  await as('dev-gagan').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh', 'prakhar', scout.id, other.id], actingMode: 'direct' });
-  await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [mine.id], actingMode: 'direct' });
+  mine = (await as('dev-harsh').post('/v1/agents', { displayName: "Harsh's Claude" })).body.agent;
+  // Each owner adds their own agents (2026-11-09); Harsh's Claude gets an owner-only seat.
+  await as('dev-gagan').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh', 'prakhar', scout.id], actingMode: 'direct' });
+  await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [other.id], actingMode: 'direct' });
+  await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [mine.id], invocableBy: 'owner', actingMode: 'direct' });
 });
 
 afterAll(async () => {
@@ -122,7 +124,7 @@ describe('sharing a secret with the members a message mentions', () => {
       createdAt: '2026-11-04T10:00:00.000Z',
       updatedAt: '2026-11-04T10:00:00.000Z',
     };
-    const text = buildPrompt({ invocation, agentId: scout.id, context: [], names: new Map(), orgAddress: 'localhost', orgUrl: 'http://localhost', attachments: [], earlierAttachments: [] });
+    const text = buildPrompt({ invocation, agentId: scout.id, context: [], names: new Map(), address: 'localhost', serverUrl: 'http://localhost', attachments: [], earlierAttachments: [] });
     expect(text).toContain(`- STRIPE_KEY: http://localhost${secretUrl(messageId, 'STRIPE_KEY')}`);
     expect(text).toContain('never write its value in the thread');
   });
@@ -164,8 +166,8 @@ describe('what it refuses, writing nothing', () => {
 
   it('a message that mentions no one', () => refused('here is the key', [{ name: 'KEY', value: VALUE }], /mention who should read the secret/));
 
-  it('someone else’s personal agent among the readers', () =>
-    refused(`${mention(scout)} ${mention(mine)} key`, [{ name: 'KEY', value: VALUE }], /personal agent/, 403));
+  it('someone else’s owner-only agent among the readers', () =>
+    refused(`${mention(scout)} ${mention(mine)} key`, [{ name: 'KEY', value: VALUE }], /answers only its owner here/, 403));
 
   it('the value in the text too', () => refused(`${mention(scout)} key ${VALUE}`, [{ name: 'KEY', value: VALUE }], /contains the value of KEY/));
 

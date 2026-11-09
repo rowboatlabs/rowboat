@@ -52,7 +52,7 @@ describe('returning to Spaces', () => {
     it.each(['design', 'dm'])('restores the saved location %s instead of the first server', (spaceId) => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId })).toEqual({ orgId: 'second', spaceId })
     })
-    it('preserves an unjoined destination for asynchronous access resolution', () => {
+    it('preserves a destination it cannot check yet: the view resolves membership', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed' })).toEqual({ orgId: 'second', spaceId: 'removed' })
     })
     it.each([
@@ -77,13 +77,9 @@ describe('returning to Spaces', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'design', rail }))
             .toEqual({ orgId: 'second', spaceId: 'design' })
     })
-    it('preserves a deep content target while resolving an unjoined space', () => {
+    it('preserves a deep content target while resolving a space it cannot check yet', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: 'removed', rail: { kind: 'thread', rootMessageId: 'msg1' } }))
             .toEqual({ orgId: 'second', spaceId: 'removed', rail: { kind: 'thread', rootMessageId: 'msg1' } })
-    })
-    it('restores Browse spaces even when no spaces are joined', () => {
-        expect(resolveSpacesLocation(orgs, { orgId: 'empty', spaceId: '', view: 'browse' }))
-            .toEqual({ orgId: 'empty', spaceId: '', view: 'browse' })
     })
     it('returns to the Activity surface instead of a space', () => {
         expect(resolveSpacesLocation(orgs, { orgId: 'second', spaceId: '', view: 'activity' }))
@@ -104,17 +100,17 @@ describe('returning to Spaces', () => {
     })
 })
 
-describe('org link landings → app deep links', () => {
-    it('reads the org address and whichever target the landing named', () => {
-        expect(parseSpacesLink('rowboat://open?type=spaces&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space' })
-        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
-        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&messageId=M1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', messageId: 'M1' })
+describe('link landings → app deep links', () => {
+    it('reads the server address and whichever target the landing named', () => {
+        expect(parseSpacesLink('rowboat://open?type=spaces&server=acme.rowboat.space')).toEqual({ address: 'acme.rowboat.space' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&server=acme.rowboat.space')).toEqual({ address: 'acme.rowboat.space', spaceId: 'S1' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&messageId=M1&server=acme.rowboat.space')).toEqual({ address: 'acme.rowboat.space', spaceId: 'S1', messageId: 'M1' })
         // The /join landing: an invite to join, not a place to go.
-        expect(parseSpacesLink('rowboat://open?type=spaces&org=acme.rowboat.space&invite=t0k3n')).toEqual({ orgAddress: 'acme.rowboat.space', inviteToken: 't0k3n' })
-        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&assetId=A%2Fx&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1', assetId: 'A/x' })
-        expect(parseSpacesLink('rowboat://open?type=spaces&memberId=google%7C1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', memberId: 'google|1' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&server=acme.rowboat.space&invite=t0k3n')).toEqual({ address: 'acme.rowboat.space', inviteToken: 't0k3n' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&spaceId=S1&assetId=A%2Fx&server=acme.rowboat.space')).toEqual({ address: 'acme.rowboat.space', spaceId: 'S1', assetId: 'A/x' })
+        expect(parseSpacesLink('rowboat://open?type=spaces&memberId=google%7C1&server=acme.rowboat.space')).toEqual({ address: 'acme.rowboat.space', memberId: 'google|1' })
         // The trailing-slash authority form some OS handlers hand over.
-        expect(parseSpacesLink('rowboat://open/?type=spaces&spaceId=S1&org=acme.rowboat.space')).toEqual({ orgAddress: 'acme.rowboat.space', spaceId: 'S1' })
+        expect(parseSpacesLink('rowboat://open/?type=spaces&spaceId=S1&server=acme.rowboat.space')).toEqual({ address: 'acme.rowboat.space', spaceId: 'S1' })
     })
 
     it('leaves orgId links (notifications) and every other deep link to the plain parser', () => {

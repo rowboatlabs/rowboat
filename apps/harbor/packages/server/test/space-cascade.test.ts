@@ -47,12 +47,12 @@ describe('space cascade (migration 039)', () => {
       await migrate(db);
       // Step back below 039, as a database that predates it. Tables created
       // after 039 carry their constraint from birth and are not stepped back.
-      const after039 = new Set(['invite_spaces', 'message_secrets']);
+      const after039 = new Set(['message_secrets']);
       for (const { table } of (await spaceKeyedTables(db)).filter((t) => !after039.has(t.table))) {
         await db.query(`alter table ${table} drop constraint ${table}_space_fk`);
       }
       await db.query(`delete from schema_migrations where id = '039-space-cascade-fks'`);
-      await db.query(`insert into spaces (org_id, id, name, created_at) values ('org-default', 'live', 'Live', '2026-10-13T00:00:00Z')`);
+      await db.query(`insert into spaces (id, name, created_at) values ('live', 'Live', '2026-10-13T00:00:00Z')`);
       for (const space of ['live', 'gone']) {
         await db.query(`insert into memberships (space_id, member_id, joined_at) values ($1, 'm', '2026-10-13T00:00:00Z')`, [space]);
         await db.query(`insert into events (space_id, stream_offset, at, event) values ($1, 1, '2026-10-13T00:00:00Z', '{}'::jsonb)`, [space]);
@@ -78,7 +78,7 @@ describe('deleting a space row', () => {
     db = fresh.db;
     harbor = await startHarbor({
       store: fresh.store,
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'gagan', displayName: 'Gagan' },
@@ -89,8 +89,8 @@ describe('deleting a space row', () => {
     const gagan = restClient(harbor, 'dev-gagan');
     // The same activity in two spaces: one is deleted, the other must not notice.
     const fill = async (name: string): Promise<string> => {
-      const id = (await ramnique.post('/v1/spaces', { name, visibility: 'open' })).body.space.id as string;
-      await gagan.post(`/v1/spaces/${id}/join`);
+      const id = (await ramnique.post('/v1/spaces', { name })).body.space.id as string;
+      await ramnique.post(`/v1/spaces/${id}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
       const root = (await gagan.post(`/v1/spaces/${id}/messages`, { body: 'shipping friday', actingMode: 'direct' })).body.message.id;
       await ramnique.post(`/v1/spaces/${id}/messages`, { body: 'agreed', threadRoot: root, actingMode: 'direct' });
       await ramnique.post(`/v1/spaces/${id}/messages/${root}/reactions`, { emoji: '👀', action: 'add', actingMode: 'direct' });
@@ -123,7 +123,7 @@ describe('deleting a space row', () => {
     const before = await count(kept);
     const doomedBefore = await count(doomed);
     // The fill reached the tables a space delete matters most for.
-    for (const table of ['memberships', 'events', 'messages', 'reactions', 'topics', 'assets', 'asset_versions', 'change_sets', 'asset_search', 'space_read_marks', 'invite_spaces']) {
+    for (const table of ['memberships', 'events', 'messages', 'reactions', 'topics', 'assets', 'asset_versions', 'change_sets', 'asset_search', 'space_read_marks']) {
       expect(doomedBefore[table], table).toBeGreaterThan(0);
     }
 
