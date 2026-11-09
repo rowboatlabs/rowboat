@@ -45,7 +45,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3.5 py-1.5 text-xs font-medium text-muted-foreground mb-6"
       >
         <span className="size-1.5 rounded-full bg-[var(--rowboat-success)] animate-pulse" />
-        The multiplayer personal assistant for work
+        Your team of AI coworkers
       </motion.div>
 
       <motion.div
