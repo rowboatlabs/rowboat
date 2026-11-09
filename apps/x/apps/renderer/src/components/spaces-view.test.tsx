@@ -44,7 +44,8 @@ vi.mock('@/components/spaces/space-admin-dialogs', () => ({ ArchiveSpaceDialog: 
 vi.mock('@/components/spaces/invite-link', () => ({ InviteLinkPanel: () => null }))
 vi.mock('@/components/spaces/selection-copy', () => ({ SelectionCopy: () => null }))
 vi.mock('@/components/spaces/activity-view', () => ({ ActivityView: () => null }))
-vi.mock('@/components/spaces/space-rail', () => ({ OrgRail: () => null, SpaceRail: () => null }))
+vi.mock('@/components/spaces/space-rail', () => ({ SpaceRail: () => <div data-testid="rail" /> }))
+vi.mock('@/components/spaces/start-here', () => ({ StartHere: () => <div data-testid="start-here" /> }))
 vi.mock('@/components/spaces/space-files-view', () => ({ SpaceFilesView: () => null }))
 vi.mock('@/components/spaces/space-search', () => ({ SpaceSearch: () => null }))
 vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null }))
@@ -72,7 +73,19 @@ beforeEach(() => {
     })
     Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke: vi.fn(async (channel: string) => channel === 'spaces:listArchivedThreads' ? { threads: [] } : { entries: [] }) } })
 })
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); fixture.orgs = [fixture.org] })
+
+// One server (2026-11-09): with no selection — the web app's "/" — the server is the place,
+// so the sidebar is there, and an account with nothing in it lands on Start here.
+describe('an empty account', () => {
+    it('gets the sidebar and Start here, never a dead end', () => {
+        fixture.orgs = [{ ...fixture.org, spaces: [], directs: [] } as typeof fixture.org]
+        render(<SpacesView selection={null} railSelection={{ kind: 'general' }} onRailSelect={vi.fn()} onSelect={vi.fn()} onSwitchSpace={vi.fn()} />)
+        expect(screen.getByTestId('rail')).toBeInTheDocument()
+        expect(screen.getByTestId('start-here')).toBeInTheDocument()
+        expect(screen.queryByText(/No chat to open/)).toBeNull()
+    })
+})
 
 describe('Threads list and pane navigation', () => {
     it.each([false, true])('keeps the filtered list mounted beside successive threads (inline=%s)', async (inline) => {

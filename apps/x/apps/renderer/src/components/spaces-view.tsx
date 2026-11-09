@@ -184,7 +184,11 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         }
     }
 
-    const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
+    // One server (2026-11-09): no selection means the server itself, so the sidebar
+    // is there and an empty account lands on Start here — the web app's "/" starts
+    // with no selection, and a new account has nothing to land on (found the same
+    // evening: a wall that said "start a chat from the sidebar" with no sidebar).
+    const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : (orgs[0] ?? null)
     // Membership is the one gate (2026-11-09, open spaces retired): a space you can select is one you are in.
     const selectedSpace = selection && selectedOrg ? findSpace(selectedOrg, selection.spaceId) ?? null : null
 
@@ -277,35 +281,23 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-xl bg-muted">
                     <FolderOpen className="size-5 text-muted-foreground" />
                 </div>
-                {orgs.length === 0 ? (
-                    <>
-                        <h2 className="text-sm font-semibold">Spaces</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            Where you and your agents work with other people: direct messages, and groups for whatever you are working on.
-                        </p>
-                        <div className="mt-4 flex flex-col items-center gap-2">
-                            {account && !account.hasSession ? (
-                                <Button size="sm" onClick={() => void signInRowboat()} disabled={signingIn}>
-                                    {signingIn ? <Loader2 className="size-4 mr-1 animate-spin" /> : null} Sign in with Rowboat
-                                </Button>
-                            ) : (
-                                <Button size="sm" onClick={() => void refreshSpacesOrgs()}>Retry</Button>
-                            )}
-                            <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => openServerDialog({ kind: 'join' })}>
-                                Have an invite link, or your own server?
-                            </button>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <h2 className="text-sm font-semibold">No chat to open</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            {orgs.some((o) => o.error)
-                                ? 'Spaces is unreachable — check your connection and that you are signed in.'
-                                : 'Start a chat from the sidebar.'}
-                        </p>
-                    </>
-                )}
+                {/* No server record at all: signed out, or the server never answered. */}
+                <h2 className="text-sm font-semibold">Spaces</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                    Where you and your agents work with other people: direct messages, and spaces for whatever you are working on.
+                </p>
+                <div className="mt-4 flex flex-col items-center gap-2">
+                    {account && !account.hasSession ? (
+                        <Button size="sm" onClick={() => void signInRowboat()} disabled={signingIn}>
+                            {signingIn ? <Loader2 className="size-4 mr-1 animate-spin" /> : null} Sign in with Rowboat
+                        </Button>
+                    ) : (
+                        <Button size="sm" onClick={() => void refreshSpacesOrgs()}>Retry</Button>
+                    )}
+                    <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => openServerDialog({ kind: 'join' })}>
+                        Have an invite link, or your own server?
+                    </button>
+                </div>
             </div>
         </div>
     )
