@@ -35,9 +35,10 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsAct
                     thin rail that held the logo and the account folded into this one the same evening. */}
                 <img src="/logo-only.png" alt="" aria-hidden="true" className="size-5 shrink-0 rounded-md" />
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">Spaces</span>
-                {/* Previewed from the header button, the rail needs no lock of its
-                    own: that button docks it (2026-10-22). */}
-                {(open || !edgeless) && <SecondaryRailToggle open={open} onToggle={togglePin} />}
+                {/* Docked: the close. Peeked: the lock. The lock lives here, in the drawer, because
+                    the drawer slides out over the header's own button (2026-11-09, the sidebar beside
+                    the content), so that button can preview the rail but not dock it. */}
+                <SecondaryRailToggle open={open} onToggle={togglePin} />
             </div>
             {/* A column, so the navigation can pin its Invite row to the foot. */}
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2">
