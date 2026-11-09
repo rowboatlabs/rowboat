@@ -203,6 +203,28 @@ function avatarColor(id: string, dark: boolean): string {
   return `hsl(${AVATAR_HUES[h % AVATAR_HUES.length]}, 45%, ${dark ? 32 : 82}%)`;
 }
 
+/**
+ * A session's pill on its first message's name line, as on desktop (#1321,
+ * 2026-11-07): "Session", or "Ended" once it is archived.
+ */
+export function SessionPill({ message }: { message: Message }) {
+  const colors = useColors();
+  if (!message.session || message.threadRoot !== undefined) return null;
+  const ended = !!message.archived;
+  return (
+    <View
+      accessibilityRole="text"
+      accessibilityLabel={ended ? 'Session, ended' : 'Session'}
+      style={{
+        alignSelf: 'center', borderWidth: 1, borderColor: colors.separator, borderRadius: 9,
+        paddingHorizontal: 6, height: 18, justifyContent: 'center',
+      }}
+    >
+      <Text style={{ fontSize: 11, fontWeight: '500', color: colors.secondaryLabel }}>{ended ? 'Ended' : 'Session'}</Text>
+    </View>
+  );
+}
+
 export const MessageRow = memo(function MessageRow({
   message,
   member,
@@ -329,6 +351,7 @@ export const MessageRow = memo(function MessageRow({
           </Text>
           <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{time}</Text>
           {message.editedAt ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>(edited)</Text> : null}
+          <SessionPill message={message} />
         </View>
         {message.poll ? (
           <PollCard

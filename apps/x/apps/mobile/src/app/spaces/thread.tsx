@@ -15,7 +15,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
-import { MessageActionSheet, MessageBody, MessageRow, applyReaction, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
+import { MessageActionSheet, MessageBody, MessageRow, SessionPill, applyReaction, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
@@ -25,6 +25,7 @@ import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
 import { postMessageReliably } from '@/lib/spaces/send';
+import { sessionTitleFromBody, sessionTitleOf } from '@/lib/spaces/session';
 import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
 import { isDeparted, answersOwnerOnly, memberLabel, useProfiles } from '@/lib/spaces/profiles';
@@ -274,6 +275,22 @@ export default function SpaceThreadScreen() {
 
   const send = async (body: string): Promise<boolean> => {
     if (sending) return false;
+    // `/session [title]` makes this thread a session, or renames it, as on desktop.
+    const sessionTitle = sessionTitleOf(body);
+    if (sessionTitle !== null) {
+      if (!rootMessage) return false;
+      setSending(true);
+      try {
+        const title = sessionTitle || rootMessage.session?.title || sessionTitleFromBody(spaces.resolveMentions(rootMessage.body, memberNames));
+        setRootMessage(await client.setSession(space, root, { title }));
+        return true;
+      } catch (err) {
+        if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+        return false;
+      } finally {
+        setSending(false);
+      }
+    }
     setSending(true);
     // The × holds for one reply.
     const toPeople = peopleOnly && followUp !== undefined && !spaces.mentionsAnyone(body);
@@ -421,7 +438,10 @@ export default function SpaceThreadScreen() {
         options={{
           headerTitle: () => (
             <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>Thread</Text>
+              {/* A session names its thread (#1321, 2026-11-07). */}
+              <Text numberOfLines={1} style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>
+                {rootMessage?.session?.title ?? 'Thread'}
+              </Text>
               {params.title ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>#{params.title}</Text> : null}
             </View>
           ),
@@ -631,7 +651,10 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
           {member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 40, height: 40 }} /> : null}
         </View>
         <View>
-          <Text style={{ fontSize: 16, fontWeight: '700', color: colors.label }}>{name}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: colors.label }}>{name}</Text>
+            <SessionPill message={message} />
+          </View>
           <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>{stamp}</Text>
         </View>
       </View>
