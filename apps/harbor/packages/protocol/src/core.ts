@@ -87,13 +87,6 @@ export const Member = z.object({
    */
   agentInstance: z.string().min(1).max(128).optional(),
   /**
-   * A personal agent (spec §4 Agent members, 2026-10-26): only its owner may
-   * invoke it, add it to a space or DM it; everyone still sees it and its
-   * replies. Absent = a channel agent, which anyone sharing a space with it
-   * may invoke. Fixed at creation; independent of the kind and connection.
-   */
-  personal: z.boolean().optional(),
-  /**
    * A super agent (spec §4 Agent members, 2026-11-02): an agent an admin let
    * create agents, and delete the managed ones it created.
    * Absent = an ordinary agent, which creates none. Set only by an admin.
@@ -198,15 +191,15 @@ export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37',
  */
 export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37', 'maritime'];
 /**
- * Connections whose agents are always personal (2026-10-28): a local agent
- * runs commands on its owner's computer, so only its owner may invoke it.
- * Added personal whatever the request says, and never switched to channel.
+ * Connections whose agents answer their owner only, in every space (2026-10-28;
+ * seats since 2026-11-09): a local agent runs commands on its owner's
+ * computer, so its seats are locked to `owner` whatever is asked.
  */
-export const PERSONAL_ONLY_CONNECTIONS: readonly string[] = [LOCAL_CONNECTION];
+export const OWNER_ONLY_CONNECTIONS: readonly string[] = [LOCAL_CONNECTION];
 /**
  * What a super agent may ask for (spec §4 Agent members, 2026-11-02): an
  * agent Rowboat runs (no connection, one of MARITIME_AGENTS), or any pair in
- * AGENT_PAIRS but a local one, which is personal and so can't be handed work.
+ * AGENT_PAIRS but a local one, which answers its owner only and so can't be handed work.
  */
 export function superAgentMayCreate(kind: string, connection?: string): boolean {
   if (connection === undefined) return (MARITIME_AGENTS as readonly string[]).includes(kind);
@@ -550,6 +543,13 @@ export const Membership = z.object({
    * members.
    */
   role: MemberRole.default('member'),
+  /**
+   * An agent's seat (spec §4 Agent members, 2026-11-09): who may ask it in
+   * this space — everyone here, or its owner only. Set by the owner when
+   * they add it, changed by the owner any time; locked to `owner` for an
+   * agent on its owner's own computer, and in a DM. Absent on a person's row.
+   */
+  invocableBy: z.enum(['owner', 'members']).optional(),
 });
 export type Membership = z.infer<typeof Membership>;
 
@@ -557,6 +557,8 @@ export type Membership = z.infer<typeof Membership>;
 export const SpaceMember = Member.extend({
   role: MemberRole,
   joinedAt: z.iso.datetime(),
+  /** An agent's seat here (Membership.invocableBy); absent on a person. */
+  invocableBy: z.enum(['owner', 'members']).optional(),
 });
 export type SpaceMember = z.infer<typeof SpaceMember>;
 

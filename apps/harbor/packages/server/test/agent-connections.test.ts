@@ -167,14 +167,14 @@ describe('a DM with an agent', () => {
   beforeAll(async () => {
     hermes = (await as('dev-harsh').post('/v1/agents', { displayName: 'Harsh’s Hermes', kind: 'hermes', connection: 'plugin' })).body.agent;
     await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [hermes.id], actingMode: 'direct' });
-    dm = (await as('dev-ramnique').post('/v1/direct', { memberId: hermes.id })).body.space.id;
+    dm = (await as('dev-harsh').post('/v1/direct', { memberId: hermes.id })).body.space.id; // the owner's DM (2026-11-09)
   });
 
   const postIn = async (space: string, token: string, body: string, extra: Record<string, unknown> = {}) =>
     routes.postMessage.response.parse((await as(token).post(`/v1/spaces/${space}/messages`, { body, actingMode: 'direct', ...extra })).body);
 
   it('every message the person posts invokes it, mention or not, with its options', async () => {
-    const { invocations } = await postIn(dm, 'dev-ramnique', 'what is on my plate today?', { agentOptions: { [hermes.id]: { plan_first: true } } });
+    const { invocations } = await postIn(dm, 'dev-harsh', 'what is on my plate today?', { agentOptions: { [hermes.id]: { plan_first: true } } });
     expect(invocations).toHaveLength(1);
     expect(invocations[0]).toMatchObject({ agentId: hermes.id, state: 'pending', where: { spaceKind: 'direct' }, options: { plan_first: true } });
   });

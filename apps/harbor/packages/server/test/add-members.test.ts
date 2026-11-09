@@ -32,7 +32,7 @@ beforeAll(async () => {
     ],
   });
   spaceId = (await ramnique().post('/v1/spaces', { name: 'Payments' })).body.space.id;
-  agent = await harbor.service.createAgent({ displayName: 'Replicas' });
+  agent = await harbor.service.createAgent({ displayName: 'Replicas', ownerId: 'ramnique' }); // only an owner adds an agent (2026-11-09)
   ramAgent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
 });
 

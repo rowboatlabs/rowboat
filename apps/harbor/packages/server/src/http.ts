@@ -324,6 +324,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
   });
 
+  app.put(routes.setAgentAccess.path, async (c) => {
+    const { spaceId, agentId } = parseWith(routes.setAgentAccess.params, c.req.param());
+    const input = await body(c, routes.setAgentAccess.request);
+    return reply(c, routes.setAgentAccess.response, { membership: await service.setAgentAccess(actor(c), spaceId, agentId, input) });
+  });
+
   app.post(routes.setSpaceRole.path, async (c) => {
     const { spaceId, memberId } = parseWith(routes.setSpaceRole.params, c.req.param());
     const input = await body(c, routes.setSpaceRole.request);
@@ -426,7 +432,6 @@ export function buildHttpApp(deps: {
         connection: input.connection,
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
         ...(input.instance !== undefined ? { instance: input.instance } : {}),
-        personal: input.personal,
         ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
@@ -445,7 +450,6 @@ export function buildHttpApp(deps: {
         kind: input.kind,
         ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
         ...(input.env !== undefined ? { env: input.env } : {}),
-        personal: input.personal,
         ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
@@ -602,12 +606,6 @@ export function buildHttpApp(deps: {
     const { agentId } = parseWith(routes.setAgentProfile.params, c.req.param());
     const input = await body(c, routes.setAgentProfile.request);
     return reply(c, routes.setAgentProfile.response, { agent: await service.setAgentProfile(actor(c), agentId, input) });
-  });
-
-  app.put(routes.setAgentPersonal.path, async (c) => {
-    const { agentId } = parseWith(routes.setAgentPersonal.params, c.req.param());
-    const input = await body(c, routes.setAgentPersonal.request);
-    return reply(c, routes.setAgentPersonal.response, { agent: await service.setAgentPersonal(actor(c), agentId, input) });
   });
 
   app.post(routes.listSetupInstances.path, async (c) => {

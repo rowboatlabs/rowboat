@@ -14,7 +14,7 @@ import { Kernel, type ActorCtx, type BindIdentity, type ServerInfo } from './cor
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
 import { SuperAgents } from './core/super-agents.js';
-import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetSpaceRoleInput } from './core/spaces.js';
+import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetAgentAccessInput, SetSpaceRoleInput } from './core/spaces.js';
 import type { ArchiveThreadInput, SetSessionInput, CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
@@ -193,9 +193,6 @@ export class HarborService {
   }
   renameAgent(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
     return this.agents.rename(ctx, agentId, input);
-  }
-  setAgentPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
-    return this.agents.setPersonal(ctx, agentId, input);
   }
   listSetupInstances(ctx: ActorCtx, connection: string, key: string): Promise<PlatformInstance[]> {
     return this.agents.listSetupInstances(ctx, connection, key);
@@ -413,6 +410,9 @@ export class HarborService {
   setSpaceRole(ctx: ActorCtx, spaceId: string, memberId: string, input: SetSpaceRoleInput): Promise<Membership> {
     return this.spaces.setSpaceRole(ctx, spaceId, memberId, input);
   }
+  setAgentAccess(ctx: ActorCtx, spaceId: string, agentId: string, input: SetAgentAccessInput): Promise<Membership> {
+    return this.spaces.setAgentAccess(ctx, spaceId, agentId, input);
+  }
   openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
     return this.spaces.openDirect(ctx, otherMemberId);
   }
@@ -478,8 +478,16 @@ export class HarborService {
   unregisterPush(ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
     return this.spaces.unregisterPush(ctx, input);
   }
-  deactivateSelf(ctx: ActorCtx): Promise<void> {
-    return this.spaces.deactivateSelf(ctx);
+  /**
+   * Account deletion (2026-10-08; 2026-11-09): the person leaves every space —
+   * their agents with them — then their agents are deactivated, the managed
+   * ones deleted so nothing keeps billing, and the person is marked.
+   */
+  async deactivateSelf(ctx: ActorCtx): Promise<void> {
+    await this.spaces.deactivateSelf(ctx);
+    await this.hosting.deleteOwnedBy(ctx.memberId);
+    const at = this.k.now();
+    for (const agent of await this.k.store.listAgents(ctx.memberId)) await this.k.store.deactivateMember(agent.id, at);
   }
   publishPresence(
     ctx: ActorCtx,

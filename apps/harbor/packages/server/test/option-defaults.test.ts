@@ -59,8 +59,9 @@ describe('option defaults', () => {
   });
 
   it('fill a DM and another agent’s hand-off too', async () => {
-    const dm = (await as('dev-harsh').post('/v1/direct', { memberId: agent.id })).body.space.id;
-    const inDm = routes.postMessage.response.parse((await as('dev-harsh').post(`/v1/spaces/${dm}/messages`, { body: 'hi', actingMode: 'direct' })).body).invocations[0]!;
+    // A DM with an agent is its owner's (2026-11-09).
+    const dm = (await as('dev-ramnique').post('/v1/direct', { memberId: agent.id })).body.space.id;
+    const inDm = routes.postMessage.response.parse((await as('dev-ramnique').post(`/v1/spaces/${dm}/messages`, { body: 'hi', actingMode: 'direct' })).body).invocations[0]!;
     expect(inDm.options).toEqual({ environment: 'env-api', plan_first: true });
 
     const other = await as('dev-ramnique').post('/v1/agents', { displayName: 'Helper' });

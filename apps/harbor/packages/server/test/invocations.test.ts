@@ -339,9 +339,9 @@ describe('thread follow-ups without a mention (2026-10-27)', () => {
     await restClient(harbor, codexKey).post(`/v1/agent/invocations/${invocations[0]!.id}/update`, { state: 'done' });
   });
 
-  it('follows the agent’s rules: once it is personal, its owner’s follow-ups only', async () => {
+  it('follows the agent’s rules: once its seat is owner-only, its owner’s follow-ups only', async () => {
     const root = await askedHermes();
-    expect((await as('dev-ramnique').put(`/v1/agents/${hermes.agent.id}/personal`, { personal: true })).status).toBe(200);
+    expect((await as('dev-ramnique').put(`/v1/spaces/${spaceId}/members/${hermes.agent.id}/access`, { invocableBy: 'owner', actingMode: 'direct' })).status).toBe(200);
     try {
       const refused = (await reply('dev-harsh', 'one more thing', root)).invocations;
       expect(refused).toHaveLength(1);
@@ -349,7 +349,7 @@ describe('thread follow-ups without a mention (2026-10-27)', () => {
       // A refused one never reached the agent: the next reply finds Harsh's earlier turn and is refused again, no work done.
       expect((await reply('dev-harsh', 'hello?', root)).invocations[0]!.state).toBe('refused');
     } finally {
-      await as('dev-ramnique').put(`/v1/agents/${hermes.agent.id}/personal`, { personal: false });
+      await as('dev-ramnique').put(`/v1/spaces/${spaceId}/members/${hermes.agent.id}/access`, { invocableBy: 'members', actingMode: 'direct' });
     }
   });
 });

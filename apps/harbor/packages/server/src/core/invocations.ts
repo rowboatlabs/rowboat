@@ -16,7 +16,7 @@ import {
   type Space,
 } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
-import { canCancelQueuedInvocation, canDecideApproval, canDecideSuperAgentRequest, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
+import { canCancelQueuedInvocation, canDecideApproval, canDecideSuperAgentRequest, canStopInvocation, enforce, invocationRefusal, seatOf } from '../policy.js';
 import type { ActorCtx, Kernel } from './kernel.js';
 
 // Invoking agent members (spec §8, 2026-09-30). Harbor decides and a
@@ -88,7 +88,7 @@ export class Invocations {
    * The agents a new message invokes: the agents it mentions, the agent in a
    * DM, and in a shared space's thread the agent a person's unaddressed reply
    * follows up (followedUp). Each agent member other than the author gets an
-   * invocation: refused (no shared space, personal, or past the hop limit),
+   * invocation: refused (no shared space, an owner-only seat, or past the hop limit),
    * pending (its conversation is free, or its turn is waiting on a person,
    * which this answers), or queued. Edits never invoke. `depth` is the
    * message's hand-off depth (handOffDepth).
@@ -117,7 +117,9 @@ export class Invocations {
       if (agent?.kind !== 'agent') continue;
       const threadRootId = message.threadRoot ?? message.id;
       const shares = space.kind === 'shared' || (await this.k.store.sharesSharedSpace(message.author.memberId, agentId));
-      const refusal = invocationRefusal(shares, depth, { agent, authorId: message.author.memberId });
+      // The agent's seat here (spec §4 Agent members, 2026-11-09): everyone, or its owner only.
+      const seat = seatOf(await this.k.store.getMembership(space.id, agentId));
+      const refusal = invocationRefusal(shares, depth, { agent, authorId: message.author.memberId, seat });
       const now = this.k.now();
       // The owner's defaults fill what the invoker did not pick: a mention, a DM, an agent's hand-off alike.
       const options = { ...(await this.defaultsFor(agentId)), ...agentOptions?.[agentId] };

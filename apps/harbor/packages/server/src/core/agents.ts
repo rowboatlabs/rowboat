@@ -1,8 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
-import { canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
+import { canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
 import type { StoredAgentKey } from '../store.js';
 import type { Kernel, ActorCtx } from './kernel.js';
 import { oneLine, type Spaces } from './spaces.js';
@@ -95,7 +95,7 @@ export class Agents {
    */
   async add(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean },
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
     enforce(canAddAgent(await this.actor(ctx)));
     if (!isAgentPair(input.kind, input.connection)) {
@@ -118,8 +118,6 @@ export class Agents {
       agentKind: input.kind,
       agentConnection: input.connection,
       ...(input.instance ? { agentInstance: input.instance } : {}),
-      // A local agent runs on its owner's computer: always personal (2026-10-28).
-      ...(input.personal || PERSONAL_ONLY_CONNECTIONS.includes(input.connection) ? { personal: true } : {}),
     });
     if (platform) await this.hooks!.save(agent.id, input.credential!, ctx.memberId);
     const key = await this.mint(ctx, agent.id);
@@ -175,25 +173,6 @@ export class Agents {
     const updated = await this.agent(agentId);
     await this.k.publishProfile(updated);
     return updated;
-  }
-
-  /**
-   * Switch an agent between channel and personal (spec §4 Agent members,
-   * amended 2026-10-27): the owner only. Like a rename, an org fact with no
-   * event. The invocation rule reads the flag when a message arrives, so what
-   * is already queued finishes and everything asked after follows the new
-   * setting; Jev's candidates read it the same way.
-   */
-  async setPersonal(ctx: ActorCtx, agentId: string, input: { personal: boolean }): Promise<Member> {
-    const agent = await this.agent(agentId);
-    enforce(canSetAgentPersonal(await this.actor(ctx), agent));
-    if ((agent.personal === true) === input.personal) return agent; // idempotent no-op: no write
-    if (!input.personal && PERSONAL_ONLY_CONNECTIONS.includes(agent.agentConnection ?? '')) {
-      throw new HarborError('invalid_request', `${agent.displayName} runs on its owner’s computer, so only its owner can use it`);
-    }
-    this.k.guardWrite();
-    await this.k.store.setAgentPersonal(agentId, input.personal);
-    return this.agent(agentId);
   }
 
   /**

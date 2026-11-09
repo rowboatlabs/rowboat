@@ -1506,6 +1506,24 @@ export const MIGRATIONS: Migration[] = [
       `alter table invites add constraint invites_one_target_check check ((space_id is null) = direct)`,
     ],
   },
+  {
+    // An agent's seat (spec §4 Agent members, 2026-11-09): who may ask it in
+    // a space lives on its membership row — everyone there, or its owner
+    // only. It replaces the agent-wide personal flag: a personal agent was
+    // owner-only in every space, a local agent always is, and an agent in a
+    // DM answers the one person there.
+    id: '065-agent-seats',
+    statements: [
+      `alter table memberships add column invocable_by text`,
+      `alter table memberships add constraint memberships_invocable_by_check check (invocable_by is null or invocable_by in ('owner', 'members'))`,
+      `update memberships ms set invocable_by = case
+         when m.personal or m.agent_connection = 'local' or s.kind = 'direct' then 'owner' else 'members' end
+         from members m, spaces s
+         where m.id = ms.member_id and s.id = ms.space_id and m.kind = 'agent'`,
+      `alter table members drop constraint members_personal_check`,
+      `alter table members drop column personal`,
+    ],
+  },
 ];
 
 /**

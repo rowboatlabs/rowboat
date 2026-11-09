@@ -473,8 +473,6 @@ export const routes = {
       credential: z.string().min(1).max(512).optional(),
       /** The platform instance the agent is (INSTANCE_CONNECTIONS only, 2026-10-05). */
       instance: z.string().min(1).max(128).optional(),
-      /** Only the owner may use it (spec §4 Agent members, 2026-10-26); absent = a channel agent, as before. */
-      personal: z.boolean().default(false),
       /** A super agent's setup card this completes (2026-11-02): its owner only; the agent joins the card's space. */
       request: ApprovalId.optional(),
     }),
@@ -537,8 +535,6 @@ export const routes = {
       kind: z.string().min(1).max(32),
       anthropicApiKey: z.string().min(1).max(512).optional(),
       env: z.array(z.object({ key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/), value: z.string().max(4096), secret: z.boolean().optional() })).max(20).optional(),
-      /** A personal agent, as on createAgent (spec §4 Agent members, 2026-10-27). */
-      personal: z.boolean().default(false),
       /** A super agent's setup card this completes, as on createAgent (2026-11-02). */
       request: ApprovalId.optional(),
     }),
@@ -808,24 +804,10 @@ export const routes = {
     response: z.object({ agent: Member }),
   },
   /**
-   * Switch an agent between channel and personal (spec §4 Agent members,
-   * amended 2026-10-27): its owner only, app only like its name. The same
-   * value is a no-op. No event, as with a rename: rosters carry it on the
-   * next read. Work already queued for it finishes; the rule applies to what
-   * is asked of it after.
-   */
-  setAgentPersonal: {
-    method: 'PUT',
-    path: '/v1/agents/:agentId/personal',
-    params: z.object({ agentId: MemberId }),
-    request: z.object({ personal: z.boolean() }),
-    response: z.object({ agent: Member }),
-  },
-  /**
    * Make an agent a super agent, change what it may do, or make it an
    * ordinary agent again with `null` (spec §4 Agent members, 2026-11-02):
    * admins only, for an agent with an owner, app only. The same value is a
-   * no-op. No event, as with personal: rosters carry it on the next read.
+   * no-op. No event, as with a rename: rosters carry it on the next read.
    */
   setAgentSuper: {
     method: 'PUT',
@@ -1002,6 +984,12 @@ export const routes = {
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
       memberIds: z.array(MemberId).min(1).max(100),
+      /**
+       * The seat for any agent among them (spec §4 Agent members, 2026-11-09):
+       * who may ask it in this space. Default `members`; a local agent's is
+       * `owner` whatever is sent. Only an agent's owner adds it.
+       */
+      invocableBy: z.enum(['owner', 'members']).optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),
@@ -1046,6 +1034,20 @@ export const routes = {
    * (`invalid_request`); demoting the only admin is `forbidden`; the same
    * role is a 200 no-op with no event; a change appends `role_changed`.
    */
+  /**
+   * Change an agent's seat in a space (spec §4 Agent members, 2026-11-09):
+   * its owner only. A local agent cannot be opened to everyone
+   * (`invalid_request`); an agent not in the space is `invalid_request`; the
+   * same value is a 200 no-op with no event; a change appends
+   * `agent_access_changed`.
+   */
+  setAgentAccess: {
+    method: 'PUT',
+    path: '/v1/spaces/:spaceId/members/:agentId/access',
+    params: z.object({ spaceId: SpaceId, agentId: MemberId }),
+    request: z.object({ invocableBy: z.enum(['owner', 'members']), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ membership: Membership }),
+  },
   setSpaceRole: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/members/:memberId/role',

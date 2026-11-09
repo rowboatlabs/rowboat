@@ -51,9 +51,11 @@ beforeAll(async () => {
   const b = await as('dev-harsh').post('/v1/agents', { displayName: 'Other' });
   other = b.body.agent;
   otherKey = b.body.key.secret;
-  mine = (await as('dev-harsh').post('/v1/agents', { displayName: "Harsh's Claude", personal: true })).body.agent;
-  await as('dev-gagan').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh', 'prakhar', scout.id, other.id], actingMode: 'direct' });
-  await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [mine.id], actingMode: 'direct' });
+  mine = (await as('dev-harsh').post('/v1/agents', { displayName: "Harsh's Claude" })).body.agent;
+  // Each owner adds their own agents (2026-11-09); Harsh's Claude gets an owner-only seat.
+  await as('dev-gagan').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh', 'prakhar', scout.id], actingMode: 'direct' });
+  await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [other.id], actingMode: 'direct' });
+  await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [mine.id], invocableBy: 'owner', actingMode: 'direct' });
 });
 
 afterAll(async () => {
@@ -164,8 +166,8 @@ describe('what it refuses, writing nothing', () => {
 
   it('a message that mentions no one', () => refused('here is the key', [{ name: 'KEY', value: VALUE }], /mention who should read the secret/));
 
-  it('someone else’s personal agent among the readers', () =>
-    refused(`${mention(scout)} ${mention(mine)} key`, [{ name: 'KEY', value: VALUE }], /personal agent/, 403));
+  it('someone else’s owner-only agent among the readers', () =>
+    refused(`${mention(scout)} ${mention(mine)} key`, [{ name: 'KEY', value: VALUE }], /answers only its owner here/, 403));
 
   it('the value in the text too', () => refused(`${mention(scout)} key ${VALUE}`, [{ name: 'KEY', value: VALUE }], /contains the value of KEY/));
 

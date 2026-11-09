@@ -196,8 +196,12 @@ async function dispatch(
       return { membership: await service.setSpaceRole(ctx, a.spaceId, a.memberId, { role: a.role, ...attribution }) };
     }
     case 'add_members': {
-      const a = args as { spaceId: string; memberIds: string[] };
-      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
+      const a = args as { spaceId: string; memberIds: string[]; invocableBy?: 'owner' | 'members' };
+      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...(a.invocableBy ? { invocableBy: a.invocableBy } : {}), ...attribution }) };
+    }
+    case 'set_agent_access': {
+      const a = args as { spaceId: string; agentId: string; invocableBy: 'owner' | 'members' };
+      return { membership: await service.setAgentAccess(ctx, a.spaceId, a.agentId, { invocableBy: a.invocableBy, ...attribution }) };
     }
     case 'leave_space': {
       const a = args as { spaceId: string };

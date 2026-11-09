@@ -1,4 +1,5 @@
 import type { ErrorCode, Invocation, InvocationRefusal, Member, MemberRole, Membership, Message, MessageSecrets, Space } from '@rowboat/spaces-protocol';
+import { OWNER_ONLY_CONNECTIONS } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
 // Who may do what. The service loads the facts (space, membership, message,
@@ -213,12 +214,6 @@ export function canSetAgentProfile(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner can change its description and instructions' };
 }
 
-/** Switching an agent between channel and personal (spec §4 Agent members, 2026-10-27): the owner, as with its name. */
-export function canSetAgentPersonal(actor: Member, agent: Member): Decision {
-  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
-  return { code: 'forbidden', message: 'only the agent’s owner can change who can use it' };
-}
-
 /** Pointing an agent's alerts at a space (spec §8 Alerts, 2026-10-03): the owner, as with its keys. */
 export function canSetAgentHook(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
@@ -277,33 +272,57 @@ export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner can revoke its keys' };
 }
 
-/**
- * A personal agent is its owner's alone (spec §4 Agent members, 2026-10-26):
- * nobody else adds it to a space or opens a DM with it. Everyone still sees
- * it on the roster and reads its replies. A channel agent, or any person,
- * passes.
- */
-export function canReachPersonalAgent(actorId: string, member: Member, act: 'add' | 'message'): Decision {
-  if (member.kind !== 'agent' || member.personal !== true || member.ownerId === actorId) return null;
-  return {
-    code: 'forbidden',
-    message: act === 'add'
-      ? `${member.displayName} is a personal agent: only its owner can add it to a space`
-      : `${member.displayName} is a personal agent: only its owner can message it`,
-  };
+/** An agent's seat in a space (spec §4 Agent members, 2026-11-09): who may ask it there. Absent, or a person's row, reads as everyone. */
+export type Seat = 'owner' | 'members';
+export function seatOf(membership: Membership | undefined): Seat {
+  return membership?.invocableBy ?? 'members';
 }
 
 /**
+ * Who may add a member to a space (spec §4 Agent members, 2026-11-09): any
+ * member adds a person; an agent is added only by its owner — nobody else
+ * knows it exists — or by a super agent of the same owner, bringing an agent
+ * it created into the space it was asked in.
+ */
+export function canAddToSpace(actor: Member, member: Member): Decision {
+  if (member.kind !== 'agent') return null;
+  if (member.ownerId !== undefined && member.ownerId === actor.id) return null;
+  if (actor.kind === 'agent' && actor.ownerId !== undefined && member.ownerId === actor.ownerId) return null;
+  return { code: 'forbidden', message: `only its owner can add ${member.displayName} to a space` };
+}
+
+/** A DM with an agent is its owner's alone (spec §4 Agent members, 2026-11-09): nobody else is there to hold its seat. */
+export function canMessageAgent(actorId: string, agent: Member): Decision {
+  if (agent.kind !== 'agent' || agent.ownerId === actorId) return null;
+  return { code: 'forbidden', message: `${agent.displayName} is someone else’s agent: only its owner can message it` };
+}
+
+/**
+ * Changing an agent's seat (spec §4 Agent members, 2026-11-09): its owner,
+ * for an agent in the space; an agent on its owner's own computer stays
+ * owner-only.
+ */
+export function canSetAgentAccess(actor: Member, agent: Member, membership: Membership | undefined, invocableBy: Seat): Decision {
+  if (agent.kind !== 'agent') return { code: 'invalid_request', message: 'only an agent has a seat to set' };
+  if (agent.ownerId === undefined || agent.ownerId !== actor.id) return { code: 'forbidden', message: 'only the agent’s owner can change who may ask it' };
+  if (!membership) return { code: 'invalid_request', message: `${agent.displayName} is not in this space` };
+  if (invocableBy === 'members' && OWNER_ONLY_CONNECTIONS.includes(agent.agentConnection ?? '')) {
+    return { code: 'invalid_request', message: `${agent.displayName} runs on its owner’s computer, so only its owner can use it` };
+  }
+  return null;
+}
+/**
  * Handing secrets in a message (2026-11-04, "secrets card" in Main): to the
  * members it mentions, its readers, so a message that mentions no one carries
- * none. A personal agent only from its owner, since only its owner can ask it
- * for anything.
+ * none. An agent whose seat here is owner-only takes one only from its owner,
+ * since only its owner can ask it for anything (seats, 2026-11-09).
  */
-export function canHandSecrets(authorId: string, readers: Member[]): Decision {
+export function canHandSecrets(authorId: string, readers: Array<{ member: Member; seat: Seat }>): Decision {
   if (readers.length === 0) return { code: 'invalid_request', message: 'mention who should read the secret' };
-  for (const reader of readers) {
-    const refused = canReachPersonalAgent(authorId, reader, 'message');
-    if (refused) return refused;
+  for (const { member, seat } of readers) {
+    if (member.kind === 'agent' && seat === 'owner' && member.ownerId !== authorId) {
+      return { code: 'forbidden', message: `${member.displayName} answers only its owner here, so only its owner can hand it a secret` };
+    }
   }
   return null;
 }
@@ -326,20 +345,21 @@ export function canReadSecret(actorId: string, secrets: MessageSecrets | undefin
 export const AGENT_HOP_LIMIT = 20;
 
 /**
- * Whether a mention may invoke an agent, or why not. A personal agent answers
- * its owner only (spec §4 Agent members, 2026-10-26): another person, another
- * agent and Ro are all refused. You must share a shared space with the agent:
- * a DM alone does not count (PR #1130's rule for Replicas, generalized). Past
- * the hop limit an agent's hand-off is refused. A refusal is a recorded
- * outcome shown under the message, not an error.
+ * Whether a mention may invoke an agent, or why not. An agent whose seat in
+ * this space is owner-only answers its owner alone (spec §4 Agent members;
+ * seats 2026-11-09): another person and another agent are refused. You must
+ * share a shared space with the agent: a DM alone does not count (PR #1130's
+ * rule for Replicas, generalized). Past the hop limit an agent's hand-off is
+ * refused. A refusal is a recorded outcome shown under the message, not an
+ * error.
  */
 export function invocationRefusal(
   sharesSharedSpace: boolean,
   depth: number,
-  invoked: { agent: Member; authorId: string },
+  invoked: { agent: Member; authorId: string; seat: Seat },
 ): InvocationRefusal | null {
-  if (invoked.agent.personal === true && invoked.agent.ownerId !== invoked.authorId) {
-    return { reason: 'not_permitted', message: `${invoked.agent.displayName} is a personal agent: only its owner can ask it for something.` };
+  if (invoked.seat === 'owner' && invoked.agent.ownerId !== invoked.authorId) {
+    return { reason: 'not_permitted', message: `${invoked.agent.displayName} answers only its owner here.` };
   }
   if (!sharesSharedSpace) {
     return { reason: 'not_permitted', message: 'You need to share a space with this agent to ask it for something.' };

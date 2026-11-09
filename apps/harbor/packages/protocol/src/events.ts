@@ -175,6 +175,16 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     membership: Membership,
     by: Attribution,
   }),
+  /**
+   * An agent's seat in this space changed (spec §4 Agent members,
+   * 2026-11-09): the membership row as it now stands, plus its owner, who
+   * alone changes it.
+   */
+  z.object({
+    type: z.literal('agent_access_changed'),
+    membership: Membership,
+    by: Attribution,
+  }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 

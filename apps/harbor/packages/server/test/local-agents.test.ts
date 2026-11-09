@@ -5,7 +5,7 @@ import { liveClient, restClient, startTestHarbor, type LiveClient } from './help
 
 // Local agents (spec §4 Agent members and §8 Where agents run, 2026-10-28):
 // the desktop app runs its owner's own Claude Code or Codex as an agent on
-// its key. Always personal, and online only while the app holds a live
+// its key. Its seats are its owner's, and online only while the app holds a live
 // connection on that key.
 
 let harbor: RunningHarbor;
@@ -23,8 +23,7 @@ beforeAll(async () => {
     ],
     agentPresenceGraceMs: GRACE_MS,
   });
-  // Asked for as a channel agent: a local agent is personal anyway.
-  const added = await as('dev-gagan').post('/v1/agents', { displayName: "Gagan's Claude Code", kind: 'claude-code', connection: 'local', personal: false });
+  const added = await as('dev-gagan').post('/v1/agents', { displayName: "Gagan's Claude Code", kind: 'claude-code', connection: 'local' });
   expect(added.status).toBe(200);
   local = added.body.agent;
   localKey = added.body.key.secret;
@@ -47,21 +46,26 @@ const presence = (frames: LiveClient['frames'], online: boolean) =>
   frames.some((f) => f.kind === 'agent_presence' && f.agentId === local.id && f.online === online);
 
 describe('adding one', () => {
-  it('is Claude Code or Codex through local, and always personal', async () => {
-    expect(local).toMatchObject({ kind: 'agent', agentKind: 'claude-code', agentConnection: 'local', ownerId: 'gagan', personal: true });
+  it('is Claude Code or Codex through local, and its seats are its owner’s whatever was asked', async () => {
+    expect(local).toMatchObject({ kind: 'agent', agentKind: 'claude-code', agentConnection: 'local', ownerId: 'gagan' });
+    const desk = (await as('dev-gagan').get('/v1/spaces')).body.spaces.find((s: { name: string }) => s.name === 'Desk')!;
+    expect((await harbor.store.getMembership(desk.id, local.id))?.invocableBy).toBe('owner');
     const codex = await as('dev-gagan').post('/v1/agents', { displayName: 'Codex', kind: 'codex', connection: 'local' });
-    expect(codex.body.agent).toMatchObject({ agentConnection: 'local', personal: true });
+    expect(codex.body.agent).toMatchObject({ agentConnection: 'local' });
+    const added = await as('dev-gagan').post(`/v1/spaces/${desk.id}/members`, { memberIds: [codex.body.agent.id], invocableBy: 'members', actingMode: 'direct' });
+    expect(added.body.memberships[0]).toMatchObject({ invocableBy: 'owner' });
     const cursor = await as('dev-gagan').post('/v1/agents', { displayName: 'Cursor', kind: 'cursor', connection: 'local' });
     expect(cursor.status).toBe(400);
   });
 
-  it('never switches to a channel agent', async () => {
-    const r = await as('dev-gagan').put(`/v1/agents/${local.id}/personal`, { personal: false });
+  it('never opens a seat to everyone', async () => {
+    const desk = (await as('dev-gagan').get('/v1/spaces')).body.spaces.find((s: { name: string }) => s.name === 'Desk')!;
+    const r = await as('dev-gagan').put(`/v1/spaces/${desk.id}/members/${local.id}/access`, { invocableBy: 'members', actingMode: 'direct' });
     expect(r.status).toBe(400);
     expect(r.body.message).toMatch(/runs on its owner’s computer/);
-    expect((await harbor.store.getMember(local.id))?.personal).toBe(true);
+    expect((await harbor.store.getMembership(desk.id, local.id))?.invocableBy).toBe('owner');
     // Asking for what it already is stays a no-op.
-    expect((await as('dev-gagan').put(`/v1/agents/${local.id}/personal`, { personal: true })).status).toBe(200);
+    expect((await as('dev-gagan').put(`/v1/spaces/${desk.id}/members/${local.id}/access`, { invocableBy: 'owner', actingMode: 'direct' })).status).toBe(200);
   });
 });
 

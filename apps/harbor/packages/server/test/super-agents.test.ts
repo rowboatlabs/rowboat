@@ -151,7 +151,6 @@ describe('creating, with its owner’s approval', () => {
   it('made the agent its owner’s, asked for by the super agent, in the space', async () => {
     const l = (await listing(created))!;
     expect(l.agent).toMatchObject({ displayName: 'Helper', ownerId: 'harsh', agentKind: 'hermes', agentConnection: 'maritime' });
-    expect(l.agent.personal).toBeUndefined();
     expect(l.hosting).toMatchObject({ createdBy: 'harsh', requestedBy: boss.id, funding: 'trial' });
     expect(await inSpace(created)).toBe(true);
   });

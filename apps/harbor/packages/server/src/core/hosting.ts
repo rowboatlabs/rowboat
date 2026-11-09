@@ -300,7 +300,7 @@ export class Hosting {
    */
   async createManaged(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }> },
     /** The super agent whose setup card this completes (2026-11-02): it may delete what it asked for. */
     requestedBy?: string,
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
@@ -327,7 +327,7 @@ export class Hosting {
 
   private async provision(
     ownerId: string,
-    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }> },
     requestedBy?: string,
   ): Promise<{ agent: Member; hosting: AgentHosting }> {
     if (!this.provider || !this.hooks) throw new HarborError('invalid_request', 'this Harbor runs no managed hosting');
@@ -408,8 +408,6 @@ export class Hosting {
       agentKind: input.kind,
       agentConnection: 'maritime',
       agentInstance: externalId,
-      // Channel or personal, as on Add (spec §4 Agent members, 2026-10-27).
-      ...(input.personal ? { personal: true } : {}),
     });
     await this.hooks.save(agent.id, this.provider.credential(), ownerId);
     row = { ...row, agentId: agent.id, externalId, status: 'deploying', updatedAt: this.k.now() };
@@ -427,6 +425,14 @@ export class Hosting {
     const row = await this.k.store.getAgentHosting(agentId);
     if (!row) throw new HarborError('not_found', 'this agent is not one Rowboat hosts');
     return this.remove(agentId, row);
+  }
+
+  /** Account deletion (2026-11-09): every managed agent the person owns goes with them, so nothing keeps billing. */
+  async deleteOwnedBy(ownerId: string): Promise<void> {
+    for (const agent of await this.k.store.listAgents(ownerId)) {
+      const row = await this.k.store.getAgentHosting(agent.id);
+      if (row) await this.remove(agent.id, row);
+    }
   }
 
   /** A super agent's delete (2026-11-02): only one an admin let delete, and only an agent it created. */

@@ -15,14 +15,16 @@ import {
   canRemoveFromSpace,
   canSetRole,
   canAddAgent,
-  canReachPersonalAgent,
+  canAddToSpace,
+  canMessageAgent,
+  canSetAgentAccess,
+  seatOf,
   canHandSecrets,
   canReadSecret,
   canCreateAgentKey,
   canRenameAgent,
   canRevokeAgentKey,
   canSetAgentHook,
-  canSetAgentPersonal,
   canSetSuperAgent,
   canSuperAgentCreate,
   canSuperAgentDelete,
@@ -149,9 +151,6 @@ describe('policy', () => {
     expect(canRenameAgent(admin, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canRenameAgent(other, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canRenameAgent(owner, owner)).toMatchObject({ code: 'forbidden' });
-    expect(canSetAgentPersonal(owner, hermes)).toBeNull();
-    expect(canSetAgentPersonal(admin, hermes)).toMatchObject({ code: 'forbidden' });
-    expect(canSetAgentPersonal(other, hermes)).toMatchObject({ code: 'forbidden' });
     // Its description and personality (2026-10-29): the owner's, as its name is.
     expect(canSetAgentProfile(owner, hermes)).toBeNull();
     expect(canSetAgentProfile(admin, hermes)).toMatchObject({ code: 'forbidden' });
@@ -189,17 +188,16 @@ describe('policy', () => {
 
   it('invocations: a shared space to invoke, the hop limit, the invoker cancels, invoker or admin stops when the connector can', () => {
     const helper: Member = { id: 'helper', displayName: 'Helper', kind: 'agent', ownerId: 'harsh' };
-    const byHarsh = { agent: helper, authorId: 'harsh' };
+    const byHarsh = { agent: helper, authorId: 'harsh', seat: 'members' as const };
     expect(invocationRefusal(true, 0, byHarsh)).toBeNull();
     expect(invocationRefusal(true, AGENT_HOP_LIMIT, byHarsh)).toBeNull();
     expect(invocationRefusal(true, AGENT_HOP_LIMIT + 1, byHarsh)).toMatchObject({ reason: 'hop_limit' });
     expect(invocationRefusal(false, 0, byHarsh)).toMatchObject({ reason: 'not_permitted' });
-    // A channel agent answers anyone; a personal one its owner only (2026-10-26).
-    expect(invocationRefusal(true, 0, { agent: helper, authorId: 'gagan' })).toBeNull();
-    const mine: Member = { ...helper, personal: true };
-    expect(invocationRefusal(true, 0, { agent: mine, authorId: 'harsh' })).toBeNull();
-    expect(invocationRefusal(true, 0, { agent: mine, authorId: 'gagan' })).toMatchObject({ reason: 'not_permitted', message: expect.stringContaining('personal agent') });
-    expect(invocationRefusal(true, 1, { agent: mine, authorId: 'other-agent' })).toMatchObject({ reason: 'not_permitted' });
+    // A seat for everyone answers anyone; an owner-only seat its owner alone (2026-11-09).
+    expect(invocationRefusal(true, 0, { agent: helper, authorId: 'gagan', seat: 'members' })).toBeNull();
+    expect(invocationRefusal(true, 0, { agent: helper, authorId: 'harsh', seat: 'owner' })).toBeNull();
+    expect(invocationRefusal(true, 0, { agent: helper, authorId: 'gagan', seat: 'owner' })).toMatchObject({ reason: 'not_permitted', message: expect.stringContaining('only its owner here') });
+    expect(invocationRefusal(true, 1, { agent: helper, authorId: 'other-agent', seat: 'owner' })).toMatchObject({ reason: 'not_permitted' });
     const inv = { trigger: { authorId: 'harsh' } } as Invocation;
     expect(canCancelQueuedInvocation({ memberId: 'harsh' }, inv)).toBeNull();
     expect(canCancelQueuedInvocation({ memberId: 'gagan' }, inv)).toMatchObject({ code: 'forbidden' });
@@ -234,29 +232,46 @@ describe('profiles (2026-10-19)', () => {
   });
 });
 
-describe('personal agents (2026-10-26)', () => {
-  const person: Member = { id: 'gagan', displayName: 'Gagan', kind: 'human' };
-  const channel: Member = { id: 'scout', displayName: 'Scout', kind: 'agent', ownerId: 'harsh' };
-  const personal: Member = { ...channel, id: 'mine', displayName: "Harsh's Claude Code", personal: true };
-  it('only the owner adds or messages a personal agent; channel agents and people are anyone’s', () => {
-    expect(canReachPersonalAgent('harsh', personal, 'add')).toBeNull();
-    expect(canReachPersonalAgent('harsh', personal, 'message')).toBeNull();
-    expect(canReachPersonalAgent('gagan', personal, 'add')).toMatchObject({ code: 'forbidden', message: expect.stringContaining('add it to a space') });
-    expect(canReachPersonalAgent('gagan', personal, 'message')).toMatchObject({ code: 'forbidden', message: expect.stringContaining('message it') });
-    expect(canReachPersonalAgent('gagan', channel, 'add')).toBeNull();
-    expect(canReachPersonalAgent('harsh', person, 'message')).toBeNull();
+describe('an agent’s seat (2026-11-09)', () => {
+  const gagan: Member = { id: 'gagan', displayName: 'Gagan', kind: 'human' };
+  const harsh: Member = { id: 'harsh', displayName: 'Harsh', kind: 'human' };
+  const scout: Member = { id: 'scout', displayName: 'Scout', kind: 'agent', ownerId: 'harsh' };
+  const local: Member = { ...scout, id: 'laptop', agentKind: 'claude-code', agentConnection: 'local' };
+  const boss: Member = { ...scout, id: 'boss', superAgent: { askBeforeCreate: true, askBeforeDelete: true } };
+  const row = (memberId: string, invocableBy?: 'owner' | 'members'): Membership => ({ spaceId: 'S', memberId, joinedAt: NOW, role: 'member', ...(invocableBy ? { invocableBy } : {}) });
+  it('only the owner adds an agent to a space, or a super agent of the same owner; people are anyone’s to add', () => {
+    expect(canAddToSpace(harsh, scout)).toBeNull();
+    expect(canAddToSpace(gagan, scout)).toMatchObject({ code: 'forbidden', message: expect.stringContaining('only its owner can add') });
+    expect(canAddToSpace(boss, scout)).toBeNull();
+    expect(canAddToSpace(gagan, harsh)).toBeNull();
+  });
+  it('only the owner messages their agent', () => {
+    expect(canMessageAgent('harsh', scout)).toBeNull();
+    expect(canMessageAgent('gagan', scout)).toMatchObject({ code: 'forbidden', message: expect.stringContaining('only its owner can message it') });
+    expect(canMessageAgent('gagan', harsh)).toBeNull();
+  });
+  it('the seat: the owner sets it for an agent in the space; a local agent stays owner-only; absent reads as everyone', () => {
+    expect(seatOf(row('scout'))).toBe('members');
+    expect(seatOf(row('scout', 'owner'))).toBe('owner');
+    expect(seatOf(undefined)).toBe('members');
+    expect(canSetAgentAccess(harsh, scout, row('scout'), 'owner')).toBeNull();
+    expect(canSetAgentAccess(gagan, scout, row('scout'), 'owner')).toMatchObject({ code: 'forbidden' });
+    expect(canSetAgentAccess(harsh, scout, undefined, 'owner')).toMatchObject({ code: 'invalid_request' });
+    expect(canSetAgentAccess(harsh, local, row('laptop', 'owner'), 'members')).toMatchObject({ code: 'invalid_request', message: expect.stringContaining('owner’s computer') });
+    expect(canSetAgentAccess(harsh, harsh, row('harsh'), 'owner')).toMatchObject({ code: 'invalid_request' });
   });
 });
 
 describe('secrets in a message (2026-11-04)', () => {
   const harsh: Member = { id: 'harsh', displayName: 'Harsh', kind: 'human' };
   const scout: Member = { id: 'scout', displayName: 'Scout', kind: 'agent', ownerId: 'harsh' };
-  const personal: Member = { ...scout, id: 'mine', personal: true };
-  it('goes to the members the message mentions, people and agents, a personal agent only from its owner', () => {
-    expect(canHandSecrets('gagan', [harsh, scout])).toBeNull();
+  const everyone = (member: Member) => ({ member, seat: 'members' as const });
+  const ownerOnly = (member: Member) => ({ member, seat: 'owner' as const });
+  it('goes to the members the message mentions, people and agents; an owner-only agent only from its owner', () => {
+    expect(canHandSecrets('gagan', [everyone(harsh), everyone(scout)])).toBeNull();
     expect(canHandSecrets('gagan', [])).toMatchObject({ code: 'invalid_request', message: expect.stringContaining('mention who should read') });
-    expect(canHandSecrets('gagan', [scout, personal])).toMatchObject({ code: 'forbidden' });
-    expect(canHandSecrets('harsh', [personal])).toBeNull();
+    expect(canHandSecrets('gagan', [everyone(scout), ownerOnly({ ...scout, id: 'mine' })])).toMatchObject({ code: 'forbidden' });
+    expect(canHandSecrets('harsh', [ownerOnly({ ...scout, id: 'mine' })])).toBeNull();
   });
   it('is read by its readers alone, an admin and its author included', () => {
     const secrets = { names: ['KEY'], readers: ['scout', 'harsh'] };

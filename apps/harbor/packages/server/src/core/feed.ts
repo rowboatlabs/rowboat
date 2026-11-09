@@ -26,7 +26,7 @@ import type { z } from 'zod';
 import { HarborError } from '../errors.js';
 import { legacyToTokens } from '../mentions-backfill.js';
 import type { Notifier } from '../notify.js';
-import { canHandSecrets, canReadSecret, enforce, isAuthor } from '../policy.js';
+import { canHandSecrets, canReadSecret, enforce, isAuthor, seatOf, type Seat } from '../policy.js';
 import { assertSealingConfigured, seal, unseal } from '../sealing.js';
 import { parseSearchQuery } from '../search.js';
 import type { MessageWindow, StoredPollVote, StoredReaction } from '../store.js';
@@ -515,10 +515,11 @@ export class Feed {
     if (twice) throw new HarborError('invalid_request', `${twice} is in the message twice`);
     const ids = new Set([...mentions, ...(space.kind === 'direct' ? space.participants ?? [] : [])]);
     ids.delete(ctx.memberId);
-    const readers: Member[] = [];
+    const readers: Array<{ member: Member; seat: Seat }> = [];
     for (const id of ids) {
       const member = await this.k.store.getMember(id);
-      if (member && (await this.k.store.getMembership(space.id, id))) readers.push(member);
+      const membership = member ? await this.k.store.getMembership(space.id, id) : undefined;
+      if (member && membership) readers.push({ member, seat: seatOf(membership) });
     }
     enforce(canHandSecrets(ctx.memberId, readers));
     for (const secret of values) {
@@ -526,7 +527,7 @@ export class Feed {
         throw new HarborError('invalid_request', `the message's text contains the value of ${secret.name}: take it out, so only its readers see it`);
       }
     }
-    return { card: { names, readers: readers.map((m) => m.id) }, values };
+    return { card: { names, readers: readers.map((r) => r.member.id) }, values };
   }
 
   /** Seals each value apart from the message row and the log, bound to its message and name. */

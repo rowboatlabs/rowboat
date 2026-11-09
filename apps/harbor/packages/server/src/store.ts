@@ -253,8 +253,6 @@ export interface Store {
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
   patchAvailability(id: string, patch: NonNullable<Member['availability']>): Promise<void>;
-  /** Switch an agent between channel and personal (2026-10-27): the one write of the flag after creation. */
-  setAgentPersonal(id: string, personal: boolean): Promise<void>;
   /** Make an agent a super agent or an ordinary one again (2026-11-02): the one write of the setting. */
   setAgentSuper(id: string, superAgent: SuperAgent | null): Promise<void>;
   /** An agent's description (its title) and instructions, both whole: null clears one (2026-10-29). */
@@ -314,6 +312,8 @@ export interface Store {
    * under a row lock so two admins demoting each other cannot both pass.
    */
   setMembershipRole(spaceId: string, memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'>;
+  /** Set an agent's seat in a space (spec §4 Agent members, 2026-11-09): the one write of the field after the row is made. */
+  setMembershipAccess(spaceId: string, agentId: string, invocableBy: 'owner' | 'members'): Promise<void>;
   listMemberships(spaceId: string): Promise<Membership[]>;
   putMembership(membership: Membership): Promise<void>;
   /** Delete the space row; every space-keyed table cascades from it (migration 039). */

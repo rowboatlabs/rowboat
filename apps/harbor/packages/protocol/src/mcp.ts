@@ -206,10 +206,19 @@ export const addMembers = tool({
   description:
     'Add people or agents your person can reach to a shared space they are in. Take ' +
     'memberIds from list_members. Anyone already in is a no-op. Direct messages cannot be added to. ' +
-    "Someone else's personal agent (personal: true) can be added only by its owner. " +
+    "An agent is added only by its owner; invocableBy sets who may ask it there (members, the default, or owner). " +
     'Only when your person asked for it.',
-  input: z.object({ spaceId: SpaceId, memberIds: z.array(MemberId).min(1).max(100) }),
+  input: z.object({ spaceId: SpaceId, memberIds: z.array(MemberId).min(1).max(100), invocableBy: z.enum(['owner', 'members']).optional() }),
   output: z.object({ memberships: z.array(Membership) }),
+});
+
+export const setAgentAccess = tool({
+  name: 'set_agent_access',
+  description:
+    "Change who may ask one of your person's agents in a space: everyone there (members) or your person only (owner). " +
+    'Only the agent’s owner may; an agent on its owner’s own computer stays owner-only. The same value is a no-op. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, agentId: MemberId, invocableBy: z.enum(['owner', 'members']) }),
+  output: z.object({ membership: Membership }),
 });
 
 export const removeMember = tool({
@@ -830,6 +839,7 @@ export const mcpTools = [
   unarchiveSpace,
   deleteSpace,
   addMembers,
+  setAgentAccess,
   removeMember,
   leaveSpace,
   setMemberRole,

@@ -1,4 +1,5 @@
 import {
+  OWNER_ONLY_CONNECTIONS,
   inviteUrl,
   Member,
   type Attribution,
@@ -16,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canArchiveSpace, canDeleteSpace, canChangeMembership, canEditProfile, canListOnInvite, canOpenDirect, canReachMember, canReachPersonalAgent, canRemoveFromSpace, canRenameSpace, canSetRole, canSignIn, canWriteSpace, enforce } from '../policy.js';
+import { canArchiveSpace, canDeleteSpace, canChangeMembership, canEditProfile, canAddToSpace, canListOnInvite, canMessageAgent, canOpenDirect, canReachMember, canRemoveFromSpace, canSetAgentAccess, canRenameSpace, canSetRole, canSignIn, canWriteSpace, enforce } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent, type StoredInvite } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -43,6 +44,7 @@ export type AddMembersInput = z.infer<Routes['addMembers']['request']>;
 export type ArchiveSpaceInput = z.infer<Routes['archiveSpace']['request']>;
 export type RemoveMemberInput = z.infer<Routes['removeMember']['request']>;
 export type SetSpaceRoleInput = z.infer<Routes['setSpaceRole']['request']>;
+export type SetAgentAccessInput = z.infer<Routes['setAgentAccess']['request']>;
 export type CreateInviteInput = z.infer<Routes['createInvite']['request']>;
 
 const DEFAULT_INVITE_HOURS = 24 * 7;
@@ -99,7 +101,7 @@ export class Spaces {
    * its own: the integration that owns the agent calls this and gates who may.
    * The first is the Replicas coding agent (PR #1130).
    */
-  async createAgent(input: { displayName: string; ownerId?: string; agentKind?: string; agentConnection?: string; agentInstance?: string; personal?: boolean }): Promise<Member> {
+  async createAgent(input: { displayName: string; ownerId?: string; agentKind?: string; agentConnection?: string; agentInstance?: string }): Promise<Member> {
     const displayName = input.displayName.trim();
     if (!Member.shape.displayName.safeParse(displayName).success) {
       throw new HarborError('invalid_request', 'an agent needs a display name of 1 to 128 characters');
@@ -115,8 +117,6 @@ export class Spaces {
       agentKind: input.agentKind ?? 'custom',
       agentConnection: input.agentConnection ?? 'contract',
       ...(input.agentInstance ? { agentInstance: input.agentInstance } : {}),
-      // Personal is its owner's (spec §4 Agent members, 2026-10-26): an ownerless agent can't be.
-      ...(input.personal && input.ownerId ? { personal: true } : {}),
     };
     await this.k.store.putMember(member);
     return member;
@@ -259,7 +259,7 @@ export class Spaces {
       const other = await this.k.store.getMember(otherMemberId);
       if (!other) throw new HarborError('not_found', 'no such member');
       enforce(canReachMember(other));
-      enforce(canReachPersonalAgent(ctx.memberId, other, 'message'));
+      enforce(canMessageAgent(ctx.memberId, other));
       ownsAgent = other.kind === 'agent' && other.ownerId === ctx.memberId;
     }
     const participants = self ? [ctx.memberId] : [ctx.memberId, otherMemberId].sort();
@@ -282,7 +282,8 @@ export class Spaces {
     await this.k.locked(space.id, async () => {
       let offset = await this.k.store.head(space.id);
       for (const memberId of participants) {
-        const membership: Membership = { spaceId: space.id, memberId, joinedAt: now, role: 'member' };
+        // An agent in a DM answers the one person there: its seat is owner-only (2026-11-09).
+        const membership: Membership = { spaceId: space.id, memberId, joinedAt: now, role: 'member', ...(ownsAgent && memberId !== ctx.memberId ? { invocableBy: 'owner' as const } : {}) };
         await this.k.store.putMembership(membership);
         await this.k.append(space.id, ++offset, now, { type: 'membership', membership, action: 'joined' });
       }
@@ -326,13 +327,19 @@ export class Spaces {
   async addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
     const space = await this.k.requireMember(ctx, spaceId);
     enforce(canChangeMembership(space, 'add'));
+    const actor = await this.me(ctx);
     const ids = [...new Set(input.memberIds)];
+    const members = new Map<string, Member>();
     for (const id of ids) {
       const member = await this.k.store.getMember(id);
-      if (!member) throw new HarborError('not_found', `no member ${id} in this org`);
+      if (!member) throw new HarborError('not_found', `no member ${id}`);
       enforce(canReachMember(member));
-      enforce(canReachPersonalAgent(ctx.memberId, member, 'add'));
+      enforce(canAddToSpace(actor, member));
+      members.set(id, member);
     }
+    // An agent's seat (spec §4 Agent members, 2026-11-09): as asked, default everyone; a local agent's is its owner's whatever was asked.
+    const seatFor = (member: Member): Membership['invocableBy'] =>
+      member.kind === 'agent' ? (OWNER_ONLY_CONNECTIONS.includes(member.agentConnection ?? '') ? 'owner' : (input.invocableBy ?? 'members')) : undefined;
     const by = this.k.attributionOf(ctx, input);
     const at = this.k.now();
     const { memberships, added } = await this.k.lockedAs(ctx, spaceId, async () => {
@@ -345,7 +352,8 @@ export class Spaces {
       if (existing.size < ids.length) this.k.guardWrite();
       for (const memberId of ids) {
         if (existing.has(memberId)) continue;
-        const membership: Membership = { spaceId, memberId, joinedAt: at, role: 'member' };
+        const seat = seatFor(members.get(memberId)!);
+        const membership: Membership = { spaceId, memberId, joinedAt: at, role: 'member', ...(seat ? { invocableBy: seat } : {}) };
         await this.k.store.putMembership(membership);
         await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'joined', by });
         added.push(membership);
@@ -372,23 +380,38 @@ export class Spaces {
     enforce(canRemoveFromSpace(membership, space, memberId));
     const by = this.k.attributionOf(ctx, input);
     const at = this.k.now();
-    const removed = await this.k.lockedAs(ctx, spaceId, async () => {
-      const removed = await this.removeMembershipLocked(spaceId, memberId, by, at);
+    const { removed, agents } = await this.k.lockedAs(ctx, spaceId, async () => {
+      const removed = await this.removeMembershipLocked(spaceId, memberId, by, at, 'removed');
+      const agents = removed ? await this.removeOwnedAgentsLocked(spaceId, memberId, by, at, 'removed') : [];
       if (removed) await this.ensureAdminLocked(space, by, at);
-      return removed;
+      return { removed, agents };
     }, { archived: 'allow' });
-    if (removed) this.k.hub.publishToMember(memberId, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
+    for (const id of removed ? [memberId, ...agents] : []) this.k.hub.publishToMember(id, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
     return { removed };
   }
 
-  /** The removal itself, inside the space lock: the row, the member's read marks, the `removed` event. */
-  private async removeMembershipLocked(spaceId: string, memberId: string, by: Attribution, at: string): Promise<boolean> {
+  /** The removal itself, inside the space lock: the row, the member's read marks, the `left` or `removed` event. */
+  private async removeMembershipLocked(spaceId: string, memberId: string, by: Attribution, at: string, action: 'left' | 'removed'): Promise<boolean> {
     const membership = await this.k.store.getMembership(spaceId, memberId);
     if (!membership) return false;
     await this.k.store.deleteMembership(spaceId, memberId);
     await this.k.store.deleteReadMarks(spaceId, memberId);
-    await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'removed', by });
+    await this.k.appendNext(spaceId, at, { type: 'membership', membership, action, by });
     return true;
+  }
+
+  /**
+   * Your agents leave a space when you do (spec §4 Agent members, 2026-11-09):
+   * nobody should spend your money in a room you are no longer in, and the
+   * one person who could change their seats has just left. One event each,
+   * attributed to the act that took you out. Inside the space lock.
+   */
+  private async removeOwnedAgentsLocked(spaceId: string, ownerId: string, by: Attribution, at: string, action: 'left' | 'removed'): Promise<string[]> {
+    const gone: string[] = [];
+    for (const m of await this.k.store.listSpaceMembers(spaceId)) {
+      if (m.kind === 'agent' && m.ownerId === ownerId && (await this.removeMembershipLocked(spaceId, m.id, by, at, action))) gone.push(m.id);
+    }
+    return gone;
   }
 
   async leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
@@ -396,15 +419,19 @@ export class Spaces {
     enforce(canChangeMembership(space, 'leave'));
     // No write guard on purpose: over its limit an org cannot grow, but anyone may leave (policy.ts canWrite).
     const at = this.k.now();
-    await this.k.lockedAs(ctx, spaceId, async (membership) => {
+    const by: Attribution = { memberId: ctx.memberId, actingMode: 'direct' };
+    const agents = await this.k.lockedAs(ctx, spaceId, async (membership) => {
       await this.k.store.deleteMembership(spaceId, ctx.memberId);
       await this.k.store.deleteReadMarks(spaceId, ctx.memberId);
       await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'left' });
-      await this.ensureAdminLocked(space, { memberId: ctx.memberId, actingMode: 'direct' }, at);
+      const agents = await this.removeOwnedAgentsLocked(spaceId, ctx.memberId, by, at, 'left');
+      await this.ensureAdminLocked(space, by, at);
+      return agents;
     }, { archived: 'allow' }); // anyone may leave an archived space (2026-10-13)
     // Every connection the member holds ends its subscription to the space
-    // (2026-09-22) — leave on the laptop, the phone stops receiving too.
-    this.k.hub.publishToMember(ctx.memberId, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
+    // (2026-09-22) — leave on the laptop, the phone stops receiving too; the
+    // agents that left with them likewise.
+    for (const id of [ctx.memberId, ...agents]) this.k.hub.publishToMember(id, { kind: 'space_removed', spaceId, by: ctx.memberId, at });
   }
 
   // --- roles on the space (spec §4 Roles, rewritten 2026-11-09) ----------------
@@ -433,6 +460,33 @@ export class Spaces {
       }
       const updated: Membership = { ...current, role: input.role };
       await this.k.appendNext(spaceId, this.k.now(), { type: 'role_changed', membership: updated, by });
+      return updated;
+    }, { archived: 'allow' });
+  }
+
+  /**
+   * Change an agent's seat in a space (spec §4 Agent members, 2026-11-09):
+   * its owner only. The same value is a no-op with no event; a change
+   * appends `agent_access_changed` with the row as it now stands. Work
+   * already queued finishes; the rule applies to what is asked after.
+   */
+  async setAgentAccess(ctx: ActorCtx, spaceId: string, agentId: string, input: SetAgentAccessInput): Promise<Membership> {
+    const { space } = await this.k.requireMembership(ctx, spaceId);
+    if (space.kind === 'direct') throw new HarborError('invalid_request', 'an agent in a DM answers the one person there');
+    const agent = await this.k.store.getMember(agentId);
+    if (!agent) throw new HarborError('not_found', 'no such agent');
+    const current = await this.k.store.getMembership(spaceId, agentId);
+    enforce(canSetAgentAccess(await this.me(ctx), agent, current, input.invocableBy));
+    if (current!.invocableBy === input.invocableBy) return current!; // idempotent, no event
+    this.k.guardWrite();
+    const by = this.k.attributionOf(ctx, input);
+    return this.k.lockedAs(ctx, spaceId, async () => {
+      const row = await this.k.store.getMembership(spaceId, agentId);
+      if (!row) throw new HarborError('invalid_request', `${agent.displayName} is not in this space`);
+      if (row.invocableBy === input.invocableBy) return row;
+      await this.k.store.setMembershipAccess(spaceId, agentId, input.invocableBy);
+      const updated: Membership = { ...row, invocableBy: input.invocableBy };
+      await this.k.appendNext(spaceId, this.k.now(), { type: 'agent_access_changed', membership: updated, by });
       return updated;
     }, { archived: 'allow' });
   }
