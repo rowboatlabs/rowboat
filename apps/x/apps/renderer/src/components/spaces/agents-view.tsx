@@ -352,8 +352,8 @@ function SpacesBadge({ names }: { names: string[] }) {
  * The card that adds one: New agent opens the chooser, which asks where it
  * runs (on this computer, Rowboat runs it, or one you already run; 2026-10-28,
  * replacing Create agent beside Add an agent you run, which didn't say what
- * either meant). The card's "or add a bot" link went 2026-11-09 (Arjun): bots
- * are reached from the chooser.
+ * either meant). No way to add a bot from here or the chooser (2026-11-09,
+ * Arjun: remove bots).
  */
 function NewAgentCard({ creates, onNew }: { creates: boolean; onNew: () => void }) {
     // The ways the chooser offers, in its order: this computer on the desktop, Rowboat's only when the org has it.

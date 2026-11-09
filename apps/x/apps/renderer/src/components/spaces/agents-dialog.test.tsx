@@ -837,7 +837,7 @@ describe('AgentsDialog', () => {
         })
     })
 
-    it('New agent asks where it runs: this computer, Rowboat, or one you already run; a bot is the small print', async () => {
+    it('New agent asks where it runs: this computer, Rowboat, or one you already run', async () => {
         managedKinds = ['hermes', 'claude-code', 'codex']
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         fireEvent.click(await screen.findByRole('button', { name: /New agent/ }))
@@ -855,8 +855,9 @@ describe('AgentsDialog', () => {
         fireEvent.click(await screen.findByRole('button', { name: PATHS.local }))
         expect(await screen.findByRole('heading', { name: 'Run an agent on this computer' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-        fireEvent.click(await screen.findByRole('button', { name: /Looking for a bot/ }))
-        expect(await screen.findByRole('radiogroup', { name: 'Which service' })).toBeInTheDocument()
+        // No bot entry in the chooser (2026-11-09, Arjun: remove bots).
+        await screen.findByText('Where should it run?')
+        expect(screen.queryByRole('button', { name: /Looking for a bot/ })).toBeNull()
     })
 
     it('offers Rowboat runs it only on a Harbor that creates agents', async () => {
