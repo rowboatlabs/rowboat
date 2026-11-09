@@ -366,7 +366,7 @@ describe('AgentsDialog', () => {
         await screen.findByText('Hermes')
         await newAgent('connect')
         // On this computer is its own path on the chooser, not one of these.
-        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Maritime', 'Conductor', 'Custom'])
+        expect(setupsOffered()).toEqual(['Hermes', 'Replicas', 'Agent37', 'Maritime', 'Conductor', 'Grok Bot', 'Custom'])
         expect(screen.getByRole('radio', { name: 'Hermes' })).toHaveAttribute('aria-checked', 'true')
         // The name suggests the kind's own.
         expect(screen.getByLabelText('Agent name')).toHaveValue('Hermes')
@@ -613,6 +613,21 @@ describe('AgentsDialog', () => {
         expect(screen.getByText('.mcp.json')).toBeInTheDocument()
         expect(screen.getByText(/"Authorization": "Bearer \$\{ROWBOAT_AGENT_KEY\}"/)).toBeInTheDocument()
         expect(screen.queryByText(NEW_KEY)).toBeNull()
+    })
+
+    it('adds a Grok Bot agent: the routine webhook as its credential, then the MCP server and the routine prompt (2026-11-05)', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        await screen.findByText('Hermes')
+        await newAgent('connect')
+        fireEvent.click(screen.getByRole('radio', { name: 'Grok Bot' }))
+        expect(screen.getByLabelText('Agent name')).toHaveValue('Grok')
+        expect(screen.getByText(/make a routine with a Webhook trigger/)).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Routine webhook'), { target: { value: 'https://bot.x.ai/hooks/r1 gb_key' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+        await screen.findByRole('heading', { name: 'Connect Grok' })
+        expect(invoke).toHaveBeenCalledWith('spaces:addAgent', { orgId: 'org-1', displayName: 'Grok', kind: 'grok-bot', connection: 'grok-bot', credential: 'https://bot.x.ai/hooks/r1 gb_key' })
+        expect(screen.getByText('https://rowboat.example/mcp')).toBeInTheDocument()
+        expect(screen.getByText(/post your answer once, as a reply in the thread, with post_message/)).toBeInTheDocument()
     })
 
     it('adds the new agent to every space by default, minus the ones unticked, then offers the rest from its setup', async () => {
