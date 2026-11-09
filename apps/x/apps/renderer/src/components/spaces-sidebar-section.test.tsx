@@ -66,7 +66,7 @@ const nav = (props: Partial<Parameters<typeof ServerSpaceNavigation>[0]> = {}) =
     render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main" onOpenSpace={vi.fn()} showDiscussions={false} {...props} /></SidebarProvider>)
 // A section's rows: a group row also carries its ⋯ options button, a header its +.
 const names = (section: string) => within(screen.getByRole('region', { name: section })).getAllByRole('button')
-    .filter((b) => { const label = b.getAttribute('aria-label') ?? ''; return !label.startsWith('Options for') && !['New group', 'New message'].includes(label) })
+    .filter((b) => { const label = b.getAttribute('aria-label') ?? ''; return !label.startsWith('Options for') && !label.startsWith('View all') })
     .map((b) => b.textContent?.replace(/you$|opening…$/, '').replace(/^(Agents)\d+$/, '$1').trim())
 
 
@@ -76,16 +76,16 @@ describe('the chat list', () => {
         activity.founders = '2026-10-02'
         activity.main = '2026-10-01'
         nav({ onOpenAgents: vi.fn() })
-        expect(names('Agents')).toEqual(['Agents', 'Claude', 'Add an agent'])
-        expect(names('Groups')).toEqual(['founders', 'main'])
-        expect(names('People')).toEqual(['Person 1', 'Person 0', 'Me'])
+        expect(names('Agents')).toEqual(['Claude', 'Add an agent'])
+        expect(names('Spaces')).toEqual(['founders', 'main', 'New space'])
+        expect(names('People')).toEqual(['Person 1', 'Person 0', 'Me', 'New message'])
     })
 
-    it('leads with New space, then Activity, Threads and the Agents header, and pins your link to the foot', () => {
+    it('leads with New space, then Activity, Threads and the Agents section, and pins your link to the foot', () => {
         const openActivity = vi.fn()
         const openAgents = vi.fn()
         nav({ onOpenActivity: openActivity, onOpenAgents: openAgents, onOpenThreads: vi.fn() })
-        const order = ['New space', 'Activity', 'Threads', /^Agents/, 'Share your link'].map((name) => screen.getByRole('button', { name }))
+        const order = [/^New space$/, 'Activity', 'Threads', 'View all agents', 'Share your link'].map((name) => screen.getAllByRole('button', { name })[0])
         for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         fireEvent.click(order[1])
         expect(openActivity).toHaveBeenCalledWith(org.id)
@@ -95,9 +95,9 @@ describe('the chat list', () => {
         expect(openAgents).toHaveBeenCalledTimes(2)
     })
 
-    it('opens the new-chat sheet on the screen the click meant: New space on the group form, the People + on a message', () => {
+    it('opens the new-chat sheet on the screen the click meant: New space on the space form, New message on the picker', () => {
         nav()
-        fireEvent.click(screen.getByRole('button', { name: 'New space' }))
+        fireEvent.click(screen.getAllByRole('button', { name: /^New space$/ })[0])
         expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute('data-start', 'group')
         cleanup()
         nav()
@@ -125,7 +125,7 @@ describe('the chat list', () => {
     it('opens rename from the row’s options button as well as the context menu', () => {
         nav()
         fireEvent.keyDown(screen.getByRole('button', { name: 'Options for founders' }), { key: 'Enter' })
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Rename group' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Rename space' }))
         expect(screen.getByDisplayValue('founders')).toBeInTheDocument()
     })
 

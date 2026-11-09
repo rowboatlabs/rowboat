@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 // An agent's seat in a space (Harbor spec §4 Agent members, 2026-11-09:
 // `Membership.invocableBy`): who may ask it there — everyone in the space,
 // or its owner alone. Chosen by the owner when adding it to a space (the
-// default is everyone: you chose to bring it into the group) and changed any
+// default is everyone: you chose to bring it into the space) and changed any
 // time from the member list or the agent's page. It replaced the global
 // personal flag of 2026-10-26.
 
@@ -24,7 +24,7 @@ export function SeatBadge({ seat, ownerName, className }: { seat: Seat; ownerNam
     const ownerOnly = seat === 'owner'
     const explain = ownerOnly
         ? `Only ${ownerName ?? 'its owner'} can ask it here. Everyone sees it and its replies.`
-        : 'Anyone in this group can mention it.'
+        : 'Anyone in this space can mention it.'
     return (
         <Tooltip>
             <TooltipTrigger asChild>
@@ -45,7 +45,7 @@ export function SeatBadge({ seat, ownerName, className }: { seat: Seat; ownerNam
 }
 
 const OPTIONS: ReadonlyArray<{ value: Seat; label: string; description: string }> = [
-    { value: 'members', label: 'Everyone here', description: 'Anyone in the group can mention it.' },
+    { value: 'members', label: 'Everyone here', description: 'Anyone in the space can mention it.' },
     { value: 'owner', label: 'Only me', description: 'Only you can ask it. Others see it and its replies.' },
 ]
 

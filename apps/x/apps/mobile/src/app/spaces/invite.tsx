@@ -10,7 +10,7 @@ import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
 // An invite link (2026-11-02; one target since 2026-11-09, desktop's
-// invite-link.tsx): with `space`, the group's link — anyone with it is in;
+// invite-link.tsx): with `space`, the space's link — anyone with it is in;
 // without, your personal link, which opens a direct message with you. Minted
 // as the screen opens; it works for seven days.
 export default function InviteScreen() {
@@ -18,7 +18,7 @@ export default function InviteScreen() {
   const params = useLocalSearchParams<{ org: string; space?: string; title?: string }>();
   const client = useOrgClient(params.org);
   const direct = !params.space;
-  const what = direct ? 'me' : `#${params.title ?? 'the group'}`;
+  const what = direct ? 'me' : `#${params.title ?? 'the space'}`;
 
   const [link, setLink] = useState<{ url: string; admits: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export default function InviteScreen() {
       <Text style={{ ...type.body, lineHeight: 22, color: colors.secondaryLabel, paddingHorizontal: 4 }}>
         {direct
           ? 'Share it with anyone you want to talk to — on WhatsApp, LinkedIn, a mail. Opening it starts a direct message with you.'
-          : `Share it with whoever should be in ${what}. Opening it puts them in the group.`}
+          : `Share it with whoever should be in ${what}. Opening it puts them in the space.`}
       </Text>
 
       {link === null && !error ? <ActivityIndicator /> : null}

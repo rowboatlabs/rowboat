@@ -10,7 +10,7 @@ import { SpacesClient } from '@/lib/spaces/client';
 import { useColors } from '@/theme/colors';
 
 // Join from an invite link (https://<server>/join/<token>): paste or arrive
-// by link → resolve (pre-auth) → "Join #group", or "Message <person>" for a
+// by link → resolve (pre-auth) → "Join #space", or "Message <person>" for a
 // personal link (2026-11-09) → sign in if needed → accept → the chat opens.
 // Mirrors core/spaces/oauth.ts joinViaInviteLink.
 
@@ -72,7 +72,7 @@ export default function JoinScreen() {
       const org = new URL(resolved.baseUrl).host;
       const me = await client.me();
       router.replace('/spaces');
-      // The group joined, or the DM a personal link opened; nothing when the
+      // The space joined, or the DM a personal link opened; nothing when the
       // link was your own, or its target is gone (2026-11-09).
       if (result.space) router.push({ pathname: '/spaces/chat', params: { org, space: result.space.id, title: result.space.name, me: me.member.id, ...(result.space.kind === 'direct' ? { kind: 'direct' } : {}) } });
     } catch (err) {
@@ -91,7 +91,7 @@ export default function JoinScreen() {
     >
       <Stack.Screen options={{ title: 'Open an invite' }} />
       <Text style={{ fontSize: 14, lineHeight: 20, color: colors.secondaryLabel }}>
-        Paste the invite link someone shared with you — to a group, or their personal link.
+        Paste the invite link someone shared with you — to a space, or their personal link.
       </Text>
       <TextInput
         value={url}
@@ -129,7 +129,7 @@ export default function JoinScreen() {
               <Image source={resolved.direct ? 'sf:person' : 'sf:number'} style={{ width: 20, height: 20 }} tintColor={colors.label} />
             </View>
             <View style={{ flex: 1 }}>
-              {/* An invite is to one group, or it is a person's link (2026-11-09). */}
+              {/* An invite is to one space, or it is a person's link (2026-11-09). */}
               <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>
                 {resolved.space ? `#${resolved.space.name}` : resolved.direct ? resolved.direct.displayName : 'This invite leads nowhere any more'}
               </Text>
@@ -152,7 +152,7 @@ export default function JoinScreen() {
               <Text style={{ fontSize: 15, fontWeight: '600', color: colors.background }}>
                 {resolved.direct
                   ? account.status === 'signedIn' ? `Message ${resolved.direct.displayName}` : 'Sign in and message'
-                  : account.status === 'signedIn' ? 'Join group' : 'Sign in and join'}
+                  : account.status === 'signedIn' ? 'Join space' : 'Sign in and join'}
               </Text>
             )}
           </Pressable>

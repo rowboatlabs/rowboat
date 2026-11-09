@@ -8,7 +8,7 @@ import type { spaces } from '@x/shared'
  * stream's empty copy becomes the space's first-run page — bring people in,
  * bring an agent in, give it a file — with the space's link underneath, so
  * the three things the product is for are one click away from the start.
- * Groups only: a DM has its own one-line copy.
+ * Shared spaces only: a DM has its own one-line copy.
  */
 export function EmptySpaceStart({ orgId, space, onAddPeople, onOpenFiles }: {
     orgId: string

@@ -125,7 +125,7 @@ export default function AddPeopleScreen() {
           </Group>
         ) : (
           <Text style={{ ...type.body, textAlign: 'center', color: colors.tertiaryLabel, paddingTop: 24 }}>
-            {query.trim() ? 'No one matches.' : `Everyone you know is already in #${params.title}. Invite someone new with the group's link.`}
+            {query.trim() ? 'No one matches.' : `Everyone you know is already in #${params.title}. Invite someone new with the space's link.`}
           </Text>
         )
       ) : null}
