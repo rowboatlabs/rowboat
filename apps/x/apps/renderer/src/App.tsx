@@ -38,6 +38,7 @@ import {
 } from '@/lib/active-markdown-external-change';
 import { useDebounce } from './hooks/use-debounce';
 import { DockSidebar, LAST_SPACE_STORAGE_KEY } from '@/components/dock-sidebar';
+import { SpacesModeRail, SPACES_RAIL_PX } from '@/components/spaces-mode-rail';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
@@ -211,8 +212,6 @@ const KEEP_ALIVE_SECTIONS: ReadonlySet<MiddleView> = new Set<MiddleView>([
 
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
-/** The Spaces mode's rail, the web app's w-12. */
-const SPACES_RAIL_PX = 48
 type AppMode = 'spaces' | 'local'
 /** The mascot tour, off for now (2026-11-06): its stops walk the Local sidebar. */
 const TOUR_ENABLED = false
@@ -851,17 +850,6 @@ function AppModeTabs({ mode, onSelect }: { mode: AppMode; onSelect: (mode: AppMo
         {tab('local', 'Local')}
       </div>
     </div>
-  )
-}
-
-/** The Spaces mode's left rail: the Rowboat mark where the sidebar was, as
-    the web app's rail has it (web/account-menu.tsx). It starts below the
-    titlebar band, which the traffic lights own. */
-function SpacesModeRail() {
-  return (
-    <nav aria-label="Rowboat" className="fixed bottom-0 left-0 top-10 z-10 flex flex-col items-center border-r border-border bg-[var(--rowboat-panel-soft)] py-3" style={{ width: SPACES_RAIL_PX }}>
-      <img src="/logo-only.png" alt="Rowboat" className="size-6 rounded-md" />
-    </nav>
   )
 }
 
@@ -7344,7 +7332,7 @@ function App() {
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onVoiceNoteCreated={handleVoiceNoteCreated}
             />
-            {appMode === 'spaces' && <SpacesModeRail />}
+            {appMode === 'spaces' && <SpacesModeRail onOpenSettings={() => setMenuSettings({ open: true, tab: 'account' })} />}
             {/* Only the ⌥/⌃+Tab switcher; the collapsed tray it also draws
                 is gone with the collapse toggle. */}
             <DockSidebar
