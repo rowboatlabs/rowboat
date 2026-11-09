@@ -8,7 +8,7 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
-import type { Invocation, Member, Message } from '@rowboat/spaces-protocol';
+import { onServer, type Invocation, type Member, type Message } from '@rowboat/spaces-protocol';
 
 import { spaces } from '@x/shared';
 
@@ -241,7 +241,7 @@ export default function SpaceThreadScreen() {
   const [openingFile, setOpeningFile] = useState(false);
   const openBlobLink = useCallback(
     (link: { host: string; spaceId: string; hash: string; url: string }) => {
-      if (link.host !== org) {
+      if (!onServer(link.host, org)) {
         void Linking.openURL(link.url);
         return;
       }
@@ -263,7 +263,7 @@ export default function SpaceThreadScreen() {
   // id, so a rename never breaks it); any other host goes to the browser.
   const openAssetLink = useCallback(
     (link: { host: string; spaceId: string; assetId: string }) => {
-      if (link.host !== org) {
+      if (!onServer(link.host, org)) {
         void Linking.openURL(`https://${link.host}/s/${link.spaceId}/a/${link.assetId}`);
         return;
       }

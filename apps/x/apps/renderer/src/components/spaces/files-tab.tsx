@@ -1,3 +1,4 @@
+import { onServer } from '@x/shared/dist/spaces.js'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
@@ -611,7 +612,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
         }
         const wire = parseAssetWireUrl(href)
         if (wire) {
-            if (wire.orgAddress === org.address && wire.spaceId === space.id) onOpenFile?.(wire.assetId)
+            if (onServer(wire.orgAddress, org.address) && wire.spaceId === space.id) onOpenFile?.(wire.assetId)
             else onOpenSpaceFile?.(wire.orgAddress, wire.spaceId, wire.assetId)
             return true
         }

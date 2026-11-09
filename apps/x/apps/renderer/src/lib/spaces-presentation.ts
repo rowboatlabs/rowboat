@@ -279,14 +279,16 @@ export function parseBlobAppUrl(url: string): { orgId: string; spaceId: string; 
 export const isBlobAppUrl = (url: string): boolean => (LOCAL_RUNTIME ? url.startsWith(APP_BLOB_BASE) : parseBlobAppUrl(url) !== null)
 
 /**
- * Rewrite the org's blob links inside a markdown body to their app:// form so
- * plain <img>/<a> rendering just works. Any space on the org is matched — the
+ * Rewrite the server's blob links inside a markdown body to their app:// form so
+ * plain <img>/<a> rendering just works. Any space on the server is matched — the
  * serving path re-checks membership; a link the viewer can't fetch 404s into
- * a broken image, never into leaked bytes. Code regions stay literal.
+ * a broken image, never into leaked bytes. Code regions stay literal. A link
+ * on an old org host, `<org>.<address>` (every message from before
+ * 2026-11-09), is the server's too (protocol `onServer`).
  */
 export function rewriteBlobLinks(body: string, refs: SpaceRefs): string {
     const host = refs.orgAddress.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const re = new RegExp(`https://${host}/s/([0-9A-HJKMNP-TV-Z]{26})/b/([0-9a-f]{64})`, 'g')
+    const re = new RegExp(`https://(?:[a-z0-9-]+\\.)*${host}/s/([0-9A-HJKMNP-TV-Z]{26})/b/([0-9a-f]{64})`, 'gi')
     const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
     return parts
         .map((part, i) => {

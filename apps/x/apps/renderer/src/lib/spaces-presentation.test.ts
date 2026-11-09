@@ -416,3 +416,18 @@ describe('splitImageEmbeds / joinImageEmbeds — the inline editor round trip', 
         expect(joinImageEmbeds('', images)).toBe(body)
     })
 })
+
+// Every message from before 2026-11-09 links its attachments on an org host,
+// `<org>.<address>`; the one server still serves them, so they still render.
+describe('blob links on an old org host', () => {
+    it('rewrite like links on the server address itself', () => {
+        const refs = { orgId: 'server', orgAddress: 'spaces.x.rowboatlabs.com', spaceId: '01HXSPACE00000000000000000' } as unknown as Parameters<typeof rewriteBlobLinks>[1]
+        const hash = 'a'.repeat(64)
+        const old = `![shot](https://rowboat.spaces.x.rowboatlabs.com/s/01HXSPACE00000000000000000/b/${hash}?name=shot.png)`
+        expect(rewriteBlobLinks(old, refs)).not.toContain('https://rowboat.spaces.x.rowboatlabs.com')
+        expect(rewriteBlobLinks(old, refs)).toContain(hash)
+        // Another server's link is left alone.
+        const other = `![x](https://spaces.x.rowboatlabs.com.evil.example/s/01HXSPACE00000000000000000/b/${hash})`
+        expect(rewriteBlobLinks(other, refs)).toBe(other)
+    })
+})

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { memberUrl, messageUrl, serverUrl, parseSpacesUrl, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
+import { memberUrl, messageUrl, serverUrl, onServer, parseSpacesUrl, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { liveClient, startTestHarbor } from './helpers.js';
 
@@ -409,6 +409,11 @@ describe('feed: the stream, threads, and topic annotations', () => {
       expect(html).toContain(`href="https://web.test/open?${deep.replaceAll('&', '&amp;')}"`);
     }
     // The one parser reads every one of them back.
+    // Old org hosts (`<org>.<address>`, every link from before 2026-11-09) still name this server.
+    expect(onServer(`rowboat.${address}`, address)).toBe(true);
+    expect(onServer(address.toUpperCase(), address)).toBe(true);
+    expect(onServer(`evil-${address}`, address)).toBe(false);
+    expect(onServer('other.example', address)).toBe(false);
     expect(parseSpacesUrl(serverUrl(address))).toEqual({ kind: 'server', address });
     expect(parseSpacesUrl(`https://${address}`)).toEqual({ kind: 'server', address });
     expect(parseSpacesUrl(spaceUrl(address, spaceId))).toEqual({ kind: 'space', address, spaceId });
