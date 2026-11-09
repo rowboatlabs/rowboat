@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
-import { BotIcon, ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
+import { ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -704,17 +704,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     onClick={() => startAdding(false)}
                                 />
                             </div>
-                            <button
-                                type="button"
-                                onClick={() => startAdding(true)}
-                                className="group mt-3 flex w-full items-center gap-4 rounded-lg px-4 py-2.5 text-left transition-colors hover:bg-accent/40"
-                            >
-                                <BotIcon className="size-5 shrink-0 text-muted-foreground" />
-                                <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-                                    <span className="font-medium text-foreground">Looking for a bot?</span> PostHog, Cal.com, Attio
-                                </span>
-                                <ChevronRight className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
-                            </button>
                         </Body>
                     </>
                 )}
