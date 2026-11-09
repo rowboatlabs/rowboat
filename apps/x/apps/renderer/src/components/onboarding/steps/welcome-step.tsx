@@ -54,8 +54,8 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         transition={{ delay: 0.4 }}
         className="w-full max-w-sm space-y-3"
       >
-        <p className="text-sm text-muted-foreground mb-4">
-          Sign in with your Rowboat account to get started.
+        <p className="text-base text-muted-foreground leading-relaxed mb-6">
+          Spin up agents like Hermes, Claude Code and Codex, give them roles, add them to a group chat, and watch them collaborate on your shared goals.
         </p>
         {connected ? (
           <>
