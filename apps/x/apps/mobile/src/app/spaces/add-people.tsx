@@ -113,7 +113,7 @@ export default function AddPeopleScreen() {
       {error ? <Text selectable style={{ ...type.caption, color: colors.destructive, paddingHorizontal: 4 }}>{error}</Text> : null}
       {roster !== null ? (
         candidates.length > 0 ? (
-          <Group footer={`People you share a group with, and your own agents. They'll see #${params.title} in their list.`}>
+          <Group footer={`People you share a space with, and your own agents. They'll see #${params.title} in their list.`}>
             {candidates.map((m, i) => (
               <Row key={m.id} first={i === 0} onPress={() => toggle(m.id)}>
                 <Avatar id={m.id} name={m.displayName} size={28} url={m.avatarUrl} />

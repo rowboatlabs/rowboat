@@ -7,8 +7,9 @@ import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View } 
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
+import { useHomeBackButton } from '@/components/home-back';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
-import { onServer, type Invocation, type Member, type Message } from '@rowboat/spaces-protocol';
+import { onServer, type Invocation, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
 
 import { spaces } from '@x/shared';
 
@@ -25,7 +26,7 @@ import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
 import { postMessageReliably } from '@/lib/spaces/send';
-import { loadRoster, loadThread, peekRoster, peekThread, saveRoster, saveThread } from '@/lib/spaces/cache';
+import { loadRoster, loadThread, peekRoster, peekThread, peekValue, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
 import { isDeparted, answersOwnerOnly, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
@@ -162,6 +163,13 @@ export default function SpaceThreadScreen() {
       .listThread(space, root)
       .then((thread) => {
         if (cancelled) return;
+        // A message link may name a reply (2026-11-10); the server answers with
+        // its root. Live replies, read marks and sends key on the root, so take
+        // the root's id as the param and load again under it.
+        if (thread.root.id !== root) {
+          router.setParams({ root: thread.root.id });
+          return;
+        }
         const freshLast = thread.messages.at(-1)?.offset ?? thread.root.offset;
         setRootMessage(thread.root);
         // Keep anything live delivered after the server's snapshot.
@@ -415,14 +423,21 @@ export default function SpaceThreadScreen() {
     [client, space, me],
   );
 
+  // Links and pushes pass no space name (title 'Thread', 2026-11-10): name it
+  // from Home's cached list, and leave a DM unnamed.
+  const cachedSpace = peekValue<Space[]>(`spaces:${org}`)?.find((s) => s.id === space);
+  const spaceName = params.title && params.title !== 'Thread' ? params.title : cachedSpace?.kind === 'direct' ? undefined : cachedSpace?.name;
+
+  const homeBack = useHomeBackButton();
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={0}>
       <Stack.Screen
         options={{
+          headerLeft: homeBack,
           headerTitle: () => (
             <View style={{ alignItems: 'center' }}>
               <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>Thread</Text>
-              {params.title ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>#{params.title}</Text> : null}
+              {spaceName ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>#{spaceName}</Text> : null}
             </View>
           ),
           // Follow = replies land in Activity + notifications (Slack's bell).
