@@ -1,3 +1,4 @@
+import { SpacesSkeleton } from '@/components/spaces/spaces-skeleton'
 import { onServer } from '@x/shared/dist/spaces.js'
 import { MemberDirectory } from '@/components/spaces/member-directory'
 import { invokeSpace } from '@/lib/spaces-invoke'
@@ -202,13 +203,8 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         }
     }, [loading, orgs, selection, selectedOrg, selectedSpace, onSelect])
 
-    if (loading) {
-        return (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground gap-2">
-                <Loader2 className="size-3.5 animate-spin" /> Loading…
-            </div>
-        )
-    }
+    // The screen's own shape, pulsing, until the server answers (2026-11-09).
+    if (loading) return <SpacesSkeleton />
 
     if (selectedOrg) {
         const empty = selectedOrg.spaces.length === 0 && selectedOrg.directs.length === 0

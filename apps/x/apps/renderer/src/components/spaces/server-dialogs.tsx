@@ -1,5 +1,8 @@
+import { avatarColorClass, initials } from '@/lib/spaces-presentation'
+import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Loader2, MoreHorizontal } from 'lucide-react'
+import { Loader2, MoreHorizontal, Hash, Link as LinkIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -205,7 +208,7 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
     const signedOut = account !== null && !account.hasSession
     return (
         <Shell
-            title="Join a server"
+            title={preview?.person ? "You're invited to chat" : "You're invited"}
             onClose={onClose}
             footerLeft={
                 <>
@@ -233,7 +236,8 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
                 <>
                     <Button variant="ghost" onClick={onClose}>Cancel</Button>
                     <Button onClick={() => void join()} disabled={busy || resolving || !url.trim()}>
-                        {busy && <Loader2 className="size-3.5 mr-1 animate-spin" />} Join
+                        {busy && <Loader2 className="size-3.5 mr-1 animate-spin" />}
+                        {preview?.space ? `Join #${preview.space}` : preview?.person ? `Message ${preview.person}` : 'Join'}
                     </Button>
                 </>
             }
@@ -252,20 +256,27 @@ function JoinServerDialog({ inviteUrl: initialUrl, autoJoin = false, onClose, on
                     <p className="mt-1 text-xs text-muted-foreground">Paste the link someone sent you.</p>
                 </div>
             ) : null}
+            {/* The card (2026-11-09, the web app's look): the space or the person as the headline, who sent it beneath. */}
             {preview ? (
-                <div className="rounded-md border px-3 py-2.5 text-sm">
-                    <div>
-                        {preview.space
-                            ? <>You’re invited to <span className="font-medium">#{preview.space}</span></>
-                            : preview.person
-                                ? <>This link opens a direct message with <span className="font-medium">{preview.person}</span></>
-                                : 'This invite no longer leads anywhere.'}
+                <div className="flex items-center gap-3.5 rounded-xl border border-border bg-accent/30 p-4">
+                    <span aria-hidden="true" className={cn('flex size-11 shrink-0 items-center justify-center rounded-lg text-lg font-semibold', preview.person ? avatarColorClass(preview.person) : 'bg-primary/10 text-primary')}>
+                        {preview.space ? <Hash className="size-5" /> : preview.person ? initials(preview.person) : <LinkIcon className="size-5" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <div className="truncate text-base font-semibold">
+                            {preview.space ? `#${preview.space}` : preview.person ?? 'This invite no longer leads anywhere'}
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                            {preview.space
+                                ? preview.invitedBy ? `${preview.invitedBy} invited you to this space` : 'You\u2019re invited to this space'
+                                : preview.person ? 'Opens a direct message with them' : 'Ask whoever sent it for a new link.'}
+                        </div>
                     </div>
-                    {preview.invitedBy && preview.space && <div className="text-xs text-muted-foreground">Invited by {preview.invitedBy}</div>}
                 </div>
             ) : resolving ? (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Loader2 className="size-3 animate-spin" /> Checking the invite…
+                <div className="flex items-center gap-3.5 rounded-xl border border-border bg-accent/30 p-4" aria-busy="true" aria-label="Checking the invite">
+                    <Skeleton className="size-11 shrink-0 rounded-lg" />
+                    <div className="flex min-w-0 flex-1 flex-col gap-2"><Skeleton className="h-4 w-40" /><Skeleton className="h-3 w-56" /></div>
                 </div>
             ) : null}
             {!editing && (

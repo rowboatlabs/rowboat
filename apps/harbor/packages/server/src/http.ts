@@ -709,14 +709,19 @@ export function buildHttpApp(deps: {
     return reply(c, routes.acceptInvite.response, result);
   });
 
-  // Where a browser-opened link goes (2026-10-13, Slack's pattern): the
-  // desktop app, launched at once, else the web app when this Harbor names
-  // one. The web app's /open takes the deep link's query unchanged, so both
-  // resolve the link the same way (the renderer's parseSpacesLink).
+  // Where a browser-opened link goes. The web app, when this Harbor names one
+  // (2026-11-09: most people opening a link have no desktop app, and a browser
+  // cannot tell whether one is installed, so the page used to dead-end them on
+  // a launch that did nothing); its /open takes the deep link's query
+  // unchanged, so it resolves the link the way the desktop does (the
+  // renderer's parseSpacesLink). Without a web app, the hand-off page of
+  // 2026-10-13: the desktop app launched at once, and its download.
   const openers = (query: string): Openers => ({
     deep: `rowboat://open?${query}`,
     ...(deps.webAppUrl ? { web: `${deps.webAppUrl.replace(/\/$/, '')}/open?${query}` } : {}),
   });
+  /** The web app when there is one, else the hand-off page. */
+  const handOff = (c: Context, o: Openers, page: string) => (o.web ? c.redirect(o.web, 302) : c.html(page));
 
   // The invite link's landing (2026-09-15): a browser-opened /join/<token>
   // hands the invite into the app as rowboat://open?type=spaces&server=…&invite=…
@@ -729,7 +734,8 @@ export function buildHttpApp(deps: {
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
     const query = `type=spaces&server=${encodeURIComponent(service.server.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', ...(resolved.space ? { space: resolved.space.name } : {}), ...(resolved.direct ? { person: resolved.direct.displayName } : {}), server: service.server.name, invitedBy: resolved.invitedBy, ...openers(query) }));
+    const o = openers(query);
+    return handOff(c, o, invitePage({ state: 'ok', ...(resolved.space ? { space: resolved.space.name } : {}), ...(resolved.direct ? { person: resolved.direct.displayName } : {}), server: service.server.name, invitedBy: resolved.invitedBy, ...o }));
   });
 
   // --- link landings ---------------------------------------------------------
@@ -738,19 +744,20 @@ export function buildHttpApp(deps: {
   // is rendered about the target, so a link says nothing to someone who
   // cannot open it. The app itself intercepts these URLs before they ever
   // reach a browser.
-  const landing = (target: URLSearchParams) => {
+  const landing = (c: Context, target: URLSearchParams) => {
     target.set('server', service.server.address);
-    return landingPage(openers(`type=spaces&${target.toString()}`));
+    const o = openers(`type=spaces&${target.toString()}`);
+    return handOff(c, o, landingPage(o));
   };
-  app.get('/', (c) => c.html(landing(new URLSearchParams())));
-  app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
+  app.get('/', (c) => landing(c, new URLSearchParams()));
+  app.get('/s/:spaceId', (c) => landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId') })));
   app.get('/s/:spaceId/m/:messageId', (c) =>
-    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') }))),
+    landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') })),
   );
   app.get('/s/:spaceId/a/:assetId', (c) =>
-    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), assetId: c.req.param('assetId') }))),
+    landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId'), assetId: c.req.param('assetId') })),
   );
-  app.get('/u/:memberId', (c) => c.html(landing(new URLSearchParams({ memberId: c.req.param('memberId') }))));
+  app.get('/u/:memberId', (c) => landing(c, new URLSearchParams({ memberId: c.req.param('memberId') })));
 
   // --- assets ----------------------------------------------------------------
 

@@ -58,7 +58,7 @@ it.each([
     // An invite is to one group (2026-11-09): the card names it and who sent it.
     if (!autoJoin) {
         expect(screen.getByText('#launch')).toBeVisible()
-        expect(screen.getByText('Invited by Gagan')).toBeVisible()
+        expect(screen.getByText('Gagan invited you to this space')).toBeVisible()
     }
 })
 
@@ -74,5 +74,5 @@ it('a person’s link says whose direct message it opens', async () => {
     })
     await act(async () => {})
     expect(screen.getByText('Gagan')).toBeVisible()
-    expect(screen.getByText(/opens a direct message with/)).toBeVisible()
+    expect(screen.getByText(/Opens a direct message with them/)).toBeVisible()
 })
