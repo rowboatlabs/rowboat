@@ -12,7 +12,7 @@ import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Rows3, Trash2, UserPlus, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeftOpen, PenTool, Rows3, Trash2, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -996,7 +996,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             onMouseLeave={() => railPeekRef.current?.leave()}
                             className="spaces-header-button spaces-rail-reveal relative -mr-1"
                         >
-                            <PanelLeft className="size-4" />
+                            <PanelLeftOpen className="size-4" />
                             {railHasUnread && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 rounded-full bg-foreground" />}
                         </button>
                     </TooltipTrigger>
