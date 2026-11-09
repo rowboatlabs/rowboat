@@ -1,7 +1,7 @@
 import { OpenBrowserContext } from '@/contexts/browser-context';
 import { WorkspaceSessionTabs } from './components/code/workspace-session-tabs'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
-import { isOrgView, parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type OrgView, type SpacesLinkTarget } from '@/lib/spaces-navigation'
+import { isOrgView, lastSpaceLocation, parseSpacesLink, readLastSpace, resolveSpacesLocation, serverLandingSpaceId, type OrgView, type SpacesLinkTarget } from '@/lib/spaces-navigation'
 import { openServerDialog } from '@/lib/server-dialog'
 import { resolveSpacesLink } from '@/lib/spaces-link-open'
 import { ServerDialogs } from '@/components/spaces/server-dialogs'
@@ -951,9 +951,14 @@ function App() {
   const [isLiveNotesOpen, setIsLiveNotesOpen] = useState(false)
   const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
-  const [isSpacesOpen, setIsSpacesOpen] = useState(false)
+  // Spaces is open from the first frame (2026-11-09), in the space last
+  // left, so a launch never shows Local while the servers load; the landing
+  // effect below confirms the space once they have.
+  const [initialSpace] = useState(() => SPACES_ENABLED ? lastSpaceLocation() : null)
+  const [isSpacesOpen, setIsSpacesOpen] = useState(SPACES_ENABLED)
   // The space open in the Spaces view (org + space); the sidebar highlights it.
-  const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(null)
+  const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(() =>
+    initialSpace ? { orgId: initialSpace.orgId, spaceId: initialSpace.spaceId, ...(initialSpace.view ? { view: initialSpace.view } : {}) } : null)
   // Remember the last space opened (any route in) — the ⌥Tab switcher lands
   // there directly instead of opening the spaces flyout.
   useEffect(() => {
@@ -963,7 +968,7 @@ function App() {
     } catch { /* ignore */ }
   }, [spaceSelection])
   // What's selected inside the open space (general / topic / file) — part of the history.
-  const [railSelection, setRailSelection] = useState<RailSelection>({ kind: 'general' })
+  const [railSelection, setRailSelection] = useState<RailSelection>(() => initialSpace?.rail ?? { kind: 'general' })
   /**
    * The Spaces view correcting its own selection (the open space was deleted,
    * or the last server went away). Not a navigation — no history entry. The
@@ -5545,15 +5550,17 @@ function App() {
     else void navigateToView(lastLocalViewRef.current)
   }, [openSpaces, navigateToView])
 
-  // Spaces is where the app lands (2026-11-06), unless something already
-  // opened a view first (a deep link, a notification). Applied without a
-  // history entry, so Back doesn't lead to an Assistant nobody opened.
+  // Spaces is where the app lands (2026-11-06). It opens on the first frame
+  // in the space last left (initialSpace, 2026-11-09); once the servers load,
+  // this lands on that space if it's still there, or the first one, unless
+  // something already navigated (a deep link, a notification). No history
+  // entry, so Back doesn't lead anywhere nobody opened.
   const landedRef = useRef(false)
   useEffect(() => {
     if (landedRef.current || !SPACES_ENABLED || spacesLoading) return
     landedRef.current = true
     const current = currentViewStateRef.current
-    if (historyRef.current.back.length > 0 || current.type !== 'chat' || current.runId) return
+    if (historyRef.current.back.length > 0 || current.type !== 'spaces') return
     const target = resolveSpacesLocation(getSpacesOrgs(), readLastSpace())
     void applyViewState(target ? { type: 'spaces', ...target } : { type: 'spaces' })
   }, [spacesLoading, applyViewState])
