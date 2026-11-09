@@ -81,12 +81,22 @@ export const updateProfile = tool({
 export const listMembers = tool({
   name: 'list_members',
   description:
-    'People and agents, with names. Omit spaceId for everyone you can reach, sorted by display name. ' +
-    "Pass spaceId for that space's members, each with their role there (admin or member). This is how a name becomes a memberId — match displayName " +
-    '(case-insensitive, first name is usually enough); if several match, say so and ask. ' +
-    'Messages and reactions carry memberIds only; resolve them here before naming anyone.',
-  input: z.object({ spaceId: SpaceId.optional() }),
-  output: z.object({ members: z.array(SpaceMember.partial({ role: true, joinedAt: true })) }),
+    "A space's members, people and agents, each with their role there (admin or member) and when they joined. " +
+    'This is how a name becomes a memberId — match displayName (case-insensitive, first name is usually enough); ' +
+    'if several match, say so and ask. Messages and reactions carry memberIds only; resolve them here before naming anyone. ' +
+    'For people outside this space, list_contacts.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ members: z.array(SpaceMember) }),
+});
+
+export const listContacts = tool({
+  name: 'list_contacts',
+  description:
+    "Everyone your person can reach: the people they share a space with (DMs and archived spaces included) and the agents they own, sorted by display name. " +
+    'There is no list of everyone on the server; someone not here is reached by their invite link. ' +
+    'Use it to resolve a name to a memberId for open_direct or add_members.',
+  input: z.object({}),
+  output: z.object({ members: z.array(Member) }),
 });
 
 // --- spaces & membership --------------------------------------------------------
@@ -312,7 +322,7 @@ export const readThread = tool({
 export const searchSpace = tool({
   name: 'search_space',
   description:
-    'Search a space: messages, topic titles, and files (by extracted content or filename), ' +
+    'Search a space, or every space your person is in when spaceId is omitted: messages, topic titles, and files (by extracted content or filename), ' +
     'returned as three independently-ranked lists. Query words are AND-ed; a word that is a ' +
     "member's name also matches @-mentions of them. Filters narrow message hits and work alone: " +
     'from:<name>, mentions:<name> (me is you), in:<thread title>, has:link|image|file; a ' +
@@ -322,7 +332,8 @@ export const searchSpace = tool({
     'rather than raising the limit. Use before posting a new root to avoid duplicating a ' +
     'conversation, and to locate files without listing everything.',
   input: z.object({
-    spaceId: SpaceId,
+    /** One space; omit it to search every space your person is in (2026-11-09) — each hit then says which. */
+    spaceId: SpaceId.optional(),
     query: z.string().min(1).max(512),
     /** Narrow to specific categories; omit for all three. */
     kinds: z.array(SearchKind).optional(),
@@ -809,6 +820,7 @@ export const mcpTools = [
   whoami,
   updateProfile,
   listMembers,
+  listContacts,
   listSpaces,
   listAssets,
   openDirect,
@@ -865,6 +877,7 @@ export const agentOnlyMcpToolNames: ReadonlySet<string> = new Set([createAgent.n
 export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   whoami.name,
   listMembers.name,
+  listContacts.name,
   listSpaces.name,
   listAssets.name,
   readStream.name,

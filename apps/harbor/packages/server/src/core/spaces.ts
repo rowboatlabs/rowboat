@@ -303,19 +303,14 @@ export class Spaces {
   }
 
   /**
-   * The org roster (api.ts listOrgMembers): every member, people and agents,
-   * sorted by display name (case-insensitive, id breaks ties). Org-wide since
-   * 2026-09-29 (spec §5 answer 4): inside one org the org is the trust
-   * boundary, so anyone can find, DM, mention, or add anyone. It was bounded
-   * to shared spaces until then; guests, when built, get that bound back.
-   * Admins see nothing members do not.
+   * Your contacts (spec §3, 2026-11-09; the org roster until then): the
+   * people you share a space with now and the agents you own, sorted by name.
+   * There is no list of everyone on the server — discovery happens through
+   * invite links, off-platform.
    */
-  async listOrgMembers(_ctx: ActorCtx): Promise<Member[]> {
-    const members = await this.k.store.listAllMembers();
-    return members.sort(
-      (a, b) =>
-        a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }) || a.id.localeCompare(b.id),
-    );
+  async listContacts(ctx: ActorCtx): Promise<Member[]> {
+    await this.k.requireActiveMember(ctx);
+    return this.k.store.listContacts(ctx.memberId);
   }
 
   /**

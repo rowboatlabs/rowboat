@@ -525,6 +525,32 @@ export class PgStore implements Store {
     await this.sql.query('update members set availability = availability || $2::jsonb where id = $1', [id, JSON.stringify(patch)]);
   }
 
+  async listContacts(memberId: string): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      `select m.id, m.display_name, m.title, m.avatar_url, m.kind, m.owner_id, m.agent_kind, m.agent_connection, m.agent_instance, m.personal, m.super_agent, m.instructions, m.deactivated_at, m.removed_at, m.availability
+       from members m
+       where m.id <> $1 and m.deactivated_at is null and m.removed_at is null
+         and (
+           (m.kind = 'agent' and m.owner_id = $1)
+           or exists (
+             select 1 from memberships mine
+             join memberships theirs on theirs.space_id = mine.space_id and theirs.member_id = m.id
+             where mine.member_id = $1
+           )
+         )
+       order by lower(m.display_name), m.id`,
+      [memberId]);
+    return rows.map(rowToMember);
+  }
+
+  async listMembersByIds(ids: readonly string[]): Promise<Member[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.sql.query<MemberRow>(
+      'select id, display_name, title, avatar_url, kind, owner_id, agent_kind, agent_connection, agent_instance, personal, super_agent, instructions, deactivated_at, removed_at, availability from members where id = any($1::text[]) order by id',
+      [[...ids]]);
+    return rows.map(rowToMember);
+  }
+
   async putMember(member: Member): Promise<void> {
     // Kind, owner, and an agent's kind, connection and personal flag are
     // written once here and never updated: a person never becomes an agent or
@@ -1065,14 +1091,14 @@ export class PgStore implements Store {
   // strings arrive pre-quoted from toTsQueryParams — no user text ever
   // reaches tsquery syntax.
 
-  async searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]> {
+  async searchMessages(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<MessageSearchRow[]> {
     if (query.terms.length === 0 && !query.filtered) return [];
-    const params: unknown[] = [spaceId];
+    const params: unknown[] = [[...spaceIds]];
     const param = (v: unknown) => {
       params.push(v);
       return `$${params.length}`;
     };
-    const where = ['m.space_id = $1'];
+    const where = ['m.space_id = any($1::text[])'];
     if (query.terms.length > 0) {
       const [groups, wholes] = tsqueryArgs(query);
       where.push(`m.body_tsv @@ ${tsquerySql(param(groups), param(wholes))}`);
@@ -1099,34 +1125,35 @@ export class PgStore implements Store {
     return rows.map((r) => ({ message: rowToMessage(r), snippet: snippetAround(r.body, query) }));
   }
 
-  async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
+  async searchTopics(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<Topic[]> {
     if (query.terms.length === 0) return [];
     const rows = await this.sql.query<TopicRow>(
-      `${TOPIC_SELECT} where t.space_id = $1 and t.title_tsv @@ ${tsquerySql('$2', '$3')}
+      `${TOPIC_SELECT} where t.space_id = any($1::text[]) and t.title_tsv @@ ${tsquerySql('$2', '$3')}
        order by ts_rank(t.title_tsv, ${tsquerySql('$2', '$3')}) desc, t.created_at desc, t.id desc limit $4`,
-      [spaceId, ...tsqueryArgs(query), limit],
+      [[...spaceIds], ...tsqueryArgs(query), limit],
     );
     return rows.map(rowToTopic);
   }
 
-  async searchAssets(spaceId: string, query: SearchQuery, limit: number): Promise<AssetSearchRow[]> {
+  async searchAssets(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<AssetSearchRow[]> {
     if (query.terms.length === 0) return [];
-    const rows = await this.sql.query<AssetRow & { extracted: string | null; content_hit: boolean; path_hit: boolean }>(
-      `select a.id, a.path, a.version, a.updated_at, a.state, v.blob, s.extracted,
+    const rows = await this.sql.query<AssetRow & { space_id: string; extracted: string | null; content_hit: boolean; path_hit: boolean }>(
+      `select a.space_id, a.id, a.path, a.version, a.updated_at, a.state, v.blob, s.extracted,
               coalesce(s.tsv @@ ${tsquerySql('$2', '$3')}, false) as content_hit,
               (a.path ilike all($4::text[])) as path_hit
        from assets a
        join asset_versions v on v.space_id = a.space_id and v.asset_id = a.id and v.version = a.version
        left join asset_search s on s.space_id = a.space_id and s.asset_id = a.id
-       where a.space_id = $1 and a.state = 'live'
+       where a.space_id = any($1::text[]) and a.state = 'live'
          and (coalesce(s.tsv @@ ${tsquerySql('$2', '$3')}, false) or a.path ilike all($4::text[]))
        order by (a.path ilike all($4::text[])) desc,
                 coalesce(ts_rank(s.tsv, ${tsquerySql('$2', '$3')}), 0) desc,
                 a.updated_at desc
        limit $5`,
-      [spaceId, ...tsqueryArgs(query), toPathPatterns(query), limit],
+      [[...spaceIds], ...tsqueryArgs(query), toPathPatterns(query), limit],
     );
     return rows.map((r) => ({
+      spaceId: r.space_id,
       record: this.assetRow(r),
       ...(r.content_hit && r.extracted ? { snippet: snippetAround(r.extracted, query) } : {}),
     }));

@@ -66,10 +66,10 @@ describe('the registry', () => {
 });
 
 describe('kind and connection', () => {
-  it('defaults to custom/contract, and everyone sees them on the roster', async () => {
+  it('defaults to custom/contract, and its owner sees them in their contacts', async () => {
     const created = await as('dev-ramnique').post('/v1/agents', { displayName: 'Scout' });
     expect(created.body.agent).toMatchObject({ agentKind: 'custom', agentConnection: 'contract' });
-    const roster = (await as('dev-harsh').get('/v1/members')).body.members as Member[];
+    const roster = (await as('dev-ramnique').get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === created.body.agent.id)).toMatchObject({ agentKind: 'custom', agentConnection: 'contract' });
     expect(roster.find((m) => m.id === 'harsh')?.agentKind).toBeUndefined();
   });

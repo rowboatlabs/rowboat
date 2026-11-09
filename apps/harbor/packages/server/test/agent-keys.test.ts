@@ -51,11 +51,11 @@ describe('adding an agent', () => {
     expect((await as('dev-ramnique').get('/v1/agents')).body.agents).toEqual([]);
   });
 
-  it('puts a new agent, in no space yet, on the org roster — so anyone can add it to a space', async () => {
+  it('a new agent, in no space yet, is its owner’s contact and nobody else’s; the owner adds it to a space (2026-11-09)', async () => {
     const fresh = (await as('dev-harsh').post('/v1/agents', { displayName: 'Fresh' })).body.agent as Member;
-    const roster = (token: string) => as(token).get('/v1/members').then((r) => (r.body.members as Member[]).map((m) => m.id));
-    expect(await roster('dev-harsh')).toContain(fresh.id);
-    expect(await roster('dev-gagan')).toContain(fresh.id);
+    const contacts = (token: string) => as(token).get('/v1/contacts').then((r) => (r.body.members as Member[]).map((m) => m.id));
+    expect(await contacts('dev-harsh')).toContain(fresh.id);
+    expect(await contacts('dev-gagan')).not.toContain(fresh.id);
     expect((await as('dev-harsh').post(`/v1/spaces/${spaceId}/members`, { memberIds: [fresh.id], actingMode: 'direct' })).status).toBe(200);
   });
 

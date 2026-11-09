@@ -69,14 +69,14 @@ describe('rosters are one statement', () => {
     expect(result.map((m) => m.id)).toEqual(['ramnique', 'harsh', 'gagan']);
   });
 
-  it('listOrgMembers: one statement, the whole org, sorted by name case-insensitively', async () => {
-    const { result, statements: n } = await count(() => harbor.service.listOrgMembers({ memberId: 'ramnique' }));
-    expect(n).toBe(1);
-    expect(result.map((m) => m.id)).toEqual(['gagan', 'harsh', 'loner', 'ramnique']);
-    // The same answer for a member who shares no space (org-wide since 2026-09-29).
-    const alone = await count(() => harbor.service.listOrgMembers({ memberId: 'loner' }));
-    expect(alone.statements).toBe(1);
-    expect(alone.result.map((m) => m.id)).toEqual(['gagan', 'harsh', 'loner', 'ramnique']);
+  it('listContacts: the gate and one statement — who you share a space with, sorted by name (2026-11-09)', async () => {
+    const { result, statements: n } = await count(() => harbor.service.listContacts({ memberId: 'ramnique' }));
+    expect(n).toBe(2);
+    expect(result.map((m) => m.id)).toEqual(['gagan', 'harsh']);
+    // A member who shares no space has no contacts.
+    const alone = await count(() => harbor.service.listContacts({ memberId: 'loner' }));
+    expect(alone.statements).toBe(2);
+    expect(alone.result).toEqual([]);
   });
 
   it('the notification decision reads the roster once for a root message', async () => {

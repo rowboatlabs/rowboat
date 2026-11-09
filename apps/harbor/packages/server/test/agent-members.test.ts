@@ -78,8 +78,8 @@ describe('on the wire', () => {
     const space = await ramnique.get(`/v1/spaces/${spaceId}/members`);
     expect(space.body.members.find((m: Member) => m.id === agent.id)?.kind).toBe('agent');
     expect(space.body.members.find((m: Member) => m.id === 'ramnique')?.kind).toBe('human');
-    const org = await ramnique.get('/v1/members');
-    expect(org.body.members.find((m: Member) => m.id === agent.id)?.kind).toBe('agent');
+    const contacts = await ramnique.get('/v1/contacts');
+    expect(contacts.body.members.find((m: Member) => m.id === agent.id)?.kind).toBe('agent');
     const tool = await ramAgent.callTool({ name: 'list_members', arguments: { spaceId } });
     const members = (tool.structuredContent as { members: Member[] }).members;
     expect(members.find((m) => m.id === agent.id)?.kind).toBe('agent');

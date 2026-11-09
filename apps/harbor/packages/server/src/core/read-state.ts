@@ -130,8 +130,8 @@ export class ReadState {
       };
     });
     const last = page[page.length - 1];
-    // Names for everyone on the page, from the roster the caller may see —
-    // actors and mention labels alike, so no client walks spaces for names.
+    // Names for everyone on the page — actors and mention labels alike, departed
+    // members included, so no client walks spaces for names (by id since 2026-11-09).
     const wanted = new Set<string>();
     for (const item of items) {
       for (const actor of item.actors) wanted.add(actor.memberId);
@@ -140,7 +140,7 @@ export class ReadState {
     }
     const names: Record<string, string> = {};
     if (wanted.size > 0) {
-      for (const m of await this.spaces.listOrgMembers(ctx)) if (wanted.has(m.id)) names[m.id] = m.displayName;
+      for (const m of await this.k.store.listMembersByIds([...wanted])) names[m.id] = m.displayName;
     }
     return {
       items,

@@ -67,6 +67,7 @@ describe('agent face (MCP)', () => {
       'leave_space',
       'list_archived_threads',
       'list_assets',
+      'list_contacts',
       'list_members',
       'list_my_threads',
       'list_spaces',

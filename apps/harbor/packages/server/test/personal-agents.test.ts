@@ -58,8 +58,8 @@ describe('creating one', () => {
     expect(await harbor.store.getMember(personal.id)).toMatchObject({ personal: true });
   });
 
-  it('is on everyone’s roster, marked, like any member', async () => {
-    const roster = (await as('dev-harsh').get('/v1/members')).body.members as Member[];
+  it('is in its owner’s contacts, marked, like any agent they own', async () => {
+    const roster = (await as('dev-gagan').get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === personal.id)).toMatchObject({ personal: true, ownerId: 'gagan' });
   });
 
@@ -150,7 +150,7 @@ describe('switching it (2026-10-27)', () => {
     const r = await setPersonal('dev-harsh', channel, true);
     expect(r.status).toBe(200);
     expect(r.body.agent).toMatchObject({ id: channel.id, personal: true });
-    const roster = (await as('dev-gagan').get('/v1/members')).body.members as Member[];
+    const roster = (await as('dev-harsh').get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === channel.id)).toMatchObject({ personal: true });
     const { invocations } = await post('dev-gagan', `${mention(channel)} one more`);
     expect(invocations[0]).toMatchObject({ agentId: channel.id, state: 'refused', refusal: { reason: 'not_permitted' } });

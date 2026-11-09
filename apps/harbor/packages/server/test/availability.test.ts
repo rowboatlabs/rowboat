@@ -35,7 +35,12 @@ describe('notification hours', () => {
 });
 
 let harbor: RunningHarbor;
-beforeAll(async () => { harbor = await startTestHarbor({ seedMembers: [{ id: 'alice', displayName: 'Alice' }, { id: 'bob', displayName: 'Bob' }] }); });
+beforeAll(async () => {
+  harbor = await startTestHarbor({ seedMembers: [{ id: 'alice', displayName: 'Alice' }, { id: 'bob', displayName: 'Bob' }] });
+  // Contacts are the people you share a space with (2026-11-09): Bob reads Alice through one.
+  const shared = await as('bob').post('/v1/spaces', { name: 'Shared' });
+  expect((await as('bob').post(`/v1/spaces/${shared.body.space.id}/members`, { memberIds: ['alice'], actingMode: 'direct' })).status).toBe(200);
+});
 afterAll(async () => { await harbor.close(); });
 const as = (id: string) => restClient(harbor, `dev-${id}`);
 
@@ -49,7 +54,7 @@ it('persists partial availability edits on both faces, publishes the profile and
   expect(result.isError).not.toBe(true);
   expect((await as('alice').get('/v1/me')).body.member.availability).toMatchObject({ status, schedule, manualAway: true });
   await as('alice').put('/v1/me', { title: 'Engineer' });
-  expect((await as('bob').get('/v1/members')).body.members.find((m: { id: string }) => m.id === 'alice').availability.status).toEqual(status);
+  expect((await as('bob').get('/v1/contacts')).body.members.find((m: { id: string }) => m.id === 'alice').availability.status).toEqual(status);
   expect((await as('alice').put('/v1/me', { availability: { schedule: { ...schedule, timeZone: 'Nope' } } })).status).toBe(400);
   await as('alice').put('/v1/me', { availability: { manualAway: false, status: null, schedule: null } });
   await agent.close(); observer.close();
@@ -62,15 +67,15 @@ it('manual away overrides active devices; idle tabs cannot hide an active one; D
   try {
     await as('alice').put('/v1/me', { availability: { manualAway: true } });
     first.send({ kind: 'activity', active: true });
-    expect((await as('bob').get('/v1/members')).body.onlinePeople).not.toContain('alice');
+    expect((await as('bob').get('/v1/contacts')).body.onlinePeople).not.toContain('alice');
     await as('alice').put('/v1/me', { availability: { manualAway: false } });
     await observer.until(frames => frames.some(f => f.kind === 'member_presence' && f.memberId === 'alice' && f.online));
     first.send({ kind: 'activity', active: false });
     await as('alice').put('/v1/me', { availability: { pausedUntil: new Date(Date.now() + 60_000).toISOString() } });
-    expect((await as('bob').get('/v1/members')).body.onlinePeople).toContain('alice');
+    expect((await as('bob').get('/v1/contacts')).body.onlinePeople).toContain('alice');
     second.send({ kind: 'activity', active: false });
     await observer.until(frames => frames.some(f => f.kind === 'member_presence' && f.memberId === 'alice' && !f.online));
-    expect((await as('bob').get('/v1/members')).body.onlinePeople).not.toContain('alice');
+    expect((await as('bob').get('/v1/contacts')).body.onlinePeople).not.toContain('alice');
   } finally { first.close(); second.close(); observer.close(); }
 });
 
@@ -95,9 +100,9 @@ it('expires a connected client with no activity reports after ten minutes', asyn
   await as('alice').put('/v1/me', { availability: { manualAway: false } });
   const client = await liveClient(harbor, 'dev-alice');
   try {
-    expect((await as('bob').get('/v1/members')).body.onlinePeople).toContain('alice');
+    expect((await as('bob').get('/v1/contacts')).body.onlinePeople).toContain('alice');
     const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 10 * 60_000 + 1);
-    try { expect((await as('bob').get('/v1/members')).body.onlinePeople).not.toContain('alice'); }
+    try { expect((await as('bob').get('/v1/contacts')).body.onlinePeople).not.toContain('alice'); }
     finally { clock.mockRestore(); }
   } finally { client.close(); }
 });

@@ -28,6 +28,9 @@ beforeAll(async () => {
   expect(added.status).toBe(200);
   local = added.body.agent;
   localKey = added.body.key.secret;
+  // Harsh reads presence off his contacts (2026-11-09): a space with Gagan and the agent puts both there.
+  const space = (await as('dev-gagan').post('/v1/spaces', { name: 'Desk' })).body.space.id;
+  await as('dev-gagan').post(`/v1/spaces/${space}/members`, { memberIds: ['harsh', local.id], actingMode: 'direct' });
 });
 
 afterAll(async () => {
@@ -35,9 +38,9 @@ afterAll(async () => {
 });
 
 async function roster(token: string) {
-  const r = await as(token).get('/v1/members');
+  const r = await as(token).get('/v1/contacts');
   expect(r.status).toBe(200);
-  return routes.listOrgMembers.response.parse(r.body);
+  return routes.listContacts.response.parse(r.body);
 }
 
 const presence = (frames: LiveClient['frames'], online: boolean) =>

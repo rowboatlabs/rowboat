@@ -82,24 +82,19 @@ describe('agent face parity', () => {
     expect(other.member.id).toBe('harsh');
   });
 
-  it('list_members without spaceId is the whole org roster, the same for everyone (2026-09-29)', async () => {
-    const everyone = ['gagan', 'harsh', 'loner', 'ramnique'];
-    const mine = await call<{ members: Member[] }>(ramAgent, 'list_members');
-    // Sorted by display name, case-insensitively.
-    expect(mine.members.map((m) => m.id)).toEqual(everyone);
-    // harsh shares no space with gagan, and still finds him.
-    const harshs = await call<{ members: Member[] }>(harshAgent, 'list_members');
-    expect(harshs.members.map((m) => m.id)).toEqual(everyone);
-    // A member of nothing finds everyone too.
+  it('list_contacts is who you share a space with, each their own (2026-11-09); list_members needs a space', async () => {
+    const mine = await call<{ members: Member[] }>(ramAgent, 'list_contacts');
+    expect(mine.members.map((m) => m.id)).toEqual(['gagan', 'harsh']);
+    const harshs = await call<{ members: Member[] }>(harshAgent, 'list_contacts');
+    expect(harshs.members.map((m) => m.id)).toEqual(['ramnique']);
     const lonerAgent = await agentClient(harbor, 'dev-loner');
     try {
-      const alone = await call<{ members: Member[] }>(lonerAgent, 'list_members');
-      expect(alone.members.map((m) => m.id)).toEqual(everyone);
+      expect((await call<{ members: Member[] }>(lonerAgent, 'list_contacts')).members).toEqual([]);
     } finally {
       await lonerAgent.close();
     }
     // Same answer as the render face.
-    expect((await ramnique.get('/v1/members')).body.members).toEqual(mine.members);
+    expect((await ramnique.get('/v1/contacts')).body.members).toEqual(mine.members);
   });
 
   it('list_members with spaceId matches REST listMembers, and refuses non-members', async () => {

@@ -1023,24 +1023,18 @@ export const routes = {
     response: z.object({ removed: z.boolean() }),
   },
   /**
-   * The org roster: every member of the org, people and agents, sorted by
-   * display name (spec §5 answer 4, built 2026-09-29 — inside one org the org
-   * is the trust boundary, as inside one Slack workspace). Until then it was
-   * bounded to people sharing a space with the caller. Both faces use it: the
-   * app's pickers (New message, Add people, mentions) and the agent's
-   * `list_members` resolve a name to a memberId here.
+   * Your contacts (spec §3, §5; 2026-11-09, replacing the org roster): the
+   * people you share a space with now, DMs and archived spaces included, and
+   * the agents you own — sorted by display name, departed members left out.
+   * Nothing lists everyone on the server. `online` / `onlinePeople` are the
+   * presence lists the roster carried, over these members.
    */
-  listOrgMembers: {
+  listContacts: {
     method: 'GET',
-    path: '/v1/members',
+    path: '/v1/contacts',
     response: z.object({
       members: z.array(Member),
-      /**
-       * The agents holding a live connection now (local agents, 2026-10-28):
-       * only agents whose connector holds their own key, since an agent
-       * Harbor runs is always reachable. Kept fresh by `agent_presence`.
-       * Absent from servers before it.
-       */
+      /** The agents holding a live connection now (local agents, 2026-10-28); `agent_presence` keeps this fresh. */
       online: z.array(MemberId).optional(),
       /** People with recent client activity and no manual away override (2026-11-05); member_presence keeps this fresh. */
       onlinePeople: z.array(MemberId).optional(),
@@ -1688,6 +1682,26 @@ export const routes = {
     params: z.object({ spaceId: SpaceId }),
     query: z.object({
       q: z.string().min(1).max(512),
+      kinds: z
+        .string()
+        .transform((s) => s.split(','))
+        .pipe(z.array(SearchKind))
+        .optional(),
+      limit: z.coerce.number().int().positive().max(50).optional(),
+    }),
+    response: SearchResults,
+  },
+  /**
+   * The same search over every space the caller is in (2026-11-09, spec §5):
+   * DMs and archived spaces included, every hit carrying its `spaceId`.
+   * `spaceId` narrows it to one space, the per-space route's answer.
+   */
+  searchAll: {
+    method: 'GET',
+    path: '/v1/search',
+    query: z.object({
+      q: z.string().min(1).max(512),
+      spaceId: SpaceId.optional(),
       kinds: z
         .string()
         .transform((s) => s.split(','))

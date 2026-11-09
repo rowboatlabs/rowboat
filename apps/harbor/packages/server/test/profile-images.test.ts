@@ -66,7 +66,7 @@ describe('profile images over the render face', () => {
     expect(member.avatarUrl).toBe(`${harbor.url}/v1/images/${blobHash(PNG_A)}`);
 
     expect((await gagan.get('/v1/me')).body.member.avatarUrl).toBe(member.avatarUrl);
-    const roster = (await admin.get('/v1/members')).body.members as Member[];
+    const roster = (await admin.get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === 'gagan')?.avatarUrl).toBe(member.avatarUrl);
   });
 

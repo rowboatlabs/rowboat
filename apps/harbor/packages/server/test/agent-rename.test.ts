@@ -36,7 +36,7 @@ describe('PUT /v1/agents/:agentId/name', () => {
     const r = await rename('dev-harsh', '  Hermes \n Prime ');
     expect(r.status).toBe(200);
     expect(r.body.agent).toMatchObject({ id: agent.id, displayName: 'Hermes Prime', kind: 'agent', ownerId: 'harsh' });
-    const roster = (await as('dev-ramnique').get('/v1/members')).body.members as Member[];
+    const roster = (await as('dev-harsh').get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === agent.id)?.displayName).toBe('Hermes Prime');
   });
 

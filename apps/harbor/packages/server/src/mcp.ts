@@ -159,13 +159,10 @@ async function dispatch(
     }
     case 'update_profile':
       return { member: await service.updateProfile(ctx, args as { displayName?: string; title?: string }) };
-    case 'list_members': {
-      const a = args as { spaceId?: string };
-      const members = a.spaceId !== undefined
-        ? await service.listMembers(ctx, a.spaceId)
-        : await service.listOrgMembers(ctx);
-      return { members };
-    }
+    case 'list_members':
+      return { members: await service.listMembers(ctx, (args as { spaceId: string }).spaceId) };
+    case 'list_contacts':
+      return { members: await service.listContacts(ctx) };
     // --- spaces & membership --------------------------------------------------
     case 'open_direct': {
       const a = args as { memberId: string };
@@ -510,7 +507,7 @@ async function dispatch(
     case 'delete_agent':
       return service.superAgentDelete(ctx, args as { spaceId: string; threadRootId: string; agentId: string; reason: string });
     case 'search_space': {
-      const a = args as { spaceId: string; query: string; kinds?: SearchKind[]; limit?: number };
+      const a = args as { spaceId?: string; query: string; kinds?: SearchKind[]; limit?: number };
       return service.search(ctx, a.spaceId, a.query, {
         ...(a.kinds !== undefined ? { kinds: a.kinds } : {}),
         ...(a.limit !== undefined ? { limit: a.limit } : {}),

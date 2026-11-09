@@ -207,6 +207,21 @@ describe('asset search', () => {
   });
 });
 
+describe('across every space you are in (2026-11-09)', () => {
+  it('searches every space the caller is in when no space is given, each hit saying which; a stranger’s space is not searched', async () => {
+    const other = await service.createSpace(ram, 'Elsewhere');
+    await service.postMessage(ram, other.id, { body: 'shipping the elsewhere build', actingMode: 'direct' });
+    await service.postMessage(ram, spaceId, { body: 'shipping the main build', actingMode: 'direct' });
+    const everywhere = await service.search(ram, undefined, 'shipping', { kinds: ['messages'] });
+    expect(everywhere.messages.map((h) => h.spaceId).sort()).toEqual([other.id, spaceId].sort());
+    const one = await service.search(ram, spaceId, 'shipping', { kinds: ['messages'] });
+    expect(one.messages.map((h) => h.spaceId)).toEqual([spaceId]);
+    // Harsh is not in Elsewhere: his everywhere-search never reaches it.
+    const harshs = await service.search(harsh, undefined, 'shipping', { kinds: ['messages'] });
+    expect(harshs.messages.map((h) => h.spaceId)).toEqual([spaceId]);
+  });
+});
+
 describe('shape and scoping', () => {
   it('honors kinds and per-category limit with truncated flags', async () => {
     for (let i = 0; i < 4; i++) {

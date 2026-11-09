@@ -203,6 +203,7 @@ export interface MessageSearchRow {
 
 /** An asset search hit: snippet present only for extracted-content matches. */
 export interface AssetSearchRow {
+  spaceId: string;
   record: AssetRecord;
   snippet?: string;
 }
@@ -262,6 +263,15 @@ export interface Store {
   listAllMembers(): Promise<Member[]>;
   /** A space's roster in join order, each with their role there — one statement (2026-09-22; roles 2026-11-09). */
   listSpaceMembers(spaceId: string): Promise<SpaceMember[]>;
+  /**
+   * A member's contacts (spec §3, 2026-11-09): every active person who shares
+   * a space with them now, DMs and archived spaces included, plus the agents
+   * they own — one statement, sorted by display name (case-insensitive, id
+   * breaks ties). The member themself is not in it.
+   */
+  listContacts(memberId: string): Promise<Member[]>;
+  /** The rows for these ids, departed included — names for authors on a page (2026-11-09; the roster used to serve this). One statement. */
+  listMembersByIds(ids: readonly string[]): Promise<Member[]>;
   /**
    * Every member who shares a space (DMs included) with `memberId`, plus the
    * member themself — one statement (2026-09-22). The store answers the
@@ -430,11 +440,11 @@ export interface Store {
   // protocol search.ts for ordering semantics). Tombstones never match
   // (their bodies are blank); deleted assets are filtered, not de-indexed.
   /** Body matches, newest first. */
-  searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]>;
+  searchMessages(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<MessageSearchRow[]>;
   /** Title matches, best first. */
-  searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]>;
+  searchTopics(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<Topic[]>;
   /** Live assets by extracted content or path; path matches rank first. */
-  searchAssets(spaceId: string, query: SearchQuery, limit: number): Promise<AssetSearchRow[]>;
+  searchAssets(spaceIds: readonly string[], query: SearchQuery, limit: number): Promise<AssetSearchRow[]>;
 
   // reactions — per-(member, emoji) toggles on messages
   getReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<StoredReaction | undefined>;

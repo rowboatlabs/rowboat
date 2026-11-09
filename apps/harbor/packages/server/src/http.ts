@@ -330,9 +330,9 @@ export function buildHttpApp(deps: {
     return reply(c, routes.setSpaceRole.response, { membership: await service.setSpaceRole(actor(c), spaceId, memberId, input) });
   });
 
-  app.get(routes.listOrgMembers.path, async (c) => {
-    const members = await service.listOrgMembers(actor(c));
-    return reply(c, routes.listOrgMembers.response, { members, online: service.onlineAgents(members), onlinePeople: service.onlinePeople(members) });
+  app.get(routes.listContacts.path, async (c) => {
+    const members = await service.listContacts(actor(c));
+    return reply(c, routes.listContacts.response, { members, online: service.onlineAgents(members), onlinePeople: service.onlinePeople(members) });
   });
 
   app.post('/v1/spaces/:spaceId/leave', async (c) => {
@@ -892,6 +892,20 @@ export function buildHttpApp(deps: {
     });
     const topics = await service.listTopics(actor(c), spaceId, q.includeArchived ?? false);
     return reply(c, routes.listTopics.response, { topics });
+  });
+
+  app.get(routes.searchAll.path, async (c) => {
+    const q = parseWith(routes.searchAll.query, {
+      q: c.req.query('q'),
+      ...(c.req.query('spaceId') !== undefined ? { spaceId: c.req.query('spaceId') } : {}),
+      ...(c.req.query('kinds') !== undefined ? { kinds: c.req.query('kinds') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    const results = await service.search(actor(c), q.spaceId, q.q, {
+      ...(q.kinds !== undefined ? { kinds: q.kinds } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    });
+    return reply(c, routes.searchAll.response, results);
   });
 
   app.get('/v1/spaces/:spaceId/search', async (c) => {

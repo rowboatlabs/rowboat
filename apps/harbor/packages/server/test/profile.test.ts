@@ -19,6 +19,8 @@ beforeAll(async () => {
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
     ],
+    // One shared space, so each is the other's contact (2026-11-09).
+    seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
   });
   gaganAgent = await agentClient(harbor, 'dev-gagan', { agentName: 'Rowboat' });
 });
@@ -35,7 +37,7 @@ describe('PUT /v1/me', () => {
     expect(r.body.member).toMatchObject({ id: 'gagan', displayName: 'Gagan P', title: 'Founding engineer' });
 
     expect((await as('dev-gagan').get('/v1/me')).body.member).toEqual(r.body.member);
-    const roster = (await as('dev-ramnique').get('/v1/members')).body.members as Member[];
+    const roster = (await as('dev-ramnique').get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === 'gagan')).toMatchObject({ displayName: 'Gagan P', title: 'Founding engineer' });
   });
 
@@ -129,7 +131,7 @@ it('broadcasts persisted profile updates to active members only', async () => {
       const frame = client.frames.find(f => f.kind === 'profile_updated');
       expect(frame).toMatchObject({ member: updated.body.member });
     }
-    expect((await as('dev-ramnique').get('/v1/members')).body.members).toContainEqual(updated.body.member);
+    expect((await as('dev-ramnique').get('/v1/contacts')).body.members).toContainEqual(updated.body.member);
     expect(received).toEqual([]);
     const publish = vi.spyOn(harbor.hub, 'publishToMember');
     await as('dev-gagan').put('/v1/me', { title: 'Profile test' });

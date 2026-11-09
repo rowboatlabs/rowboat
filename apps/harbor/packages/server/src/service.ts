@@ -423,8 +423,12 @@ export class HarborService {
   setAgentProfile(ctx: ActorCtx, agentId: string, input: { title?: string; instructions?: string }): Promise<Member> {
     return this.agents.setProfile(ctx, agentId, input);
   }
-  listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
-    return this.spaces.listOrgMembers(ctx);
+  listContacts(ctx: ActorCtx): Promise<Member[]> {
+    return this.spaces.listContacts(ctx);
+  }
+  /** Display names for these member ids, departed included: what a page or a prompt needs to label authors (2026-11-09). */
+  async namesFor(ids: readonly string[]): Promise<Map<string, string>> {
+    return new Map((await this.k.store.listMembersByIds([...new Set(ids)])).map((m) => [m.id, m.displayName]));
   }
   /** Of these members, the agents whose connector is connected now (local agents, 2026-10-28). */
   onlinePeople(members: readonly Member[]): string[] {
@@ -704,7 +708,7 @@ export class HarborService {
   }
   search(
     ctx: ActorCtx,
-    spaceId: string,
+    spaceId: string | undefined,
     rawQuery: string,
     opts?: { kinds?: SearchKind[]; limit?: number },
   ): Promise<SearchResults> {

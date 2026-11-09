@@ -51,8 +51,8 @@ describe('setting it', () => {
     expect(saved).toMatchObject({ title: 'Reviews pull requests', instructions: INSTRUCTIONS });
     await harsh.until((frames) => frames.some((f) => f.kind === 'profile_updated' && f.member.id === agent.id && f.member.instructions === INSTRUCTIONS), 'profile_updated');
     harsh.close();
-    // Everyone reads them on the roster.
-    const roster = routes.listOrgMembers.response.parse((await as('dev-harsh').get('/v1/members')).body);
+    // Everyone in the space reads them on its roster.
+    const roster = routes.listMembers.response.parse((await as('dev-harsh').get(`/v1/spaces/${spaceId}/members`)).body);
     expect(roster.members.find((m) => m.id === agent.id)).toMatchObject({ title: 'Reviews pull requests', instructions: INSTRUCTIONS });
   });
 

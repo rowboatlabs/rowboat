@@ -9,7 +9,6 @@ import { attachmentLinks, buildPrompt, type Attachment } from './prompt.js';
 /** The prompt for this invocation: the request, the thread after `deliveredOffset`, the files. */
 export async function requestPrompt(env: ConnectorEnv, invocation: Invocation, deliveredOffset: number | undefined): Promise<string> {
   const { spaceId, threadRootId } = invocation.conversation;
-  const names = new Map((await quietly(env, () => env.service.listOrgMembers(env.ctx), [])).map((m) => [m.id, m.displayName]));
   const trigger = await quietly(env, () => env.service.getMessage(env.ctx, spaceId, invocation.trigger.messageId), undefined);
   const after = deliveredOffset ?? 0;
   const context: Message[] = [];
@@ -24,6 +23,8 @@ export async function requestPrompt(env: ConnectorEnv, invocation: Invocation, d
   }
   const attachments = await attachmentsOf(env, spaceId, invocation.trigger.body);
   const earlierAttachments = (await Promise.all(context.map((m) => attachmentsOf(env, spaceId, m.body)))).flat();
+  // Names for everyone the prompt mentions, by id (2026-11-09; the roster served this before).
+  const names = await quietly(env, () => env.service.namesFor(namedIn([...(trigger ? [trigger] : []), ...context], invocation)), new Map<string, string>());
   return buildPrompt({
     invocation,
     agentId: env.agent.id,
@@ -43,6 +44,16 @@ async function attachmentsOf(env: ConnectorEnv, spaceId: string, body: string): 
     if (blob) found.push({ name, mime: blob.mime, size: blob.size, hash });
   }
   return found;
+}
+
+/** Every member id a prompt may need a name for: the invoker, the authors and mentions of the messages in it. */
+export function namedIn(messages: readonly Message[], invocation: Invocation): string[] {
+  const ids = new Set<string>([invocation.trigger.authorId, invocation.agentId]);
+  for (const m of messages) {
+    ids.add(m.author.memberId);
+    for (const id of m.mentions) ids.add(id);
+  }
+  return [...ids];
 }
 
 /** A call whose failure is logged and replaced by `fallback`. */

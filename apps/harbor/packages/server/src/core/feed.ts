@@ -1073,17 +1073,34 @@ export class Feed {
    * (which thread a hit lives in, which topic annotates it) is joined at
    * query time, never copied into any index.
    */
+  /**
+   * One space, or every space the caller is in when `spaceId` is undefined
+   * (2026-11-09): DMs and archived spaces included, every hit saying which.
+   * Names in `from:` and `mentions:` resolve against the space's roster, or
+   * the caller's contacts and themself across spaces.
+   */
   async search(
     ctx: ActorCtx,
-    spaceId: string,
+    spaceId: string | undefined,
     rawQuery: string,
     opts?: { kinds?: SearchKind[]; limit?: number },
   ): Promise<SearchResults> {
-    await this.k.requireMember(ctx, spaceId);
+    let spaceIds: string[];
+    let roster: Member[];
+    if (spaceId !== undefined) {
+      await this.k.requireMember(ctx, spaceId);
+      spaceIds = [spaceId];
+      roster = await this.k.store.listSpaceMembers(spaceId);
+    } else {
+      await this.k.requireActiveMember(ctx);
+      spaceIds = (await this.k.store.listSpacesFor(ctx.memberId, { includeDirect: true })).map((s) => s.id);
+      const me = await this.k.store.getMember(ctx.memberId);
+      roster = [...(me ? [me] : []), ...(await this.k.store.listContacts(ctx.memberId))];
+    }
     const limit = Math.min(opts?.limit ?? 10, 50);
     const kinds = new Set<SearchKind>(opts?.kinds ?? ['messages', 'topics', 'assets']);
 
-    const query = parseSearchQuery(rawQuery, await this.k.store.listSpaceMembers(spaceId), ctx.memberId);
+    const query = parseSearchQuery(rawQuery, roster, ctx.memberId);
 
     const empty: SearchResults = {
       messages: [],
@@ -1091,7 +1108,7 @@ export class Feed {
       assets: [],
       truncated: { messages: false, topics: false, assets: false },
     };
-    if (query.terms.length === 0 && !query.filtered) return empty;
+    if ((query.terms.length === 0 && !query.filtered) || spaceIds.length === 0) return empty;
     const results = empty;
     // A filter is about messages (search.ts SearchFilters): who wrote one,
     // whom it mentions, its thread, its links. Discussions and files have
@@ -1103,17 +1120,19 @@ export class Feed {
 
     if (kinds.has('messages')) {
       // limit+1 detects truncation without a count query.
-      const rows = await this.k.store.searchMessages(spaceId, query, limit + 1);
+      const rows = await this.k.store.searchMessages(spaceIds, query, limit + 1);
       results.truncated.messages = rows.length > limit;
       const titleByRoot = new Map<string, string>();
       for (const { message, snippet } of rows.slice(0, limit)) {
         const rootId = message.threadRoot ?? message.id;
-        if (!titleByRoot.has(rootId)) {
-          const topic = await this.k.store.getTopicByRoot(spaceId, rootId);
-          if (topic) titleByRoot.set(rootId, topic.title);
+        const rootKey = `${message.spaceId}/${rootId}`;
+        if (!titleByRoot.has(rootKey)) {
+          const topic = await this.k.store.getTopicByRoot(message.spaceId, rootId);
+          if (topic) titleByRoot.set(rootKey, topic.title);
         }
-        const topicTitle = titleByRoot.get(rootId);
+        const topicTitle = titleByRoot.get(rootKey);
         results.messages.push({
+          spaceId: message.spaceId,
           messageId: message.id,
           threadRootId: rootId,
           ...(topicTitle !== undefined ? { topicTitle } : {}),
@@ -1125,16 +1144,16 @@ export class Feed {
       }
     }
     if (kinds.has('topics')) {
-      const rows = await this.k.store.searchTopics(spaceId, query, limit + 1);
+      const rows = await this.k.store.searchTopics(spaceIds, query, limit + 1);
       results.truncated.topics = rows.length > limit;
       results.topics = rows.slice(0, limit).map((topic) => ({ topic }));
     }
     if (kinds.has('assets')) {
-      const rows = await this.k.store.searchAssets(spaceId, query, limit + 1);
+      const rows = await this.k.store.searchAssets(spaceIds, query, limit + 1);
       results.truncated.assets = rows.length > limit;
-      results.assets = rows.slice(0, limit).map(({ record, snippet }) => {
+      results.assets = rows.slice(0, limit).map(({ spaceId: hitSpaceId, record, snippet }) => {
         const { state: _live, ...asset } = this.assets.toAsset(record);
-        return { ...asset, ...(snippet !== undefined ? { snippet } : {}) };
+        return { spaceId: hitSpaceId, ...asset, ...(snippet !== undefined ? { snippet } : {}) };
       });
     }
     return results;

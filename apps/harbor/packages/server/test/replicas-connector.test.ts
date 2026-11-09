@@ -368,12 +368,12 @@ describe('the Replicas connector starting up', () => {
     let releaseList!: () => void;
     const listHeld = new Promise<void>((r) => (releaseList = r));
     vi.spyOn(service, 'listAgentInvocations').mockImplementationOnce(async (...args) => (await listHeld, list(...args)));
-    const members = service.listOrgMembers.bind(service);
+    const members = service.namesFor.bind(service);
     let releasePrompt!: () => void;
     const promptHeld = new Promise<void>((r) => (releasePrompt = r));
     let first = true;
-    vi.spyOn(service, 'listOrgMembers').mockImplementation(async (...args) => {
-      if (args[0].agent && first) {
+    vi.spyOn(service, 'namesFor').mockImplementation(async (...args) => {
+      if (first) {
         first = false;
         await promptHeld;
       }
