@@ -125,21 +125,14 @@ describe('spaces, invites, membership', () => {
     expect((await prakhar.post('/v1/invites/accept', { token: inv.body.token })).status).toBe(403);
   });
 
-  it('the /join/<token> page names the space pre-auth and hands the invite to the app', async () => {
+  it('the /join/<token> link sends a browser to the web app with the invite (2026-11-09)', async () => {
     const inv = await ramnique.post('/v1/invites', { spaceId });
-    const res = await fetch(`${harbor.url}/join/${inv.body.token}`);
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('text/html');
-    const html = await res.text();
-    expect(html).toContain('Show HN draft');
-    // The deep link names the org by address and carries the token — the app
-    // rebuilds the https invite link from those two (spaces-navigation.ts).
+    const res = await fetch(`${harbor.url}/join/${inv.body.token}`, { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    // The deep link's query, unchanged: the server by address and the token — the web app
+    // rebuilds the https invite link from those two (spaces-navigation.ts) and shows its card.
     const query = `type=spaces&server=${encodeURIComponent(harbor.service.server.address)}&invite=${encodeURIComponent(inv.body.token)}`;
-    expect(html).toContain(`rowboat://open?${query}`);
-    expect(html).toContain('location.replace(');
-    // No app: the download, or the web app's /open on the same query.
-    expect(html).toContain('Download Rowboat');
-    expect(html).toContain(`href="https://web.test/open?${query.replaceAll('&', '&amp;')}"`);
+    expect(res.headers.get('location')).toBe(`https://web.test/open?${query}`);
 
     // A dead invite: says so, launches nothing.
     const stored = await harbor.store.getInvite(inv.body.token);
@@ -396,17 +389,14 @@ describe('feed: the stream, threads, and topic annotations', () => {
       [memberUrl(address, 'google|123'), 'memberId=google%7C123&server='],
     ];
     for (const [link, expected] of cases) {
-      // The links are minted on the org's public address; the test server answers on its local url.
-      const res = await fetch(link.replace(`https://${address}`, harbor.url));
-      expect(res.status).toBe(200);
-      expect(res.headers.get('content-type')).toContain('text/html');
-      const html = await res.text();
-      expect(html).toContain('rowboat://open?type=spaces&');
-      expect(html).toContain(expected);
-      expect(html).not.toContain('Feed'); // never the space's name — nothing is looked up
-      // Slack's pattern (2026-10-13): the same query, on the web app's /open.
-      const deep = /location\.replace\("rowboat:\/\/open\?([^"]*)"\)/.exec(html)![1]!;
-      expect(html).toContain(`href="https://web.test/open?${deep.replaceAll('&', '&amp;')}"`);
+      // The links are minted on the server's public address; the test server answers on its local url.
+      // A browser is sent to the web app (2026-11-09), the deep link's query unchanged on its /open.
+      const res = await fetch(link.replace(`https://${address}`, harbor.url), { redirect: 'manual' });
+      expect(res.status).toBe(302);
+      const location = res.headers.get('location')!;
+      expect(location.startsWith('https://web.test/open?type=spaces&')).toBe(true);
+      expect(location).toContain(expected);
+      expect(location).not.toContain('Feed'); // never the space's name — nothing is looked up
     }
     // The one parser reads every one of them back.
     // Old org hosts (`<org>.<address>`, every link from before 2026-11-09) still name this server.
@@ -426,7 +416,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(parseSpacesUrl('not a url')).toBeNull();
   });
 
-  it('a hand-off page offers no browser when the deployment names no web app', async () => {
+  it('a deployment that names no web app keeps the hand-off page: the desktop app at once, and its download', async () => {
     const bare = await startTestHarbor({ seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }] });
     try {
       const html = await (await fetch(`${bare.url}/`)).text();

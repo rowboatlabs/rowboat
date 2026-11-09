@@ -1,9 +1,10 @@
+import { StreamSkeleton } from '@/components/spaces/spaces-skeleton'
 import { EmptySpaceStart } from '@/components/spaces/empty-space-start'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { useSpaceAccess, ArchivedNotice } from '@/lib/spaces-access'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, CornerDownRight, Loader2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, CornerDownRight, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
 import { mentionToken, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
@@ -1214,9 +1215,7 @@ export function GeneralStream({
             >
                 {/* One measurable child — the tail pin observes its size. */}
                 <div ref={contentRef}>
-                {(!stream.ready || snapping) && (
-                    <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
-                )}
+                {(!stream.ready || snapping) && <StreamSkeleton />}
                 {stream.ready && !snapping && messageRows === 0 && space.kind === 'shared' && !space.archived && (
                     <EmptySpaceStart orgId={org.id} space={space} onAddPeople={onAddPeople} onOpenFiles={onOpenFiles} />
                 )}
