@@ -20,6 +20,7 @@ import { installLoopbackRelay } from './loopback-relay.js';
 import { createFileCipher } from './file-cipher.js';
 import { setTokenCipher as setChatGPTTokenCipher } from '@x/core/dist/auth/chatgpt-auth.js';
 import { setTokenCipher as setGithubTokenCipher } from '@x/core/dist/apps/github-auth.js';
+import { initSystemCertificates } from '@x/core/dist/security/system-ca.js';
 
 // Headless rowboat-server: the RFC's end-state entrypoint, where main spawns
 // this as a child process (or it runs on a remote box) and core lives here.
@@ -33,6 +34,9 @@ import { setTokenCipher as setGithubTokenCipher } from '@x/core/dist/apps/github
 //
 
 async function main(): Promise<void> {
+  // Merge host OS trusted root certificates into Node's TLS defaults
+  initSystemCertificates();
+
   // The workdir lock is acquired by createRowboatServer itself — a live
   // Electron-hosted transport makes this boot fail loudly, as it must.
   await initConfigs();
