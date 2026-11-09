@@ -1,27 +1,26 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { mcpTools, type Member, type Space } from '@rowboat/spaces-protocol';
+import { mcpTools, type Member } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { agentClient, liveClient, restClient, startTestHarbor } from './helpers.js';
 
-// Admin controls (spec §4 Roles, built 2026-10-19): removing someone from a
-// space or from the org, promoting and demoting admins, a space's visibility,
-// and the invite policy. Membership and policy, never content; never on a DM.
-// Reactivation by a later invite needs a real identity binding, so it is
-// pinned in multi-org.test.ts.
+// Admin controls (spec §4 Roles, built 2026-10-19; per space since 2026-11-09):
+// removing someone from a space, giving and taking the admin bit, and the
+// longest-standing human inheriting it when the last admin goes. Membership
+// acts, never content; never on a DM. The creator of a space is its admin.
 
 let harbor: RunningHarbor;
 let ramAgent: Client;
 let gaganAgent: Client;
-const admin = () => restClient(harbor, 'dev-ramnique'); // the seed space's creator is the org's admin
+const admin = () => restClient(harbor, 'dev-ramnique'); // creates every space here, so is its admin
 const gagan = () => restClient(harbor, 'dev-gagan');
 const prakhar = () => restClient(harbor, 'dev-prakhar');
 const direct = { actingMode: 'direct' } as const;
-const roster = async (): Promise<Member[]> => (await admin().get('/v1/members')).body.members;
-const memberOf = async (id: string) => (await roster()).find((m) => m.id === id)!;
+const roleOf = async (spaceId: string, id: string, client = admin()) => ((await client.get(`/v1/spaces/${spaceId}/members`)).body.members as Array<Member & { role: string }>).find((m) => m.id === id)?.role;
+const roleEvents = async (spaceId: string) => (await harbor.store.listEventsAfter(spaceId, 0)).filter((e) => e.event.type === 'role_changed');
 
-async function newSpace(name: string, visibility: 'open' | 'private' = 'private', members: string[] = ['gagan', 'prakhar']): Promise<string> {
-  const id = (await admin().post('/v1/spaces', { name, visibility })).body.space.id as string;
+async function newSpace(name: string, members: string[] = ['gagan', 'prakhar']): Promise<string> {
+  const id = (await admin().post('/v1/spaces', { name })).body.space.id as string;
   await admin().post(`/v1/spaces/${id}/members`, { memberIds: members, ...direct });
   return id;
 }
@@ -112,189 +111,95 @@ describe('remove a member from a space', () => {
   });
 });
 
-describe('change a space’s visibility', () => {
-  it('an admin opens and closes a space; the event says who; the same value is a no-op', async () => {
-    const spaceId = await newSpace('Plans', 'private', ['gagan']);
-    expect((await prakhar().get('/v1/spaces/browse')).body.spaces.map((s: { space: Space }) => s.space.id)).not.toContain(spaceId);
+describe('give and take the admin bit (spec §4 Roles, 2026-11-09)', () => {
+  it('the creator is admin; an admin promotes a member; the same role is a no-op; members can’t', async () => {
+    const spaceId = await newSpace('Roles', ['gagan', 'arjun']);
+    expect(await roleOf(spaceId, 'ramnique')).toBe('admin');
+    expect(await roleOf(spaceId, 'gagan')).toBe('member');
+    expect((await gagan().post(`/v1/spaces/${spaceId}/members/arjun/role`, { role: 'admin', ...direct })).status).toBe(403);
 
-    const opened = await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'open', ...direct });
-    expect(opened.status).toBe(200);
-    expect(opened.body.space.visibility).toBe('open');
-    expect((await prakhar().get('/v1/spaces/browse')).body.spaces.map((s: { space: Space }) => s.space.id)).toContain(spaceId);
-
-    // A reader who is not a member is cut off when it goes private.
-    const live = await liveClient(harbor, 'dev-prakhar');
-    live.send({ kind: 'subscribe', spaceId });
-    await live.until((f) => f.some((x) => x.kind === 'subscribed' && x.spaceId === spaceId), 'subscribed');
-    expect((await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'private', ...direct })).body.space.visibility).toBe('private');
-    await live.until((f) => f.some((x) => x.kind === 'space_removed' && x.spaceId === spaceId), 'space_removed');
-    await live.until((f) => f.some((x) => x.kind === 'org_changed'), 'org_changed');
-    live.close();
-    expect((await prakhar().get(`/v1/spaces/${spaceId}/stream`)).status).toBe(403);
-
-    await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'private', ...direct });
-    const changes = (await harbor.store.listEventsAfter(spaceId, 0)).filter((e) => e.event.type === 'space_visibility_changed');
-    expect(changes).toHaveLength(2);
-    expect(changes[0]!.event).toMatchObject({ space: { visibility: 'open' }, by: { memberId: 'ramnique' } });
-  });
-
-  it('refuses a non-admin, a DM, and an archived space', async () => {
-    const spaceId = await newSpace('Closed', 'private', ['gagan']);
-    expect((await gagan().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'open', ...direct })).status).toBe(403);
-    const dm = (await admin().post('/v1/direct', { memberId: 'prakhar' })).body.space.id;
-    expect((await admin().post(`/v1/spaces/${dm}/visibility`, { visibility: 'open', ...direct })).status).toBe(400);
-    await admin().post(`/v1/spaces/${spaceId}/archive`, direct);
-    expect((await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'open', ...direct })).status).toBe(403);
-  });
-
-  it('a default space stays open until an admin takes it off the defaults', async () => {
-    const spaceId = await newSpace('Welcome', 'open', ['gagan']);
-    await admin().post(`/v1/spaces/${spaceId}/default`, { isDefault: true, ...direct });
-    const refused = await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'private', ...direct });
-    expect(refused.status).toBe(400);
-    expect(refused.body.message).toContain('default space');
-    await admin().post(`/v1/spaces/${spaceId}/default`, { isDefault: false, ...direct });
-    expect((await admin().post(`/v1/spaces/${spaceId}/visibility`, { visibility: 'private', ...direct })).body.space.visibility).toBe('private');
-  });
-
-  it('the agent face', async () => {
-    const spaceId = await newSpace('Tooled', 'private', ['gagan']);
-    const { space } = await call<{ space: Space }>(ramAgent, 'set_space_visibility', { spaceId, visibility: 'open' });
-    expect(space.visibility).toBe('open');
-    expect((await refused(gaganAgent, 'set_space_visibility', { spaceId, visibility: 'private' })).code).toBe('forbidden');
-  });
-});
-
-describe('promote and demote admins', () => {
-  it('an admin promotes a person; the same role is a no-op; members can’t', async () => {
-    expect((await gagan().post('/v1/members/arjun/role', { role: 'admin', ...direct })).status).toBe(403);
     const live = await liveClient(harbor, 'dev-arjun');
-    const res = await admin().post('/v1/members/arjun/role', { role: 'admin', ...direct });
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((f) => f.some((x) => x.kind === 'subscribed'), 'subscribed');
+    const res = await admin().post(`/v1/spaces/${spaceId}/members/arjun/role`, { role: 'admin', ...direct });
     expect(res.status).toBe(200);
-    expect(res.body.member.role).toBe('admin');
-    await live.until((f) => f.some((x) => x.kind === 'org_changed'), 'org_changed');
+    expect(res.body.membership).toMatchObject({ spaceId, memberId: 'arjun', role: 'admin' });
+    await live.until((f) => f.some((x) => x.kind === 'event' && x.event.type === 'role_changed'), 'role_changed');
     live.close();
-    expect((await admin().post('/v1/members/arjun/role', { role: 'admin', ...direct })).body.member.role).toBe('admin');
-    // The new admin can act as one.
-    expect((await restClient(harbor, 'dev-arjun').post('/v1/members/arjun/role', { role: 'member', ...direct })).body.member.role).toBe('member');
+    const events = await roleEvents(spaceId);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.event).toMatchObject({ membership: { memberId: 'arjun', role: 'admin' }, by: { memberId: 'ramnique', actingMode: 'direct' } });
+
+    // The same role again: a no-op, no event.
+    expect((await admin().post(`/v1/spaces/${spaceId}/members/arjun/role`, { role: 'admin', ...direct })).body.membership.role).toBe('admin');
+    expect(await roleEvents(spaceId)).toHaveLength(1);
+    // The new admin can act as one, and demote themself while another admin remains.
+    const arjun = restClient(harbor, 'dev-arjun');
+    expect((await arjun.post(`/v1/spaces/${spaceId}/members/gagan/role`, { role: 'admin', ...direct })).status).toBe(200);
+    expect((await arjun.post(`/v1/spaces/${spaceId}/members/arjun/role`, { role: 'member', ...direct })).body.membership.role).toBe('member');
   });
 
-  it('keeps at least one admin: the last one can’t step down', async () => {
-    const res = await admin().post('/v1/members/ramnique/role', { role: 'member', ...direct });
-    expect(res.status).toBe(400);
+  it('a space keeps at least one admin: the only one can’t step down', async () => {
+    const spaceId = await newSpace('Solo admin', ['gagan']);
+    const res = await admin().post(`/v1/spaces/${spaceId}/members/ramnique/role`, { role: 'member', ...direct });
+    expect(res.status).toBe(403);
     expect(res.body.message).toContain('at least one admin');
-    expect((await memberOf('ramnique')).role).toBe('admin');
+    expect(await roleOf(spaceId, 'ramnique')).toBe('admin');
   });
 
   it('two admins demoting each other at once leave one admin', async () => {
-    await admin().post('/v1/members/tushar/role', { role: 'admin', ...direct });
+    const spaceId = await newSpace('Duel', ['tushar']);
+    await admin().post(`/v1/spaces/${spaceId}/members/tushar/role`, { role: 'admin', ...direct });
     const tushar = restClient(harbor, 'dev-tushar');
     const [a, b] = await Promise.all([
-      admin().post('/v1/members/tushar/role', { role: 'member', ...direct }),
-      tushar.post('/v1/members/ramnique/role', { role: 'member', ...direct }),
+      admin().post(`/v1/spaces/${spaceId}/members/tushar/role`, { role: 'member', ...direct }),
+      tushar.post(`/v1/spaces/${spaceId}/members/ramnique/role`, { role: 'member', ...direct }),
     ]);
-    const admins = (await roster()).filter((m) => m.role === 'admin');
-    expect(admins).toHaveLength(1);
+    const members = (await admin().get(`/v1/spaces/${spaceId}/members`)).body.members as Array<{ role: string }>;
+    expect(members.filter((m) => m.role === 'admin')).toHaveLength(1);
     expect([a.status, b.status].filter((s) => s === 200).length).toBeGreaterThanOrEqual(1);
-    // Restore: Ramnique stays the admin the rest of the file expects.
-    if (admins[0]!.id !== 'ramnique') {
-      await tushar.post('/v1/members/ramnique/role', { role: 'admin', ...direct });
-      await admin().post('/v1/members/tushar/role', { role: 'member', ...direct });
-    }
-    expect((await memberOf('ramnique')).role).toBe('admin');
   });
 
-  it('an agent is never an admin', async () => {
+  it('refuses an agent, someone not in the space, a DM, and an unknown member', async () => {
+    const spaceId = await newSpace('Refusals', ['gagan']);
     const agent = (await gagan().post('/v1/agents', { displayName: 'Helper' })).body.agent as Member;
-    const res = await admin().post(`/v1/members/${agent.id}/role`, { role: 'admin', ...direct });
-    expect(res.status).toBe(400);
+    await gagan().post(`/v1/spaces/${spaceId}/members`, { memberIds: [agent.id], ...direct });
+    expect((await admin().post(`/v1/spaces/${spaceId}/members/${agent.id}/role`, { role: 'admin', ...direct })).status).toBe(400);
+    expect((await admin().post(`/v1/spaces/${spaceId}/members/arjun/role`, { role: 'admin', ...direct })).status).toBe(400);
+    const dm = (await admin().post('/v1/direct', { memberId: 'gagan' })).body.space.id;
+    expect((await admin().post(`/v1/spaces/${dm}/members/gagan/role`, { role: 'admin', ...direct })).status).toBe(400);
+    expect((await admin().post(`/v1/spaces/${spaceId}/members/nobody/role`, { role: 'admin', ...direct })).status).toBe(404);
+  });
+
+  it('when the last admin leaves, the longest-standing human inherits; agents never do', async () => {
+    const spaceId = await newSpace('Inheritance', []);
+    const agent = (await gagan().post('/v1/agents', { displayName: 'Early bot' })).body.agent as Member;
+    await gagan().post(`/v1/spaces/${spaceId}/members`, { memberIds: [agent.id], ...direct }).catch(() => undefined);
+    await admin().post(`/v1/spaces/${spaceId}/members`, { memberIds: ['prakhar'], ...direct });
+    await new Promise((r) => setTimeout(r, 5));
+    await admin().post(`/v1/spaces/${spaceId}/members`, { memberIds: ['tushar'], ...direct });
+    await admin().post(`/v1/spaces/${spaceId}/leave`);
+    expect(await roleOf(spaceId, 'prakhar', prakhar())).toBe('admin');
+    expect(await roleOf(spaceId, 'tushar', prakhar())).toBe('member');
+    const events = await roleEvents(spaceId);
+    expect(events.at(-1)!.event).toMatchObject({ membership: { memberId: 'prakhar', role: 'admin' }, by: { memberId: 'ramnique' } });
+    // The heir runs the space now.
+    expect((await prakhar().post(`/v1/spaces/${spaceId}/members/tushar/role`, { role: 'admin', ...direct })).status).toBe(200);
+  });
+
+  it('removal by an admin passes the bit on the same way', async () => {
+    const spaceId = await newSpace('Handover', ['gagan']);
+    await admin().post(`/v1/spaces/${spaceId}/members/gagan/role`, { role: 'admin', ...direct });
+    // Gagan, now admin, removes Ramnique: Gagan stays the admin; nothing to inherit.
+    expect((await gagan().post(`/v1/spaces/${spaceId}/members/ramnique/remove`, direct)).body).toEqual({ removed: true });
+    expect(await roleOf(spaceId, 'gagan', gagan())).toBe('admin');
   });
 
   it('the agent face', async () => {
-    const { member } = await call<{ member: Member }>(ramAgent, 'set_member_role', { memberId: 'arjun', role: 'admin' });
-    expect(member.role).toBe('admin');
-    await call(ramAgent, 'set_member_role', { memberId: 'arjun', role: 'member' });
-    expect((await refused(gaganAgent, 'set_member_role', { memberId: 'gagan', role: 'admin' })).code).toBe('forbidden');
-  });
-});
-
-describe('the invite policy', () => {
-  it('members by default; an admin restricts it to admins, and then members can’t invite', async () => {
-    const spaceId = await newSpace('Invites', 'private', ['gagan']);
-    expect((await gagan().get('/v1/org/settings')).body.settings).toEqual({ invitePolicy: 'members', jevEnabled: false });
-    expect((await gagan().post('/v1/invites', { spaceId })).status).toBe(200);
-
-    expect((await gagan().patch('/v1/org/settings', { invitePolicy: 'admins' })).status).toBe(403);
-    const set = await admin().patch('/v1/org/settings', { invitePolicy: 'admins' });
-    expect(set.status).toBe(200);
-    expect(set.body.settings).toEqual({ invitePolicy: 'admins', jevEnabled: false });
-
-    const refusedInvite = await gagan().post('/v1/invites', { spaceId });
-    expect(refusedInvite.status).toBe(403);
-    expect(refusedInvite.body.message).toContain('only admins');
-    expect((await admin().post('/v1/invites', { spaceId })).status).toBe(200);
-    // Adding an existing member isn't an invite: the policy doesn't touch it.
-    expect((await gagan().post(`/v1/spaces/${spaceId}/members`, { memberIds: ['arjun'], ...direct })).status).toBe(200);
-
-    expect((await refused(gaganAgent, 'create_invite', { spaceId })).code).toBe('forbidden');
-    expect(await call(gaganAgent, 'get_org_settings', {})).toEqual({ settings: { invitePolicy: 'admins', jevEnabled: false } });
-    expect(await call(ramAgent, 'set_invite_policy', { invitePolicy: 'members' })).toEqual({ settings: { invitePolicy: 'members', jevEnabled: false } });
-    expect((await gagan().post('/v1/invites', { spaceId })).status).toBe(200);
-  });
-});
-
-describe('remove a member from the org', () => {
-  it('out of every shared space, kept on the roster marked removed, refused at sign-in; DMs stay', async () => {
-    const a = await newSpace('Alpha', 'open', ['prakhar']);
-    const b = await newSpace('Beta', 'private', ['prakhar']);
-    const dm = (await admin().post('/v1/direct', { memberId: 'prakhar' })).body.space.id;
-    const posted = await prakhar().post(`/v1/spaces/${a}/messages`, { body: 'hi', ...direct });
-    const owned = (await prakhar().post('/v1/agents', { displayName: 'Prakhar’s bot' })).body;
-    expect((await restClient(harbor, owned.key.secret).get('/v1/me')).status).toBe(200);
-    await prakhar().post('/v1/members/prakhar/role', { role: 'admin', ...direct }); // refused: not an admin
-    await admin().post('/v1/members/prakhar/role', { role: 'admin', ...direct });
-
-    const live = await liveClient(harbor, 'dev-prakhar');
-    const res = await admin().post('/v1/members/prakhar/remove', direct);
-    expect(res.status).toBe(200);
-    expect(res.body.member).toMatchObject({ id: 'prakhar', role: 'member', removedAt: expect.any(String) });
-    await live.until((f) => f.filter((x) => x.kind === 'space_removed').length >= 2, 'space_removed ×2');
-    live.close();
-
-    for (const spaceId of [a, b]) {
-      const ev = (await harbor.store.listEventsAfter(spaceId, 0)).filter((e) => e.event.type === 'membership' && e.event.action === 'removed');
-      expect(ev).toHaveLength(1);
-      expect(ev[0]!.event).toMatchObject({ membership: { memberId: 'prakhar' }, by: { memberId: 'ramnique' } });
-    }
-    expect(await harbor.store.getMembership(dm, 'prakhar')).toBeDefined();
-    expect(posted.body.message.author.memberId).toBe('prakhar');
-    expect((await memberOf('prakhar')).removedAt).toEqual(expect.any(String));
-
-    const signIn = await prakhar().get('/v1/spaces');
-    expect(signIn.status).toBe(403);
-    expect(signIn.body.code).toBe('not_a_member');
-    expect((await restClient(harbor, owned.key.secret).get('/v1/me')).status).toBe(401);
-
-    const add = await admin().post(`/v1/spaces/${a}/members`, { memberIds: ['prakhar'], ...direct });
-    expect(add.status).toBe(400);
-    expect(add.body.message).toContain('no longer in this org');
-
-    // Idempotent: nothing left to remove, no second event.
-    expect((await admin().post('/v1/members/prakhar/remove', direct)).status).toBe(200);
-    expect((await harbor.store.listEventsAfter(a, 0)).filter((e) => e.event.type === 'membership' && e.event.action === 'removed')).toHaveLength(1);
-  });
-
-  it('refuses a non-admin and yourself', async () => {
-    expect((await gagan().post('/v1/members/arjun/remove', direct)).status).toBe(403);
-    expect((await admin().post('/v1/members/ramnique/remove', direct)).status).toBe(400);
-    expect((await admin().post('/v1/members/nobody/remove', direct)).status).toBe(404);
-  });
-
-  it('removes an agent too, and the agent face can do it', async () => {
-    const agent = (await gagan().post('/v1/agents', { displayName: 'Scratch' })).body;
-    const { member } = await call<{ member: Member }>(ramAgent, 'remove_org_member', { memberId: agent.agent.id });
-    expect(member.removedAt).toEqual(expect.any(String));
-    expect((await restClient(harbor, agent.key.secret).get('/v1/me')).status).toBe(401);
-    expect((await refused(gaganAgent, 'remove_org_member', { memberId: 'arjun' })).code).toBe('forbidden');
+    const spaceId = await newSpace('Tooled roles', ['gagan', 'arjun']);
+    const { membership } = await call<{ membership: { role: string } }>(ramAgent, 'set_member_role', { spaceId, memberId: 'arjun', role: 'admin' });
+    expect(membership.role).toBe('admin');
+    await call(ramAgent, 'set_member_role', { spaceId, memberId: 'arjun', role: 'member' });
+    expect((await refused(gaganAgent, 'set_member_role', { spaceId, memberId: 'gagan', role: 'admin' })).code).toBe('forbidden');
   });
 });

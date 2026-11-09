@@ -157,7 +157,7 @@ export class Feed {
   }
 
   async listTopics(ctx: ActorCtx, spaceId: string, includeArchived = false): Promise<TopicListing[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const topics = await this.k.store.listTopics(spaceId, includeArchived);
     // Every consumer needs the root message (reply chips, parent cards,
     // unread anchors) — always folded in; activity computes from its denorm.
@@ -239,7 +239,7 @@ export class Feed {
     spaceId: string,
     opts?: PageOpts & { replies?: boolean },
   ): Promise<{ messages: Message[]; topics: Topic[]; threadRoots: Message[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     // Newest page by default — never the full history. With replies (the
     // inline view, 2026-10-25) a page is every message in offset order.
     const { rows, hasMore, hasMoreAfter, span } = await this.pageOf(
@@ -301,7 +301,7 @@ export class Feed {
     readOffset: number | null;
     following: boolean;
   }> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const root = await this.resolveRoot(spaceId, rootMessageId);
     const { rows: replies, hasMore, hasMoreAfter } = await this.pageOf((w) => this.k.store.listThread(spaceId, root.id, w), opts);
     const [foldedRoot] = await this.foldPage(spaceId, [root]);
@@ -320,7 +320,7 @@ export class Feed {
 
   /** One message by id, folded — the read behind a message link. */
   async getMessage(ctx: ActorCtx, spaceId: string, messageId: string): Promise<Message> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const message = await this.k.store.getMessage(spaceId, messageId);
     if (!message) throw new HarborError('not_found', 'no such message');
     return this.foldLive(spaceId, message);
@@ -348,15 +348,12 @@ export class Feed {
    * (in-process only): this message is the agent's approval card, and the
    * approval rides on it, raised in the same transaction (spec §8 part 4);
    * with an `action`, Harbor's own for a super agent's request (2026-11-02).
-   * `relayOf` (in-process only): this message is Jev's tags for that one,
-   * and the agents it mentions take that message's hand-off depth (spec §8
-   * Jev, 2026-10-07).
    */
   async postMessage(
     ctx: ActorCtx,
     spaceId: string,
     input: NewMessage,
-    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest; action?: ApprovalAction }; relayOf?: string } = {},
+    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest; action?: ApprovalAction } } = {},
   ): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
@@ -372,10 +369,7 @@ export class Feed {
     let raising: Invocation | undefined;
     const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => {
       if (!this.invocations) return { message, invocations: [] };
-      // Recorded before the answer below finishes its turn: Jev may tag
-      // someone for this message later, at this depth (spec §8 Jev, 2026-10-07).
-      const depth = await this.invocations.handOffDepth(ctx, spaceId, opts.relayOf);
-      if (depth > 0) await this.k.store.putMessageHops(spaceId, message.id, depth);
+      const depth = await this.invocations.handOffDepth(ctx);
       const invocations = await this.invocations.onMessage(ctx, space, message, input.agentOptions, depth, outbox);
       if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
       return { message, invocations: invocations.map(forPeople) };
@@ -550,7 +544,7 @@ export class Feed {
    * it, and only while they can read the space and the message stands.
    */
   async readMessageSecret(ctx: ActorCtx, spaceId: string, messageId: string, name: string): Promise<string> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const message = await this.k.store.getMessage(spaceId, messageId);
     enforce(canReadSecret(ctx.memberId, message?.secrets, name));
     const sealed = await this.k.store.getMessageSecret(spaceId, messageId, name);
@@ -1004,7 +998,7 @@ export class Feed {
   }
 
   async listArchivedThreads(ctx: ActorCtx, spaceId: string): Promise<Message[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     return this.foldPage(spaceId, await this.k.store.listArchivedRoots(spaceId));
   }
 
@@ -1085,7 +1079,7 @@ export class Feed {
     rawQuery: string,
     opts?: { kinds?: SearchKind[]; limit?: number },
   ): Promise<SearchResults> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const limit = Math.min(opts?.limit ?? 10, 50);
     const kinds = new Set<SearchKind>(opts?.kinds ?? ['messages', 'topics', 'assets']);
 

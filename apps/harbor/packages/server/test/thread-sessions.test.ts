@@ -52,8 +52,8 @@ beforeAll(async () => {
     ],
     seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
   });
-  spaceId = (await ram().post('/v1/spaces', { name: 'Launch', visibility: 'private' })).body.space.id;
-  otherSpaceId = (await ram().post('/v1/spaces', { name: 'Design', visibility: 'private' })).body.space.id;
+  spaceId = (await ram().post('/v1/spaces', { name: 'Launch' })).body.space.id;
+  otherSpaceId = (await ram().post('/v1/spaces', { name: 'Design' })).body.space.id;
   await ram().post(`/v1/spaces/${spaceId}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
   const created = await ram().post('/v1/agents', { displayName: 'Hermes' });
   hermes = { member: created.body.agent as Member, key: created.body.key.secret as string };

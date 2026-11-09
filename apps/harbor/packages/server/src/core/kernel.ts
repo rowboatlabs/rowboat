@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { monotonicFactory } from 'ulid';
 import { HarborError } from '../errors.js';
 import type { SpaceHub } from '../hub.js';
-import { canAccessSpace, canReadSpace, canWrite, canWriteSpace, enforce } from '../policy.js';
+import { canAccessSpace, canWrite, canWriteSpace, enforce } from '../policy.js';
 import type { Store, StoredEvent } from '../store.js';
 
 // The transactional core every aggregate is built on: the store and the hub,
@@ -93,20 +93,17 @@ export class Kernel {
     if (!(await this.isActiveMember(ctx))) throw new HarborError('not_a_member', 'you are not a member of this server');
   }
 
-  async requireReadableSpace(ctx: ActorCtx, spaceId: string): Promise<Space> {
-    const space = await this.requireSpace(spaceId);
-    const membership = await this.store.getMembership(spaceId, ctx.memberId);
-    const orgMember = membership ? true : await this.isActiveMember(ctx);
-    enforce(canReadSpace(space, membership, orgMember));
-    return space;
-  }
-
   /** The access gate: load the facts, let policy decide — THE rule is policy.ts canAccessSpace. */
   async requireMember(ctx: ActorCtx, spaceId: string): Promise<Space> {
+    return (await this.requireMembership(ctx, spaceId)).space;
+  }
+
+  /** The same gate, handing back the caller's row too: admin acts read its bit (spec §4 Roles, 2026-11-09). */
+  async requireMembership(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
     const space = await this.requireSpace(spaceId);
     const membership = await this.store.getMembership(spaceId, ctx.memberId);
     enforce(canAccessSpace(space, membership));
-    return space;
+    return { space, membership: membership! };
   }
 
   /**

@@ -1,5 +1,4 @@
-import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, MessageSecrets, Space } from '@rowboat/spaces-protocol';
-import { BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
+import type { ErrorCode, Invocation, InvocationRefusal, Member, MemberRole, Membership, Message, MessageSecrets, Space } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
 // Who may do what. The service loads the facts (space, membership, message,
@@ -16,35 +15,25 @@ export function enforce(decision: Decision): void {
   if (decision) throw new HarborError(decision.code, decision.message);
 }
 
-/** Membership remains the write boundary (spec §5, 2026-09-22). */
-export function canAccessSpace(space: Space, membership: Membership | undefined): Decision {
+/** Membership is the one gate (spec §5; open spaces were retired 2026-11-09): reading and acting alike. */
+export function canAccessSpace(_space: Space, membership: Membership | undefined): Decision {
   if (membership) return null;
-  return {
-    code: 'forbidden',
-    message: space.kind === 'shared' && space.visibility === 'open'
-      ? 'join this space to post' : 'you are not a member of this space',
-  };
-}
-
-/** Browsing never grants acting rights, and never opens a DM (spec §5, 2026-09-22). */
-export function canReadSpace(space: Space, membership: Membership | undefined, orgMember: boolean): Decision {
-  if (membership || (orgMember && space.kind === 'shared' && space.visibility === 'open')) return null;
   return { code: 'forbidden', message: 'you are not a member of this space' };
 }
 
-export function canJoinSpace(space: Space): Decision {
-  if (space.kind === 'shared' && space.visibility === 'open') return null;
-  return { code: 'forbidden', message: 'only shared open spaces can be self-joined' };
+/** The admin bit is on the membership row (spec §4 Roles, 2026-11-09). */
+export function isAdmin(membership: Membership | undefined): boolean {
+  return membership?.role === 'admin';
 }
 
 /**
- * read_only_limit (spec §4: over a limit the org is read-only, never locked
- * out): the org cannot GROW. Content writes and membership growth — invites,
+ * read_only_limit (spec §4: over a limit the server is read-only, never locked
+ * out): it cannot GROW. Content writes and membership growth — invites,
  * joins — refuse; leaving, read marks, follows and push registration pass.
  */
-export function canWrite(org: { readOnly: boolean }): Decision {
-  if (!org.readOnly) return null;
-  return { code: 'read_only_limit', message: 'org is over its plan limit: writes are paused, reads still work' };
+export function canWrite(server: { readOnly: boolean }): Decision {
+  if (!server.readOnly) return null;
+  return { code: 'read_only_limit', message: 'this server is over its plan limit: writes are paused, reads still work' };
 }
 
 /** A direct space has a fixed membership: nobody is invited, nobody leaves. */
@@ -69,89 +58,48 @@ export function canRenameSpace(space: Space): Decision {
 
 /**
  * Archive and unarchive are admin acts on a shared space (spec §4 Roles and
- * §6, built 2026-10-13). A DM has no admin path into it, so it never archives.
+ * §6, built 2026-10-13; the space's admin since 2026-11-09). A DM has no
+ * admin path into it, so it never archives.
  */
-export function canArchiveSpace(actor: Member, space: Space, act: 'archive' | 'unarchive'): Decision {
+export function canArchiveSpace(actor: Membership | undefined, space: Space, act: 'archive' | 'unarchive'): Decision {
   if (space.kind === 'direct') return { code: 'invalid_request', message: `a direct message cannot be ${act}d` };
-  if (actor.role === 'admin') return null;
-  return { code: 'forbidden', message: `only an admin can ${act} a space` };
+  if (isAdmin(actor)) return null;
+  return { code: 'forbidden', message: `only an admin of this space can ${act} it` };
 }
 
 /** Deleting a space is an admin act too, on the same terms as archiving it (spec §6, built 2026-10-14). */
-export function canDeleteSpace(actor: Member, space: Space): Decision {
+export function canDeleteSpace(actor: Membership | undefined, space: Space): Decision {
   if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be deleted' };
-  if (actor.role === 'admin') return null;
-  return { code: 'forbidden', message: 'only an admin can delete a space' };
+  if (isAdmin(actor)) return null;
+  return { code: 'forbidden', message: 'only an admin of this space can delete it' };
 }
 
 /**
  * Removing someone from a shared space is an admin act (spec §4 Roles,
  * built 2026-10-19). A DM's membership is fixed; your own tool is leave.
  */
-export function canRemoveFromSpace(actor: Member, space: Space, targetId: string): Decision {
+export function canRemoveFromSpace(actor: Membership | undefined, space: Space, targetId: string): Decision {
   if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message has a fixed membership — nobody can be removed' };
-  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can remove someone from a space' };
-  if (targetId === actor.id) return { code: 'invalid_request', message: 'to take yourself out of a space, leave it' };
-  return null;
-}
-
-/** Changing who may find a space is an admin act on a shared space (spec §4 Roles, 2026-10-19); a DM is private forever. */
-export function canSetSpaceVisibility(actor: Member, space: Space): Decision {
-  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message is always private' };
-  if (actor.role === 'admin') return null;
-  return { code: 'forbidden', message: 'only an admin can change who can see a space' };
-}
-
-/**
- * Removing a member from the org (spec §4 Roles, 2026-10-19): an admin act,
- * never on yourself (an org removal is not a way to leave, and it keeps the
- * last admin from removing the org's last admin), and never on an agent
- * Harbor itself is, which no person added.
- */
-export function canRemoveFromOrg(actor: Member, target: Member): Decision {
-  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can remove someone from the org' };
-  if (target.id === actor.id) return { code: 'invalid_request', message: 'you can’t remove yourself from the org' };
-  if (target.agentConnection === BUILT_IN_CONNECTION) return { code: 'invalid_request', message: `${target.displayName} is built into the org and can’t be removed` };
+  if (!isAdmin(actor)) return { code: 'forbidden', message: 'only an admin of this space can remove someone from it' };
+  if (targetId === actor!.memberId) return { code: 'invalid_request', message: 'to take yourself out of a space, leave it' };
   return null;
 }
 
 /**
- * Default spaces are an admin's to set (spec §4 Roles, §5 answer 3; built
- * 2026-10-19), and only a shared open space can be one, so an invite to the
- * org is never a back door into a private space. Taking the flag off needs
- * only the admin bit. The schema holds the same rule (migration 041).
+ * Giving and taking the admin bit in a space (spec §4 Roles, rewritten
+ * 2026-11-09): an admin of the space, on an active person who is in it. An
+ * agent is never an admin (spec §4 Agent members). A DM has no admin. The
+ * only-admin rule needs the count, so the store decides it.
  */
-export function canSetDefaultSpace(actor: Member, space: Space, isDefault: boolean): Decision {
-  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be a default space' };
-  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can choose the default spaces' };
-  if (isDefault && space.visibility !== 'open') return { code: 'invalid_request', message: 'only an open space can be a default space' };
-  return null;
-}
-
-/**
- * Promoting and demoting (spec §4 Roles, 2026-10-19): an admin act on an
- * active person. An agent is never an admin (spec §4 Agent members). The
- * at-least-one-admin rule needs the count, so the store decides it.
- */
-export function canSetRole(actor: Member, target: Member, role: MemberRole): Decision {
-  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can change who is an admin' };
+export function canSetRole(actor: Membership | undefined, space: Space, target: Member, targetMembership: Membership | undefined, role: MemberRole): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message has no admin' };
+  if (!isAdmin(actor)) return { code: 'forbidden', message: 'only an admin of this space can change who is an admin' };
+  if (!targetMembership) return { code: 'invalid_request', message: `${target.displayName} is not in this space` };
   if (target.kind === 'agent' && role === 'admin') return { code: 'invalid_request', message: 'an agent can’t be an admin' };
   if (target.removedAt !== undefined || target.deactivatedAt !== undefined) {
-    return { code: 'invalid_request', message: `${target.displayName} is no longer in the org` };
+    return { code: 'invalid_request', message: `${target.displayName} is no longer here` };
   }
   return null;
-}
-
-/** The org's settings are its admins' to set (spec §4 Roles, 2026-10-19). */
-export function canSetOrgSettings(actor: Member): Decision {
-  if (actor.role === 'admin') return null;
-  return { code: 'forbidden', message: 'only an admin can change the org’s settings' };
-}
-
-/** Creating an invite, under the org's policy (spec §4 Invites, built 2026-10-19). */
-export function canInvite(actor: Member, policy: InvitePolicy): Decision {
-  if (policy === 'members' || actor.role === 'admin') return null;
-  return { code: 'forbidden', message: 'only admins can invite people to this org' };
 }
 
 /**
@@ -175,23 +123,6 @@ export function canWriteSpace(space: Space): Decision {
 }
 
 /**
- * A group chat (spec §4, 2026-10-07): an org with one shared space and no
- * DMs. One answer for every member — the org's count, not anyone's
- * listing — so a group is a chat, or a workspace, for everyone at once.
- * "No DMs" keeps an org that already talks in DMs a workspace: nothing
- * that exists is ever hidden by this rule.
- */
-export function isGroupChat(counts: { shared: number; direct: number }): boolean {
-  return counts.shared === 1 && counts.direct === 0;
-}
-
-/** DMs are off in a group chat, notes to self included; a second space turns them on (2026-10-07). */
-export function canOpenDirect(groupChat: boolean): Decision {
-  if (!groupChat) return null;
-  return { code: 'forbidden', message: 'direct messages are off in a group chat — add a channel to turn them on' };
-}
-
-/**
  * The content plane is role-flat (spec §4): the one act restricted to a
  * single member is an author acting on their own message — edit, delete,
  * end a poll. The check is on the member id, never the acting mode: a
@@ -206,7 +137,6 @@ export function isAuthor(
   return { code: 'forbidden', message: `only the author can ${act}` };
 }
 
-/** The org's logo is its admins' to set (2026-10-02); a member's avatar is always their own. */
 /**
  * A deleted account's member (2026-10-13): kept for attribution, refused as
  * a sign-in — through any driver, and through an invite, which would
@@ -214,16 +144,16 @@ export function isAuthor(
  */
 export function canSignIn(member: Member): Decision {
   if (member.deactivatedAt !== undefined) return { code: 'not_a_member', message: 'this account was deleted' };
-  // Removed by an admin (2026-10-19): refused as a sign-in; an invite
-  // reactivates the row instead (spaces.ts bindInvite), so it never asks.
-  if (member.removedAt !== undefined) return { code: 'not_a_member', message: 'you were removed from this org' };
+  // A departed row (2026-11-09: the losing rows of the identity merge) keeps
+  // history and is nobody's sign-in; the identity names the surviving row.
+  if (member.removedAt !== undefined) return { code: 'not_a_member', message: 'this member has departed' };
   return null;
 }
 
-/** Nobody adds, or opens a DM with, a deactivated or removed member (2026-10-13, 2026-10-19). */
+/** Nobody adds, or opens a DM with, a deactivated or departed member (2026-10-13, 2026-10-19, 2026-11-09). */
 export function canReachMember(member: Member): Decision {
   if (member.deactivatedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
-  if (member.removedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} is no longer in this org` };
+  if (member.removedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} is no longer here` };
   return null;
 }
 
@@ -247,9 +177,8 @@ export function canAddAgent(actor: Member): Decision {
 }
 
 /**
- * Creating a key is the owner's alone. A key IS the agent's identity: an
- * admin who could mint one could post as the agent, so admins get the off
- * switch (revoke) and never this. An org-owned agent (no owner) takes no keys.
+ * Creating a key is the owner's alone. A key IS the agent's identity (spec
+ * §4 Agent members). An agent without an owner takes no keys.
  */
 export function canCreateAgentKey(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
@@ -284,23 +213,25 @@ export function canSetAgentHook(actor: Member, agent: Member): Decision {
   return { code: 'forbidden', message: 'only the agent’s owner can set where its alerts go' };
 }
 
-/** Turning its alerts off: the owner, or any admin, like revoking a key. */
+/** Turning its alerts off: the owner, like revoking a key (nothing stands above the owner since 2026-11-09). */
 export function canClearAgentHook(actor: Member, agent: Member): Decision {
-  if (agent.kind === 'agent' && (actor.role === 'admin' || (agent.ownerId !== undefined && agent.ownerId === actor.id))) return null;
-  return { code: 'forbidden', message: 'only the agent’s owner or an admin can turn its alerts off' };
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can turn its alerts off' };
 }
 
 // --- super agents (spec §4 Agent members, 2026-11-02) --------------------------
 
 /**
  * Making an agent a super agent, changing what it may do, or making it
- * ordinary again: an admin, since what it creates runs on Rowboat's trial
- * credit. Only an agent with an owner, who will own what it creates.
+ * ordinary again: its owner (spec §4 Agent members, 2026-11-09; an admin
+ * until then, while what it created could run on Rowboat's trial credit —
+ * it bills the owner now, §8 Billing). Only an agent with an owner, who will
+ * own what it creates.
  */
 export function canSetSuperAgent(actor: Member, agent: Member): Decision {
   if (agent.kind !== 'agent') return { code: 'invalid_request', message: 'only an agent can be a super agent' };
-  if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can make an agent a super agent' };
   if (agent.ownerId === undefined) return { code: 'invalid_request', message: 'an agent without an owner can’t be a super agent: what it creates needs a person to own it' };
+  if (agent.ownerId !== actor.id) return { code: 'forbidden', message: 'only the agent’s owner can make it a super agent' };
   return null;
 }
 
@@ -328,10 +259,10 @@ export function canDecideSuperAgentRequest(actor: Member, superAgent: Member | u
   return { code: 'forbidden', message: 'only the agent’s owner can decide this' };
 }
 
-/** Revoking: the owner, or any admin — the off switch for an agent that misbehaves. */
+/** Revoking: the owner — the off switch for an agent that misbehaves (an admin's too until 2026-11-09; nothing stands above the owner now). */
 export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
-  if (agent.kind === 'agent' && (actor.role === 'admin' || (agent.ownerId !== undefined && agent.ownerId === actor.id))) return null;
-  return { code: 'forbidden', message: 'only the agent’s owner or an admin can revoke its keys' };
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can revoke its keys' };
 }
 
 /**
@@ -369,11 +300,6 @@ export function canHandSecrets(authorId: string, readers: Member[]): Decision {
 export function canReadSecret(actorId: string, secrets: MessageSecrets | undefined, name: string): Decision {
   if (secrets && secrets.names.includes(name) && secrets.readers.includes(actorId)) return null;
   return { code: 'not_found', message: 'no such secret for you' };
-}
-
-/** The agents a member manages, and so sees on the Agents screen: an admin, every one; anyone else, their own. */
-export function agentsManagedBy(actor: Member): 'all' | 'owned' {
-  return actor.role === 'admin' ? 'all' : 'owned';
 }
 
 // --- invoking agent members (spec §8 Invoking agent members, 2026-09-30) -----
@@ -428,10 +354,10 @@ export function canDecideApproval(ctx: { agent?: boolean }, actingMode: string):
   return null;
 }
 
-/** Stopping a running invocation: its invoker or an admin, and only when the agent's connector can stop. */
-export function canStopInvocation(actor: Member, invocation: Invocation, stopDeclared: boolean): Decision {
-  if (invocation.trigger.authorId !== actor.id && actor.role !== 'admin') {
-    return { code: 'forbidden', message: 'only the person who asked, or an admin, can stop it' };
+/** Stopping a running invocation: its invoker or an admin of the space, and only when the agent's connector can stop. */
+export function canStopInvocation(actor: Membership | undefined, invocation: Invocation, stopDeclared: boolean): Decision {
+  if (invocation.trigger.authorId !== actor?.memberId && !isAdmin(actor)) {
+    return { code: 'forbidden', message: 'only the person who asked, or an admin of this space, can stop it' };
   }
   if (!stopDeclared) return { code: 'invalid_request', message: 'this agent can’t be stopped from Spaces; open it in its own app' };
   return null;

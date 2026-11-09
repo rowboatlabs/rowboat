@@ -165,22 +165,14 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     by: Attribution,
   }),
   /**
-   * An admin changed the space's visibility (api.ts setSpaceVisibility,
-   * 2026-10-19) — the full row plus who did it, the shape of a rename.
+   * A member's admin bit in this space changed (spec §4 Roles, 2026-11-09):
+   * the membership row as it now stands, plus who acted — an admin giving or
+   * taking it, or, when the last admin left, the departing member, whose
+   * leaving made the longest-standing human admin.
    */
   z.object({
-    type: z.literal('space_visibility_changed'),
-    space: Space,
-    by: Attribution,
-  }),
-  /**
-   * An admin made the space a default space or took it off the defaults
-   * (api.ts setDefaultSpace, 2026-10-19) — the full row, whose `isDefault`
-   * says which, plus who did it. Clients older than it skip the event.
-   */
-  z.object({
-    type: z.literal('space_default_changed'),
-    space: Space,
+    type: z.literal('role_changed'),
+    membership: Membership,
     by: Attribution,
   }),
 ]);
@@ -285,18 +277,6 @@ export const ServerFrame = z.discriminatedUnion('kind', [
   }),
   // Org profiles bypass space subscriptions; missed updates are recovered by roster reads (2026-10-22).
   z.object({ kind: z.literal('profile_updated'), member: Member, at: z.iso.datetime() }),
-  /**
-   * Addressed to EVERY member of the org (2026-10-07): the org's shape
-   * changed — a second space made a group chat a workspace, DMs on; or,
-   * since 2026-10-19, an admin changed a role, the invite policy, a space's
-   * visibility, or removed someone from the org.
-   * It reaches members the new space does not include, which is why it is
-   * not a space event. Ephemeral, never replayed: refetch the listing
-   * (`groupChat` on listSpaces is the truth), the roster and `me` (roles,
-   * removals) and the org's settings. Older clients drop the
-   * unknown frame by contract.
-   */
-  z.object({ kind: z.literal('org_changed'), at: z.iso.datetime() }),
   /**
    * Addressed to a MEMBER (read state, 2026-09-09): one of your own
    * connections advanced a read mark — the stream's (no threadRootId) or a

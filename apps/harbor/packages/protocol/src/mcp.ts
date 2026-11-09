@@ -11,7 +11,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, InvitePolicy, Member, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { Attribution, Member, SpaceMember, SuperAgentResult, MemberRole, Membership, Message, SessionMark, ReactionEmoji, Space, SpaceKind, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
@@ -81,12 +81,12 @@ export const updateProfile = tool({
 export const listMembers = tool({
   name: 'list_members',
   description:
-    'People and agents, with names. Omit spaceId for the whole org roster, sorted by display name. ' +
-    "Pass spaceId for that space's members only. This is how a name becomes a memberId — match displayName " +
+    'People and agents, with names. Omit spaceId for everyone you can reach, sorted by display name. ' +
+    "Pass spaceId for that space's members, each with their role there (admin or member). This is how a name becomes a memberId — match displayName " +
     '(case-insensitive, first name is usually enough); if several match, say so and ask. ' +
     'Messages and reactions carry memberIds only; resolve them here before naming anyone.',
   input: z.object({ spaceId: SpaceId.optional() }),
-  output: z.object({ members: z.array(Member) }),
+  output: z.object({ members: z.array(SpaceMember.partial({ role: true, joinedAt: true })) }),
 });
 
 // --- spaces & membership --------------------------------------------------------
@@ -94,14 +94,13 @@ export const listMembers = tool({
 export const listSpaces = tool({
   name: 'list_spaces',
   description:
-    'List the spaces you are a member of on this org, each with its file listing. ' +
+    'List the spaces you are a member of, each with its file listing. ' +
     'Call this first: it resolves a space name (e.g. "Roadboard") to the spaceId every other ' +
     'tool needs, and lists every file with its assetId (what read_asset and every file tool take) ' +
     'and its path (the display name). Discovery is mechanical — never guess a spaceId or an assetId. ' +
     'Shared spaces only by default; pass includeDirect to ' +
     'also list your direct messages (kind "direct": a private conversation with exactly one other ' +
     'member — its participants are listed; label it by the other member, its name is a placeholder). ' +
-    'groupChat: true means the org is one group conversation and DMs are off (open_direct refuses) until it has a second space. ' +
     "A DM flagged self: true is your person's own notes-to-self space (they are its only participant) — " +
     'the right place for "save this for me". Every other tool works on a DM exactly as on a space.',
   input: z.object({
@@ -114,7 +113,6 @@ export const listSpaces = tool({
         id: SpaceId,
         name: z.string(),
         kind: SpaceKind,
-        visibility: SpaceVisibility.default('private'),
         /** Direct spaces only: the member ids (one = a self-DM). */
         participants: z.array(MemberId).optional(),
         /** Direct spaces only: true when the caller is the only participant — their notes to self. */
@@ -124,8 +122,6 @@ export const listSpaces = tool({
         assets: z.array(Asset.omit({ state: true })),
       }),
     ),
-    /** The org is a group chat (spec §4, 2026-10-07): one space, DMs off until a second space. */
-    groupChat: z.boolean(),
   }),
 });
 
@@ -149,27 +145,13 @@ export const listAssets = tool({
   output: z.object({ entries: z.array(Asset) }),
 });
 
-export const browseSpaces = tool({
-  name: 'browse_spaces',
-  description: 'Browse this org’s shared open spaces, including those already joined. Read any result without joining; call join_space before posting or other actions. Private spaces and DMs are never listed.',
-  input: z.object({}),
-  output: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
-});
-
-export const joinSpace = tool({
-  name: 'join_space',
-  description: 'Join a shared open space as your person before posting or other actions. Repeated joins are a no-op. Private spaces and DMs cannot be self-joined.',
-  input: z.object({ spaceId: SpaceId }),
-  output: z.object({ space: Space, membership: Membership }),
-});
-
 export const createSpace = tool({
   name: 'create_space',
   description:
-    'Create a new shared space (a channel: one message stream plus a file folder). Your person ' +
-    'becomes its first member. Visibility defaults to private (invite required); open spaces allow org members to browse and self-join. Check list_spaces and browse_spaces ' +
+    'Create a new shared space (a group: one message stream plus a file folder). Your person ' +
+    'becomes its first member and its admin; others arrive by invite link or by being added. Check list_spaces ' +
     'first so you do not create a duplicate of a space that already exists.',
-  input: z.object({ name: z.string().min(1).max(128), visibility: SpaceVisibility.default('private') }),
+  input: z.object({ name: z.string().min(1).max(128) }),
   output: z.object({ space: Space }),
 });
 
@@ -209,20 +191,10 @@ export const deleteSpace = tool({
   output: z.object({ deleted: z.literal(true) }),
 });
 
-export const setSpaceVisibility = tool({
-  name: 'set_space_visibility',
-  description:
-    "Change a shared space's visibility (admins only, in a space they are in; DMs and archived " +
-    'spaces refuse). open: any org member can find, read and join it. private: members only, and ' +
-    'nobody else can see it. The same value is a no-op. Only when your person asked for it.',
-  input: z.object({ spaceId: SpaceId, visibility: SpaceVisibility }),
-  output: z.object({ space: Space }),
-});
-
 export const addMembers = tool({
   name: 'add_members',
   description:
-    'Add existing org members, people or agents, to a shared space your person is in. Take ' +
+    'Add people or agents your person can reach to a shared space they are in. Take ' +
     'memberIds from list_members. Anyone already in is a no-op. Direct messages cannot be added to. ' +
     "Someone else's personal agent (personal: true) can be added only by its owner. " +
     'Only when your person asked for it.',
@@ -233,57 +205,20 @@ export const addMembers = tool({
 export const removeMember = tool({
   name: 'remove_member',
   description:
-    'Remove someone, person or agent, from a shared space (admins only, in a space they are in; ' +
+    "Remove someone, person or agent, from a shared space (the space's admins only; " +
     'DMs refuse). Take the memberId from list_members. To take your person out, use leave_space. ' +
     'Someone not in the space is a no-op. Only when your person explicitly asked to remove them.',
   input: z.object({ spaceId: SpaceId, memberId: MemberId }),
   output: z.object({ removed: z.boolean() }),
 });
 
-export const removeOrgMember = tool({
-  name: 'remove_org_member',
-  description:
-    'Remove someone, person or agent, from the whole org (admins only; never your person). They ' +
-    'leave every shared space and can no longer sign in; their messages stay, attributed. A new ' +
-    'invite brings the same member back. Only when your person explicitly asked to remove this ' +
-    'person from the org by name — never as a step toward something else.',
-  input: z.object({ memberId: MemberId }),
-  output: z.object({ member: Member }),
-});
-
 export const setMemberRole = tool({
   name: 'set_member_role',
   description:
-    "Make a person an admin, or a member again (admins only). Agents can't be admins, and the org " +
-    'always keeps one admin. The same role is a no-op. Only when your person asked for it.',
-  input: z.object({ memberId: MemberId, role: MemberRole }),
-  output: z.object({ member: Member }),
-});
-
-export const getOrgSettings = tool({
-  name: 'get_org_settings',
-  description: "The org's settings: invitePolicy says who may create invite links (members, or admins only); jevEnabled says whether Ro, the built-in agent that tags whoever a message needs, is on.",
-  input: z.object({}),
-  output: z.object({ settings: OrgSettings }),
-});
-
-export const setInvitePolicy = tool({
-  name: 'set_invite_policy',
-  description:
-    'Set who may create invite links: members (anyone) or admins (admins only). Admins only. ' +
-    'The same value is a no-op. Only when your person asked for it.',
-  input: z.object({ invitePolicy: InvitePolicy }),
-  output: z.object({ settings: OrgSettings }),
-});
-
-export const setJevEnabled = tool({
-  name: 'set_jev_enabled',
-  description:
-    'Turn Ro, the built-in agent that tags whoever a message needs, on or off for the org. Admins only. ' +
-    'Off, it tags no one and apps leave it out of agent lists and pickers. The same value is a no-op. ' +
-    'Only when your person asked for it.',
-  input: z.object({ jevEnabled: z.boolean() }),
-  output: z.object({ settings: OrgSettings }),
+    "Make a member of a space one of its admins, or a member again (the space's admins only). Agents can't be admins, " +
+    'the only admin cannot step down, and a DM has no admin. The same role is a no-op. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, memberId: MemberId, role: MemberRole }),
+  output: z.object({ membership: Membership }),
 });
 
 export const leaveSpace = tool({
@@ -293,16 +228,6 @@ export const leaveSpace = tool({
     'explicitly asked to leave — rejoining needs a fresh invite.',
   input: z.object({ spaceId: SpaceId }),
   output: z.object({ left: z.literal(true) }),
-});
-
-export const setDefaultSpace = tool({
-  name: 'set_default_space',
-  description:
-    'Make a shared open space a default space, or take it off the defaults (admins only). ' +
-    'Everyone who accepts an invite to the org joins every default space. Private spaces and ' +
-    'DMs cannot be defaults. Only when your person asked for it.',
-  input: z.object({ spaceId: SpaceId, isDefault: z.boolean() }),
-  output: z.object({ space: Space }),
 });
 
 export const createInvite = tool({
@@ -886,25 +811,17 @@ export const mcpTools = [
   updateProfile,
   listMembers,
   listSpaces,
-  browseSpaces,
   listAssets,
-  joinSpace,
   openDirect,
   createSpace,
   renameSpace,
   archiveSpace,
   unarchiveSpace,
-  setDefaultSpace,
   deleteSpace,
-  setSpaceVisibility,
   addMembers,
   removeMember,
   leaveSpace,
-  removeOrgMember,
   setMemberRole,
-  getOrgSettings,
-  setInvitePolicy,
-  setJevEnabled,
   createInvite,
   readStream,
   readThread,
@@ -950,7 +867,6 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   whoami.name,
   listMembers.name,
   listSpaces.name,
-  browseSpaces.name,
   listAssets.name,
   readStream.name,
   readThread.name,
@@ -963,5 +879,4 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   assetHistory.name,
   diff.name,
   getInvocations.name,
-  getOrgSettings.name,
 ]);

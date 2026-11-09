@@ -4,7 +4,6 @@ import { bindAuth, type AuthDriver, type ServerAuth } from './auth.js';
 import { billingFromEnv, type BillingAccounts } from './billing.js';
 import type { BlobStore } from './blobs.js';
 import { HostedConnectors } from './connectors/host.js';
-import { jevApiKey } from './connectors/jev/index.js';
 import { maritimeProvisioner } from './connectors/maritime/provisioning.js';
 import type { HostingProvider } from './core/hosting.js';
 import { buildHttpApp } from './http.js';
@@ -112,8 +111,6 @@ export async function buildRuntime(input: RuntimeInput): Promise<Runtime> {
       },
     );
   }
-  // Jev (spec §8 Jev, 2026-10-07): created once when the deployment has its key.
-  if (jevApiKey()) await service.ensureJev();
   await connectors.startAll();
   if (provider) service.startHosting(input.hosting?.tickMs);
   const auth = bindAuth(input.auth, store);

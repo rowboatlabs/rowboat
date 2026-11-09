@@ -15,7 +15,7 @@ const SPACE = '01HZZZZZZZZZZZZZZZZZZZZZZZ';
 const ROOT = '01HXXXXXXXXXXXXXXXXXXXXXXX';
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: SPACE, name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private', archived: false }) as Space;
+  ({ id: SPACE, name: 'general', createdAt: new Date().toISOString(), kind, archived: false }) as Space;
 
 const msg = (body: string, author = 'harsh', opts: { agent?: boolean; threadRoot?: string } = {}): Message =>
   ({
@@ -71,8 +71,8 @@ describe('decideNotifications + Notifier', () => {
     const s = space('shared');
     await store.putSpace(s);
     for (const id of ['harsh', 'gagan', 'arjun']) {
-      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member', kind: 'human' });
-      await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString() });
+      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), kind: 'human' });
+      await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString(), role: 'member' });
     }
     await store.setThreadFollowing(s.id, ROOT, 'gagan', true, new Date().toISOString());
     return { store, s };

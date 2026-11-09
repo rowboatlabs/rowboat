@@ -48,7 +48,6 @@ beforeAll(async () => {
     ],
   });
   const gagan = (await harbor.store.getMember('gagan'))!;
-  await harbor.store.putMember({ ...gagan, role: 'admin' });
   spaceId = (await as('dev-ramnique').post('/v1/spaces', { name: 'Payments' })).body.space.id;
   await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh', 'gagan'], actingMode: 'direct' });
 });

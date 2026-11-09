@@ -72,7 +72,6 @@ beforeAll(async () => {
     ],
   });
   const ram = (await harbor.store.getMember('ramnique'))!;
-  await harbor.store.putMember({ ...ram, role: 'admin' });
   spaceId = (await as('dev-ramnique').post('/v1/spaces', { name: 'Payments' })).body.space.id;
   await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh'], actingMode: 'direct' });
   const h = await addAgent('ramnique', 'Hermes');

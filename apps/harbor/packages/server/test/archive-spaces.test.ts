@@ -54,8 +54,8 @@ beforeAll(async () => {
     ],
     seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
   });
-  spaceId = (await admin().post('/v1/spaces', { name: 'Launch', visibility: 'open' })).body.space.id;
-  await gagan().post(`/v1/spaces/${spaceId}/join`);
+  spaceId = (await admin().post('/v1/spaces', { name: 'Launch' })).body.space.id;
+  await admin().post(`/v1/spaces/${spaceId}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
   notesId = (await admin().post(`/v1/spaces/${spaceId}/assets`, {
     path: 'notes.md', newContent: '# Notes\n', reason: 'start', actingMode: 'direct',
   })).body.asset.id;
@@ -105,7 +105,6 @@ describe('archive and unarchive a space', () => {
     await forbidden(gagan().post(`/v1/spaces/${spaceId}/rename`, { name: 'Renamed', actingMode: 'direct' }));
     await forbidden(admin().post('/v1/invites', { spaceId }));
     await forbidden(admin().post(`/v1/spaces/${spaceId}/members`, { memberIds: ['prakhar'], actingMode: 'direct' }));
-    await forbidden(prakhar().post(`/v1/spaces/${spaceId}/join`));
     const upload = await fetch(`${harbor.url}/v1/spaces/${spaceId}/blobs`, {
       method: 'PUT',
       headers: { authorization: 'Bearer dev-gagan', 'x-blob-sha256': blobHash(PNG_1PX), 'content-type': 'image/png' },
@@ -124,8 +123,6 @@ describe('archive and unarchive a space', () => {
     expect((await gagan().get(`/v1/spaces/${spaceId}/search?q=shipping`)).status).toBe(200);
     // Listings keep it, flagged — the client files it under Archived.
     expect(((await gagan().get('/v1/spaces')).body.spaces as Space[]).find((s) => s.id === spaceId)).toMatchObject({ archived: true });
-    const browsed = (await prakhar().get('/v1/spaces/browse')).body.spaces as Array<{ space: Space }>;
-    expect(browsed.find((b) => b.space.id === spaceId)?.space.archived).toBe(true);
     // Personal state and leaving still work.
     expect((await gagan().post(`/v1/spaces/${spaceId}/read`, { offset: 1 })).status).toBe(200);
     expect((await gagan().post(`/v1/spaces/${spaceId}/leave`)).status).toBe(200);

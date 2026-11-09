@@ -89,8 +89,8 @@ describe('deleting a space row', () => {
     const gagan = restClient(harbor, 'dev-gagan');
     // The same activity in two spaces: one is deleted, the other must not notice.
     const fill = async (name: string): Promise<string> => {
-      const id = (await ramnique.post('/v1/spaces', { name, visibility: 'open' })).body.space.id as string;
-      await gagan.post(`/v1/spaces/${id}/join`);
+      const id = (await ramnique.post('/v1/spaces', { name })).body.space.id as string;
+      await ramnique.post(`/v1/spaces/${id}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
       const root = (await gagan.post(`/v1/spaces/${id}/messages`, { body: 'shipping friday', actingMode: 'direct' })).body.message.id;
       await ramnique.post(`/v1/spaces/${id}/messages`, { body: 'agreed', threadRoot: root, actingMode: 'direct' });
       await ramnique.post(`/v1/spaces/${id}/messages/${root}/reactions`, { emoji: '👀', action: 'add', actingMode: 'direct' });

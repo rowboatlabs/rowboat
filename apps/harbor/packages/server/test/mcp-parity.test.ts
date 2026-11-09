@@ -74,7 +74,7 @@ describe('agent face parity', () => {
 
   it("whoami is the token's member — the same row /v1/me serves — plus the server's name and address", async () => {
     const { member, server } = await call<{ member: Member; server: { name: string; address: string } }>(ramAgent, 'whoami');
-    expect(member).toMatchObject({ id: 'ramnique', displayName: 'Ramnique', role: 'member' });
+    expect(member).toMatchObject({ id: 'ramnique', displayName: 'Ramnique', kind: 'human' });
     expect(member).toEqual((await ramnique.get('/v1/me')).body.member);
     expect(server).toEqual({ name: harbor.service.server.name, address: harbor.service.server.address });
     const other = await call<{ member: Member }>(harshAgent, 'whoami');

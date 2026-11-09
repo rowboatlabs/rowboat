@@ -37,8 +37,8 @@ const upload = (token: string, spaceId: string, bytes: Uint8Array) =>
 const removed = (live: LiveClient, spaceId: string) =>
   live.frames.filter((f): f is Extract<ServerFrame, { kind: 'space_removed' }> => f.kind === 'space_removed' && f.spaceId === spaceId);
 
-async function space(name: string, visibility: 'open' | 'private', members: string[] = ['gagan']): Promise<string> {
-  const id = (await admin().post('/v1/spaces', { name, visibility })).body.space.id as string;
+async function space(name: string, members: string[] = ['gagan']): Promise<string> {
+  const id = (await admin().post('/v1/spaces', { name })).body.space.id as string;
   await admin().post(`/v1/spaces/${id}/members`, { memberIds: members, actingMode: 'direct' });
   return id;
 }
@@ -68,7 +68,7 @@ afterAll(async () => {
 
 describe('DELETE /v1/spaces/:spaceId', () => {
   it('only an admin deletes, only a shared space, and a refusal deletes nothing', async () => {
-    const id = await space('Keep me', 'private');
+    const id = await space('Keep me');
     expect((await del('dev-gagan', id)).status).toBe(403);
     expect((await del('dev-prakhar', id)).status).toBe(403); // not a member
     const dm = (await admin().post('/v1/direct', { memberId: 'gagan' })).body.space.id;
@@ -78,7 +78,7 @@ describe('DELETE /v1/spaces/:spaceId', () => {
   });
 
   it('drops the space whole: gone from every listing, every link dead, a second delete not_found', async () => {
-    const id = await space('Launch', 'open');
+    const id = await space('Launch');
     const root = (await gagan().post(`/v1/spaces/${id}/messages`, { body: 'shipping friday', actingMode: 'direct' })).body.message.id;
     const asset = (await admin().post(`/v1/spaces/${id}/assets`, { path: 'notes.md', newContent: '# Notes\n', reason: 'start', actingMode: 'direct' })).body.asset;
     const invite = (await admin().post('/v1/invites', { spaceId: id })).body.token;
@@ -88,7 +88,6 @@ describe('DELETE /v1/spaces/:spaceId', () => {
     expect(routes.deleteSpace.response.parse(r.body)).toEqual({ deleted: true });
 
     expect(((await gagan().get('/v1/spaces')).body.spaces as Space[]).some((s) => s.id === id)).toBe(false);
-    expect(((await prakhar().get('/v1/spaces/browse')).body.spaces as Array<{ space: Space }>).some((b) => b.space.id === id)).toBe(false);
     expect((await gagan().get(`/v1/spaces/${id}/stream`)).status).toBe(404);
     expect((await gagan().get(`/v1/spaces/${id}/assets/${asset.id}`)).status).toBe(404);
     expect((await gagan().get(`/v1/spaces/${id}/threads/${root}`)).status).toBe(404);
@@ -99,14 +98,14 @@ describe('DELETE /v1/spaces/:spaceId', () => {
   });
 
   it('an archived space can be deleted', async () => {
-    const id = await space('Old', 'private');
+    const id = await space('Old');
     expect((await admin().post(`/v1/spaces/${id}/archive`, { actingMode: 'direct' })).status).toBe(200);
     expect((await del('dev-ramnique', id)).status).toBe(200);
     expect(await harbor.store.getSpace(id)).toBeUndefined();
   });
 
   it('removes the bytes nothing else in the org uses, and keeps the rest', async () => {
-    const id = await space('Uploads', 'private');
+    const id = await space('Uploads');
     for (const bytes of [SHARED, ONLY_HERE, AVATAR]) expect(await upload('dev-gagan', id, bytes)).toBe(200);
     expect(await upload('dev-gagan', lobby, SHARED)).toBe(200); // the same bytes in another space
     const avatar = await fetch(`${harbor.url}/v1/me/avatar`, {
@@ -124,7 +123,7 @@ describe('DELETE /v1/spaces/:spaceId', () => {
   });
 
   it('tells every member of a private space, and nobody else', async () => {
-    const id = await space('Secret', 'private');
+    const id = await space('Secret');
     const [g, p] = [await liveClient(harbor, 'dev-gagan'), await liveClient(harbor, 'dev-prakhar')];
     try {
       expect((await del('dev-ramnique', id)).status).toBe(200);
@@ -132,25 +131,11 @@ describe('DELETE /v1/spaces/:spaceId', () => {
       expect(removed(g, id)[0]).toMatchObject({ spaceId: id, by: 'ramnique' });
       // Prakhar, not a member, learns nothing about a private space; a frame
       // sent after the delete still reaches him, so had his come, it is here.
-      const sentinel = await space('Sentinel', 'private', ['prakhar']);
+      const sentinel = await space('Sentinel', ['prakhar']);
       await p.until((fs) => fs.some((f) => f.kind === 'space_added' && f.spaceId === sentinel), 'space_added for prakhar');
       expect(removed(p, id)).toEqual([]);
     } finally {
       g.close();
-      p.close();
-    }
-  });
-
-  it('tells everyone in the org about an open space, and ends a non-member reader’s subscription', async () => {
-    const id = await space('Town square', 'open');
-    const p = await liveClient(harbor, 'dev-prakhar');
-    try {
-      p.send({ kind: 'subscribe', spaceId: id });
-      await p.until((fs) => fs.some((f) => f.kind === 'subscribed' && f.spaceId === id), 'subscribed');
-      expect((await del('dev-ramnique', id)).status).toBe(200);
-      await p.until(() => removed(p, id).length > 0, 'space_removed for a reader');
-      expect(harbor.stats.snapshot().live.subscriptions).toBe(0);
-    } finally {
       p.close();
     }
   });
@@ -162,7 +147,7 @@ describe('delete_space (MCP)', () => {
     expect(tool.description).toMatch(/no undo/);
     expect(tool.description).toMatch(/explicitly asked/);
 
-    const id = await space('Agent-made', 'private');
+    const id = await space('Agent-made');
     const refusal = await gaganAgent.callTool({ name: 'delete_space', arguments: { spaceId: id } });
     expect(refusal.isError).toBe(true);
     expect(JSON.parse((refusal.content as Array<{ text: string }>)[0]!.text).code).toBe('forbidden');

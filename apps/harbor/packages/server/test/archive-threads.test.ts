@@ -42,7 +42,7 @@ beforeAll(async () => {
     ],
     seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
   });
-  spaceId = (await ram().post('/v1/spaces', { name: 'Launch', visibility: 'private' })).body.space.id;
+  spaceId = (await ram().post('/v1/spaces', { name: 'Launch' })).body.space.id;
   await ram().post(`/v1/spaces/${spaceId}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
   agent = await agentClient(harbor, 'dev-gagan', { agentName: 'Rowboat' });
 });

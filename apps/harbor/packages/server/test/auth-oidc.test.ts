@@ -160,7 +160,7 @@ describe('invite-binding ceremony', () => {
     const memberId = accepted.body.membership.memberId as string;
     expect(memberId).not.toBe('sub-harsh'); // minted id, sub lives only in the mapping
     const member = await harbor.store.getMember(memberId);
-    expect(member).toMatchObject({ displayName: 'Harsh Vardhan', role: 'member' });
+    expect(member).toMatchObject({ displayName: 'Harsh Vardhan', kind: 'human' });
     expect((await harbor.store.getMemberByIdentity(as.issuer, 'sub-harsh'))?.id).toBe(memberId);
 
     // After: the same token works; /v1/me answers who the identity became;
@@ -173,8 +173,7 @@ describe('invite-binding ceremony', () => {
       id: string;
       role: string;
     }>;
-    expect(members.find((m) => m.id === 'ramnique')?.role).toBe('admin');
-    expect(members.find((m) => m.id === memberId)?.role).toBe('member');
+    expect(members.some((m) => m.id === memberId)).toBe(true);
     await harbor.close();
   });
 

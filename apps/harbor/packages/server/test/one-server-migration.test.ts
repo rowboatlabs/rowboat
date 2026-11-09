@@ -118,7 +118,7 @@ describe('migration 062 — one server', () => {
       const tables = await db.query<{ table_name: string }>(`select table_name from information_schema.tables where table_schema = 'public' and table_name in ('orgs', 'org_domains', 'org_logos', 'org_images', 'images')`);
       expect(tables.map((t) => t.table_name).sort()).toEqual(['images']);
       const orgCols = await db.query<{ table_name: string }>(`select table_name from information_schema.columns where table_schema = 'public' and column_name = 'org_id' order by table_name`);
-      expect(orgCols.map((c) => c.table_name)).toEqual(['org_settings']);
+      expect(orgCols.map((c) => c.table_name)).toEqual([]);
     } finally {
       await db.close();
     }

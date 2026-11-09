@@ -22,7 +22,6 @@ beforeAll(async () => {
     ],
   });
   const ram = (await harbor.store.getMember('ramnique'))!;
-  await harbor.store.putMember({ ...ram, role: 'admin' });
   const created = await as('dev-harsh').post('/v1/agents', { displayName: 'Hermes' });
   ({ agent } = routes.createAgent.response.parse(created.body));
   secret = created.body.key.secret;

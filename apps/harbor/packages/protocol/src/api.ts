@@ -12,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, SecretName, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, MemberRole, Membership, SpaceMember, Message, SecretName, SessionMark, ReactionEmoji, Space, SpaceKind, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
   HostingConsole,
@@ -315,23 +315,6 @@ export const routes = {
     path: '/v1/me/avatar',
     response: z.object({ member: Member }),
   },
-  /** The org's settings (2026-10-19): who may invite, and whether Ro is on (2026-10-30). Any member reads them. */
-  getOrgSettings: {
-    method: 'GET',
-    path: '/v1/org/settings',
-    response: z.object({ settings: OrgSettings }),
-  },
-  /**
-   * Change the org's settings — admins only (spec §4 Roles, 2026-10-19).
-   * Fields left out stay as they are; an unchanged value is a no-op. Every
-   * member's connections get `org_changed`.
-   */
-  updateOrgSettings: {
-    method: 'PATCH',
-    path: '/v1/org/settings',
-    request: z.object({ invitePolicy: InvitePolicy.optional(), jevEnabled: z.boolean().optional() }),
-    response: z.object({ settings: OrgSettings }),
-  },
   /**
    * An avatar's or logo's bytes: a stream or a 302 to a short-lived presigned
    * URL, exactly as getBlob. Readable by every member of the org; hash-keyed,
@@ -356,13 +339,6 @@ export const routes = {
     query: z.object({ includeDirect: z.coerce.boolean().optional() }),
     response: z.object({
       spaces: z.array(Space),
-      /**
-       * The org is a group chat (spec §4, 2026-10-07): one shared space and
-       * no DMs, the same answer for every member. Clients show it as one
-       * conversation; DMs are off until a second space. Absent from orgs
-       * that predate it.
-       */
-      groupChat: z.boolean().optional(),
     }),
   },
   /**
@@ -406,21 +382,10 @@ export const routes = {
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
   },
-  browseSpaces: {
-    method: 'GET',
-    path: '/v1/spaces/browse',
-    response: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
-  },
-  joinSpace: {
-    method: 'POST',
-    path: '/v1/spaces/:spaceId/join',
-    params: z.object({ spaceId: SpaceId }),
-    response: z.object({ space: Space, membership: Membership }),
-  },
   createSpace: {
     method: 'POST',
     path: '/v1/spaces',
-    request: z.object({ name: z.string().min(1).max(128), visibility: SpaceVisibility.default('private') }),
+    request: z.object({ name: z.string().min(1).max(128) }),
     response: z.object({ space: Space }),
   },
   /**
@@ -459,38 +424,6 @@ export const routes = {
     response: z.object({ space: Space }),
   },
   /**
-   * Change a shared space's visibility (spec §4 Roles, 2026-10-19): an admin
-   * act by a member of the space, refused on a DM and on an archived space.
-   * The same value is a no-op with no event; a change appends
-   * `space_visibility_changed`. Every org member gets `org_changed`, so
-   * browse listings move; making a space private also sends `space_removed`
-   * to every org member not in it, ending any reading subscription.
-   */
-  setSpaceVisibility: {
-    method: 'POST',
-    path: '/v1/spaces/:spaceId/visibility',
-    params: z.object({ spaceId: SpaceId }),
-    request: z.object({ visibility: SpaceVisibility, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
-    response: z.object({ space: Space }),
-  },
-  /**
-   * Make a space a default space, or take it off the defaults (spec §5
-   * answer 3, 2026-10-19): everyone who accepts an invite to the org joins
-   * every default space. An admin act, on a shared open space only — a
-   * private space or a DM refuses with `invalid_request`, so an invite is
-   * never a back door into either; taking a flag off is allowed on any
-   * shared space. The admin need not be a member. Archived spaces refuse.
-   * Setting the flag a space already has is a no-op with no event. Members
-   * learn by `space_default_changed` on the log.
-   */
-  setDefaultSpace: {
-    method: 'POST',
-    path: '/v1/spaces/:spaceId/default',
-    params: z.object({ spaceId: SpaceId }),
-    request: z.object({ isDefault: z.boolean(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
-    response: z.object({ space: Space }),
-  },
-  /**
    * Delete a shared space (spec §6, 2026-10-14): an admin act, refused on a
    * DM, allowed on an archived space. The space and every row that hangs off
    * it go in one statement (the cascade, migration 039); blob bytes no other
@@ -509,7 +442,7 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces/:spaceId/members',
     params: z.object({ spaceId: SpaceId }),
-    response: z.object({ members: z.array(Member) }),
+    response: z.object({ members: z.array(SpaceMember) }),
   },
   /**
    * Agent members and their keys (spec §4 Agent members, 2026-09-29). Render
@@ -1114,35 +1047,17 @@ export const routes = {
     }),
   },
   /**
-   * Remove a member, person or agent, from the org (spec §4 Roles,
-   * 2026-10-19): admins only, never yourself, never Jev. The member leaves
-   * every shared space (a `removed` event with `by` on each, and
-   * `space_removed`), their push tokens go, keys of the agent and of agents
-   * they own are revoked, an admin becomes a member, and `removedAt` is
-   * stamped. Their DMs keep the membership, as with a deleted account. Their
-   * sign-in is `not_a_member` until an invite they accept reactivates the
-   * same row. Removing a removed member is a no-op. Every member's
-   * connections get `org_changed`.
+   * Give or take the admin bit for one member of a space (spec §4 Roles,
+   * 2026-11-09): admins of the space only. An agent is refused
+   * (`invalid_request`); demoting the only admin is `forbidden`; the same
+   * role is a 200 no-op with no event; a change appends `role_changed`.
    */
-  removeOrgMember: {
+  setSpaceRole: {
     method: 'POST',
-    path: '/v1/members/:memberId/remove',
-    params: z.object({ memberId: MemberId }),
-    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
-    response: z.object({ member: Member }),
-  },
-  /**
-   * Promote or demote an admin (spec §4 Roles, 2026-10-19): admins only.
-   * Agents are never admins; the org always keeps one, so demoting its last
-   * admin — yourself included — is refused. The same role is a no-op. Every
-   * member's connections get `org_changed`.
-   */
-  setMemberRole: {
-    method: 'POST',
-    path: '/v1/members/:memberId/role',
-    params: z.object({ memberId: MemberId }),
+    path: '/v1/spaces/:spaceId/members/:memberId/role',
+    params: z.object({ spaceId: SpaceId, memberId: MemberId }),
     request: z.object({ role: MemberRole, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
-    response: z.object({ member: Member }),
+    response: z.object({ membership: Membership }),
   },
   leaveSpace: {
     method: 'POST',

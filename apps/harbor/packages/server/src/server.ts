@@ -142,8 +142,8 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
 
 /**
  * The dev/test seed (main.ts's Roadboard, the suites' fixtures): members,
- * then each seed space — made by its creator (the provisioned first admin,
- * spec §4), joined by every seed member, filled with its files. Idempotent
+ * then each seed space — made by its creator, its admin (spec §4 Roles),
+ * joined by every seed member, filled with its files. Idempotent
  * on durable stores: a creator's existing space of the same name is left alone.
  */
 async function seed(
@@ -153,11 +153,10 @@ async function seed(
 ): Promise<void> {
   for (const m of options.seedMembers ?? []) {
     const existing = await store.getMember(m.id);
-    await store.putMember({ ...existing, id: m.id, displayName: m.displayName, role: existing?.role ?? 'member', kind: 'human' });
+    await store.putMember({ ...existing, id: m.id, displayName: m.displayName, kind: 'human' });
   }
   for (const seed of options.seedSpaces ?? []) {
-    const creator = await ensureMember(store, seed.creator);
-    if (creator.role !== 'admin') await store.putMember({ ...creator, role: 'admin' });
+    await ensureMember(store, seed.creator);
     const existing = await service.listSpaces({ memberId: seed.creator });
     if (existing.some((s) => s.name === seed.name)) continue;
     const space = await service.createSpace({ memberId: seed.creator }, seed.name);

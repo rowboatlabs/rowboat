@@ -1452,6 +1452,47 @@ export const MIGRATIONS: Migration[] = [
       `drop table orgs`,
     ],
   },
+  {
+    // Roles on the space (spec §4 Roles, rewritten 2026-11-09): the admin bit
+    // moves from the member (admin of the org) to the membership row (admin
+    // of this space). Every existing shared space gets its earliest-joined
+    // active human as admin, and every former org admin who is in it. Open
+    // spaces, default spaces and the org's knobs (invite policy, Ro's switch)
+    // go with the org; Ro itself leaves every space and stays as a departed
+    // row so its old tag replies keep an author.
+    id: '063-space-roles',
+    statements: [
+      `alter table memberships add column role text not null default 'member'`,
+      `alter table memberships add constraint memberships_role_check check (role in ('admin', 'member'))`,
+      `update memberships ms set role = 'admin'
+         from members m, spaces s
+         where m.id = ms.member_id and s.id = ms.space_id and s.kind = 'shared'
+           and m.kind = 'human' and m.role = 'admin' and m.removed_at is null and m.deactivated_at is null`,
+      `update memberships ms set role = 'admin'
+         where (ms.space_id, ms.member_id) in (
+           select distinct on (x.space_id) x.space_id, x.member_id
+           from memberships x
+           join members m on m.id = x.member_id
+           join spaces s on s.id = x.space_id
+           where s.kind = 'shared' and m.kind = 'human' and m.removed_at is null and m.deactivated_at is null
+           order by x.space_id, x.joined_at, x.member_id)`,
+      `create index memberships_admins on memberships (space_id) where role = 'admin'`,
+      `alter table members drop constraint members_agent_not_admin_check`,
+      `alter table members drop constraint members_role_check`,
+      `alter table members drop column role`,
+      // Open spaces retired: nothing is found by anyone but its members.
+      `alter table spaces drop constraint spaces_direct_private_check`,
+      `alter table spaces drop constraint spaces_visibility_check`,
+      `alter table spaces drop constraint spaces_default_open_check`,
+      `drop index if exists spaces_default`,
+      `alter table spaces drop column visibility`,
+      `alter table spaces drop column is_default`,
+      // The org's knobs: anyone in a space invites to it; Ro has no switch because Ro is gone.
+      `drop table org_settings`,
+      `delete from memberships where member_id in (select id from members where agent_kind = 'jev')`,
+      `update members set removed_at = coalesce(removed_at, to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) where agent_kind = 'jev'`,
+    ],
+  },
 ];
 
 /**

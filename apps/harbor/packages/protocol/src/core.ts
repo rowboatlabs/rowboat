@@ -23,6 +23,11 @@ export type Attribution = z.infer<typeof Attribution>;
  * The org-level admin bit (spec §4, amended 2026-08-19): admin powers are
  * membership and policy, never content — the content plane is role-flat.
  */
+/**
+ * The admin bit (spec §4 Roles, rewritten 2026-11-09): on a MEMBERSHIP row,
+ * meaning admin of that space. Until 2026-11-09 it sat on the member and
+ * meant admin of the org.
+ */
 export const MemberRole = z.enum(['admin', 'member']);
 export type MemberRole = z.infer<typeof MemberRole>;
 
@@ -59,7 +64,6 @@ export const Member = z.object({
   /** What they do, as the roster shows it (spec §4 Member profile; built 2026-10-19). Absent = none. */
   title: z.string().min(1).max(128).optional(),
   avatarUrl: z.string().url().optional(),
-  role: MemberRole.default('member'),
   /** Absent from servers before 2026-09-29, whose members are all people. */
   kind: MemberKind.default('human'),
   /**
@@ -120,26 +124,6 @@ export const Member = z.object({
   removedAt: z.string().optional(),
 });
 export type Member = z.infer<typeof Member>;
-
-/**
- * Who may create invites (spec §4 Invites and Roles, built 2026-10-19): any
- * member, Slack's default, or admins only. An admin sets it.
- */
-export const InvitePolicy = z.enum(['members', 'admins']);
-export type InvitePolicy = z.infer<typeof InvitePolicy>;
-
-/** The org's settings any member may read and an admin sets (2026-10-19). */
-export const OrgSettings = z.object({
-  invitePolicy: InvitePolicy.default('members'),
-  /**
-   * Whether Ro, the built-in Jev agent, is on (spec §8 Jev, 2026-10-30): off,
-   * it tags no one and clients leave it out of their agent lists and pickers.
-   * It keeps its spaces, so on again it carries on there. Off until an admin
-   * turns it on (2026-11-03, Arjun's call).
-   */
-  jevEnabled: z.boolean().default(false),
-});
-export type OrgSettings = z.infer<typeof OrgSettings>;
 
 /**
  * Edit your own profile (spec §4 Member profile; built 2026-10-19): a field
@@ -219,16 +203,6 @@ export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37', 'maritime'];
  * Added personal whatever the request says, and never switched to channel.
  */
 export const PERSONAL_ONLY_CONNECTIONS: readonly string[] = [LOCAL_CONNECTION];
-/**
- * An agent Harbor itself is (2026-10-07, Jev): built into the org, on the
- * deployment's own key, so no person adds it, owns it or holds a key for it.
- * Never in AGENT_PAIRS: people add it to spaces like any agent, but never
- * create one. Jev is TypeSafe's decision model; it reads every message in
- * its spaces and tags whoever a message needs (spec §8 Jev).
- */
-export const BUILT_IN_CONNECTION = 'builtin';
-export const JEV_KIND = 'jev';
-
 /**
  * What a super agent may ask for (spec §4 Agent members, 2026-11-02): an
  * agent Rowboat runs (no connection, one of MARITIME_AGENTS), or any pair in
@@ -539,9 +513,6 @@ export type AgentListing = z.infer<typeof AgentListing>;
 export const SpaceKind = z.enum(['shared', 'direct']);
 export type SpaceKind = z.infer<typeof SpaceKind>;
 
-export const SpaceVisibility = z.enum(['private', 'open']);
-export type SpaceVisibility = z.infer<typeof SpaceVisibility>;
-
 export const Space = z.object({
   id: SpaceId,
   /**
@@ -552,8 +523,6 @@ export const Space = z.object({
   name: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
   kind: SpaceKind.default('shared'),
-  /** Old payloads and existing spaces stay private (spec §5, 2026-09-22). */
-  visibility: SpaceVisibility.default('private'),
   /**
    * Direct spaces only: the fixed member set, sorted — the DM's identity.
    * Absent on shared spaces. ONE element = the member's self-DM (notes to
@@ -567,13 +536,6 @@ export const Space = z.object({
    * payloads and every existing space are live. A DM is never archived.
    */
   archived: z.boolean().default(false),
-  /**
-   * A default space (spec §5 answer 3, built 2026-10-19): everyone who
-   * accepts an invite to the org joins it. Only a shared open space can be
-   * one, and only an admin sets it. Old payloads and every existing space
-   * are not defaults.
-   */
-  isDefault: z.boolean().default(false),
 });
 export type Space = z.infer<typeof Space>;
 
@@ -581,8 +543,22 @@ export const Membership = z.object({
   spaceId: SpaceId,
   memberId: MemberId,
   joinedAt: z.iso.datetime(),
+  /**
+   * Admin of this space (spec §4 Roles, 2026-11-09): the creator at birth,
+   * given and taken by admins, inherited by the longest-standing human when
+   * the last admin goes. Never on an agent's row. Older payloads parse as
+   * members.
+   */
+  role: MemberRole.default('member'),
 });
 export type Membership = z.infer<typeof Membership>;
+
+/** A space's roster entry (listMembers, 2026-11-09): the member with their seat in this space. */
+export const SpaceMember = Member.extend({
+  role: MemberRole,
+  joinedAt: z.iso.datetime(),
+});
+export type SpaceMember = z.infer<typeof SpaceMember>;
 
 /**
  * The deliberate conversation object (spec §7, annotation model 2026-09-01):

@@ -65,7 +65,7 @@ export class Assets {
   }
 
   async listAssets(ctx: ActorCtx, spaceId: string, includeDeleted = false): Promise<Asset[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const records = await this.k.store.listAssets(spaceId, includeDeleted);
     return records.map((a) => this.toAsset(a));
   }
@@ -93,7 +93,7 @@ export class Assets {
   }
 
   async readAsset(ctx: ActorCtx, spaceId: string, assetId: string, version?: number): Promise<ReadAssetResult> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const asset = await this.requireLiveAsset(spaceId, assetId);
     const v = version ?? asset.version;
     const data = await this.k.store.getAssetVersion(spaceId, asset.id, v);
@@ -376,7 +376,7 @@ export class Assets {
     // force a download (getBlob's download=1).
     opts: { expiresInSeconds?: number; inline?: boolean; attachment?: boolean } = {},
   ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const blobs = this.requireBlobStore();
     const stored = await this.k.store.getSpaceBlob(spaceId, hash);
     if (!stored) throw new HarborError('not_found', 'no such blob in this space');
@@ -504,7 +504,7 @@ export class Assets {
     spaceId: string,
     opts: { assetId?: string; beforeOffset?: number; limit?: number },
   ): Promise<ChangeSet[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     // An assetId filter means "this file's lineage" — live or trashed alike,
     // the record stays queryable across moves and after deletion.
     if (opts.assetId !== undefined && !(await this.k.store.getAssetById(spaceId, opts.assetId))) return [];
@@ -516,7 +516,7 @@ export class Assets {
   }
 
   async diff(ctx: ActorCtx, spaceId: string, assetId: string, from: number, to: number): Promise<string> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const asset = await this.requireAsset(spaceId, assetId);
     const fromData = await this.k.store.getAssetVersion(spaceId, asset.id, from);
     const toData = await this.k.store.getAssetVersion(spaceId, asset.id, to);

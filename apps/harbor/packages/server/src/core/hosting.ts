@@ -417,7 +417,7 @@ export class Hosting {
     return { agent, hosting: publicShape(row) };
   }
 
-  /** Delete a managed agent's hosting: the owner or an admin. Keys go now; the platform's resources in the background. */
+  /** Delete a managed agent's hosting: the owner. Keys go now; the platform's resources in the background. */
   async deleteManaged(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
     const actor = await this.k.store.getMember(ctx.memberId);
     if (!actor) throw new HarborError('not_a_member', 'not a member of this org');

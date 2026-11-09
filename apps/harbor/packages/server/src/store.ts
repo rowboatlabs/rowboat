@@ -14,10 +14,9 @@ import type {
   InvocationState,
   BlobInfo,
   ChangeSet,
-  InvitePolicy,
   Member,
   MemberRole,
-  OrgSettings,
+  SpaceMember,
   Membership,
   MentionStamps,
   Message,
@@ -259,8 +258,8 @@ export interface Store {
   setAgentProfile(id: string, profile: { title: string | null; instructions: string | null }): Promise<void>;
   /** Every member on the server — operator-side reads only (the mentions backfill, profile fan-out). */
   listAllMembers(): Promise<Member[]>;
-  /** A space's roster in join order — one statement (2026-09-22). */
-  listSpaceMembers(spaceId: string): Promise<Member[]>;
+  /** A space's roster in join order, each with their role there — one statement (2026-09-22; roles 2026-11-09). */
+  listSpaceMembers(spaceId: string): Promise<SpaceMember[]>;
   /**
    * Every member who shares a space (DMs included) with `memberId`, plus the
    * member themself — one statement (2026-09-22). The store answers the
@@ -283,49 +282,26 @@ export interface Store {
    * refuses the next sign-in (policy.ts canSignIn). Idempotent.
    */
   deactivateMember(memberId: string, at: string): Promise<void>;
-  /**
-   * An admin removes a member from the org (spec §4 Roles, 2026-10-19): the
-   * row stays, stamped removed_at, and an admin's role drops to member so a
-   * removed admin never counts toward, or comes back as, an admin. Push
-   * tokens go; keys of the member (an agent) and of agents they own are
-   * revoked. The identity row stays: it is how an invite finds the same row
-   * again (reactivateMember). Idempotent.
-   */
-  removeMemberFromOrg(memberId: string, at: string): Promise<void>;
-  /** Clear removed_at: the same identity accepted an invite (2026-10-19). */
-  reactivateMember(memberId: string): Promise<void>;
-  /**
-   * Set the admin bit. Demoting the org's last active admin answers
-   * 'last_admin' and writes nothing, decided under a row lock so two admins
-   * demoting each other cannot both pass (spec §4 Roles: at least one admin).
-   */
-  setMemberRole(memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'>;
-
-  // org settings (2026-10-19): one row per org once an admin sets one; no row = the defaults.
-  getOrgSettings(): Promise<OrgSettings>;
-  setInvitePolicy(policy: InvitePolicy, by: string, at: string): Promise<void>;
-  /** Ro on or off for the org (spec §8 Jev, 2026-10-30). */
-  setJevEnabled(enabled: boolean, by: string, at: string): Promise<void>;
 
   // spaces — `kind` (migration 014) rides the row; a direct space also
   // stores its direct key, and putSpace MUST refuse a second direct space
   // with the same key (the get-or-create race guard the service relies on).
   putSpace(space: Space): Promise<void>;
   getSpace(id: string): Promise<Space | undefined>;
-  /** Shared spaces only unless `includeDirect` — the listing's compatibility posture (api.ts). */
-  browseSpaces(memberId: string): Promise<Array<{ space: Space; joined: boolean }>>;
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
   /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
   listAllSpaces(): Promise<Space[]>;
-  /** The org's default spaces (spec §5 answer 3), oldest first — archived ones included; the caller skips them. */
-  listDefaultSpaces(): Promise<Space[]>;
-  /** How many spaces of each kind the org holds — what makes it a group chat (policy.ts isGroupChat). */
-  countSpacesByKind(): Promise<{ shared: number; direct: number }>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
   getDirectSpace(directKey: string): Promise<Space | undefined>;
 
   // membership
   getMembership(spaceId: string, memberId: string): Promise<Membership | undefined>;
+  /**
+   * Set the admin bit on one row (spec §4 Roles, 2026-11-09). Demoting the
+   * space's only admin answers 'last_admin' and writes nothing, decided
+   * under a row lock so two admins demoting each other cannot both pass.
+   */
+  setMembershipRole(spaceId: string, memberId: string, role: MemberRole): Promise<'ok' | 'last_admin'>;
   listMemberships(spaceId: string): Promise<Membership[]>;
   putMembership(membership: Membership): Promise<void>;
   /** Delete the space row; every space-keyed table cascades from it (migration 039). */
@@ -554,7 +530,7 @@ export interface Store {
 
   // --- agent keys (spec §4 Agent members, 2026-09-29) ---
   /** Agent members, by display name: every one, or those `ownerId` owns. */
-  listAgents(ownerId: string | null): Promise<Member[]>;
+  listAgents(ownerId: string): Promise<Member[]>;
   putAgentKey(key: StoredAgentKey): Promise<void>;
   getAgentKey(id: string): Promise<StoredAgentKey | undefined>;
   getAgentKeyByHash(hash: string): Promise<StoredAgentKey | undefined>;
@@ -606,9 +582,6 @@ export interface Store {
   listConversationInvocations(agentId: string, spaceId: string, threadRootId: string): Promise<Invocation[]>;
   /** A space's invocations (one thread's, when given), newest message first. */
   listSpaceInvocations(spaceId: string, threadRootId: string | null, limit: number): Promise<Invocation[]>;
-  /** The hand-off depth an agent a message mentions is invoked at (spec §8 Jev, 2026-10-07); 0 when none was recorded. */
-  getMessageHops(spaceId: string, messageId: string): Promise<number>;
-  putMessageHops(spaceId: string, messageId: string, depth: number): Promise<void>;
   /** Whether two members share a shared (not direct) space. */
   sharesSharedSpace(a: string, b: string): Promise<boolean>;
 

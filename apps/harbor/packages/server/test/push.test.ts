@@ -11,7 +11,7 @@ import type { Message, Space } from '@rowboat/spaces-protocol';
 // registration — against the store with a mocked Expo endpoint.
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private', archived: false }) as Space;
+  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind, archived: false }) as Space;
 
 const msg = (author = 'harsh'): Message =>
   ({
@@ -51,8 +51,8 @@ describe('PushSender.send', () => {
     const s = space('shared');
     await store.putSpace(s);
     for (const id of ['harsh', 'gagan']) {
-      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member', kind: 'human' });
-      await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString() });
+      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), kind: 'human' });
+      await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString(), role: 'member' });
     }
     await store.putPushToken('gagan', 'ExponentPushToken[g1]', new Date().toISOString());
     await store.putPushToken('gagan', 'ExponentPushToken[g2]', new Date().toISOString());
@@ -91,8 +91,8 @@ describe('PushSender.send', () => {
     const store = (await freshStore()).store;
     const s = space('shared');
     await store.putSpace(s);
-    await store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'member', kind: 'human' });
-    await store.putMembership({ spaceId: s.id, memberId: 'gagan', joinedAt: new Date().toISOString() });
+    await store.putMember({ id: 'gagan', displayName: 'Gagan', kind: 'human' });
+    await store.putMembership({ spaceId: s.id, memberId: 'gagan', joinedAt: new Date().toISOString(), role: 'member' });
     await store.putPushToken('gagan', 'ExponentPushToken[dead]', new Date().toISOString());
     await store.setPushLevel('gagan', 'all');
     const fetchImpl = (async () =>

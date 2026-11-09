@@ -311,7 +311,7 @@ describe('migration 022 — hygiene', () => {
       db.query(`insert into spaces (id, name, created_at, kind) values ('01HZCHECK00000000000000000', 'x', '2026-01-01T00:00:00.000Z', 'weird')`),
     ).rejects.toThrow(/spaces_kind_check/);
     await expect(db.query(`insert into push_prefs (member_id, level) values ('x', 'loud')`)).rejects.toThrow(/push_prefs_level_check/);
-    await expect(db.query(`update members set role = 'owner' where id = 'ramnique'`)).rejects.toThrow(/members_role_check/);
+    await expect(db.query(`update memberships set role = 'owner' where member_id = 'ramnique'`)).rejects.toThrow(/memberships_role_check/);
   });
 
   it('author_member_id is the author, computed by the database on every row', async () => {

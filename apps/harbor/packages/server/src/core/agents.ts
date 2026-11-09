@@ -1,8 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, JEV_KIND, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
-import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
+import { canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
 import type { StoredAgentKey } from '../store.js';
 import type { Kernel, ActorCtx } from './kernel.js';
 import { oneLine, type Spaces } from './spaces.js';
@@ -68,10 +68,10 @@ export class Agents {
     return agent;
   }
 
-  /** The agents the caller manages, each with its keys (never their secrets). */
+  /** The caller's own agents, each with its keys (never their secrets). Nothing stands above the owner (2026-11-09). */
   async list(ctx: ActorCtx): Promise<AgentListing[]> {
     const actor = await this.actor(ctx);
-    const agents = await this.k.store.listAgents(agentsManagedBy(actor) === 'all' ? null : actor.id);
+    const agents = await this.k.store.listAgents(actor.id);
     const keys = await this.k.store.listAgentKeys(agents.map((a) => a.id));
     const credentials = await this.k.store.listAgentCredentials(agents.map((a) => a.id));
     const hooks = await this.k.store.listAgentHooks(agents.map((a) => a.id));
@@ -125,19 +125,6 @@ export class Agents {
     const key = await this.mint(ctx, agent.id);
     this.hooks?.added(agent);
     return { agent, key };
-  }
-
-  /**
-   * Jev (spec §8 Jev, 2026-10-07): built into the org, never added by a
-   * person, so it has no owner, takes no keys, and is in no space until
-   * someone adds it. Created on the first boot with the deployment's key;
-   * a read-only org gets it once it can write again.
-   */
-  async ensureJev(): Promise<Member | undefined> {
-    const existing = (await this.k.store.listAgentsByConnection([BUILT_IN_CONNECTION])).find((a) => a.agentKind === JEV_KIND);
-    if (existing || this.k.readOnly) return existing;
-    // People meet it as Ro (2026-10-07, Arjun's call): Jev is the model it runs on, not its name.
-    return this.spaces.createAgent({ displayName: 'Ro', agentKind: JEV_KIND, agentConnection: BUILT_IN_CONNECTION });
   }
 
   /** Replace a platform agent's credential: the owner only, checked with the platform first; clears a rejection. */

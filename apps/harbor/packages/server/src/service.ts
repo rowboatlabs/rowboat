@@ -14,7 +14,7 @@ import { Kernel, type ActorCtx, type BindIdentity, type ServerInfo } from './cor
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
 import { SuperAgents } from './core/super-agents.js';
-import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetDefaultSpaceInput, SetMemberRoleInput, SetSpaceVisibilityInput, UpdateOrgSettingsInput } from './core/spaces.js';
+import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetSpaceRoleInput } from './core/spaces.js';
 import type { ArchiveThreadInput, SetSessionInput, CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
@@ -33,7 +33,6 @@ import type {
   CreateInviteResult,
   DeleteAssetResult,
   Member,
-  OrgSettings,
   UpdateProfile,
   AgentKey,
   AgentCredential,
@@ -65,6 +64,7 @@ import type {
   SearchResults,
   ThreadListing,
   Space,
+  SpaceMember,
   PlatformInstance,
   SuperAgent,
   SuperAgentResult,
@@ -142,11 +142,6 @@ export class HarborService {
   }
   stopHosting(): Promise<void> {
     return this.hosting.stop();
-  }
-
-  /** Jev, the agent Harbor itself is (spec §8 Jev, 2026-10-07): created once per org, when the deployment has its key (runtime.ts). */
-  ensureJev(): Promise<Member | undefined> {
-    return this.agents.ensureJev();
   }
 
   /** The server — `address` is set once the listener knows its port (server.ts). */
@@ -397,17 +392,8 @@ export class HarborService {
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
   }
-  isGroupChat(): Promise<boolean> {
-    return this.spaces.isGroupChat();
-  }
-  browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
-    return this.spaces.browseSpaces(ctx);
-  }
-  joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
-    return this.spaces.joinSpace(ctx, spaceId);
-  }
-  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private', opts: { isDefault?: boolean } = {}): Promise<Space> {
-    return this.spaces.createSpace(ctx, name, visibility, opts);
+  createSpace(ctx: ActorCtx, name: string): Promise<Space> {
+    return this.spaces.createSpace(ctx, name);
   }
   renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     return this.spaces.renameSpace(ctx, spaceId, input);
@@ -418,34 +404,19 @@ export class HarborService {
   unarchiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
     return this.spaces.unarchiveSpace(ctx, spaceId, input);
   }
-  setDefaultSpace(ctx: ActorCtx, spaceId: string, input: SetDefaultSpaceInput): Promise<Space> {
-    return this.spaces.setDefaultSpace(ctx, spaceId, input);
-  }
   deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     return this.spaces.deleteSpace(ctx, spaceId);
-  }
-  setSpaceVisibility(ctx: ActorCtx, spaceId: string, input: SetSpaceVisibilityInput): Promise<Space> {
-    return this.spaces.setSpaceVisibility(ctx, spaceId, input);
   }
   removeMember(ctx: ActorCtx, spaceId: string, memberId: string, input: RemoveMemberInput): Promise<{ removed: boolean }> {
     return this.spaces.removeMember(ctx, spaceId, memberId, input);
   }
-  removeOrgMember(ctx: ActorCtx, memberId: string, input: RemoveMemberInput): Promise<Member> {
-    return this.spaces.removeOrgMember(ctx, memberId, input);
-  }
-  setMemberRole(ctx: ActorCtx, memberId: string, input: SetMemberRoleInput): Promise<Member> {
-    return this.spaces.setMemberRole(ctx, memberId, input);
-  }
-  getOrgSettings(ctx: ActorCtx): Promise<OrgSettings> {
-    return this.spaces.getOrgSettings(ctx);
-  }
-  updateOrgSettings(ctx: ActorCtx, input: UpdateOrgSettingsInput): Promise<OrgSettings> {
-    return this.spaces.updateOrgSettings(ctx, input);
+  setSpaceRole(ctx: ActorCtx, spaceId: string, memberId: string, input: SetSpaceRoleInput): Promise<Membership> {
+    return this.spaces.setSpaceRole(ctx, spaceId, memberId, input);
   }
   openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
     return this.spaces.openDirect(ctx, otherMemberId);
   }
-  listMembers(ctx: ActorCtx, spaceId: string): Promise<Member[]> {
+  listMembers(ctx: ActorCtx, spaceId: string): Promise<SpaceMember[]> {
     return this.spaces.listMembers(ctx, spaceId);
   }
   /** An agent's description and instructions, by its owner (2026-10-29). */
@@ -638,22 +609,6 @@ export class HarborService {
     const invocation = await this.invocations.ownInvocation(ctx, invocationId);
     const { spaceId, threadRootId } = invocation.conversation;
     return this.feed.postMessage(ctx, spaceId, { body, threadRoot: threadRootId, actingMode: 'direct' }, { finishes: invocationId });
-  }
-
-  /**
-   * Jev's tags for one message (spec §8 Jev, 2026-10-07): a reply in its
-   * thread whose mentions take that message's hand-off depth, so an agent
-   * and Jev passing work back and forth stop at the hop limit. In-process
-   * only, like `finishes`.
-   */
-  async relayMentions(ctx: ActorCtx, spaceId: string, messageId: string, body: string): Promise<{ message: Message; invocations: Invocation[] }> {
-    const message = await this.feed.getMessage(ctx, spaceId, messageId);
-    return this.feed.postMessage(ctx, spaceId, { body, threadRoot: message.threadRoot ?? message.id, actingMode: 'direct' }, { relayOf: messageId });
-  }
-  /** The depth an agent this message mentions is invoked at: what Jev checks before it tags an agent. */
-  async messageHandOffDepth(ctx: ActorCtx, spaceId: string, messageId: string): Promise<number> {
-    await this.k.requireReadableSpace(ctx, spaceId);
-    return this.k.store.getMessageHops(spaceId, messageId);
   }
 
   // --- approvals (core/invocations.ts, spec §8 part 4, 2026-10-01) ----------------------

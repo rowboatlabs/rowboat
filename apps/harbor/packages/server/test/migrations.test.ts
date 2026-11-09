@@ -15,9 +15,9 @@ describe('schema migrations', () => {
     await migrate(db);
     const applied = await db.query<{ id: string }>('select id from schema_migrations order by id');
     expect(applied.map((r) => r.id)).toEqual(MIGRATIONS.map((m) => m.id));
-    // The 002 column exists.
+    // The admin bit lives on the membership row (062), not the member.
     const cols = await db.query<{ column_name: string }>(
-      `select column_name from information_schema.columns where table_name = 'members'`,
+      `select column_name from information_schema.columns where table_name = 'memberships'`,
     );
     expect(cols.map((c) => c.column_name)).toContain('role');
     await db.close();
@@ -47,7 +47,7 @@ describe('schema migrations', () => {
     const db = await pgliteDb();
     try {
       await migrate(db);
-      await db.query(`insert into members (id, display_name, role, availability) values ('test-person', 'Test person', 'member', '{"manualAway":true}'::jsonb)`);
+      await db.query(`insert into members (id, display_name, availability) values ('test-person', 'Test person', '{"manualAway":true}'::jsonb)`);
       await db.query(`update schema_migrations set id = '060-member-availability' where id = '061-member-availability'`);
       await migrate(db);
       const members = await db.query<{ availability: unknown }>(`select availability from members where id = 'test-person'`);
@@ -166,41 +166,8 @@ describe('schema migrations', () => {
     // The legacy row survived and picked up the role default via 002.
     const store = new PgStore(db);
     const member = await store.getMember('ramnique');
-    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', role: 'member', kind: 'human' });
+    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', kind: 'human' });
     await db.close();
-  });
-});
-
-describe('open-space migration', () => {
-  it('keeps legacy spaces private and preserves membership/content, then enforces visibility constraints', async () => {
-    const db = await pgliteDb();
-    try {
-      await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
-      // Everything before 023, as a database that predates it; later entries
-      // (040's default-space CHECK) build on its column.
-      for (const migration of MIGRATIONS.slice(0, MIGRATIONS.findIndex((m) => m.id === '023-open-spaces'))) {
-        for (const statement of migration.statements) await db.query(statement);
-        await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-09-22T00:00:00Z']);
-      }
-      await db.query(`insert into spaces (id, name, created_at, kind, direct_key) values
-        ('legacy-shared', 'Legacy', '2026-09-22T00:00:00Z', 'shared', null),
-        ('legacy-direct', 'Direct', '2026-09-22T00:00:00Z', 'direct', '["a","b"]')`);
-      await db.query(`insert into memberships (space_id, member_id, joined_at) values ('legacy-shared', 'a', '2026-09-22T00:00:00Z')`);
-      await db.query(`insert into events (space_id, stream_offset, at, event) values ('legacy-shared', 1, '2026-09-22T00:00:00Z', '{"legacy":"content"}')`);
-      const memberships = await db.query('select * from memberships');
-      const events = await db.query('select * from events');
-      await migrate(db);
-      expect(await db.query('select id, visibility from spaces order by id')).toEqual([
-        { id: 'legacy-direct', visibility: 'private' }, { id: 'legacy-shared', visibility: 'private' },
-      ]);
-      expect(await db.query('select * from memberships')).toEqual(memberships);
-      expect(await db.query('select * from events')).toEqual(events);
-      await expect(db.query("update spaces set visibility = 'open' where id = 'legacy-direct'")).rejects.toThrow();
-      await expect(db.query("update spaces set visibility = 'public' where id = 'legacy-shared'")).rejects.toThrow();
-      await db.query("update spaces set visibility = 'open' where id = 'legacy-shared'");
-      await migrate(db);
-      expect(await db.query("select visibility from spaces where id = 'legacy-shared'")).toEqual([{ visibility: 'open' }]);
-    } finally { await db.close(); }
   });
 });
 
@@ -225,22 +192,6 @@ describe('Agent37 effort key migration', () => {
         { agent_id: 'a37', data: { effort: 'high' } },
         { agent_id: 'rpl', data: { reasoning: 'x', environment: 'env-api' } },
       ]);
-    } finally { await db.close(); }
-  });
-});
-
-describe('Ro off by default (056)', () => {
-  it('switches off every org that had Ro on, and a new row starts off', async () => {
-    const db = await pgliteDb();
-    try {
-      await migrate(db);
-      // An org on from 053's default, as databases before 056 have it.
-      await db.query(`insert into org_settings (org_id, jev_enabled, set_by, set_at) values ('o1', true, 'a', 'now')`);
-      await db.query(`delete from schema_migrations where id = '056-org-settings-jev-off'`);
-      await migrate(db);
-      await db.query(`insert into org_settings (org_id, set_by, set_at) values ('o2', 'a', 'now')`);
-      const rows = await db.query<{ org_id: string; jev_enabled: boolean }>('select org_id, jev_enabled from org_settings order by org_id');
-      expect(rows).toEqual([{ org_id: 'o1', jev_enabled: false }, { org_id: 'o2', jev_enabled: false }]);
     } finally { await db.close(); }
   });
 });

@@ -266,20 +266,12 @@ export function buildHttpApp(deps: {
       ...(c.req.query('includeDirect') !== undefined ? { includeDirect: c.req.query('includeDirect') } : {}),
     });
     const spaces = await service.listSpaces(actor(c), { includeDirect: q.includeDirect ?? false });
-    return reply(c, routes.listSpaces.response, { spaces, groupChat: await service.isGroupChat() });
-  });
-
-  app.get(routes.browseSpaces.path, async (c) =>
-    reply(c, routes.browseSpaces.response, { spaces: await service.browseSpaces(actor(c)) }));
-
-  app.post(routes.joinSpace.path, async (c) => {
-    const { spaceId } = parseWith(routes.joinSpace.params, c.req.param());
-    return reply(c, routes.joinSpace.response, await service.joinSpace(actor(c), spaceId));
+    return reply(c, routes.listSpaces.response, { spaces });
   });
 
   app.post(routes.createSpace.path, async (c) => {
     const input = await body(c, routes.createSpace.request);
-    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name, input.visibility) });
+    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name) });
   });
 
   app.post('/v1/spaces/:spaceId/rename', async (c) => {
@@ -300,12 +292,6 @@ export function buildHttpApp(deps: {
     return reply(c, routes.deleteSpace.response, { deleted: true });
   });
 
-  app.post(routes.setSpaceVisibility.path, async (c) => {
-    const { spaceId } = parseWith(routes.setSpaceVisibility.params, c.req.param());
-    const input = await body(c, routes.setSpaceVisibility.request);
-    return reply(c, routes.setSpaceVisibility.response, { space: await service.setSpaceVisibility(actor(c), spaceId, input) });
-  });
-
   app.post(routes.removeMember.path, async (c) => {
     const { spaceId, memberId } = parseWith(routes.removeMember.params, c.req.param());
     const input = await body(c, routes.removeMember.request);
@@ -316,12 +302,6 @@ export function buildHttpApp(deps: {
     const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
     const input = await body(c, routes.unarchiveSpace.request);
     return reply(c, routes.unarchiveSpace.response, { space: await service.unarchiveSpace(actor(c), spaceId, input) });
-  });
-
-  app.post(routes.setDefaultSpace.path, async (c) => {
-    const { spaceId } = parseWith(routes.setDefaultSpace.params, c.req.param());
-    const input = await body(c, routes.setDefaultSpace.request);
-    return reply(c, routes.setDefaultSpace.response, { space: await service.setDefaultSpace(actor(c), spaceId, input) });
   });
 
   app.post(routes.openDirect.path, async (c) => {
@@ -344,25 +324,10 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
   });
 
-  app.post(routes.removeOrgMember.path, async (c) => {
-    const { memberId } = parseWith(routes.removeOrgMember.params, c.req.param());
-    const input = await body(c, routes.removeOrgMember.request);
-    return reply(c, routes.removeOrgMember.response, { member: await service.removeOrgMember(actor(c), memberId, input) });
-  });
-
-  app.post(routes.setMemberRole.path, async (c) => {
-    const { memberId } = parseWith(routes.setMemberRole.params, c.req.param());
-    const input = await body(c, routes.setMemberRole.request);
-    return reply(c, routes.setMemberRole.response, { member: await service.setMemberRole(actor(c), memberId, input) });
-  });
-
-  app.get(routes.getOrgSettings.path, async (c) => {
-    return reply(c, routes.getOrgSettings.response, { settings: await service.getOrgSettings(actor(c)) });
-  });
-
-  app.patch(routes.updateOrgSettings.path, async (c) => {
-    const input = await body(c, routes.updateOrgSettings.request);
-    return reply(c, routes.updateOrgSettings.response, { settings: await service.updateOrgSettings(actor(c), input) });
+  app.post(routes.setSpaceRole.path, async (c) => {
+    const { spaceId, memberId } = parseWith(routes.setSpaceRole.params, c.req.param());
+    const input = await body(c, routes.setSpaceRole.request);
+    return reply(c, routes.setSpaceRole.response, { membership: await service.setSpaceRole(actor(c), spaceId, memberId, input) });
   });
 
   app.get(routes.listOrgMembers.path, async (c) => {

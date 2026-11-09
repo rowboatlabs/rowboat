@@ -56,7 +56,7 @@ describe('GET /v1/members', () => {
     expect(ids(r.body.members)).toEqual(everyone);
     expect(r.body.members.map((m: Member) => m.displayName)).toEqual(['Arjun', 'Gagan', 'harsh', 'Loner', 'Ramnique']);
     // Full Member objects, the same rows listMembers serves.
-    expect(r.body.members.find((m: Member) => m.id === 'harsh')).toEqual({ id: 'harsh', displayName: 'harsh', role: 'member', kind: 'human' });
+    expect(r.body.members.find((m: Member) => m.id === 'harsh')).toEqual({ id: 'harsh', displayName: 'harsh', kind: 'human' });
   });
 
   it('is the same for everyone, whatever spaces they share — a member of nothing included', async () => {
