@@ -1493,6 +1493,19 @@ export const MIGRATIONS: Migration[] = [
       `update members set removed_at = coalesce(removed_at, to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) where agent_kind = 'jev'`,
     ],
   },
+  {
+    // Invites are to one space, or they are a person's link (spec §4 Invites,
+    // 2026-11-09). The org-era list of spaces goes, and so does every invite
+    // made before today: their links lived on hosts that no longer resolve.
+    id: '064-invites-one-target',
+    statements: [
+      `delete from invite_spaces`,
+      `delete from invites`,
+      `drop table invite_spaces`,
+      `alter table invites add column direct boolean not null default false`,
+      `alter table invites add constraint invites_one_target_check check ((space_id is null) = direct)`,
+    ],
+  },
 ];
 
 /**

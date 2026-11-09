@@ -29,7 +29,7 @@ beforeAll(async () => {
   await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', kind: 'human' });
   const space = await service.createSpace(ram, 'Search Space');
   spaceId = space.id;
-  const invite = await service.createInvite(ram, { spaceIds: [spaceId] });
+  const invite = await service.createInvite(ram, { spaceId: spaceId });
   await service.acceptInvite(harsh, invite.token);
 });
 
@@ -237,7 +237,7 @@ describe('filters and word prefixes (2026-11-06)', () => {
 
   beforeAll(async () => {
     filterSpace = (await service.createSpace(ram, 'Filter Space')).id;
-    const invite = await service.createInvite(ram, { spaceIds: [filterSpace] });
+    const invite = await service.createInvite(ram, { spaceId: filterSpace });
     await service.acceptInvite(harsh, invite.token);
   });
 

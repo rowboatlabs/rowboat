@@ -1,6 +1,5 @@
 import {
   inviteUrl,
-  MAX_INVITE_SPACES,
   Member,
   type Attribution,
   type AcceptInviteResult,
@@ -17,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canArchiveSpace, canDeleteSpace, canChangeMembership, canEditProfile, canListOnInvite, canReachMember, canReachPersonalAgent, canRemoveFromSpace, canRenameSpace, canSetRole, canSignIn, canWriteSpace, enforce } from '../policy.js';
+import { canArchiveSpace, canDeleteSpace, canChangeMembership, canEditProfile, canListOnInvite, canOpenDirect, canReachMember, canReachPersonalAgent, canRemoveFromSpace, canRenameSpace, canSetRole, canSignIn, canWriteSpace, enforce } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent, type StoredInvite } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -253,18 +252,22 @@ export class Spaces {
    * on the org — every device sees them, and so does your agent, through
    * the same face as any space.
    */
-  async openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
+  async openDirect(ctx: ActorCtx, otherMemberId: string, opts: { byInvite?: boolean } = {}): Promise<{ space: Space; created: boolean }> {
     const self = otherMemberId === ctx.memberId;
+    let ownsAgent = false;
     if (!self) {
       const other = await this.k.store.getMember(otherMemberId);
-      if (!other) throw new HarborError('not_found', 'no such member on this org');
+      if (!other) throw new HarborError('not_found', 'no such member');
       enforce(canReachMember(other));
       enforce(canReachPersonalAgent(ctx.memberId, other, 'message'));
+      ownsAgent = other.kind === 'agent' && other.ownerId === ctx.memberId;
     }
     const participants = self ? [ctx.memberId] : [ctx.memberId, otherMemberId].sort();
     const key = directKeyFor(participants);
     const existing = await this.k.store.getDirectSpace(key);
     if (existing) return { space: existing, created: false };
+    // The reach rule (policy.ts canOpenDirect, 2026-11-09); an accepted personal link is the maker's consent.
+    if (!opts.byInvite) enforce(canOpenDirect(self, await this.k.store.sharesSharedSpace(ctx.memberId, otherMemberId), ownsAgent));
 
     this.k.guardWrite();
     const now = this.k.now();
@@ -462,27 +465,34 @@ export class Spaces {
   // --- invites ---------------------------------------------------------------
 
   /**
-   * An invite to the org, with an optional list of spaces (spec §4 Invites,
-   * amended 2026-09-22; built 2026-10-19). Any org member may make one, and
-   * may list any shared space they are in that takes members. The list is
-   * checked whole before anything is written.
+   * An invite to one space, or a personal link (spec §4 Invites, rewritten
+   * 2026-11-09). Anyone in a space may invite to it; an archived space takes
+   * no new members. A personal link needs nothing but an active member: it is
+   * how someone who shares no space with you reaches you.
    */
   async createInvite(ctx: ActorCtx, input: CreateInviteInput): Promise<CreateInviteResult> {
     await this.k.requireActiveMember(ctx);
-    const spaceIds = [...new Set([...(input.spaceId ? [input.spaceId] : []), ...(input.spaceIds ?? [])])];
-    if (spaceIds.length > MAX_INVITE_SPACES) {
-      throw new HarborError('invalid_request', `an invite lists at most ${MAX_INVITE_SPACES} spaces`);
+    if ((input.spaceId !== undefined) === (input.direct === true)) {
+      throw new HarborError('invalid_request', 'an invite names one space, or is a personal link (direct: true)');
     }
-    for (const spaceId of spaceIds) {
-      const space = await this.k.requireSpace(spaceId);
-      enforce(canListOnInvite(space, await this.k.store.getMembership(spaceId, ctx.memberId)));
+    if (input.spaceId !== undefined) {
+      const space = await this.k.requireSpace(input.spaceId);
+      enforce(canListOnInvite(space, await this.k.store.getMembership(input.spaceId, ctx.memberId)));
       enforce(canWriteSpace(space)); // an archived space takes no new members (2026-10-13)
     }
     this.k.guardWrite();
     const token = randomBytes(24).toString('base64url');
     const now = this.k.now();
     const expiresAt = new Date(Date.now() + (input.expiresInHours ?? DEFAULT_INVITE_HOURS) * 3_600_000).toISOString();
-    await this.k.store.putInvite({ token, spaceIds, createdBy: ctx.memberId, createdAt: now, expiresAt, revoked: false });
+    await this.k.store.putInvite({
+      token,
+      ...(input.spaceId !== undefined ? { spaceId: input.spaceId } : {}),
+      direct: input.direct === true,
+      createdBy: ctx.memberId,
+      createdAt: now,
+      expiresAt,
+      revoked: false,
+    });
     return { token, link: inviteUrl(this.k.server.address, token), expiresAt };
   }
 
@@ -496,45 +506,44 @@ export class Spaces {
   }
 
   /**
-   * What accepting joins, landing space first: the listed spaces in the
-   * order given (default spaces went with the orgs, 2026-11-09). Decided at
-   * acceptance. Archived spaces are left out, and so is a listed space its
-   * inviter has since left: what they offered was their own membership
-   * (2026-10-19).
+   * What accepting does, decided at acceptance: join the space, if it still
+   * stands, is not archived, and its inviter is still in it (what they
+   * offered was their own membership, 2026-10-19); or open the DM with the
+   * maker, if they are still here. Nothing, otherwise.
    */
-  private async invitePlan(invite: StoredInvite): Promise<Space[]> {
-    const plan: Space[] = [];
-    for (const spaceId of invite.spaceIds) {
-      const space = await this.k.store.getSpace(spaceId);
-      if (!space || space.archived) continue;
-      if (!(await this.k.store.getMembership(spaceId, invite.createdBy))) continue;
-      plan.push(space);
+  private async inviteTarget(invite: StoredInvite): Promise<{ space: Space } | { direct: Member } | null> {
+    if (invite.direct) {
+      const maker = await this.k.store.getMember(invite.createdBy);
+      return maker && maker.deactivatedAt === undefined && maker.removedAt === undefined ? { direct: maker } : null;
     }
-    return plan;
+    if (invite.spaceId === undefined) return null;
+    const space = await this.k.store.getSpace(invite.spaceId);
+    if (!space || space.archived) return null;
+    if (!(await this.k.store.getMembership(space.id, invite.createdBy))) return null;
+    return { space };
   }
 
   /** Pre-auth on purpose: the app shows what's being joined before the OAuth dance. */
   async resolveInvite(token: string): Promise<ResolveInviteResult> {
     const found = await this.lookupInvite(token);
     if (found.state !== 'ok') return { state: found.state };
-    const spaces = (await this.invitePlan(found.invite)).map((s) => ({ id: s.id, name: s.name }));
+    const target = await this.inviteTarget(found.invite);
     const inviter = await this.k.store.getMember(found.invite.createdBy);
     return {
       state: 'ok',
-      org: { address: this.k.server.address, name: this.k.server.name },
-      ...(spaces[0] ? { space: spaces[0] } : {}),
-      spaces,
-      invitedBy: inviter?.displayName,
+      ...(target && 'space' in target ? { space: { id: target.space.id, name: target.space.name } } : {}),
+      ...(target && 'direct' in target ? { direct: { id: target.direct.id, displayName: target.direct.displayName } } : {}),
+      ...(inviter ? { invitedBy: inviter.displayName } : {}),
     };
   }
 
   /**
    * The invite-binding ceremony (spec §4, amended 2026-08-19): an
    * authenticated identity + an open bearer invite → member (created on
-   * first bind, displayName seeded from IdP profile claims) + memberships.
-   * There is no bind-time policy (2026-11-09: possession of the link plus a
-   * sign-in is the whole claim, spec §4 Invites). The (iss, sub) → member row written here is
-   * what the oidc auth driver resolves on every later request.
+   * first bind, displayName seeded from IdP profile claims) + what the
+   * invite opens. There is no bind-time policy (2026-11-09: possession of
+   * the link plus a sign-in is the whole claim). The (iss, sub) → member row
+   * written here is what the oidc auth driver resolves on every later request.
    */
   async bindInvite(identity: BindIdentity, token: string): Promise<AcceptInviteResult> {
     const found = await this.lookupInvite(token);
@@ -546,7 +555,7 @@ export class Spaces {
     if (member) enforce(canSignIn(member));
     if (!member) {
       // Minted id, NOT the raw sub: issuer subjects live only in the mapping
-      // table, so an org can change AS someday without rewriting history.
+      // table, so the server can change AS someday without rewriting history.
       member = { id: this.k.ulid(), displayName: seedDisplayName(identity), kind: 'human' };
       await this.k.store.putMember(member);
       await this.k.store.putIdentity(identity.iss, identity.sub, member.id);
@@ -555,12 +564,11 @@ export class Spaces {
   }
 
   /**
-   * Accepting joins every space in the plan, each under its own lock, with
-   * the same `joined` event a self-join appends. A space the member is
-   * already in is kept in the result and writes nothing, so accepting twice
-   * is a no-op. Each join is its own transaction: a space archived or
-   * deleted between the plan and its lock is skipped, and the rest still
-   * join. The member's other connections learn by `space_added`.
+   * Accepting joins the space under its lock, with the same `joined` event
+   * any join appends — a no-op for a member already in it, so accepting twice
+   * writes nothing — or opens the DM with the maker (get-or-create; the
+   * maker's own click opens nothing). The member's other connections learn
+   * by `space_added`.
    */
   async acceptInvite(ctx: ActorCtx, token: string): Promise<AcceptInviteResult> {
     const found = await this.lookupInvite(token);
@@ -568,30 +576,30 @@ export class Spaces {
       throw new HarborError('forbidden', `invite is ${found.state}`);
     }
     this.k.guardWrite();
-    const joined: Array<{ space: Space; membership: Membership }> = [];
-    for (const planned of await this.invitePlan(found.invite)) {
-      const result = await this.k.locked(planned.id, async () => {
-        const space = await this.k.store.getSpace(planned.id);
-        if (!space) return null;
-        const existing = await this.k.store.getMembership(space.id, ctx.memberId);
-        if (existing) return { space, membership: existing, created: false };
-        if (space.archived) return null; // an archived space takes no new members (2026-10-13)
-        const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: this.k.now(), role: 'member' };
-        await this.k.store.putMembership(membership);
-        await this.k.appendNext(space.id, membership.joinedAt, { type: 'membership', membership, action: 'joined' });
-        return { space, membership, created: true };
-      });
-      if (!result) continue;
-      joined.push(result);
-      if (result.created) this.k.hub.publishToMember(ctx.memberId, {
-        kind: 'space_added', spaceId: result.space.id, spaceKind: 'shared', by: found.invite.createdBy, at: result.membership.joinedAt,
-      });
+    const target = await this.inviteTarget(found.invite);
+    if (!target) return {};
+    if ('direct' in target) {
+      if (target.direct.id === ctx.memberId) return {};
+      const { space } = await this.openDirect(ctx, target.direct.id, { byInvite: true });
+      const membership = await this.k.store.getMembership(space.id, ctx.memberId);
+      return { space, ...(membership ? { membership } : {}) };
     }
-    const landing = joined[0];
-    return {
-      ...(landing ? { membership: landing.membership, space: landing.space } : {}),
-      spaces: joined.map((j) => j.space),
-    };
+    const result = await this.k.locked(target.space.id, async () => {
+      const space = await this.k.store.getSpace(target.space.id);
+      if (!space) return null;
+      const existing = await this.k.store.getMembership(space.id, ctx.memberId);
+      if (existing) return { space, membership: existing, created: false };
+      if (space.archived) return null; // an archived space takes no new members (2026-10-13)
+      const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: this.k.now(), role: 'member' };
+      await this.k.store.putMembership(membership);
+      await this.k.appendNext(space.id, membership.joinedAt, { type: 'membership', membership, action: 'joined' });
+      return { space, membership, created: true };
+    });
+    if (!result) return {};
+    if (result.created) this.k.hub.publishToMember(ctx.memberId, {
+      kind: 'space_added', spaceId: result.space.id, spaceKind: 'shared', by: found.invite.createdBy, at: result.membership.joinedAt,
+    });
+    return { membership: result.membership, space: result.space };
   }
 
   // --- push (CONTRACT.md, the push bullet) -----------------------------------

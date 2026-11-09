@@ -54,8 +54,9 @@ async function start(): Promise<void> {
   spaceId = created.body.space.id;
   const inv = await ramnique.post('/v1/invites', { spaceId });
   await harsh.post('/v1/invites/accept', { token: inv.body.token });
-  // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
-  await ramnique.post('/v1/spaces', { name: 'Lobby' });
+  // Lobby = {ramnique, gagan}: the reach rule needs a shared space before a DM (2026-11-09).
+  const lobby = (await ramnique.post('/v1/spaces', { name: 'Lobby' })).body.space.id;
+  await ramnique.post(`/v1/spaces/${lobby}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
   dmWithGagan = (await ramnique.post('/v1/direct', { memberId: 'gagan' })).body.space.id;
   ramAgent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
   harshAgent = await agentClient(harbor, 'dev-harsh', { agentName: 'Claude' });

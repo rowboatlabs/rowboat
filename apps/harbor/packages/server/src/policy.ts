@@ -103,10 +103,9 @@ export function canSetRole(actor: Membership | undefined, space: Space, target: 
 }
 
 /**
- * Listing a space on an invite requires being a member of it (spec §4
- * Invites, amended 2026-09-22): for a private space that is the whole rule,
- * for an open one it is harmless, and it needs no kind check. A DM is never
- * listed — its membership is fixed.
+ * Inviting to a space requires being a member of it (spec §4 Invites, amended
+ * 2026-09-22; one space per invite since 2026-11-09). A DM is never the
+ * target — its membership is fixed.
  */
 export function canListOnInvite(space: Space, membership: Membership | undefined): Decision {
   return canChangeMembership(space, 'invite') ?? canAccessSpace(space, membership);
@@ -120,6 +119,19 @@ export function canListOnInvite(space: Space, membership: Membership | undefined
 export function canWriteSpace(space: Space): Decision {
   if (!space.archived) return null;
   return { code: 'forbidden', message: 'this space is archived — an admin can unarchive it' };
+}
+
+/**
+ * The reach rule (spec §5 Direct messages, 2026-11-09): you may open a DM
+ * with yourself, or with anyone you share a space with (archived included);
+ * a DM that already exists is returned whatever the two share now. Anyone
+ * else is reached by their personal link — an invite with a DM target, which
+ * opens the DM on acceptance — or by inviting them to a group. Your own agent
+ * is always yours to message, in a space or not (spec §4 Agent members).
+ */
+export function canOpenDirect(self: boolean, sharesSpace: boolean, ownsAgent: boolean): Decision {
+  if (self || sharesSpace || ownsAgent) return null;
+  return { code: 'forbidden', message: 'you can message people you share a space with — ask them for their link, or invite them to a group' };
 }
 
 /**

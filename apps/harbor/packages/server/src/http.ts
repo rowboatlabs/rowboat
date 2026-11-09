@@ -720,7 +720,7 @@ export function buildHttpApp(deps: {
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
     const query = `type=spaces&server=${encodeURIComponent(service.server.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', spaces: resolved.spaces.map((s) => s.name), server: service.server.name, invitedBy: resolved.invitedBy, ...openers(query) }));
+    return c.html(invitePage({ state: 'ok', ...(resolved.space ? { space: resolved.space.name } : {}), ...(resolved.direct ? { person: resolved.direct.displayName } : {}), server: service.server.name, invitedBy: resolved.invitedBy, ...openers(query) }));
   });
 
   // --- link landings ---------------------------------------------------------
@@ -1098,13 +1098,9 @@ function landingPage(o: Openers): string {
 }
 
 type InvitePage =
-  | ({ state: 'ok'; spaces: string[]; server: string; invitedBy?: string } & Openers)
+  | ({ state: 'ok'; space?: string; person?: string; server: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
 
-/** "a", "a and b", "a, b and c". */
-function listNames(names: string[]): string {
-  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
 
 /** The /join landing: launch the app with the invite, or say why not. */
 function invitePage(page: InvitePage): string {
@@ -1112,11 +1108,15 @@ function invitePage(page: InvitePage): string {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
     return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
-  // The space is the headline (2026-11-09: an invite is to one space, or a person; there is no org to join).
-  const headline = page.spaces.length > 0 ? `You're invited to ${escapeHtml(listNames(page.spaces))}` : `You're invited to ${escapeHtml(page.server)}`;
-  const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
+  // The space, or the person, is the headline (2026-11-09: an invite is to one space, or it is someone's link).
+  const headline = page.space
+    ? `You're invited to ${escapeHtml(page.space)}`
+    : page.person
+      ? `${escapeHtml(page.person)} invited you to message them`
+      : `You're invited to ${escapeHtml(page.server)}`;
+  const by = page.space && page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${PAGE_HEAD}<title>Join ${escapeHtml(page.spaces[0] ?? page.server)}</title>${PAGE_STYLE}<main>` +
+    `${PAGE_HEAD}<title>${escapeHtml(page.space ? `Join ${page.space}` : page.person ? `Message ${page.person}` : `Join ${page.server}`)}</title>${PAGE_STYLE}<main>` +
     `<h1>${headline}</h1>${by}` +
     `${openerLinks(page)}</main>`
   );

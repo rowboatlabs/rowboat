@@ -91,8 +91,8 @@ describe('DELETE /v1/spaces/:spaceId', () => {
     expect((await gagan().get(`/v1/spaces/${id}/stream`)).status).toBe(404);
     expect((await gagan().get(`/v1/spaces/${id}/assets/${asset.id}`)).status).toBe(404);
     expect((await gagan().get(`/v1/spaces/${id}/threads/${root}`)).status).toBe(404);
-    // The invite was to the org (2026-10-19): it lives on, listing nothing.
-    expect((await prakhar().post('/v1/invites/resolve', { token: invite })).body).toMatchObject({ state: 'ok', spaces: [] });
+    // The invite was to the space (2026-11-09): it went with it.
+    expect((await prakhar().post('/v1/invites/resolve', { token: invite })).status).toBe(404);
     expect(await harbor.store.listEventsAfter(id, 0)).toEqual([]);
     expect((await del('dev-ramnique', id)).status).toBe(404);
   });

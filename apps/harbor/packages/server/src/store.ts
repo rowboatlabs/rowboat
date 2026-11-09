@@ -102,8 +102,10 @@ export interface StoredImage {
 
 export interface StoredInvite {
   token: string;
-  /** The spaces it lists, in the order given; empty = the org and its default spaces only (2026-10-19). */
-  spaceIds: string[];
+  /** The space it invites to; absent for a personal link (2026-11-09). */
+  spaceId?: string;
+  /** A personal link: accepting opens a DM with its maker (2026-11-09). */
+  direct: boolean;
   createdBy: string;
   createdAt: string;
   expiresAt?: string;

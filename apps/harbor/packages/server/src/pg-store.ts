@@ -1394,44 +1394,23 @@ export class PgStore implements Store {
   // --- invites ---------------------------------------------------------------
 
   async putInvite(invite: StoredInvite): Promise<void> {
-    // The invite and its list in one transaction: an invite never exists
-    // without the spaces it was made to list.
-    const write = async () => {
-      await this.sql.query(
-        `insert into invites (token, created_by, created_at, expires_at, revoked)
-         values ($1, $2, $3, $4, $5)
-         on conflict (token) do update set expires_at = excluded.expires_at, revoked = excluded.revoked`,
-        [invite.token, invite.createdBy, invite.createdAt, invite.expiresAt ?? null, invite.revoked]);
-      for (const [position, spaceId] of invite.spaceIds.entries()) {
-        await this.sql.query(
-          `insert into invite_spaces (token, space_id, position) values ($1, $2, $3) on conflict do nothing`,
-          [invite.token, spaceId, position],
-        );
-      }
-    };
-    if (this.als.getStore()) await write();
-    else await this.transaction(write);
+    await this.sql.query(
+      `insert into invites (token, space_id, direct, created_by, created_at, expires_at, revoked)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       on conflict (token) do update set expires_at = excluded.expires_at, revoked = excluded.revoked`,
+      [invite.token, invite.spaceId ?? null, invite.direct, invite.createdBy, invite.createdAt, invite.expiresAt ?? null, invite.revoked]);
   }
 
   async getInvite(token: string): Promise<StoredInvite | undefined> {
-    // Org-scoped: another org's token is not_found here.
-    const rows = await this.sql.query<{
-      token: string;
-      created_by: string;
-      created_at: string;
-      expires_at: string | null;
-      revoked: boolean;
-      space_ids: string[];
-    }>(
-      `select i.token, i.created_by, i.created_at, i.expires_at, i.revoked,
-         coalesce(array(select l.space_id from invite_spaces l where l.token = i.token order by l.position, l.space_id), '{}') as space_ids
-       from invites i where i.token = $1`,
+    const rows = await this.sql.query<{ token: string; space_id: string | null; direct: boolean; created_by: string; created_at: string; expires_at: string | null; revoked: boolean }>(
+      'select token, space_id, direct, created_by, created_at, expires_at, revoked from invites where token = $1',
       [token]);
     const r = rows[0];
     if (!r) return undefined;
     return {
       token: r.token,
-      spaceIds: r.space_ids,
+      ...(r.space_id !== null ? { spaceId: r.space_id } : {}),
+      direct: r.direct,
       createdBy: r.created_by,
       createdAt: r.created_at,
       ...(r.expires_at !== null ? { expiresAt: r.expires_at } : {}),

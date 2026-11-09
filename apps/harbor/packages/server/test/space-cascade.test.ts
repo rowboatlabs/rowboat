@@ -47,7 +47,7 @@ describe('space cascade (migration 039)', () => {
       await migrate(db);
       // Step back below 039, as a database that predates it. Tables created
       // after 039 carry their constraint from birth and are not stepped back.
-      const after039 = new Set(['invite_spaces', 'message_secrets']);
+      const after039 = new Set(['message_secrets']);
       for (const { table } of (await spaceKeyedTables(db)).filter((t) => !after039.has(t.table))) {
         await db.query(`alter table ${table} drop constraint ${table}_space_fk`);
       }
@@ -123,7 +123,7 @@ describe('deleting a space row', () => {
     const before = await count(kept);
     const doomedBefore = await count(doomed);
     // The fill reached the tables a space delete matters most for.
-    for (const table of ['memberships', 'events', 'messages', 'reactions', 'topics', 'assets', 'asset_versions', 'change_sets', 'asset_search', 'space_read_marks', 'invite_spaces']) {
+    for (const table of ['memberships', 'events', 'messages', 'reactions', 'topics', 'assets', 'asset_versions', 'change_sets', 'asset_search', 'space_read_marks']) {
       expect(doomedBefore[table], table).toBeGreaterThan(0);
     }
 

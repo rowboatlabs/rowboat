@@ -157,8 +157,10 @@ describe('direct messages', () => {
   it('never addresses the opener or bystanders with space_added', async () => {
     const ramLive = await liveClient(harbor, 'dev-ramnique');
     const harshLive = await liveClient(harbor, 'dev-harsh');
-    // A brand-new pair so the open actually creates.
+    // A brand-new pair so the open actually creates; they share Ops, so the reach rule passes (2026-11-09).
     await harbor.store.putMember({ id: 'prakhar', displayName: 'Prakhar', kind: 'human' });
+    const ops = ((await ramnique.get('/v1/spaces')).body.spaces as Space[]).find((s) => s.name === 'Ops')!;
+    await ramnique.post(`/v1/spaces/${ops.id}/members`, { memberIds: ['prakhar'], actingMode: 'direct' });
     const prakhar = restClient(harbor, 'dev-prakhar');
     const prakharLive = await liveClient(harbor, 'dev-prakhar');
     await ramnique.post('/v1/direct', { memberId: 'prakhar' });

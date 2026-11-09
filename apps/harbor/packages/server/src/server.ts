@@ -162,7 +162,7 @@ async function seed(
     const space = await service.createSpace({ memberId: seed.creator }, seed.name);
     for (const m of options.seedMembers ?? []) {
       if (m.id === seed.creator) continue;
-      const invite = await service.createInvite({ memberId: seed.creator }, { spaceIds: [space.id] });
+      const invite = await service.createInvite({ memberId: seed.creator }, { spaceId: space.id });
       await service.acceptInvite({ memberId: m.id }, invite.token);
     }
     for (const asset of seed.assets ?? []) {

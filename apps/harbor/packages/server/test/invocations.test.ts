@@ -355,13 +355,11 @@ describe('thread follow-ups without a mention (2026-10-27)', () => {
 });
 
 describe('who may invoke', () => {
-  it('refuses a DM alone, and allows it once the person shares a space with the agent', async () => {
-    const dm = (await as('dev-gagan').post('/v1/direct', { memberId: hermes.agent.id })).body.space.id;
-    const inDm = (body: string) => as('dev-gagan').post(`/v1/spaces/${dm}/messages`, { body, actingMode: 'direct' });
-    const refused = (await inDm(`${mention(hermes.agent)} hi`)).body.invocations[0];
-    expect(refused).toMatchObject({ state: 'refused', refusal: { reason: 'not_permitted' } });
-    await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
-    const allowed = (await inDm(`${mention(hermes.agent)} hi again`)).body.invocations[0];
+  it('a DM with an agent is its owner’s to open (2026-11-09); in it, every message invokes', async () => {
+    expect((await as('dev-gagan').post('/v1/direct', { memberId: hermes.agent.id })).status).toBe(403);
+    const dm = (await as('dev-ramnique').post('/v1/direct', { memberId: hermes.agent.id })).body.space.id;
+    const inDm = (body: string) => as('dev-ramnique').post(`/v1/spaces/${dm}/messages`, { body, actingMode: 'direct' });
+    const allowed = (await inDm(`${mention(hermes.agent)} hi`)).body.invocations[0];
     expect(allowed).toMatchObject({ state: 'pending', where: { spaceKind: 'direct' } });
     await hermes.report(allowed.id, { state: 'done' });
   });

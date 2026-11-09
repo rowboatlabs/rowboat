@@ -13,7 +13,7 @@ import {
 } from './changeset.js';
 import { Attribution, Member, SpaceMember, SuperAgentResult, MemberRole, Membership, Message, SessionMark, ReactionEmoji, Space, SpaceKind, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
-import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
+import { CreateInviteResult } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 
@@ -233,15 +233,14 @@ export const leaveSpace = tool({
 export const createInvite = tool({
   name: 'create_invite',
   description:
-    "Make an invite link to the org (any member may, unless the org's invite policy is admins only). " +
-    'The person who accepts joins the org, its ' +
-    'default spaces, and any spaceIds listed — each one a shared space your person is in. Returns ' +
+    'Make an invite link: to one shared space your person is in (spaceId), or a personal link ' +
+    '(direct: true) that opens a DM with your person when accepted — the way to reach someone who ' +
+    'shares no space with them yet. Exactly one of the two. Anyone in a space may invite to it. Returns ' +
     'the link to share — delivery is up to your person (paste it in a DM, an email, wherever they ' +
-    'said). The org may cap expiresInHours.',
+    'said). Links are multi-use and expire, seven days by default.',
   input: z.object({
-    spaceIds: z.array(SpaceId).max(MAX_INVITE_SPACES).optional(),
-    /** One space, the form before 2026-10-19: the same as `spaceIds: [spaceId]`. */
     spaceId: SpaceId.optional(),
+    direct: z.literal(true).optional(),
     expiresInHours: z.number().int().positive().max(24 * 30).optional(),
   }),
   output: CreateInviteResult,
