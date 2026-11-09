@@ -10,8 +10,8 @@ import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 
 // New chat (spec §10, 2026-11-09): the one sheet behind the sidebar's New
-// space button and its section +'s. A group, a message to a contact or one
-// of your agents, a new agent, or a group you were sent a link to. It opens
+// space button and its section +'s. A space, a message to a contact or one
+// of your agents, a new agent, or a space you were sent a link to. It opens
 // where the result is; `start` opens it straight on a screen.
 
 type Screen = 'menu' | 'group'
@@ -20,7 +20,7 @@ export type NewChatStart = Screen | 'message'
 export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenSpace, onOpenAgents }: {
     org: OrgWithSpaces
     open: boolean
-    /** The screen to open on: the menu, the group form, or the message picker. */
+    /** The screen to open on: the menu, the space form, or the message picker. */
     start?: NewChatStart
     onOpenChange: (open: boolean) => void
     onOpenSpace: (orgId: string, spaceId: string) => void
@@ -53,7 +53,7 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
             close(false)
             onOpenSpace(org.id, space.id)
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not create the group', 'error')
+            toast(err instanceof Error ? err.message : 'Could not create the space', 'error')
         } finally {
             setBusy(false)
         }
@@ -75,24 +75,24 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
                 {screen === 'menu' ? <>
                     <DialogHeader>
                         <DialogTitle>New chat</DialogTitle>
-                        <DialogDescription>A group for a project, a message to someone, or an agent to work with.</DialogDescription>
+                        <DialogDescription>A space for a project, a message to someone, or an agent to work with.</DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-2 pt-1">
-                        {option(<Hash className="size-4" />, 'New group', 'Name it, add people and agents, and share its link.', () => setScreen('group'))}
-                        {option(<MessageSquare className="size-4" />, 'New message', 'Someone you share a group with, or one of your agents.', () => setMessaging(true))}
+                        {option(<Hash className="size-4" />, 'New space', 'Name it, add people and agents, and share its link.', () => setScreen('group'))}
+                        {option(<MessageSquare className="size-4" />, 'New message', 'Someone you share a space with, or one of your agents.', () => setMessaging(true))}
                         {onOpenAgents && option(<Bot className="size-4" />, 'Add an agent', 'Claude Code, Codex, Hermes and more — it becomes yours to bring into groups.', () => { close(false); onOpenAgents(org.id) })}
                         {option(<LinkIcon className="size-4" />, 'Join with a link', 'Paste the link someone sent you.', () => { close(false); openServerDialog({ kind: 'join' }) })}
                     </div>
                 </> : <>
                     <DialogHeader>
-                        <DialogTitle>New group</DialogTitle>
+                        <DialogTitle>New space</DialogTitle>
                         <DialogDescription>You are its first admin. Add people and agents once it exists, or share its invite link.</DialogDescription>
                     </DialogHeader>
                     <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void createGroup() }}>
-                        <Input autoFocus maxLength={128} value={name} onChange={(event) => setName(event.target.value)} placeholder="Group name" aria-label="Group name" />
+                        <Input autoFocus maxLength={128} value={name} onChange={(event) => setName(event.target.value)} placeholder="Space name" aria-label="Space name" />
                         <div className="flex items-center justify-between">
                             <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setScreen('menu')}>Back</button>
-                            <Button type="submit" disabled={!name.trim() || busy}>{busy && <Loader2 className="size-3.5 animate-spin" />} Create group</Button>
+                            <Button type="submit" disabled={!name.trim() || busy}>{busy && <Loader2 className="size-3.5 animate-spin" />} Create space</Button>
                         </div>
                     </form>
                 </>}

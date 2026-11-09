@@ -77,7 +77,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
             <DialogContent className="max-w-sm gap-0 p-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                 <DialogHeader className="px-4 pb-2 pt-4">
                     <DialogTitle className="text-sm">Add people to #{space.name}</DialogTitle>
-                    <DialogDescription className="text-xs">People you share a group with, and your own agents. They’ll see #{space.name} in their sidebar.</DialogDescription>
+                    <DialogDescription className="text-xs">People you share a space with, and your own agents. They’ll see #{space.name} in their sidebar.</DialogDescription>
                 </DialogHeader>
                 <div className="px-3 pb-2">
                     <Input

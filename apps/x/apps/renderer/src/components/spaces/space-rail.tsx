@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { SpaceRailSections } from '@/components/spaces/space-rail-sections'
 import { SecondaryRailToggle } from '@/components/secondary-rail-toggle'
 import { SecondaryRail, type SecondaryRailPeek } from '@/components/secondary-rail'
@@ -47,19 +47,4 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsAct
             {account && <div className="shrink-0 border-t border-border px-2 pb-2 pt-1.5">{account}</div>}
         </SpaceRailSections>}
     </SecondaryRail>
-}
-
-/**
- * The same rail for the server's own pages — Activity, Agents, Threads
- * (2026-10-21) — so it collapses there too. It shares the space view's pin,
- * so docking or tucking it away holds as you move between them.
- */
-export function OrgRail(props: Omit<Parameters<typeof SpaceRail>[0], 'open' | 'onTogglePin'>) {
-    const key = 'spaces:railOpen'
-    const [open, setOpen] = useState(() => localStorage.getItem(key) !== '0')
-    const togglePin = () => {
-        localStorage.setItem(key, open ? '0' : '1')
-        setOpen(!open)
-    }
-    return <SpaceRail {...props} open={open} onTogglePin={togglePin} />
 }

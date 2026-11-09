@@ -143,7 +143,7 @@ export function GeneralStream({
     composeActive?: boolean
     /** The content strip already labels a lone stream; split panes retain their headings. */
     showHeader?: boolean
-    /** A group with no messages yet shows its first-run page (EmptySpaceStart, 2026-11-09): these are its actions. */
+    /** A space with no messages yet shows its first-run page (EmptySpaceStart, 2026-11-09): these are its actions. */
     onAddPeople?: () => void
     onOpenFiles?: () => void
 }) {

@@ -85,7 +85,7 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
             <DialogContent className="max-w-sm gap-0 p-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                 <DialogHeader className="px-4 pb-2 pt-4">
                     <DialogTitle className="text-sm">New message</DialogTitle>
-                    <DialogDescription className="text-xs">A private conversation with someone you share a group with, or one of your agents.</DialogDescription>
+                    <DialogDescription className="text-xs">A private conversation with someone you share a space with, or one of your agents.</DialogDescription>
                 </DialogHeader>
                 <div className="px-3 pb-2">
                     <Input
@@ -116,7 +116,7 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                     {candidates.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
                             {roster.length === 0
-                                ? 'Nobody to message yet — share a group with someone, or add an agent. You can still message yourself.'
+                                ? 'Nobody to message yet — share a space with someone, or add an agent. You can still message yourself.'
                                 : 'No one matches.'}
                         </div>
                     ) : (

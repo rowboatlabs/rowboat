@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, ChevronDown, ChevronRight, CornerDownRight, Hash, Link as LinkIcon, LogIn, MessageSquarePlus, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, Sparkles, Trash2 } from 'lucide-react'
+import { Archive, Bell, ChevronDown, ChevronRight, CornerDownRight, Hash, Link as LinkIcon, LogIn, MessageSquarePlus, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -29,8 +29,8 @@ type NewChatStart = 'menu' | 'group' | 'message'
 /**
  * The chat list (spec §10, 2026-11-09, sections since the evening's design
  * pass): New space leads as the one primary action, Activity and Threads sit
- * above, and the chats come in three sections — Agents first, highlighted,
- * then Groups, then People — each newest activity first with its own "+".
+ * above, and the chats come in three sections — Agents first, then Spaces,
+ * then People — each newest activity first and ending in its own "new" row.
  * Your personal link is pinned to the foot; the host adds your account row
  * under it (SpaceRail's `account`).
  */
@@ -92,7 +92,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
             await window.ipc.invoke('spaces:renameSpace', { orgId: org.id, spaceId, name })
             onChanged()
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not rename the group', 'error')
+            toast(err instanceof Error ? err.message : 'Could not rename the space', 'error')
         }
     }
 
@@ -131,7 +131,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
     }
 
     // Each section newest activity first. A DM is a person or an agent (its
-    // other participant's kind, from your contacts); a group is a shared space.
+    // other participant's kind, from your contacts); a space is a shared one.
     type Direct = { space: OrgWithSpaces['directs'][number]; otherId: string; agent: boolean }
     const lastActivity = (space: { id: string; createdAt: string }) => spaceLastActivityAt(org.id, space.id) ?? space.createdAt
     const byActivity = <T extends { space: { id: string; createdAt: string } }>(a: T, b: T) => lastActivity(b.space).localeCompare(lastActivity(a.space))
@@ -144,11 +144,11 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
     const peopleChats = directs.filter((row) => !row.agent)
     const selfShown = !selfDm
 
-    // Archived groups (harbor #1186, 2026-10-14) leave the list for a
+    // Archived spaces (harbor #1186, 2026-10-14) leave the list for a
     // collapsed section at its foot — still readable, out of the way.
     const archivedSpaces = org.spaces.filter((space) => space.archived)
     const [archivedOpen, setArchivedOpen] = useState(false)
-    // Viewing an archived group keeps its row in sight.
+    // Viewing an archived space keeps its row in sight.
     const archivedShown = archivedOpen || archivedSpaces.some((space) => activeSpace?.orgId === org.id && activeSpace.spaceId === space.id)
     const startRename = (space: OrgWithSpaces['spaces'][number]) => {
         setRenameValue(space.name)
@@ -191,7 +191,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                                 // The row behind it carries the hover and the selection (CollapsibleSpace).
                                 className={cn('min-w-0 flex-1 hover:bg-transparent active:bg-transparent data-[active=true]:bg-transparent', renderDiscussions && 'pl-1')}
                             >
-                                {/* A group is a channel — # says so. */}
+                                {/* A space is a channel — # says so. */}
                                 <Hash className="size-3.5 shrink-0 text-muted-foreground" />
                                 <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-semibold text-foreground')}>{space.name}</span>
                                 {!active && <UnreadBadge badge={badge} />}
@@ -199,7 +199,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                         </ContextMenuTrigger>
                         <ContextMenuContent>
                             <ContextMenuItem disabled={space.archived} onClick={() => startRename(space)}>
-                                <Pencil className="mr-2 size-3.5" /> Rename group
+                                <Pencil className="mr-2 size-3.5" /> Rename space
                             </ContextMenuItem>
                         </ContextMenuContent>
                     </ContextMenu>
@@ -207,7 +207,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                         ⋯ on hover opens the same menu so it can be found. */}
                     {!space.archived && <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <button type="button" aria-label={`Options for ${space.name}`} title="Group options"
+                            <button type="button" aria-label={`Options for ${space.name}`} title="Space options"
                                 className="spaces-row-more mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
                                 <MoreHorizontal className="size-3.5" />
                             </button>
@@ -215,7 +215,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                         {/* Focus returning to the trigger would blur the rename input and commit it. */}
                         <DropdownMenuContent align="start" onCloseAutoFocus={(event) => event.preventDefault()}>
                             <DropdownMenuItem onSelect={() => startRename(space)}>
-                                <Pencil className="size-3.5" /> Rename group
+                                <Pencil className="size-3.5" /> Rename space
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>}
@@ -252,14 +252,24 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
         )
     }
 
-    const sectionHead = (label: string, add?: { label: string; onClick: () => void }) => (
+    // A section: a plain label, and on the right, shown on hover, one quiet action.
+    const sectionHead = (label: string, action?: { label: string; text: string; onClick: () => void }) => (
         <div className="flex items-center gap-0.5">
             <span className="flex h-6.5 min-w-0 flex-1 items-center pl-1.5 pr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
-            {add && <button type="button" onClick={add.onClick} aria-label={add.label} title={add.label}
-                className="spaces-sec-add flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-                <Plus className="size-3.5" />
+            {action && <button type="button" onClick={action.onClick} aria-label={action.label} title={action.label}
+                className="spaces-sec-add flex h-6 shrink-0 items-center rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                {action.text}
             </button>}
         </div>
+    )
+    // The row that ends each section: its own "new", in the accent, one shape for all three.
+    const actionRow = (text: string, title: string, onClick: () => void) => (
+        <SidebarMenuItem>
+            <SidebarMenuButton onClick={onClick} className="spaces-rail-row text-primary hover:text-primary" title={title}>
+                <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center rounded-md border border-dashed border-primary/60"><Plus className="size-3" /></span>
+                <span className="flex-1 truncate font-medium">{text}</span>
+            </SidebarMenuButton>
+        </SidebarMenuItem>
     )
     const navRows = !!(onOpenActivity || onOpenThreads || needsSignIn || org.error)
     return (
@@ -317,38 +327,22 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                 {onOpenThreads && <ThreadsRow orgId={org.id} active={threadsActive} onOpen={() => onOpenThreads(org.id)} />}
             </SidebarMenu>}
 
-            {/* Agents lead, highlighted: the header row is the Agents page, the rows are your agents' chats. */}
+            {/* Agents lead: your agents' chats, then Add an agent; the Agents page is a quiet "View all" on the header. */}
             <section aria-label="Agents" className="spaces-sec mt-3.5">
-                {onOpenAgents ? (
-                    <SidebarMenu className="gap-0.5">
-                        <SidebarMenuItem>
-                            <SidebarMenuButton isActive={agentsActive} onClick={() => onOpenAgents(org.id)} className="spaces-rail-row bg-primary/10 text-foreground hover:bg-primary/15 data-[active=true]:bg-primary/20">
-                                <Sparkles className="size-4 shrink-0 text-primary" />
-                                <span className="flex-1 truncate text-[11px] font-semibold uppercase tracking-wide">Agents</span>
-                                {agentChats.length > 0 && <span className="text-xs text-muted-foreground">{agentChats.length}</span>}
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
-                    </SidebarMenu>
-                ) : sectionHead('Agents')}
+                {sectionHead('Agents', onOpenAgents ? { label: 'View all agents', text: agentsActive ? 'Viewing' : 'View all', onClick: () => onOpenAgents(org.id) } : undefined)}
                 <SidebarMenu className="mt-0.5 gap-0.5">
                     {agentChats.map(directRow)}
-                    {onOpenAgents && (
-                        <SidebarMenuItem>
-                            <SidebarMenuButton onClick={() => onOpenAgents(org.id)} className="spaces-rail-row text-primary hover:text-primary" title="Claude Code, Codex, Hermes and more — yours to bring into spaces">
-                                <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center rounded-md border border-dashed border-primary/60"><Plus className="size-3" /></span>
-                                <span className="flex-1 truncate font-medium">Add an agent</span>
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
-                    )}
-                    {agentChats.length === 0 && !onOpenAgents && <li className="px-2 py-2 text-xs text-muted-foreground">No agents yet.</li>}
+                    {onOpenAgents
+                        ? actionRow('Add an agent', 'Claude Code, Codex, Hermes and more — yours to bring into spaces', () => onOpenAgents(org.id))
+                        : agentChats.length === 0 && <li className="px-2 py-2 text-xs text-muted-foreground">No agents yet.</li>}
                 </SidebarMenu>
             </section>
 
-            <section aria-label="Groups" className="spaces-sec mt-3.5">
-                {sectionHead('Groups', { label: 'New group', onClick: () => setNewChat('group') })}
+            <section aria-label="Spaces" className="spaces-sec mt-3.5">
+                {sectionHead('Spaces')}
                 <SidebarMenu className="mt-0.5 gap-0.5">
                     {groups.map(groupRow)}
-                    {groups.length === 0 && <li className="px-2 py-2 text-xs text-muted-foreground">No groups yet.</li>}
+                    {actionRow('New space', 'A space for a project or a team: name it, add people and agents, share its link', () => setNewChat('group'))}
                     {archivedSpaces.length > 0 && (
                         <SidebarMenuItem>
                             <SidebarMenuButton onClick={() => setArchivedOpen((open) => !open)} aria-expanded={archivedShown}
@@ -366,7 +360,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
             </section>
 
             <section aria-label="People" className="spaces-sec mt-3.5">
-                {sectionHead('People', { label: 'New message', onClick: () => setNewChat('message') })}
+                {sectionHead('People')}
                 <SidebarMenu className="mt-0.5 gap-0.5">
                     {peopleChats.map(directRow)}
                     {/* Not created yet: the same row, waiting for its first click. */}
@@ -387,7 +381,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                             </SidebarMenuButton>
                         </SidebarMenuItem>
                     )}
-                    {peopleChats.length === 0 && !selfShown && <li className="px-2 py-2 text-xs text-muted-foreground">Nobody yet. Share a group, or your link.</li>}
+                    {actionRow('New message', 'Someone you share a space with, or one of your agents', () => setNewChat('message'))}
                 </SidebarMenu>
             </section>
             {/* Your personal link (spec §4 Invites, 2026-11-09): how someone outside your groups reaches you. A full row pinned to the rail's foot. */}

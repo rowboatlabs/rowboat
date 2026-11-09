@@ -288,7 +288,7 @@ export function AgentPage({ org, listing, onChanged }: {
 /**
  * Where it works, and who may ask it there (Harbor spec §4 Agent members,
  * 2026-11-09: a seat per space). The owner flips each seat between everyone
- * in the group and themselves alone; everyone else reads it. A local agent's
+ * in the space and themselves alone; everyone else reads it. A local agent's
  * seats are the owner's alone wherever it sits, so they show without a switch.
  */
 function SeatsSection({ org, agent, mine, ownerName }: { org: OrgWithSpaces; agent: spaces.Member; mine: boolean; ownerName: string }) {
@@ -317,7 +317,7 @@ function SeatsSection({ org, agent, mine, ownerName }: { org: OrgWithSpaces; age
             <h3 className="text-sm font-semibold text-foreground">Where it works</h3>
             {seats.length === 0 ? (
                 <p className="text-xs leading-snug text-muted-foreground">
-                    {mine ? 'Not in any of your groups yet. Add it from a group’s member list, or mention it there.' : `In none of the groups you share with ${ownerName}.`}
+                    {mine ? 'Not in any of your spaces yet. Add it from a space’s member list, or mention it there.' : `In none of the spaces you share with ${ownerName}.`}
                 </p>
             ) : (
                 <ul className="flex flex-col gap-2">

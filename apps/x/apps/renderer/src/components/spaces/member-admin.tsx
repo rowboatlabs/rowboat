@@ -132,8 +132,8 @@ function RemoveFromSpaceDialog({ orgId, space, member, onClose }: {
                     <AlertDialogTitle>Remove {member.displayName} from {space.name}?</AlertDialogTitle>
                     <AlertDialogDescription>
                         {agent
-                            ? 'It stops seeing this group and answering here. What it wrote stays.'
-                            : 'They stop seeing this group, and their agents leave with them. What they wrote stays; someone in the group can invite them back.'}
+                            ? 'It stops seeing this space and answering here. What it wrote stays.'
+                            : 'They stop seeing this space, and their agents leave with them. What they wrote stays; someone in the space can invite them back.'}
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

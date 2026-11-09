@@ -14,10 +14,10 @@ import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
 // A space's people (2026-11-02, desktop's members popover): who's here, and
-// on top, Invite (the group's link, for anyone) and Add people (your
+// on top, Invite (the space's link, for anyone) and Add people (your
 // contacts, people or your own agents). A DM's membership is fixed and an
 // archived space takes no one new, so neither shows there. Anyone in a
-// group invites to it (2026-11-09).
+// space invites to it (2026-11-09).
 export default function MembersScreen() {
   const colors = useColors();
   const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string }>();

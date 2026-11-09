@@ -15,8 +15,8 @@ import { cn } from '@/lib/utils'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 
 // Agents (2026-10-21; 2026-11-09): your agents on one page — how many there
-// are, what each one is, and which of your groups it is in — and, below,
-// the agents others brought into groups you share. Only an owner renames an
+// are, what each one is, and which of your spaces it is in — and, below,
+// the agents others brought into spaces you share. Only an owner renames an
 // agent or opens its keys and setup; nothing stands above the owner. Adding
 // one, connecting it and its keys reuse the Agents dialog's screens.
 
@@ -61,7 +61,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
     }, [org.id])
 
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
-    // Your contacts hold your own agents; others' agents show through the rosters of the groups you share with them.
+    // Your contacts hold your own agents; others' agents show through the rosters of the spaces you share with them.
     const agents = useMemo(() => {
         const byId = new Map<string, spaces.Member>()
         for (const m of roster) if (m.kind === 'agent') byId.set(m.id, m)
@@ -104,7 +104,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
                             Agents
                             <span className="text-base font-normal tabular-nums text-muted-foreground">{agents.length}</span>
                         </h1>
-                        <p className="mt-1 text-sm text-[var(--rowboat-ink-secondary)]">Your agents, what each runs on, and which groups it is in. Who may ask one is set per group.</p>
+                        <p className="mt-1 text-sm text-[var(--rowboat-ink-secondary)]">Your agents, what each runs on, and which spaces it is in. Who may ask one is set per group.</p>
                     </div>
                     <Segmented
                         label="Show"

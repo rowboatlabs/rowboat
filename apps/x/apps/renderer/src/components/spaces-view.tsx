@@ -8,7 +8,7 @@ import '@/styles/spaces-header.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeft, PenTool, Rows3, Trash2, UserPlus, Users } from 'lucide-react'
@@ -32,7 +32,7 @@ import { useSpaceInvocations } from '@/hooks/use-space-invocations'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { ActivityView, type ActivityTarget } from '@/components/spaces/activity-view'
 import { MyThreadsView } from '@/components/spaces/my-threads-view'
-import { OrgRail, SpaceRail } from '@/components/spaces/space-rail'
+import { SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
 import { getStreamView, setStreamView, useStreamView } from '@/lib/spaces-stream-view'
 import { SpaceThreadsView } from '@/components/spaces/space-threads-view'
@@ -155,6 +155,18 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     // No Rowboat session → the empty state offers the sign-in first (one
     // session, two uses): one browser trip connects Rowboat's server.
     const account = useSpacesAccountState()
+    // The sidebar is mounted once here, beside whichever content is open, so
+    // its scroll and its drawer state survive a switch (2026-11-09; it used to
+    // live inside the per-space pane and remount with it). Docked by default
+    // (persisted), or a sliver at the edge that peeks the rail on hover.
+    const railPinKey = 'spaces:railOpen'
+    const [railPinned, setRailPinned] = useState(() => localStorage.getItem(railPinKey) !== '0')
+    const toggleRailPin = () => {
+        const pin = !railPinned
+        localStorage.setItem(railPinKey, pin ? '1' : '0')
+        setRailPinned(pin)
+    }
+    const railPeekRef = useRef<SecondaryRailPeek | null>(null)
     const [signingIn, setSigningIn] = useState(false)
     const signInRowboat = async () => {
         setSigningIn(true)
@@ -197,35 +209,45 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         )
     }
 
-    if (selectedOrg && selectedSpace) {
-        return (
-            <SpaceAccessContext.Provider value={{ writable: !selectedSpace.archived, archived: selectedSpace.archived === true }}>
-            <SpacePane
-                key={`${selectedOrg.id}/${selectedSpace.id}`}
-                org={selectedOrg}
-                space={selectedSpace}
-                selection={railSelection}
-                onSelect={onRailSelect}
-                onSwitchSpace={onSwitchSpace}
-                onOpenSession={onOpenSession}
-                onOpenActivity={onOpenActivity}
-                onOpenAgents={onOpenAgents}
-                onOpenThreads={onOpenThreads}
-                accountMenu={accountMenu}
-                active={active}
-            />
-            </SpaceAccessContext.Provider>
-        )
-    }
-
     if (selectedOrg) {
         const empty = selectedOrg.spaces.length === 0 && selectedOrg.directs.length === 0
-        return <div className="spaces-surface flex min-h-0 flex-1 flex-col">
-            <div className="flex min-h-0 flex-1">
-            <OrgRail org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} account={accountMenu}
+        return <div className="spaces-surface flex min-h-0 flex-1">
+            <SpaceRail
+                org={selectedOrg}
+                spaceId={selectedSpace?.id ?? ''}
+                onOpenSpace={(orgId, spaceId) => {
+                    // The open space's own row: back to its stream.
+                    if (selectedSpace && orgId === selectedOrg.id && spaceId === selectedSpace.id) onRailSelect({ kind: 'general' })
+                    else onSwitchSpace(orgId, spaceId)
+                }}
                 onOpenThreads={onOpenThreads} threadsActive={selection?.view === 'threads'}
-                onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'} onOpenActivity={onOpenActivity} activityActive={selection?.view === 'activity'} />
-            {selection?.spaceId ? (
+                onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'}
+                onOpenActivity={onOpenActivity} activityActive={selection?.view === 'activity'}
+                open={railPinned}
+                onTogglePin={toggleRailPin}
+                peekRef={railPeekRef}
+                account={accountMenu}
+                // In a space the header's "Show sidebar" button is the way back; the server pages keep the edge sliver.
+                edgeless={!!selectedSpace}
+            />
+            <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+            {selectedSpace ? (
+                <SpaceAccessContext.Provider value={{ writable: !selectedSpace.archived, archived: selectedSpace.archived === true }}>
+                <SpacePane
+                    key={`${selectedOrg.id}/${selectedSpace.id}`}
+                    org={selectedOrg}
+                    space={selectedSpace}
+                    selection={railSelection}
+                    onSelect={onRailSelect}
+                    onSwitchSpace={onSwitchSpace}
+                    onOpenSession={onOpenSession}
+                    railOpen={railPinned}
+                    onToggleRail={toggleRailPin}
+                    railPeekRef={railPeekRef}
+                    active={active}
+                />
+                </SpaceAccessContext.Provider>
+            ) : selection?.spaceId ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-sm text-muted-foreground">
                     <p>This chat is unavailable or you are no longer in it.</p>
                     <Button variant="outline" onClick={() => onSelect({ orgId: selectedOrg.id, spaceId: '', view: 'activity' })}>Open Activity</Button>
@@ -296,19 +318,17 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenAgents, onOpenThreads, active = true, accountMenu }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, active = true, railOpen, onToggleRail, railPeekRef }: {
     org: OrgWithSpaces
     space: spaces.Space
-    /** Your account row at the sidebar's foot (2026-11-09). */
-    accountMenu?: ReactNode
+    /** The sidebar, hoisted to SpacesView (2026-11-09): docked or tucked away, its lock, and its hover peek — for the header's "Show sidebar" button. */
+    railOpen: boolean
+    onToggleRail: () => void
+    railPeekRef: RefObject<SecondaryRailPeek | null>
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     /** The quick switcher can land on another space entirely. */
     onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
-    /** Your agents (2026-10-21). */
-    onOpenAgents?: (orgId: string) => void
-    onOpenThreads?: (orgId: string) => void
-    onOpenActivity?: (orgId: string) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
@@ -469,14 +489,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     useEffect(() => {
         columnMemory.set(memoryKey, { docKey, docIsBoard, chatOpen })
     }, [memoryKey, docKey, chatOpen])
-    // The chat/files rail: docked by default (persisted), or a sliver at the
-    // edge that peeks the rail as a drawer on hover — see SpaceRail. (The
-    // shell sidebar contracts to the dock while in Spaces, so this rail is
-    // THE sidebar here.)
-    const railPinKey = 'spaces:railOpen'
-    const [railPinned, setRailPinned] = useState(() => localStorage.getItem(railPinKey) !== '0')
-
-    // Width of the pane drives the Split floor and pinnability.
+    // Width of the pane (the content beside the sidebar) drives the Split floor.
     const paneRef = useRef<HTMLDivElement | null>(null)
     const [paneWidth, setPaneWidth] = useState(() => window.innerWidth)
     useEffect(() => {
@@ -507,7 +520,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const showChat = threadsListOpen || (twoFits ? chatOpen || !docOpen : !docOpen)
     const showDoc = docOpen
     const split = showChat && showDoc
-    const railOpen = railPinned
 
     // Resizable divider: drag it; the document width persists.
     const [docWidth, setDocWidth] = useState<number>(() => {
@@ -705,13 +717,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the board', 'error'))
     }
 
-    /** The rail's lock: docked ⇄ edge sliver (the rail peeks on hover by itself). */
-    const toggleRailPin = () => {
-        const pin = !railPinned
-        localStorage.setItem(railPinKey, pin ? '1' : '0')
-        setRailPinned(pin)
-    }
-    const railPeekRef = useRef<SecondaryRailPeek | null>(null)
     const railUnread = useSpacesUnreadCounts()
     const railHasUnread = [...railUnread].some(([key, badge]) => key.startsWith(`${org.id}/`) && badge.unread > 0)
 
@@ -985,7 +990,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         <button
                             type="button"
                             aria-label="Show sidebar"
-                            onClick={() => { railPeekRef.current?.leave(); toggleRailPin() }}
+                            onClick={() => { railPeekRef.current?.leave(); onToggleRail() }}
                             onMouseEnter={() => railPeekRef.current?.enter()}
                             onMouseLeave={() => railPeekRef.current?.leave()}
                             className="spaces-header-button spaces-rail-reveal relative -mr-1"
@@ -1175,22 +1180,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             </header>
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
-                <SpaceRail
-                    onOpenThreads={onOpenThreads}
-                    onOpenAgents={onOpenAgents}
-                    onOpenActivity={onOpenActivity}
-                    org={org}
-                    onOpenSpace={(orgId, spaceId) => {
-                        if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })
-                        else onSwitchSpace(orgId, spaceId)
-                    }}
-                    spaceId={space.id}
-                    open={railOpen}
-                    onTogglePin={toggleRailPin}
-                    peekRef={railPeekRef}
-                    account={accountMenu}
-                    edgeless
-                />
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
                     {selection.kind === 'files' && <>
                         {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">

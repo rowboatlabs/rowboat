@@ -9,7 +9,7 @@ import { markSpacesChanged, useOrgClient } from '@/lib/spaces/invites';
 import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
-// New group (2026-11-02, desktop's create form; 2026-11-09: a name is all —
+// New space (2026-11-02, desktop's create form; 2026-11-09: a name is all —
 // open spaces went with the orgs). You are its first admin. Creating opens it.
 export default function NewSpaceScreen() {
   const colors = useColors();
@@ -40,7 +40,7 @@ export default function NewSpaceScreen() {
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 24 }}
     >
-      <Stack.Screen options={{ title: 'New group' }} />
+      <Stack.Screen options={{ title: 'New space' }} />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: 14, borderCurve: 'continuous', backgroundColor: colors.card }}>
         <Text style={{ ...type.body, color: colors.tertiaryLabel }}>#</Text>
         <TextInput
@@ -60,7 +60,7 @@ export default function NewSpaceScreen() {
       <Text style={{ ...type.caption, color: colors.secondaryLabel, paddingHorizontal: 4 }}>
         Only people you add, or who open its invite link, can see it. You are its first admin.
       </Text>
-      <PrimaryButton label={busy ? 'Creating' : 'Create group'} busy={busy} disabled={!name.trim()} onPress={() => void create()} />
+      <PrimaryButton label={busy ? 'Creating' : 'Create space'} busy={busy} disabled={!name.trim()} onPress={() => void create()} />
     </ScrollView>
   );
 }

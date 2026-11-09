@@ -24,7 +24,7 @@ import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
 // Spaces home: signed out → one sign-in button; signed in → the server as
-// inset-grouped cards (iOS Settings shape): your groups, your direct
+// inset-grouped cards (iOS Settings shape): your spaces, your direct
 // messages, your link. One server since 2026-11-09: no switcher.
 export type SpacesTabKey = 'home' | 'dms' | 'more' | 'search';
 
@@ -311,7 +311,7 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
   // Coming back from a chat: the marks moved, so the badges must too.
   useFocusEffect(
     useCallback(() => {
-      // A new group, or one joined by link, reloads the list.
+      // A new space, or one joined by link, reloads the list.
       if (takeSpacesChanged(org.address)) void load();
       else if (spaces !== null) client.unread().then(setUnread).catch(() => {});
       // eslint-disable-next-line react-hooks/exhaustive-deps -- spaces !== null stands for spaces
@@ -448,7 +448,7 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
             <Text style={{ ...type.caption, color: colors.secondaryLabel }}>
               {[
                 people > 0 ? `${people} ${people === 1 ? 'person' : 'people'}` : null,
-                spaces ? `${spaces.length} ${spaces.length === 1 ? 'group' : 'groups'}` : null,
+                spaces ? `${spaces.length} ${spaces.length === 1 ? 'space' : 'spaces'}` : null,
               ].filter(Boolean).join(' · ')}
             </Text>
           </View>
@@ -481,13 +481,13 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
               );
             })}
             {shownSpaces.length === 0 && mode !== 'home' ? (
-              <Text style={{ ...type.body, color: colors.tertiaryLabel, padding: 14 }}>No groups yet.</Text>
+              <Text style={{ ...type.body, color: colors.tertiaryLabel, padding: 14 }}>No spaces yet.</Text>
             ) : null}
             {/* New group (2026-11-02): the last row of the list, as Slack does. Browse went with open spaces (2026-11-09). */}
             {mode === 'home' ? (
               <CardRow first={shownSpaces.length === 0} onPress={() => router.push({ pathname: '/spaces/new-space', params: { org: org.address, me: org.memberId } })}>
                 <Glyph icon="sf:plus" />
-                <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>New group</Text>
+                <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>New space</Text>
               </CardRow>
             ) : null}
           </Card>

@@ -104,7 +104,7 @@ Principles 1+2 make Harbor commodity infrastructure — easy to self-host, easy 
 
 Mental model for the stack, top to bottom: **the server** (owns identity) → **spaces** (own membership and roles) → **change-set log** (owns truth) → **edges** (own compute). Each layer's authority is exclusive.
 
-The user-facing analogy (2026-11-09): a messenger. Sign in once; your chats are the groups you were invited to, the people you've met in them, and your own agents. There is no account to create for a team and nothing to join before the first conversation.
+The user-facing analogy (2026-11-09): a messenger. Sign in once; your chats are the spaces you were invited to, the people you've met in them, and your own agents. There is no account to create for a team and nothing to join before the first conversation.
 
 ---
 
@@ -356,7 +356,7 @@ Spaces, assets, topics, and change-sets are all addressable by link. One link gr
 - **The reach rule.** "The org is the trust boundary" is gone with the org. You may open a DM with **anyone you share a space with** (or have shared one with: a DM, once open, outlives the space), and with yourself. Anyone else is reached by their **personal link** (§4 Invites), which opens the DM on acceptance, or by inviting them to a group. The new-DM picker draws from your contacts (§3). Harbor refuses `openDirect` for anyone outside that rule, so the picker is never the boundary.
 - **The group-chat rule is retired.** "DMs are off until the second space" (2026-10-07) was a rule about an org's shape; there is no org, and a DM is open from the first moment.
 - **A DM with an agent** is its owner's alone (§4 Agent members, 2026-11-09).
-- **Group conversations are still named spaces** — a *group*, in the app's words — and the start sheet makes one in a step (§10).
+- **Group conversations are still named spaces** — a *space* in the app's words too, one word everywhere (settled the evening of 2026-11-09; "group" was tried for a day) — and the start sheet makes one in a step (§10).
 - **Migration:** the DM key became a pair of server-wide member ids. Where the same two people had a DM in two orgs, the older one stayed the DM and the newer became an ordinary two-person group, since two logs cannot be merged.
 
 ### Open spaces and org membership — **Retired** *(decided 2026-09-07/22; retired 2026-11-09)*
@@ -690,7 +690,7 @@ Stabilization runs at **two speeds**. The agent face is small and stabilizes ear
 
 **Decided** at the surface level; layout and interaction details are **Latitude** (and the subject of the design pass).
 
-- **Sidebar** *(rewritten 2026-11-09; was "a Spaces section, grouped by org with org badges"; sections since that evening's design pass, was one list with filter chips)*: **one sidebar** — the product mark and your account row in it, no rail beside it — leading with **New space** as the one primary action, then Activity and Threads, then the chats in three sections, each newest activity first with its own "+": **Agents** first and highlighted (its header opens the Agents page, with an "Add an agent" row), **Groups**, **People** (your notes-to-self row last). Your personal link is pinned at the foot. A group with no messages yet opens on its first-run page: add people, add an agent, add a file, and the group's link.
+- **Sidebar** *(rewritten 2026-11-09; was "a Spaces section, grouped by org with org badges"; sections since that evening's design pass, was one list with filter chips)*: **one sidebar** — the product mark and your account row in it, no rail beside it — leading with **New space** as the one primary action, then Activity and Threads, then the chats in three sections, each newest activity first: **Agents** first and highlighted (its header opens the Agents page, with an "Add an agent" row), **Spaces**, **People** (with its own "+"; your notes-to-self row last). Your personal link is pinned at the foot. A space with no messages yet opens on its first-run page: add people, add an agent, add a file, and the space's link.
 - **Space view**: README + feed on landing; file browser; asset viewing/editing through the existing markdown editor pointed at remote assets (draft→apply replacing direct save); the existing turn view for agent work in topics.
 - **Mentions**: the existing mention system extends across the boundary — reference a space asset from a private chat (`@Roadboard/roadmap.md`) and a private asset never leaks the other way (pushes are authored summaries, §8).
 - **Automations**: existing local crons and live-note objectives can target shared assets once the space tools exist — no new scheduler.

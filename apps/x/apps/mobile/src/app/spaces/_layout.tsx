@@ -60,7 +60,7 @@ export default function SpacesLayout() {
       <Stack.Screen name="invite" options={{ title: 'Invite', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="members" options={{ title: 'Members', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="add-people" options={{ title: 'Add people', headerBackButtonDisplayMode: 'minimal' }} />
-      <Stack.Screen name="new-space" options={{ title: 'New group', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="new-space" options={{ title: 'New space', headerBackButtonDisplayMode: 'minimal' }} />
     </Stack>
   );
 }

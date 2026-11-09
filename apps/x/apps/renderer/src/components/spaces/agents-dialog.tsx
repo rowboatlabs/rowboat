@@ -252,8 +252,8 @@ function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange, 
             </ul>
             <span className="text-[11px] text-muted-foreground">
                 {ownerOnly
-                    ? 'Everyone in these groups sees it and its replies; only you can ask it.'
-                    : 'Anyone in these groups can mention it; you can narrow that per group from the member list.'}
+                    ? 'Everyone in these spaces sees it and its replies; only you can ask it.'
+                    : 'Anyone in these spaces can mention it; you can narrow that per space from the member list.'}
                 {' '}You can add it to more later from any group’s member list.
             </span>
         </div>
