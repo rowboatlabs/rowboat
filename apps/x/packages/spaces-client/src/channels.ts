@@ -115,7 +115,14 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
       members: await getClient(args.orgId).listMembers(args.spaceId),
     }),
 
-    'spaces:listContacts': async (args) => getClient(args.orgId).listContacts(),
+    // The roster the app keeps is everyone it can address, you included (2026-11-09): the route
+    // lists the others, so your own record comes from `me`, first — the account row, the sidebar's
+    // self row and a profile update all look you up there.
+    'spaces:listContacts': async (args) => {
+      const client = getClient(args.orgId);
+      const [{ member: me }, contacts] = await Promise.all([client.me(), client.listContacts()]);
+      return { ...contacts, members: [me, ...contacts.members.filter((m) => m.id !== me.id)] };
+    },
 
     'spaces:listAgents': async (args) => ({ agents: await getClient(args.orgId).listAgents() }),
     'spaces:addAgent': async ({ orgId, ...input }) => getClient(orgId).addAgent(input),

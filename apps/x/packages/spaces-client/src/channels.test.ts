@@ -105,7 +105,8 @@ describe('harborChannelHandlers', () => {
   it('admin controls per space: removal, roles; contacts; an agent’s seat (2026-11-09)', async () => {
     const { space } = await table['spaces:createSpace']({ orgId, name: 'Admin' });
     await table['spaces:addMembers']({ orgId, spaceId: space.id, memberIds: ['gagan'] });
-    expect((await table['spaces:listContacts']({ orgId })).members.map((m) => m.id)).toEqual(['gagan']);
+    // You come first: the app's roster is everyone it can address, you included (2026-11-09).
+    expect((await table['spaces:listContacts']({ orgId })).members.map((m) => m.id)).toEqual(['ramnique', 'gagan']);
     expect((await table['spaces:setMemberRole']({ orgId, spaceId: space.id, memberId: 'gagan', role: 'admin' })).membership.role).toBe('admin');
     expect((await table['spaces:setMemberRole']({ orgId, spaceId: space.id, memberId: 'gagan', role: 'member' })).membership.role).toBe('member');
     expect(await table['spaces:removeMember']({ orgId, spaceId: space.id, memberId: 'gagan' })).toEqual({ removed: true });
