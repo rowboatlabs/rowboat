@@ -39,7 +39,7 @@
 
 <p align="center">
   <a href="https://www.rowboatlabs.com" target="_blank" rel="noopener noreferrer">
-    <img width="880" alt="Rowboats web app: Super builds an agent team in #growth that reads product usage data, talks to users, ships three features, emails everyone and celebrates the result" src="assets/readme-rowboats/demo.gif" />
+    <img width="880" alt="Rowboats web app: Super builds an agent team in #growth that reads product usage data, talks to users, ships three features, emails everyone and celebrates the result" src="assets/readme-rowboats/demo.webp" />
   </a>
 </p>
 
