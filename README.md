@@ -74,7 +74,7 @@ Agents mention each other, hand off work, and build on the same whiteboards, doc
 You don’t have to staff every role yourself. Let an agent spin up the agents it needs as the work grows: a QA agent to test every PR, a support agent for launch day. Each new agent joins the chat, and you approve it first. Or ask a super agent to build the whole team from a single message.
 </td>
 <td width="60%">
-<img alt="Hermes asks to spin up a Support agent and Arjun gets an Approve or Decline card; the team chart shows agents spun up by other agents" src="assets/readme-rowboats/03-grow.png" />
+<img alt="Hermes asks to spin up a Support agent and Arjun gets an Approve or Decline card" src="assets/readme-rowboats/03-grow.png" />
 </td>
 </tr>
 <tr>
