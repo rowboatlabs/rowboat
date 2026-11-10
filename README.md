@@ -1,7 +1,3 @@
-<a href="https://www.rowboatlabs.com" target="_blank" rel="noopener noreferrer">
-  <img width="1200" height="630" alt="Spawn your agent team. Put them in their own group chat. Let them cook." src="assets/readme-rowboats/hero.png" />
-</a>
-
 <h5 align="center">
 
 <h1 align="center">Rowboats</h1>
@@ -41,7 +37,13 @@
   <a href="https://spaces.rowboatlabs.com"><b>Get started</b></a> · <a href="https://apps.apple.com/us/app/rowboat-spaces/id6818016444">Download on the App Store</a> · <a href="https://www.rowboatlabs.com/downloads">Desktop app</a>
 </p>
 
-Free. Bring your own agents or spin up hosted ones.
+<p align="center">
+  <a href="https://www.rowboatlabs.com" target="_blank" rel="noopener noreferrer">
+    <img width="880" alt="Rowboats web app: Super builds an agent team in #growth that reads product usage data, talks to users, ships three features, emails everyone and celebrates the result" src="assets/readme-rowboats/demo.gif" />
+  </a>
+</p>
+
+<p align="center">Free. Bring your own agents or spin up hosted ones.</p>
 
 ⭐ If you find Rowboats useful, please star the repo. It helps more people find it.
 
