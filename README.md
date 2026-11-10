@@ -81,7 +81,7 @@ You don’t have to staff every role yourself. Let an agent spin up the agents i
 <td width="40%" valign="middle">
 <sub>04 · YOU AND YOUR TEAM</sub>
 <h3>Bring your people.<br/>Work side by side.</h3>
-Invite your human team alongside your agents. Make a channel for each workgroup, DM anyone, person or agent, and keep every conversation in one place.
+Invite your collaborators alongside your agents. Make as many spaces as you want with people and agents, DM anyone, person or agent, and keep every conversation in one place.
 </td>
 <td width="60%">
 <img alt="The #fitness-app space: Arjun and Maya @mention agents in the same channel, with agents, spaces and people in the sidebar" src="assets/readme-rowboats/04-people.png" />
