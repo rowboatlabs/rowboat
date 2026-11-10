@@ -8,6 +8,7 @@ import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View, t
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
+import { useHomeBackButton } from '@/components/home-back';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import { onServer, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
 import { spaces } from '@x/shared';
@@ -42,10 +43,19 @@ export default function SpaceChatScreen() {
   const keyboardVisible = useKeyboardVisible();
   const account = useSpacesAccount();
   const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string; kind?: string }>();
-  const { org, space, title, me } = params;
+  const { org, space, me } = params;
+  // The space as Home last listed it (2026-11-10): links and pushes open the
+  // chat with no title or kind, so the name and kind come from here, or from
+  // the server when the list hasn't seen this space yet.
+  // Keyed by id: the router reuses this screen when a link opens another space.
+  const [fetchedSpace, setFetchedSpace] = useState<Space | undefined>();
+  const spaceInfo = useMemo(
+    () => (fetchedSpace?.id === space ? fetchedSpace : peekValue<Space[]>(`spaces:${org}`)?.find((s) => s.id === space)),
+    [fetchedSpace, org, space],
+  );
   // A DM's membership is fixed, so it has no Members button (2026-11-02). Home
-  // says so in the params; other ways in fall back to the cached space list.
-  const direct = params.kind === 'direct' || peekValue<Space[]>(`spaces:${org}`)?.find((s) => s.id === space)?.kind === 'direct';
+  // says so in the params; other ways in fall back to the space list.
+  const direct = params.kind === 'direct' || spaceInfo?.kind === 'direct';
 
   const client = useMemo(
     () => new SpacesClient({ baseUrl: `https://${org}`, token: (opts) => account.getAccessToken(opts) }),
@@ -58,6 +68,26 @@ export default function SpaceChatScreen() {
   const [messages, setMessages] = useState<Message[] | null>(() => peekValue<Message[]>(streamCacheKey) ?? null);
   const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
   const profiles = useProfiles(client, members);
+  useEffect(() => {
+    if (params.title || spaceInfo) return;
+    let cancelled = false;
+    client
+      .listSpaces({ includeDirect: true })
+      .then((all) => !cancelled && setFetchedSpace(all.find((s) => s.id === space)))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, space, params.title, spaceInfo]);
+  // A DM is named for the other person; notes to self for you.
+  const dmName = useMemo(() => {
+    if (!direct) return undefined;
+    const other = [...members.values()].find((m) => m.id !== me);
+    if (other) return memberLabel(other);
+    const self = members.get(me);
+    return self ? `${self.displayName} (you)` : undefined;
+  }, [direct, members, me]);
+  const title = params.title ?? dmName ?? spaceInfo?.name;
   // File names by id (2026-10-28), so a bare file link in a message shows the
   // file's name instead of its URL.
   const [fileNames, setFileNames] = useState<ReadonlyMap<string, string>>(() => new Map());
@@ -493,10 +523,12 @@ export default function SpaceChatScreen() {
     [org, space, title, me],
   );
 
+  const homeBack = useHomeBackButton();
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={0}>
       <Stack.Screen
         options={{
+          headerLeft: homeBack,
           title: title ?? 'Space',
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: 18 }}>
@@ -541,7 +573,9 @@ export default function SpaceChatScreen() {
               <View style={{ marginTop: 40, paddingHorizontal: 24, gap: 10, alignItems: 'center' }}>
                 <Text style={{ fontSize: 20, fontWeight: '700', color: colors.label, textAlign: 'center' }}>Welcome to #{title}</Text>
                 <Text style={{ fontSize: 14, lineHeight: 20, color: colors.secondaryLabel, textAlign: 'center', marginBottom: 8 }}>
-                  {"It's just you here so far. Bring in the people who should work on this, then say what it's for."}
+                  {members.size > 1
+                    ? "No messages yet. Say what this space is for, or bring in more people."
+                    : "It's just you here so far. Bring in the people who should work on this, then say what it's for."}
                 </Text>
                 <View style={{ alignSelf: 'stretch', gap: 10 }}>
                   <PrimaryButton label="Add people" onPress={() => router.push({ pathname: '/spaces/add-people', params: { org, space, title, me } })} />
