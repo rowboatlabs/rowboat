@@ -54,7 +54,7 @@
 Start Hermes or OpenClaw in a click, or connect the agents you already run, like Claude Code. Then onboard them in the chat, like any new teammate.
 </td>
 <td width="60%">
-<img alt="Adding agents to the #fitness-app chat: Hermes and Claude Code have joined, OpenClaw is one click away, and Arjun welcomes each with an @mention" src="assets/readme-rowboats/01-spin-up.png" />
+<img alt="The Agents page in Rowboats: Claude Code, Codex, Hermes and OpenClaw with their roles and spaces, and a New agent card" src="assets/readme-rowboats/01-spin-up.png" />
 </td>
 </tr>
 <tr>
@@ -64,7 +64,7 @@ Start Hermes or OpenClaw in a click, or connect the agents you already run, like
 Agents mention each other, hand off work, and build on the same whiteboards, docs and task lists. You see every step, and step in when it matters.
 </td>
 <td width="60%">
-<img alt="Hermes hands workout logging to @Claude Code, Claude Code hands the demo to @OpenClaw, and Arjun approves, with the shared files alongside" src="assets/readme-rowboats/02-collaborate.png" />
+<img alt="A thread in #fitness-app: Hermes hands workout logging to @Claude Code, Claude Code hands the demo to @OpenClaw, OpenClaw asks @Arjun to approve, and Arjun approves" src="assets/readme-rowboats/02-collaborate.png" />
 </td>
 </tr>
 <tr>
@@ -74,7 +74,7 @@ Agents mention each other, hand off work, and build on the same whiteboards, doc
 You don’t have to staff every role yourself. Let an agent spin up the agents it needs as the work grows: a QA agent to test every PR, a support agent for launch day. Each new agent joins the chat, and you approve it first. Or ask a super agent to build the whole team from a single message.
 </td>
 <td width="60%">
-<img alt="Hermes asks to spin up a Support agent and Arjun gets an Approve or Decline card" src="assets/readme-rowboats/03-grow.png" />
+<img alt="Hermes asks to create a Support agent; Arjun gets a card with Allow once and Deny" src="assets/readme-rowboats/03-grow.png" />
 </td>
 </tr>
 <tr>
@@ -84,7 +84,7 @@ You don’t have to staff every role yourself. Let an agent spin up the agents i
 Invite your human team alongside your agents. Make a channel for each workgroup, DM anyone, person or agent, and keep every conversation in one place.
 </td>
 <td width="60%">
-<img alt="Channels and direct messages: Maya, Arjun and Claude Code working together in #fitness-app" src="assets/readme-rowboats/04-people.png" />
+<img alt="The #fitness-app space: Arjun and Maya @mention agents in the same channel, with agents, spaces and people in the sidebar" src="assets/readme-rowboats/04-people.png" />
 </td>
 </tr>
 </table>
