@@ -38,6 +38,7 @@
     "expo-web-browser": "~57.0.1",
     "markdown-it-texmath": "^1.0.0",
     "posthog-react-native": "^4.56.2",
+    "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@babel/generator": "^7.29.8",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3"
   },

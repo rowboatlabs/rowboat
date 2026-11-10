@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 
 import { Glyph, Group, Row } from '@/components/grouped';
+import { QrCode } from '@/components/qr-code';
 import { friendlyError } from '@/lib/spaces/errors';
 import { shareInviteLink, useOrgClient } from '@/lib/spaces/invites';
 import { useColors } from '@/theme/colors';
@@ -12,7 +13,9 @@ import { type } from '@/theme/type';
 // An invite link (2026-11-02; one target since 2026-11-09, desktop's
 // invite-link.tsx): with `space`, the space's link — anyone with it is in;
 // without, your personal link, which opens a direct message with you. Minted
-// as the screen opens; it works for seven days.
+// as the screen opens; it works for seven days. "Show QR code" (2026-11-10)
+// puts the same link on screen for someone in the room to scan with their
+// phone's camera.
 export default function InviteScreen() {
   const colors = useColors();
   const params = useLocalSearchParams<{ org: string; space?: string; title?: string }>();
@@ -23,6 +26,7 @@ export default function InviteScreen() {
   const [link, setLink] = useState<{ url: string; admits: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [qr, setQr] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -82,6 +86,15 @@ export default function InviteScreen() {
             <Glyph icon={copied ? 'sf:checkmark' : 'sf:doc.on.doc'} />
             <Text style={{ flex: 1, ...type.body, color: colors.label }}>{copied ? 'Copied' : 'Copy link'}</Text>
           </Row>
+          <Row onPress={() => setQr((on) => !on)}>
+            <Glyph icon="sf:qrcode" />
+            <Text style={{ flex: 1, ...type.body, color: colors.label }}>{qr ? 'Hide QR code' : 'Show QR code'}</Text>
+          </Row>
+          {qr ? (
+            <View style={{ alignItems: 'center', paddingTop: 4, paddingBottom: 20 }}>
+              <QrCode value={link.url} size={220} />
+            </View>
+          ) : null}
         </Group>
       ) : null}
       {error ? <Text selectable style={{ ...type.caption, color: colors.destructive, paddingHorizontal: 4 }}>{error}</Text> : null}
