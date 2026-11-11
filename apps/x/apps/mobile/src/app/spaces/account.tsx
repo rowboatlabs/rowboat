@@ -186,6 +186,17 @@ export default function AccountScreen() {
         </Pressable>
       </View>
 
+      {/* Your personal link (2026-11-11): on your profile, where people look for "my code"; Home keeps its row too. */}
+      {me ? (
+        <Group footer="Anyone with it can message you directly.">
+          <Row first onPress={() => router.push({ pathname: '/spaces/invite', params: { org: me.address, qr: '1' } })}>
+            <Image source="sf:qrcode" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
+            <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>Share your link</Text>
+            <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />
+          </Row>
+        </Group>
+      ) : null}
+
       {profile ? (
         <Group label="Profile" footer="How people see you across Spaces.">
           <Row first>

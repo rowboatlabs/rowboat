@@ -15,10 +15,11 @@ import { type } from '@/theme/type';
 // without, your personal link, which opens a direct message with you. Minted
 // as the screen opens; it works for seven days. "Show QR code" (2026-11-10)
 // puts the same link on screen for someone in the room to scan with their
-// phone's camera.
+// phone's camera. `qr=1` (2026-11-11) opens with the code already showing,
+// for the entry points on your profile, where showing it is the point.
 export default function InviteScreen() {
   const colors = useColors();
-  const params = useLocalSearchParams<{ org: string; space?: string; title?: string }>();
+  const params = useLocalSearchParams<{ org: string; space?: string; title?: string; qr?: string }>();
   const client = useOrgClient(params.org);
   const direct = !params.space;
   const what = direct ? 'me' : `#${params.title ?? 'the space'}`;
@@ -26,7 +27,7 @@ export default function InviteScreen() {
   const [link, setLink] = useState<{ url: string; admits: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [qr, setQr] = useState(false);
+  const [qr, setQr] = useState(params.qr === '1');
   useEffect(() => {
     let cancelled = false;
     void (async () => {

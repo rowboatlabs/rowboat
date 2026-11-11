@@ -195,6 +195,18 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
                   <CardRow first onPress={() => router.push('/spaces/account')}>
                     <Avatar id={current?.memberId ?? who} name={who} size={28} url={myAvatar} />
                     <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{who}</Text>
+                    {/* One tap to your QR code (2026-11-11), for showing it to someone in person. */}
+                    {current ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Show your QR code"
+                        hitSlop={10}
+                        onPress={() => router.push({ pathname: '/spaces/invite', params: { org: current.address, qr: '1' } })}
+                        style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, paddingHorizontal: 4 })}
+                      >
+                        <Image source="sf:qrcode" style={{ width: 20, height: 20 }} tintColor={colors.secondaryLabel} />
+                      </Pressable>
+                    ) : null}
                     <Chevron />
                   </CardRow>
                 ) : null}
