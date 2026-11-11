@@ -118,7 +118,7 @@ describe('managed Maritime agents', () => {
     expect(claude).toMatchObject({ status: 400, body: { message: expect.stringMatching(/Anthropic API key/) } });
   });
 
-  it('creates a Hermes agent on Rowboat’s account: an end user with a cap, the pinned image with its PATH, the member with the platform id, and the first key', async () => {
+  it('creates a Hermes agent on Rowboat’s account: an end user with a cap, Rowboat’s own image as a custom container, the member with the platform id, and the first key', async () => {
     const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Scout', kind: 'hermes' });
     expect(r.status).toBe(200);
     const { agent, key, hosting } = r.body as { agent: Member; key: { secret: string }; hosting: { status: string; externalId: string } };
@@ -128,10 +128,11 @@ describe('managed Maritime agents', () => {
     expect(hosting).toMatchObject({ status: 'deploying', externalId: agent.agentInstance });
 
     const creation = fake.lastCreation()!;
-    expect(creation).toMatchObject({ framework: 'hermes', imageName: HERMES_IMAGE, useMaritimeLlm: true });
+    expect(creation).toMatchObject({ framework: 'custom', imageName: HERMES_IMAGE, useMaritimeLlm: true, hasWebUi: false });
+    expect(HERMES_IMAGE).toMatch(/^ghcr\.io\/rowboatlabs\/hermes-maritime:\d/);
     expect(creation.name).toMatch(/^scout-[a-z0-9]{8}$/);
-    const vars = creation.initialEnvVars as Array<{ key: string; value: string; isSecret: boolean }>;
-    expect(vars.find((v) => v.key === 'PATH')).toMatchObject({ value: expect.stringMatching(/^\/opt\/hermes\/bin:/), isSecret: false });
+    const vars = (creation.initialEnvVars ?? []) as Array<{ key: string; value: string; isSecret: boolean }>;
+    expect(vars.find((v) => v.key === 'PATH')).toBeUndefined();
     const created = fake.created.get(agent.agentInstance!)!;
     const endUser = fake.endUsers.get(created.endUser)!;
     expect(created.endUser).toMatch(/^rowboat-[0-9a-z]{26}$/);
@@ -200,7 +201,6 @@ describe('managed Maritime agents', () => {
     // The readiness check ran a command, which woke the VM: the page shows the platform's word as it is.
     expect(page.body.machine).toEqual({ status: 'active' });
     expect(page.body.env).toEqual([
-      { key: 'PATH', secret: false, value: expect.stringMatching(/^\/opt\/hermes\/bin:/) },
       { key: 'REPO', secret: false, value: 'rowboat' },
     ]);
 
@@ -209,7 +209,7 @@ describe('managed Maritime agents', () => {
     expect((await me.put(`/v1/agents/${agent.id}/hosting/env/REPO`, { value: 'spaces' })).body.env).toContainEqual({ key: 'REPO', secret: false, value: 'spaces' });
     expect((await me.put(`/v1/agents/${agent.id}/hosting/env/bad-key`, { value: 'x' })).status).toBe(400);
     const afterDelete = await me.delete(`/v1/agents/${agent.id}/hosting/env/REPO`);
-    expect(afterDelete.body.env.map((v: { key: string }) => v.key)).toEqual(['PATH', 'GH_TOKEN']);
+    expect(afterDelete.body.env.map((v: { key: string }) => v.key)).toEqual(['GH_TOKEN']);
 
     // Power: the platform's word for the machine comes back each time.
     expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'sleep' })).body.machine.status).toBe('sleeping');
@@ -363,6 +363,11 @@ describe('managed Maritime agents', () => {
     const { invocations } = await org.post(`${mention(agent)} hi`);
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     expect(fake.submits().at(-1)!.script).toContain('hermes config set model.provider "$HP"');
+    // On the trial, with no provider of the owner's, the same turn points Hermes at the platform's proxy from the
+    // OPENAI_BASE_URL and OPENAI_API_KEY the platform set, with the template's model when none is configured
+    // (Rowboat's own image gets no boot-time rewrite from Maritime, 2026-11-11).
+    expect(fake.submits().at(-1)!.script).toContain('"") if [ -n "$OPENAI_BASE_URL" ]; then HP=openai; LB="$OPENAI_BASE_URL"; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY;');
+    expect(fake.submits().at(-1)!.script).toContain("MD='gpt-5.4'");
 
     // Codex takes OpenAI only, and gets OpenAI's address where the template had the platform's proxy.
     const codex = (await me.post('/v1/agents/managed', { displayName: 'Cx', kind: 'codex' })).body as { agent: Member };

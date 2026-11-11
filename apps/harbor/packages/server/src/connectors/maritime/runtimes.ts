@@ -156,6 +156,18 @@ const GATEWAY_NOT_READY = 'Gateway (starting|draining): ';
 /** Tries five seconds apart: two minutes for the gateway to be ready. */
 const GATEWAY_RETRIES = 24;
 
+/**
+ * The image Rowboat runs Hermes from on Maritime (2026-11-11): Hermes packaged as a Maritime "custom"
+ * container, built from apps/harbor/images/hermes-maritime. Maritime's own `hermes` framework wrapper
+ * stops the gateway on every other snapshot restore of a current Hermes image and rewrites config.yaml
+ * on cold boots (measured 2026-11-10); under `custom` it does neither, and the image's shim keeps the
+ * gateway up itself. Maritime's template is Hermes 0.14, too old for `hermes chat --format stream-json`.
+ */
+export const HERMES_IMAGE_REPO = 'ghcr.io/rowboatlabs/hermes-maritime';
+export const HERMES_IMAGE = `${HERMES_IMAGE_REPO}:0.22.5-1`;
+/** The model Maritime's own Hermes template configures for its proxy: the trial's choice when nothing else named one. */
+const MARITIME_PROXY_MODEL = 'gpt-5.4';
+
 const hermes: Runtime = {
   root: '/opt/data',
   sessionFor: (threadKey) => `rb-${threadKey}`,
@@ -165,7 +177,9 @@ const hermes: Runtime = {
       input.effort ? `--reasoning ${q(input.effort)}` : '',
     ].filter(Boolean).join(' ');
     // Maritime's init rewrites config.yaml on every boot of the Hermes framework (measured 2026-10-26),
-    // so the Spaces MCP server is put back before a turn whenever it is not Rowboat's. The `${…}`
+    // so the Spaces MCP server is put back before a turn whenever it is not Rowboat's. A box on Rowboat's
+    // own image (framework `custom`, 2026-11-11) gets no rewrite; the guard stays for the older boxes and
+    // costs a grep. The `${…}`
     // placeholders are Hermes's own, and the check is for the placeholders, never for a literal
     // address: a VM set up by hand or an earlier probe can carry a different Rowboat (seen live
     // 2026-10-26, posting to the wrong server). Hermes 0.22 runs the turn through its gateway, which
@@ -186,7 +200,10 @@ const hermes: Runtime = {
       // they differ. ROWBOAT_LLM_PROVIDER and ROWBOAT_LLM_MODEL are set by Harbor with the key (provisioning.ts).
       // `rowboat` (2026-11-04) is Rowboat's LLM gateway on the owner's Rowboat credits: it speaks OpenRouter's API,
       // so Hermes takes it as its OpenRouter provider at the gateway's address, ROWBOAT_LLM_BASE_URL.
-      `if [ -n "$ROWBOAT_LLM_PROVIDER" ]; then HP="$ROWBOAT_LLM_PROVIDER"; case "$ROWBOAT_LLM_PROVIDER" in openai) LB=https://api.openai.com/v1; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY;; anthropic) LB=https://api.anthropic.com; LK="$ANTHROPIC_API_KEY"; LN=ANTHROPIC_API_KEY;; openrouter) LB=https://openrouter.ai/api/v1; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; rowboat) HP=openrouter; LB="$ROWBOAT_LLM_BASE_URL"; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; *) LB=; LK=; LN=;; esac; if [ -n "$LB" ]; then { grep -q "provider: \"$HP\"" /opt/data/config.yaml && grep -q "base_url: \"$LB\"" /opt/data/config.yaml; } 2>/dev/null || { run hermes config set model.provider "$HP" >/dev/null 2>&1 || true; run hermes config set model.base_url "$LB" >/dev/null 2>&1 || true; }; [ -z "$ROWBOAT_LLM_MODEL" ] || grep -q "default: \"$ROWBOAT_LLM_MODEL\"" /opt/data/config.yaml 2>/dev/null || run hermes config set model.default "$ROWBOAT_LLM_MODEL" >/dev/null 2>&1 || true; [ -z "$LK" ] || grep -F "$LN" /opt/data/.env 2>/dev/null | grep -qF "$LK" || run hermes config set "$LN" "$LK" >/dev/null 2>&1 || true; fi; fi`,
+      // The trial (no ROWBOAT_LLM_PROVIDER) runs on Maritime's proxy, which the platform names in OPENAI_BASE_URL and
+      // OPENAI_API_KEY. Maritime's Hermes wrapper used to write that into config.yaml at boot; Rowboat's own image
+      // (2026-11-11) gets no such rewrite, so the turn does it, with the template's model when none is set.
+      `HP="$ROWBOAT_LLM_PROVIDER"; MD="$ROWBOAT_LLM_MODEL"; case "$ROWBOAT_LLM_PROVIDER" in openai) LB=https://api.openai.com/v1; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY;; anthropic) LB=https://api.anthropic.com; LK="$ANTHROPIC_API_KEY"; LN=ANTHROPIC_API_KEY;; openrouter) LB=https://openrouter.ai/api/v1; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; rowboat) HP=openrouter; LB="$ROWBOAT_LLM_BASE_URL"; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; "") if [ -n "$OPENAI_BASE_URL" ]; then HP=openai; LB="$OPENAI_BASE_URL"; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY; grep -q 'default: "' /opt/data/config.yaml 2>/dev/null || MD=${q(MARITIME_PROXY_MODEL)}; else LB=; LK=; LN=; fi;; *) LB=; LK=; LN=;; esac; if [ -n "$LB" ]; then { grep -q "provider: \"$HP\"" /opt/data/config.yaml && grep -q "base_url: \"$LB\"" /opt/data/config.yaml; } 2>/dev/null || { run hermes config set model.provider "$HP" >/dev/null 2>&1 || true; run hermes config set model.base_url "$LB" >/dev/null 2>&1 || true; }; [ -z "$MD" ] || grep -q "default: \"$MD\"" /opt/data/config.yaml 2>/dev/null || run hermes config set model.default "$MD" >/dev/null 2>&1 || true; [ -z "$LK" ] || grep -F "$LN" /opt/data/.env 2>/dev/null | grep -qF "$LK" || run hermes config set "$LN" "$LK" >/dev/null 2>&1 || true; fi`,
       // The rowboat-spaces skill, once: without it the first turn of every session fetches it from GitHub (seen on prod 2026-10-26).
       `{ [ -d /opt/data/skills/rowboat-spaces ] || ls -d /opt/data/skills/*/rowboat-spaces >/dev/null 2>&1; } || run hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes >/dev/null 2>&1 || true`,
       'cd /opt/data/workspace',
@@ -366,10 +383,11 @@ const claudeCode: Runtime = {
 
 export const RUNTIMES: Record<string, Runtime> = { hermes, codex, 'claude-code': claudeCode };
 
-/** The kind a Maritime agent runs, from its record: by template, then by framework; undefined when it does not say. */
-export function kindOfAgent(agent: { framework: string; templateId: string | null }): string | undefined {
+/** The kind a Maritime agent runs, from its record: by template, then by framework, then by Rowboat's own Hermes image; undefined when it does not say. */
+export function kindOfAgent(agent: { framework: string; templateId: string | null; imageName?: string | null }): string | undefined {
   if (agent.templateId === 'claude_code') return 'claude-code';
   if (agent.templateId === 'codex') return 'codex';
   if (agent.templateId === 'hermes' || agent.framework === 'hermes') return 'hermes';
+  if (agent.imageName?.startsWith(`${HERMES_IMAGE_REPO}:`)) return 'hermes';
   return undefined;
 }

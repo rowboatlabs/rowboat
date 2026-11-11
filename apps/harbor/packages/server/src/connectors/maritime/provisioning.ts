@@ -9,14 +9,13 @@ import { MARITIME_API, MaritimeError, maritimeApi, type CreateAgentInput, type E
 // agent is created exactly once however often the call is repeated, the LLM
 // cap applies per agent, and deleting the end user takes the agent with it.
 // What each kind needs on Maritime is what was measured on 2026-10-26 (the
-// plan's section 11): Hermes from a pinned current image with the PATH the
-// image's wrapper needs, the coding agents from Maritime's templates, Claude
-// Code with the person's Anthropic key as the template requires.
+// plan's section 11): Hermes from Rowboat's own image as a Maritime "custom"
+// container (2026-11-11, see runtimes.ts), the coding agents from Maritime's
+// templates, Claude Code with the person's Anthropic key as the template requires.
 
-/** The Hermes image Rowboat runs on Maritime: Maritime's own template is v0.14.0, too old for `hermes chat --format stream-json`. */
-export const HERMES_IMAGE = 'nousresearch/hermes-agent:v0.22.5';
-/** Maritime launches the image's wrapper with a PATH that lacks the hermes binary (measured 2026-10-26). */
-const HERMES_PATH = '/opt/hermes/bin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+import { HERMES_IMAGE } from './runtimes.js';
+
+export { HERMES_IMAGE };
 
 /** Where each provider's key goes and where its API is, for a runtime the platform had pointed at its own proxy. */
 export const LLM_SETUP: Record<'openai' | 'anthropic' | 'openrouter', { keyVar: string; baseUrl: string }> = {
@@ -344,7 +343,9 @@ export function creationFor(kind: string, input: { name: string; anthropicApiKey
   const env = [...input.env];
   const idle = input.idleSeconds !== undefined ? { idleTtlSeconds: input.idleSeconds } : {};
   if (kind === 'hermes') {
-    return { name: input.name, framework: 'hermes', imageName: HERMES_IMAGE, useMaritimeLlm: true, env: [{ key: 'PATH', value: HERMES_PATH, secret: false }, ...env], ...idle };
+    // Rowboat's own Hermes image as a Maritime "custom" container (2026-11-11): no web UI for Maritime to wait for,
+    // and no PATH variable, since the image names its program by its full path. Maritime's proxy funds the trial as before.
+    return { name: input.name, framework: 'custom', imageName: HERMES_IMAGE, useMaritimeLlm: true, hasWebUi: false, env, ...idle };
   }
   if (kind === 'codex') return { name: input.name, templateId: 'codex', env, ...idle };
   if (kind === 'claude-code') {

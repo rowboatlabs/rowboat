@@ -64,6 +64,8 @@ export interface MaritimeAgent {
   framework: string;
   /** `claude_code`, `codex`, `hermes`, …, or null for an agent made from an image. */
   templateId: string | null;
+  /** The image the agent runs, when the record says: how Rowboat's own Hermes image is told apart (2026-11-11). */
+  imageName?: string | null;
   /** `sleeping`, `active`, `deploying`, `error`, `stopped`. */
   status: string;
   /** Maritime's billing tier (`always_on`, …), when the record says. */
@@ -200,6 +202,8 @@ export interface CreateAgentInput {
   imageName?: string;
   instructions?: string;
   useMaritimeLlm?: boolean;
+  /** Whether Maritime should wait for a web UI from the container (its default); false for Rowboat's Hermes image, which has none. */
+  hasWebUi?: boolean;
   env?: Array<{ key: string; value: string; secret?: boolean }>;
   /** Seconds idle before Maritime snapshots the VM; its default when unset. */
   idleTtlSeconds?: number;
@@ -233,6 +237,7 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
     name: String(a.name ?? ''),
     framework: String(a.framework ?? ''),
     templateId: typeof a.templateId === 'string' ? a.templateId : null,
+    imageName: typeof a.imageName === 'string' ? a.imageName : null,
     status: String(a.status ?? ''),
     ...(typeof a.tier === 'string' ? { tier: a.tier } : {}),
     ...(typeof a.memMb === 'number' ? { memMb: a.memMb } : {}),
@@ -364,6 +369,7 @@ export function maritimeApi(key: string, base = MARITIME_API): MaritimeApi {
           ...(input.imageName !== undefined ? { imageName: input.imageName } : {}),
           ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
           ...(input.useMaritimeLlm !== undefined ? { useMaritimeLlm: input.useMaritimeLlm } : {}),
+          ...(input.hasWebUi !== undefined ? { hasWebUi: input.hasWebUi } : {}),
           ...(input.idleTtlSeconds !== undefined ? { idleTtlSeconds: input.idleTtlSeconds } : {}),
           ...(input.env && input.env.length > 0 ? { initialEnvVars: input.env.map((e) => ({ key: e.key, value: e.value, isSecret: e.secret ?? true })) } : {}),
         },
