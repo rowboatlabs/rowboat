@@ -27,7 +27,15 @@ fs.appendFileSync(process.env.CAPTURE, JSON.stringify({ name, args }) + '\\n');
 if (name === 'hermes' && args[0] === 'config' && args[1] === 'set') {
   const [key, value] = args.slice(2);
   const env = /^[A-Z_]+$/.test(key);
-  fs.appendFileSync(process.env.HERMES_HOME + (env ? '/.env' : '/config.yaml'), key + (env ? '=' : ': ') + value + '\\n');
+  let entry;
+  try { entry = JSON.parse(value); } catch {}
+  const lines = entry && typeof entry === 'object' ? key + '.url: ' + entry.url + '\\n' + key + '.headers.Authorization: ' + entry.headers?.Authorization + '\\n' : key + (env ? '=' : ': ') + value + '\\n';
+  fs.appendFileSync(process.env.HERMES_HOME + (env ? '/.env' : '/config.yaml'), lines);
+  if (key.startsWith('mcp_servers.')) {
+    const profile = fs.existsSync(process.env.HERMES_HOME + '/.env') ? fs.readFileSync(process.env.HERMES_HOME + '/.env', 'utf8') : '';
+    const required = key.includes('composio') ? ['ROWBOAT_COMPOSIO_MCP_URL', 'ROWBOAT_GATEWAY_KEY'] : ['ROWBOAT_URL', 'ROWBOAT_AGENT_KEY'];
+    fs.appendFileSync(process.env.HERMES_HOME + '/mcp-observations.jsonl', JSON.stringify({ complete: Boolean(entry?.url && entry?.headers?.Authorization), profileReady: required.every(name => profile.includes(name + '=')) }) + '\\n');
+  }
 } else if (name === 'codex' && args[0] === 'login') {
   console.log('Logged in using ChatGPT');
 } else {
@@ -64,6 +72,9 @@ describe('managed runtimes receive Composio independently of their model', () =>
     expect(config).toContain('mcp_servers.composio.url: ${ROWBOAT_COMPOSIO_MCP_URL}');
     expect(config).toContain('mcp_servers.composio.headers.Authorization: Bearer ${ROWBOAT_GATEWAY_KEY}');
     expect(config).not.toContain(KEY);
+    const observations = readFileSync(join(first.root, 'mcp-observations.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    expect(observations.length).toBeGreaterThan(0);
+    expect(observations.every(row => row.complete && row.profileReady)).toBe(true);
     writeFileSync(join(first.root, 'config.yaml'), '');
     const resumed = turn('hermes', true, 'existing-thread', first.root);
     expect(readFileSync(join(first.root, 'config.yaml'), 'utf8')).toContain('mcp_servers.composio.url: ${ROWBOAT_COMPOSIO_MCP_URL}');

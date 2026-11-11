@@ -166,7 +166,7 @@ describe('the Maritime connector with Hermes', () => {
     expect(execution.script).toContain('--format stream-json');
     expect(execution.script).toMatch(/export HERMES_HOME=\/opt\/data HOME=\/opt\/data ROWBOAT_URL='http:\/\/localhost:\d+' ROWBOAT_AGENT_KEY='rbk_/);
     // The Spaces MCP server in Hermes's config, by placeholder, and the two values in its .env, where Hermes's gateway reads them from.
-    expect(execution.script).toContain(`hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp'`);
+    expect(execution.script).toContain('hermes config set mcp_servers.rowboat ');
     expect(execution.script).toContain('hermes config set ROWBOAT_URL "$ROWBOAT_URL"');
     expect(execution.script).toContain('hermes config set ROWBOAT_AGENT_KEY "$ROWBOAT_AGENT_KEY"');
     expect(execution.script).toContain('hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes');

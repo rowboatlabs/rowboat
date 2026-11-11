@@ -88,7 +88,7 @@ export function secretsSection(serverUrl: string, invocation: Invocation): strin
 export const SKILL_URL = 'https://raw.githubusercontent.com/rowboatlabs/rowboat/main/skills/rowboat-spaces/SKILL.md';
 
 /** The standing paragraph: who the agent is and who asked, as tokens, and when to mention (spec §8, 2026-10-01). */
-export function standingParagraph(input: { invocation: Invocation; agentId: string; names: ReadonlyMap<string, string>; address: string }): string {
+export function standingParagraph(input: { invocation: Invocation; agentId: string; names: ReadonlyMap<string, string>; address: string; agentConnection?: string }): string {
   const { invocation, names } = input;
   const token = (memberId: string) => mentionToken({ kind: 'member', id: memberId, label: names.get(memberId) ?? '' });
   const invoker = names.get(invocation.trigger.authorId) ?? 'a teammate';
@@ -97,6 +97,7 @@ export function standingParagraph(input: { invocation: Invocation; agentId: stri
   const thread = messageUrl(input.address, invocation.conversation.spaceId, invocation.conversation.threadRootId);
   return (
     `You are ${token(input.agentId)} in Rowboat, and this request comes from ${token(invocation.trigger.authorId)} in ${where}. Respond to the request above. ` +
+    (input.agentConnection === 'maritime' ? 'Harbor manages your Rowboat connection on Maritime; the Hermes Rowboat plugin update steps do not apply to this connection. ' : '') +
     'Questions asking for explanation do not authorize code changes. ' +
     'Reply concisely for the shared thread, including verification and PR links when relevant. ' +
     'To mention someone, copy their token exactly as it appears here; a bare @Name is plain text that reaches no one. ' +
@@ -104,7 +105,8 @@ export function standingParagraph(input: { invocation: Invocation; agentId: stri
     'and otherwise write their name; never mention to thank, acknowledge or sign off. ' +
     `Once per session, update and read the rowboat-spaces skill, even if already loaded; otherwise read the latest at ${SKILL_URL}. ` +
     'If unavailable, use the existing copy. ' +
-    'For app integrations, use Composio tools when available and follow the Composio workflow in that skill. ' +
+    'For app integrations, look for Composio MCP tools; if tools are deferred, search for "composio". ' +
+    "Check Composio connections before requesting consent; Hermes's native app connector catalog does not determine their status. Follow the Composio workflow in that skill. " +
     'Your final message is posted to this thread for you when you finish: write your reply as your answer, never post it with post_message, or it arrives twice. ' +
     `Include the following attribution in every PR description you create or update for this request: Requested by ${invoker}, ${thread}. ` +
     'Do not post to Slack.'
@@ -154,6 +156,8 @@ export function buildPrompt(input: {
    */
   instructionsInSystemPrompt?: boolean;
   agentId: string;
+  /** The connector's actual transport (2026-11-11), so a Maritime agent does not try plugin maintenance. */
+  agentConnection?: string;
   /** Earlier messages the workspace has not seen, oldest first (never the trigger itself). */
   context: Message[];
   names: ReadonlyMap<string, string>;

@@ -28,6 +28,7 @@ export async function requestPrompt(env: ConnectorEnv, invocation: Invocation, d
   return buildPrompt({
     invocation,
     agentId: env.agent.id,
+    agentConnection: env.agent.agentConnection,
     context,
     names,
     address: env.service.server.address,

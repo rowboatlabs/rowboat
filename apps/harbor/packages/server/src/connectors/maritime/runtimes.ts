@@ -196,13 +196,14 @@ const hermes: Runtime = {
       'mkdir -p /opt/data/rowboat /opt/data/workspace',
       // The gateway runs as the hermes user; a turn run as root would leave root-owned session files behind.
       'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then chown -R hermes:hermes /opt/data/rowboat 2>/dev/null || true; run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" ROWBOAT_URL="$ROWBOAT_URL" ROWBOAT_AGENT_KEY="$ROWBOAT_AGENT_KEY" "$@"; }; else run() { "$@"; }; fi',
-      `{ grep -q 'ROWBOAT_URL}/mcp' /opt/data/config.yaml && grep -q 'Bearer \${ROWBOAT_AGENT_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp' >/dev/null 2>&1 || true; run hermes config set mcp_servers.rowboat.headers.Authorization 'Bearer \${ROWBOAT_AGENT_KEY}' >/dev/null 2>&1 || true; }`,
       `{ grep -F ROWBOAT_URL /opt/data/.env | grep -qF "$ROWBOAT_URL" && grep -F ROWBOAT_AGENT_KEY /opt/data/.env | grep -qF "$ROWBOAT_AGENT_KEY"; } 2>/dev/null || { run hermes config set ROWBOAT_URL "$ROWBOAT_URL" >/dev/null 2>&1 || true; run hermes config set ROWBOAT_AGENT_KEY "$ROWBOAT_AGENT_KEY" >/dev/null 2>&1 || true; }`,
+      `{ grep -q 'ROWBOAT_URL}/mcp' /opt/data/config.yaml && grep -q 'Bearer \${ROWBOAT_AGENT_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.rowboat ${q(JSON.stringify({ url: '${ROWBOAT_URL}/mcp', headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } }))} >/dev/null 2>&1 || true; }`,
       // 2026-11-11: the gateway reads profile secrets, not the turn's env. Keep
-      // Composio independent of the provider key, including after a boot rewrite.
+      // Composio independent of the provider key. Publish each full server entry
+      // only after its profile secrets exist: the gateway watches config changes.
       `if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then`,
-      `  { grep -qF '\${ROWBOAT_COMPOSIO_MCP_URL}' /opt/data/config.yaml && grep -qF 'Bearer \${ROWBOAT_GATEWAY_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.composio.url '\${ROWBOAT_COMPOSIO_MCP_URL}' >/dev/null 2>&1; run hermes config set mcp_servers.composio.headers.Authorization 'Bearer \${ROWBOAT_GATEWAY_KEY}' >/dev/null 2>&1; }`,
       `  { grep -F ROWBOAT_COMPOSIO_MCP_URL /opt/data/.env | grep -qF "$ROWBOAT_COMPOSIO_MCP_URL" && grep -F ROWBOAT_GATEWAY_KEY /opt/data/.env | grep -qF "$ROWBOAT_GATEWAY_KEY"; } 2>/dev/null || { run hermes config set ROWBOAT_COMPOSIO_MCP_URL "$ROWBOAT_COMPOSIO_MCP_URL" >/dev/null 2>&1; run hermes config set ROWBOAT_GATEWAY_KEY "$ROWBOAT_GATEWAY_KEY" >/dev/null 2>&1; }`,
+      `  { grep -qF '\${ROWBOAT_COMPOSIO_MCP_URL}' /opt/data/config.yaml && grep -qF 'Bearer \${ROWBOAT_GATEWAY_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.composio ${q(JSON.stringify({ url: '${ROWBOAT_COMPOSIO_MCP_URL}', headers: { Authorization: 'Bearer ${ROWBOAT_GATEWAY_KEY}' } }))} >/dev/null 2>&1; }`,
       'fi',
       // The owner's own key (2026-10-27): the platform's boot rewrite points Hermes at the platform's proxy, so the
       // provider, its address, the model and the key go back into Hermes's config and .env before the turn, whenever
