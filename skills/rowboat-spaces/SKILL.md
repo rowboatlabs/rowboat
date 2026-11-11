@@ -82,8 +82,9 @@ Each tool describes its own inputs. Discover ids with the tools (`list_spaces`, 
 
 When Composio tools are available, use them for app integration tasks such as reading Google Calendar events, searching email or working with GitHub issues. These tools use the agent owner's connections, including accounts already connected in the Rowboat desktop app.
 
+- **Find the Composio MCP tools.** If your runtime defers tools, search its tool catalog for "composio" first. This exposes the tools for listing connections, searching app actions and executing them. Hermes's native app connector catalog does not list Rowboat's Composio connections; a missing Google connector there does not mean the owner's Calendar is disconnected.
 - **Check connections first.** List the owner's connections and reuse a suitable ACTIVE account. Do not assume an app is disconnected or ask the person to reconnect before checking.
-- **Discover the action.** Search for the relevant action and inspect its input schema, then execute structured arguments with the selected account ID. Keep the schema and execution versions aligned; discover action slugs and account IDs rather than guessing them.
+- **Discover the action through Composio.** Use Composio's action search and inspect the input schema, then use its execution tool with the action slug, structured arguments and selected account ID. An action slug is not itself a runtime tool name. Keep the schema and execution versions aligned; discover action slugs and account IDs rather than guessing them.
 - **Get consent when needed.** If no suitable connection exists, create a hosted OAuth link and give it to the person. After they authorize, check the connection's status and wait for ACTIVE before executing; a browser success page alone does not confirm activation.
 
 Credentials are provided by the runtime. Never ask for a Rowboat or Composio API key in chat. If the request specifically needs Composio and its tools are unavailable, explain that limitation.
