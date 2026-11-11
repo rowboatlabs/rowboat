@@ -41,8 +41,15 @@ export interface TurnReading {
 }
 
 export interface Runtime {
-  /** The persistent volume's mount, where the files go. */
+  /** The persistent volume's mount, where the files go: the root Maritime's files API accepts. */
   root: string;
+  /**
+   * That root for a box of the given Maritime framework, when it differs (2026-11-11): Maritime roots its
+   * files API at /opt/data on its `hermes` framework and at /data on a `custom` box, and a Hermes on
+   * Rowboat's own image is the latter. The turn script's own paths are not affected: the image links
+   * /opt/data to /data.
+   */
+  rootFor?(framework: string): string;
   /** The `sh -c` script for one turn. */
   command(input: TurnInput): string;
   /** The session name a new thread gets, when the runtime names sessions rather than minting ids. */
@@ -53,10 +60,8 @@ export interface Runtime {
   activity(out: string): string | undefined;
   /** The composer's options: the runtime's own (Effort), and Model from the list the harness left on the VM, when there is a choice. */
   options(models: ModelChoice[]): InvocationOption[];
-  /** A separate, best-effort catalogue execution after the turn is settled (2026-11-01). */
+  /** A separate, best-effort catalogue execution after the turn is settled (2026-11-01); it leaves the list at `<root>/rowboat/models.json`. */
   modelsCommand(): string;
-  /** Where the catalogue execution leaves the harness's own model list. */
-  modelsPath: string;
   /** That file read into choices; nothing when it is not one. */
   models(text: string): ModelChoice[];
 }
@@ -173,6 +178,7 @@ const MARITIME_PROXY_MODEL = 'gpt-5.4';
 
 const hermes: Runtime = {
   root: '/opt/data',
+  rootFor: (framework) => (framework === 'custom' ? '/data' : '/opt/data'),
   sessionFor: (threadKey) => `rb-${threadKey}`,
   command(input) {
     const flags = [
@@ -248,7 +254,6 @@ const hermes: Runtime = {
     'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" "$@"; }; else run() { "$@"; }; fi',
     `printf '%s\\n' ${q(HERMES_MODELS_PY)} > /opt/data/rowboat/models.py; run timeout 30 python /opt/data/rowboat/models.py > /opt/data/rowboat/models.json.tmp 2>/dev/null && mv /opt/data/rowboat/models.json.tmp /opt/data/rowboat/models.json || true`,
   ].join('\n'),
-  modelsPath: '/opt/data/rowboat/models.json',
   models(text) {
     const doc = obj(parse(text));
     const rows: unknown[] = Array.isArray(doc?.models) ? doc.models : [];
@@ -322,7 +327,6 @@ const codex: Runtime = {
     'if [ "$ROWBOAT_LLM_PROVIDER" != openai ] && codex login status 2>&1 | grep -q ChatGPT; then unset OPENAI_BASE_URL; fi',
     `cp "$CODEX_HOME/models_cache.json" /data/rowboat/models.json 2>/dev/null || { [ -n "$OPENAI_BASE_URL" ] && curl -sf -m 15 "$OPENAI_BASE_URL/models" -H "Authorization: Bearer $OPENAI_API_KEY" > /data/rowboat/models.json.tmp && mv /data/rowboat/models.json.tmp /data/rowboat/models.json; } || true`,
   ].join('\n'),
-  modelsPath: '/data/rowboat/models.json',
   // Codex's catalog (`models`: slug, display_name, visibility, priority), or a plain models endpoint (`data`: id).
   models(text) {
     const doc = obj(parse(text));
@@ -381,7 +385,6 @@ const claudeCode: Runtime = {
     'set -e',
     `f=/data/rowboat/models.json; if [ -n "$ANTHROPIC_API_KEY" ] && { [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +1440 2>/dev/null)" ]; }; then curl -sf -m 15 "\${ANTHROPIC_BASE_URL:-https://api.anthropic.com}/v1/models?limit=100" -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" > "$f.tmp" && mv "$f.tmp" "$f" || true; fi`,
   ].join('\n'),
-  modelsPath: '/data/rowboat/models.json',
   models(text) {
     const doc = obj(parse(text));
     const rows: unknown[] = Array.isArray(doc?.data) ? doc.data : [];

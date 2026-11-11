@@ -9,9 +9,9 @@ const EFFORT = { type: 'select', key: 'effort', label: 'Effort', choices: [{ id:
 describe('model lists from the harness', () => {
   it('keeps catalogue work out of every turn script, while preserving each runtime’s catalogue source', () => {
     for (const runtime of Object.values(RUNTIMES)) {
-      expect(runtime.command(input)).not.toContain(runtime.modelsPath);
+      expect(runtime.command(input)).not.toContain(`${runtime.root}/rowboat/models.json`);
       expect(runtime.command(input)).not.toContain('provider_model_ids');
-      expect(runtime.modelsCommand()).toContain(runtime.modelsPath);
+      expect(runtime.modelsCommand()).toContain(`${runtime.root}/rowboat/models.json`);
     }
     const codex = RUNTIMES.codex!.modelsCommand();
     expect(codex).toContain('models_cache.json');

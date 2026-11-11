@@ -1,3 +1,4 @@
+import { HERMES_IMAGE } from '../src/connectors/maritime/runtimes.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { routes, type Invocation, type Member, type Message } from '@rowboat/spaces-protocol';
 import { MemoryBlobStore } from '../src/blobs.js';
@@ -123,6 +124,35 @@ describe('adding a Maritime agent', () => {
     const r = await org.as('dev-ramnique').post('/v1/agents', { displayName: 'Imaged', kind: 'codex', connection: 'maritime', credential: GOOD_KEY, instance: AGENT_ID });
     expect(r.status).toBe(200);
     fake.agent = { ...fake.agent, framework: 'hermes', templateId: 'hermes' };
+  });
+});
+
+describe('the Maritime connector with Hermes on Rowboat’s own image', () => {
+  // A managed Hermes is a `custom` box on Rowboat's image (2026-11-11): Maritime roots its files API at /data there,
+  // where its `hermes` framework roots it at /opt/data, and the connector learns which from the box's record.
+  let org: Org;
+  let imaged: Member;
+
+  beforeAll(async () => {
+    fake.agent = { ...fake.agent, framework: 'custom', templateId: null, imageName: HERMES_IMAGE, status: 'sleeping' };
+    org = await new Org(await freshStore()).start();
+    await org.space();
+    imaged = await org.agent('Imaged', 'hermes');
+  });
+  afterAll(async () => {
+    fake.agent = { ...fake.agent, framework: 'hermes', templateId: 'hermes', imageName: undefined };
+    await org.harbor.close();
+  });
+
+  it('keeps the turn’s files under /data, where the box’s files API is rooted, and still runs the Hermes script', async () => {
+    fake.nextTurn = hermesTurn('On my own image.');
+    const { invocations } = await org.post(`${mention(imaged)} hello`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    const execution = fake.submits().at(-1)!;
+    expect(execution.files.prompt).toBe(`/data/rowboat/${invocations[0]!.id}.prompt`);
+    expect(fake.lastPrompt()!.startsWith(`${mention(imaged)} hello`)).toBe(true);
+    expect(execution.script).toContain(`hermes chat --query-file '/data/rowboat/${invocations[0]!.id}.prompt'`);
+    expect(execution.script).toContain('export HERMES_HOME=/opt/data HOME=/opt/data');
   });
 });
 
