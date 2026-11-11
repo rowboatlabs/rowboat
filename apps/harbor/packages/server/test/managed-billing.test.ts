@@ -27,6 +27,7 @@ const UPGRADE = 'https://app.rowboat.test?intent=upgrade';
 /** rowboatx-backend as Harbor sees it: accounts with a plan limit and credits, and what Harbor reported. */
 class FakeBilling implements BillingAccounts {
   readonly gatewayUrl = 'https://api.rowboat.test/v1/llm';
+  readonly composioMcpUrl = 'https://api.rowboat.test/v1/composio/mcp';
   readonly limits = new Map<string, number>();
   readonly registered = new Map<string, Map<string, RegisterAgentInput>>();
   readonly keys = new Map<string, { customer: string; key: string; revoked: boolean }>();
@@ -157,7 +158,10 @@ describe('managed agents on a deployment that bills', () => {
 
   let hermes: Member;
   it('creates a Hermes on its owner’s credits: registered under them, no trial and no cap, and on the gateway before it is ready', async () => {
-    const r = await create({ displayName: 'Scout', kind: 'hermes' });
+    const r = await create({ displayName: 'Scout', kind: 'hermes', env: [
+      { key: 'ROWBOAT_GATEWAY_KEY', value: 'rbg_unverified_input', secret: true },
+      { key: 'ROWBOAT_COMPOSIO_MCP_URL', value: 'https://unverified.example/mcp' },
+    ] });
     expect(r.status).toBe(200);
     hermes = r.body.agent;
     expect(r.body.hosting).toMatchObject({ funding: 'credits', billed: true });
@@ -171,6 +175,11 @@ describe('managed agents on a deployment that bills', () => {
     const key = billing.keys.get(ref)!;
     expect(key).toMatchObject({ customer: RAMNIQUE, revoked: false });
     expect(env.get('OPENROUTER_API_KEY')).toEqual({ value: key.key, isSecret: true });
+    expect(env.get('ROWBOAT_GATEWAY_KEY')).toEqual({ value: key.key, isSecret: true });
+    expect(env.get('ROWBOAT_COMPOSIO_MCP_URL')).toEqual({ value: billing.composioMcpUrl, isSecret: false });
+    const page = await as('dev-ramnique').get(`/v1/agents/${hermes.id}/hosting`);
+    expect(page.body.env.find((v: { key: string }) => v.key === 'ROWBOAT_GATEWAY_KEY')).toEqual({ key: 'ROWBOAT_GATEWAY_KEY', secret: true });
+    expect(JSON.stringify(page.body)).not.toContain(key.key);
     expect(env.get('OPENAI_API_KEY')?.value).toBe(PROXY_TOKEN_DUD);
     expect(env.get('ROWBOAT_LLM_PROVIDER')?.value).toBe('rowboat');
     expect(env.get('ROWBOAT_LLM_BASE_URL')?.value).toBe(billing.gatewayUrl);
@@ -223,6 +232,8 @@ describe('managed agents on a deployment that bills', () => {
     expect(r.body.hosting).toMatchObject({ funding: 'own', billed: true, llm: { provider: 'openrouter' } });
     expect(billing.keys.get(refOf(hermes))).toMatchObject({ key, revoked: false });
     expect(envOf(hermes).get('OPENROUTER_API_KEY')?.value).toBe('sk-or-owner-key-1234');
+    expect(envOf(hermes).get('ROWBOAT_GATEWAY_KEY')).toEqual({ value: key, isSecret: true });
+    expect(envOf(hermes).get('ROWBOAT_COMPOSIO_MCP_URL')?.value).toBe(billing.composioMcpUrl);
   });
 
   it('refuses a second agent on the free plan, with where to upgrade, and creates nothing on the platform', async () => {
@@ -244,13 +255,29 @@ describe('managed agents on a deployment that bills', () => {
     expect(r.body.hosting.llm).toBeUndefined();
     await ready(codex.id);
     expect(envOf(codex).get('OPENAI_API_KEY')?.value).toBe(PROXY_TOKEN_DUD);
-    expect(billing.keys.has(refOf(codex))).toBe(false);
+    const key = billing.keys.get(refOf(codex))!;
+    expect(key).toMatchObject({ customer: RAMNIQUE, revoked: false });
+    expect(envOf(codex).get('ROWBOAT_GATEWAY_KEY')).toEqual({ value: key.key, isSecret: true });
+    expect(envOf(codex).get('ROWBOAT_COMPOSIO_MCP_URL')?.value).toBe(billing.composioMcpUrl);
 
     await harbor.service.addMembers({ memberId: 'ramnique' }, spaceId, { memberIds: [codex.id], actingMode: 'direct' });
     fake.nextTurn = codexTurn('', { exitCode: 1, stderr: 'rowboat-sign-in: none\nError: unauthorized\n' });
     const { invocations } = await post(`${mention(codex)} fix it`);
     const done = await ended(invocations[0]!.id);
     expect(done).toMatchObject({ state: 'failed', error: NEEDS_OWN_LLM_MESSAGE });
+  });
+
+  it('gives Claude Code Composio access while retaining its Anthropic model credential', async () => {
+    const r = await create({ displayName: 'Writer', kind: 'claude-code', anthropicApiKey: 'sk-ant-owner-1234' });
+    expect(r.status).toBe(200);
+    const claude = r.body.agent as Member;
+    await ready(claude.id);
+    const key = billing.keys.get(refOf(claude))!;
+    expect(key).toMatchObject({ customer: RAMNIQUE, revoked: false });
+    expect(envOf(claude).get('ROWBOAT_GATEWAY_KEY')).toEqual({ value: key.key, isSecret: true });
+    expect(envOf(claude).get('ROWBOAT_COMPOSIO_MCP_URL')?.value).toBe(billing.composioMcpUrl);
+    expect(envOf(claude).get('ANTHROPIC_API_KEY')?.value).toBe('sk-ant-owner-1234');
+    expect(envOf(claude).has('OPENROUTER_API_KEY')).toBe(false);
   });
 
   it('reads the machine size from the platform: its range, its rate, and the free plan kept to the smallest (2026-11-04)', async () => {
@@ -307,6 +334,73 @@ describe('managed agents on a deployment that bills', () => {
   });
 });
 
+describe('upgrading existing managed agents to Composio', () => {
+  it.each([
+    { kind: 'hermes', own: false },
+    { kind: 'hermes', own: true },
+    { kind: 'codex', own: true },
+    { kind: 'claude-code', own: true },
+  ])('upgrades $kind (own model: $own) once and retains the key on a later Harbor restart', async ({ kind, own }) => {
+    const store = await freshStore();
+    const billing = new FakeBilling();
+    const start = () => startHarbor({
+      store: store.store, name: 'Upgrade', seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
+      blobs: new MemoryBlobStore(),
+      hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url }), tickMs: 25, billing },
+    });
+    let harbor = await start();
+    try {
+      await store.store.putIdentity(ISSUER, RAMNIQUE, 'ramnique');
+      const created = await restClient(harbor, 'dev-ramnique').post('/v1/agents/managed', {
+        displayName: 'Existing', kind, ...(kind === 'claude-code' ? { anthropicApiKey: 'sk-ant-existing-1234' } : {}),
+      });
+      expect(created.status).toBe(200);
+      const agent = created.body.agent as Member;
+      await until(async () => (await store.store.getAgentHosting(agent.id))?.status === 'ready', 'initial setup');
+      if (kind === 'hermes' && own) {
+        expect((await restClient(harbor, 'dev-ramnique').put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'openrouter', apiKey: 'sk-or-existing-1234' })).status).toBe(200);
+      } else if (kind === 'codex') {
+        fake.signIns.add(agent.agentInstance!);
+        expect((await restClient(harbor, 'dev-ramnique').post(`/v1/agents/${agent.id}/hosting/sign-in`, {})).body.signedIn).toBe(true);
+      }
+      await harbor.close();
+      const env = fake.env.get(agent.agentInstance!)!;
+      const ref = [...fake.endUsers].find(([, user]) => user.agentId === agent.agentInstance)![0];
+      const oldKey = billing.keys.get(ref)!.key;
+      // Before MCP shipped, only the credit-funded Hermes had an rbg_ key,
+      // and it existed solely in OPENROUTER_API_KEY, which Maritime redacts.
+      env.delete('ROWBOAT_GATEWAY_KEY');
+      env.delete('ROWBOAT_COMPOSIO_MCP_URL');
+      if (kind !== 'hermes') billing.keys.delete(ref);
+      if (kind === 'hermes' && !own) env.set('ROWBOAT_LLM_MODEL', { value: 'owner-preferred-model', isSecret: false });
+      const modelKeyVar = kind === 'claude-code' ? 'ANTHROPIC_API_KEY' : kind === 'codex' ? 'OPENAI_API_KEY' : 'OPENROUTER_API_KEY';
+      const modelKey = env.get(modelKeyVar)?.value;
+      harbor = await start();
+      await until(async () => env.has('ROWBOAT_GATEWAY_KEY'), 'Composio upgrade');
+      const key = billing.keys.get(ref)!;
+      expect(key).toMatchObject({ customer: RAMNIQUE, revoked: false });
+      expect(key.key).not.toBe(oldKey);
+      expect(env.get('ROWBOAT_GATEWAY_KEY')).toEqual({ value: key.key, isSecret: true });
+      expect(env.get('ROWBOAT_COMPOSIO_MCP_URL')).toEqual({ value: billing.composioMcpUrl, isSecret: false });
+      expect(env.get(modelKeyVar)?.value).toBe(kind === 'hermes' && !own ? key.key : modelKey);
+      expect((await store.store.getAgentHosting(agent.id))?.funding).toBe(own ? 'own' : 'credits');
+      if (kind === 'hermes' && !own) expect(env.get('ROWBOAT_LLM_MODEL')?.value).toBe('owner-preferred-model');
+      if (kind === 'codex') expect(fake.signIns.has(agent.agentInstance!)).toBe(true);
+      await harbor.close();
+      // Repair a stale public endpoint without changing the installed secret.
+      env.set('ROWBOAT_COMPOSIO_MCP_URL', { value: 'https://old.example/mcp', isSecret: false });
+      harbor = await start();
+      await until(async () => env.get('ROWBOAT_COMPOSIO_MCP_URL')?.value === billing.composioMcpUrl, 'endpoint refresh');
+      expect(billing.keys.get(ref)!.key).toBe(key.key);
+      expect(env.get('ROWBOAT_GATEWAY_KEY')?.value).toBe(key.key);
+      expect(env.get(modelKeyVar)?.value).toBe(kind === 'hermes' && !own ? key.key : modelKey);
+    } finally {
+      await harbor.close();
+      await store.db.close();
+    }
+  });
+});
+
 describe('the HTTP billing client', () => {
   let server: Server;
   let base = '';
@@ -335,6 +429,7 @@ describe('the HTTP billing client', () => {
   it('speaks the backend’s internal routes on the operator’s key', async () => {
     const client = httpBilling({ url: `${base}/`, key: 'internal-key', issuer: ISSUER });
     expect(client.gatewayUrl).toBe(`${base}/v1/llm`);
+    expect(client.composioMcpUrl).toBe(`${base}/v1/composio/mcp`);
 
     answer = () => ({ status: 200, body: { registered: true, count: 1, limit: 1 } });
     expect(await client.registerAgent(RAMNIQUE, { ref: 'rowboat-x', kind: 'hermes', name: 'Scout' })).toEqual({ ok: true });

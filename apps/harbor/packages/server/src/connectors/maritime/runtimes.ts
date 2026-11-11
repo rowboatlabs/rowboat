@@ -145,9 +145,12 @@ const signInOf = (err: string | undefined): 'chatgpt' | 'none' | undefined => {
   return found === 'chatgpt' || found === 'none' ? found : undefined;
 };
 
-/** The MCP server every runtime gets: Spaces, acting as this agent. */
-const mcpJson = (serverUrl: string) =>
-  JSON.stringify({ mcpServers: { rowboat: { type: 'http', url: `${serverUrl}/mcp`, headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } } } });
+/** 2026-11-11: billed VMs add Composio; configs hold references, never gateway credentials. */
+const mcpJson = (serverUrl: string, composio = false) =>
+  JSON.stringify({ mcpServers: {
+    rowboat: { type: 'http', url: `${serverUrl}/mcp`, headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } },
+    ...(composio ? { composio: { type: 'http', url: '${ROWBOAT_COMPOSIO_MCP_URL}', headers: { Authorization: 'Bearer ${ROWBOAT_GATEWAY_KEY}' } } } : {}),
+  } });
 
 // --- Hermes ---------------------------------------------------------------------------------
 
@@ -181,6 +184,12 @@ const hermes: Runtime = {
       'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then chown -R hermes:hermes /opt/data/rowboat 2>/dev/null || true; run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" ROWBOAT_URL="$ROWBOAT_URL" ROWBOAT_AGENT_KEY="$ROWBOAT_AGENT_KEY" "$@"; }; else run() { "$@"; }; fi',
       `{ grep -q 'ROWBOAT_URL}/mcp' /opt/data/config.yaml && grep -q 'Bearer \${ROWBOAT_AGENT_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp' >/dev/null 2>&1 || true; run hermes config set mcp_servers.rowboat.headers.Authorization 'Bearer \${ROWBOAT_AGENT_KEY}' >/dev/null 2>&1 || true; }`,
       `{ grep -F ROWBOAT_URL /opt/data/.env | grep -qF "$ROWBOAT_URL" && grep -F ROWBOAT_AGENT_KEY /opt/data/.env | grep -qF "$ROWBOAT_AGENT_KEY"; } 2>/dev/null || { run hermes config set ROWBOAT_URL "$ROWBOAT_URL" >/dev/null 2>&1 || true; run hermes config set ROWBOAT_AGENT_KEY "$ROWBOAT_AGENT_KEY" >/dev/null 2>&1 || true; }`,
+      // 2026-11-11: the gateway reads profile secrets, not the turn's env. Keep
+      // Composio independent of the provider key, including after a boot rewrite.
+      `if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then`,
+      `  { grep -qF '\${ROWBOAT_COMPOSIO_MCP_URL}' /opt/data/config.yaml && grep -qF 'Bearer \${ROWBOAT_GATEWAY_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.composio.url '\${ROWBOAT_COMPOSIO_MCP_URL}' >/dev/null 2>&1; run hermes config set mcp_servers.composio.headers.Authorization 'Bearer \${ROWBOAT_GATEWAY_KEY}' >/dev/null 2>&1; }`,
+      `  { grep -F ROWBOAT_COMPOSIO_MCP_URL /opt/data/.env | grep -qF "$ROWBOAT_COMPOSIO_MCP_URL" && grep -F ROWBOAT_GATEWAY_KEY /opt/data/.env | grep -qF "$ROWBOAT_GATEWAY_KEY"; } 2>/dev/null || { run hermes config set ROWBOAT_COMPOSIO_MCP_URL "$ROWBOAT_COMPOSIO_MCP_URL" >/dev/null 2>&1; run hermes config set ROWBOAT_GATEWAY_KEY "$ROWBOAT_GATEWAY_KEY" >/dev/null 2>&1; }`,
+      'fi',
       // The owner's own key (2026-10-27): the platform's boot rewrite points Hermes at the platform's proxy, so the
       // provider, its address, the model and the key go back into Hermes's config and .env before the turn, whenever
       // they differ. ROWBOAT_LLM_PROVIDER and ROWBOAT_LLM_MODEL are set by Harbor with the key (provisioning.ts).
@@ -248,6 +257,9 @@ const codex: Runtime = {
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
+      // 2026-11-11: per-turn overrides reach both new and resumed sessions;
+      // the token remains in the environment when a model provider changes.
+      `set --; if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then set -- -c ${q('mcp_servers.composio.url="')}"$ROWBOAT_COMPOSIO_MCP_URL"${q('"')} -c ${q('mcp_servers.composio.bearer_token_env_var="ROWBOAT_GATEWAY_KEY"')}; fi`,
       // The owner's own key (2026-10-27): Codex's built-in openai provider on OPENAI_API_KEY and OPENAI_BASE_URL, which
       // Harbor set with the key, instead of the template's provider on the platform's proxy; the owner's model when the turn picked none.
       // The owner's ChatGPT sign-in (2026-10-30): Codex honours one on its built-in provider only, and the template's
@@ -255,7 +267,7 @@ const codex: Runtime = {
       // provider when it is, the proxy's address unset with it. Its answer goes first into the stderr file, for Harbor.
       `OWN=""; if [ "$ROWBOAT_LLM_PROVIDER" = openai ]; then OWN='-c model_provider="openai"'; elif codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai"'; unset OPENAI_BASE_URL; echo '${SIGN_IN_MARK}chatgpt' > ${q(input.errPath)}; else echo '${SIGN_IN_MARK}none' > ${q(input.errPath)}; fi`,
       `${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="$OWN -m $ROWBOAT_LLM_MODEL"; '}true`,
-      `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2>> ${q(input.errPath)}`,
+      `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} "$@" -- "$PROMPT" > ${q(input.outPath)} 2>> ${q(input.errPath)}`,
     ].join('\n');
   },
   read(out, last, err, exitCode) {
@@ -322,7 +334,7 @@ const claudeCode: Runtime = {
       `export IS_SANDBOX=1 CLAUDE_CONFIG_DIR=/data/.claude ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
-      `printf '%s' ${q(mcpJson(input.serverUrl))} > /data/rowboat/mcp.json`,
+      `if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then printf '%s' ${q(mcpJson(input.serverUrl, true))}; else printf '%s' ${q(mcpJson(input.serverUrl))}; fi > /data/rowboat/mcp.json`,
       'CLI="$(command -v claude 2>/dev/null || true)"',
       '[ -n "$CLI" ] || for f in /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /app/node_modules/@anthropic-ai/claude-code/cli.js; do [ -f "$f" ] && CLI="node $f" && break; done',
       '[ -n "$CLI" ] || { echo "no Claude Code CLI found in this VM" >&2; exit 127; }',
