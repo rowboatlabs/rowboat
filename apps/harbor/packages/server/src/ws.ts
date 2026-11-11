@@ -167,7 +167,7 @@ function handleConnection(
   });
   // An agent's presence follows its live connections (local agents, 2026-10-28).
   void deps.service.liveOpened(memberId).catch(() => {});
-  // Unified online status (2026-11-11): only a foreground report starts a lease.
+  // Unified online status (2026-11-11): only an explicit activity report starts a lease.
 
   ws.on('message', (data) => {
     ws.sawLifeSinceLastBeat = true;

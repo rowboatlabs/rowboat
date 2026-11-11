@@ -97,7 +97,7 @@ function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
 const subscriptions = new SpaceSubscriptions({ getLive: orgs.getLive, onRuntimeReset: orgs.onRuntimeReset });
 
 // The table's handlers take the request alone; main's take the IPC event first.
-const harbor = harborChannelHandlers({ isActive: () => BrowserWindow.getAllWindows().some(win => win.isVisible() && win.isFocused()) && powerMonitor.getSystemIdleState(600) !== 'locked', getClient: orgs.getClient, getLive: orgs.getLive, subscriptions, emit: broadcastSpacesEvent });
+const harbor = harborChannelHandlers({ isActive: () => powerMonitor.getSystemIdleTime() < 600 && powerMonitor.getSystemIdleState(600) !== 'locked', getClient: orgs.getClient, getLive: orgs.getLive, subscriptions, emit: broadcastSpacesEvent });
 const harborIpcHandlers = Object.fromEntries(
   Object.entries(harbor).map(([channel, handle]) => [
     channel,

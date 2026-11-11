@@ -273,7 +273,7 @@ it('reports activity on the connection without a space subscription', async () =
 });
 
 for (const active of [false, true]) {
-  it(`resends foreground=${active} after connecting and reconnecting`, async () => {
+  it(`resends activity=${active} after connecting and reconnecting`, async () => {
     const live = makeLive({ staleAfterMs: 60_000 });
     live.onMemberFrame(() => {});
     live.activity(active);

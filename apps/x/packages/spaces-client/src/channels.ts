@@ -46,7 +46,7 @@ export type HarborChannelHandlers = {
 };
 
 export interface HarborChannelDeps {
-  /** Whether this host is foreground (desktop: any focused visible window); absent, the renderer's report stands (2026-11-11, unified online status). */
+  /** Whether this host is active (desktop: system idle time); absent, the renderer's report stands (2026-11-11, shared Online/Away status). */
   isActive?: () => boolean;
   /** The server's REST client; throws for an id the host doesn't know (SPACES_SERVER_ID since 2026-11-09). */
   getClient(orgId: string): SpacesClient;

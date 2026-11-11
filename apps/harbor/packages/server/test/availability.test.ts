@@ -97,7 +97,7 @@ it('suppresses notification recipients without suppressing the message or unread
   expect((await decideNotifications(harbor.store, space, message)).map(row => row.memberId)).toContain('alice');
 });
 
-it('requires foreground activity and expires abandoned leases after ten minutes', async () => {
+it('requires explicit activity and expires abandoned leases after ten minutes', async () => {
   await as('alice').put('/v1/me', { availability: { manualAway: false } });
   const client = await liveClient(harbor, 'dev-alice');
   try {
