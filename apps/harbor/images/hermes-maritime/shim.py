@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -69,7 +71,12 @@ def hermes_user() -> pwd.struct_passwd | None:
 
 
 def link_legacy_home() -> None:
-    """`/opt/data` -> `/data`: Harbor's turn script was written for the template's layout."""
+    """`/opt/data` -> `/data`: Harbor's turn script was written for the template's layout.
+
+    The image ships `/opt/data` as the hermes user's home with its skeleton files, so on
+    first boot it is a populated directory on the root disk: whatever is not already on the
+    volume moves across, the rest is kept beside it, and the path becomes the link.
+    """
     if LEGACY_HOME == HOME:
         return
     try:
@@ -79,10 +86,23 @@ def link_legacy_home() -> None:
                 os.symlink(HOME, LEGACY_HOME)
             return
         if os.path.isdir(LEGACY_HOME):
-            if os.listdir(LEGACY_HOME):
-                log(f"{LEGACY_HOME} is a non-empty directory; not linking it to {HOME}")
+            if os.path.ismount(LEGACY_HOME):
+                log(f"{LEGACY_HOME} is a mount; leaving it")
                 return
-            os.rmdir(LEGACY_HOME)
+            moved = 0
+            for name in os.listdir(LEGACY_HOME):
+                if not os.path.lexists(os.path.join(HOME, name)):
+                    shutil.move(os.path.join(LEGACY_HOME, name), os.path.join(HOME, name))
+                    moved += 1
+            if os.listdir(LEGACY_HOME):
+                kept = LEGACY_HOME + ".image"
+                shutil.rmtree(kept, ignore_errors=True)
+                os.rename(LEGACY_HOME, kept)
+                log(f"moved {moved} entr{'y' if moved == 1 else 'ies'} from {LEGACY_HOME} to {HOME}; the rest kept at {kept}")
+            else:
+                os.rmdir(LEGACY_HOME)
+                if moved:
+                    log(f"moved {moved} entr{'y' if moved == 1 else 'ies'} from {LEGACY_HOME} to {HOME}")
         os.makedirs(os.path.dirname(LEGACY_HOME), exist_ok=True)
         os.symlink(HOME, LEGACY_HOME)
     except OSError as e:
@@ -122,8 +142,16 @@ def as_hermes(user: pwd.struct_passwd | None):
     return demote
 
 
+# Hermes's own API server, on localhost: how a scheduled occurrence fires its job at once
+# (`POST /api/jobs/<id>/run`), as Maritime's wrapper did on the `hermes` framework.
+API_SERVER_ENV = {"API_SERVER_ENABLED": "true", "API_SERVER_HOST": "127.0.0.1", "API_SERVER_PORT": "8642"}
+
+
 def hermes_env() -> dict[str, str]:
-    return dict(os.environ, HOME=HOME, HERMES_HOME=HOME)
+    env = dict(os.environ, HOME=HOME, HERMES_HOME=HOME)
+    for k, v in API_SERVER_ENV.items():
+        env.setdefault(k, v)
+    return env
 
 
 # --- the gateway -----------------------------------------------------------------------------
@@ -387,15 +415,64 @@ class Handler(BaseHTTPRequestHandler):
             log("http " + (fmt % args))
 
 
+def forwarded_ports(cmdlines: list[list[str]]) -> list[int]:
+    """The ports Maritime's in-VM forwarder (`portfwd <from> <to>`) delivers to, from process command lines."""
+    out: list[int] = []
+    for argv in cmdlines:
+        if len(argv) >= 3 and os.path.basename(argv[0]) == "portfwd" and argv[2].isdigit():
+            port = int(argv[2])
+            if port not in out:
+                out.append(port)
+    return out
+
+
+def process_cmdlines() -> list[list[str]]:
+    found: list[list[str]] = []
+    try:
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    argv = [a.decode(errors="replace") for a in f.read().split(b"\0") if a]
+            except OSError:
+                continue
+            if argv:
+                found.append(argv)
+    except OSError:
+        pass
+    return found
+
+
+def listen_ports() -> list[int]:
+    """$PORT, plus any port Maritime forwards the VM's 8080 to that nobody serves: its readiness
+    check follows the forwarder, which on an image whose base exposes another port (Hermes's
+    dashboard, 9119) can point away from $PORT (seen 2026-11-11, a six-minute deploy wait)."""
+    ports = [PORT]
+    for port in forwarded_ports(process_cmdlines()):
+        if port in ports:
+            continue
+        with socket.socket() as probe:
+            probe.settimeout(0.2)
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                continue  # something else serves it
+        ports.append(port)
+    return ports
+
+
 def main() -> None:
     user = prep()
     Handler.user = user
-    log(f"up port={PORT} home={HOME} uid={os.geteuid()} hermes_user={'yes' if user else 'no'}")
+    ports = listen_ports()
+    log(f"up ports={ports} home={HOME} uid={os.geteuid()} hermes_user={'yes' if user else 'no'}")
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     threading.Thread(target=supervise, args=(user,), daemon=True).start()
     threading.Thread(target=watch_jobs, daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    servers = [ThreadingHTTPServer(("0.0.0.0", port), Handler) for port in ports]
+    for extra in servers[1:]:
+        threading.Thread(target=extra.serve_forever, daemon=True).start()
+    servers[0].serve_forever()
 
 
 if __name__ == "__main__":

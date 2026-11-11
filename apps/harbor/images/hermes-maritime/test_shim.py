@@ -176,14 +176,36 @@ class LegacyLink(unittest.TestCase):
                 shim.link_legacy_home()
                 self.assertTrue(os.path.islink(legacy))
 
-    def test_leaves_a_populated_directory_alone(self):
+    def test_moves_a_populated_directory_into_home_and_keeps_clashes_beside_it(self):
         with tempfile.TemporaryDirectory() as root:
-            legacy = os.path.join(root, "data")
-            os.makedirs(legacy)
-            open(os.path.join(legacy, "keep"), "w").close()
-            with mock.patch.object(shim, "LEGACY_HOME", legacy):
+            home = os.path.join(root, "data")
+            legacy = os.path.join(root, "opt", "data")
+            os.makedirs(home)
+            os.makedirs(os.path.join(legacy, "skills"))
+            open(os.path.join(legacy, ".bashrc"), "w").write("image")
+            open(os.path.join(legacy, "SOUL.md"), "w").write("image soul")
+            open(os.path.join(home, "SOUL.md"), "w").write("volume soul")
+            with mock.patch.object(shim, "HOME", home), mock.patch.object(shim, "LEGACY_HOME", legacy):
                 shim.link_legacy_home()
-            self.assertFalse(os.path.islink(legacy))
+            self.assertEqual(os.readlink(legacy), home)
+            self.assertEqual(open(os.path.join(home, ".bashrc")).read(), "image")
+            self.assertTrue(os.path.isdir(os.path.join(home, "skills")))
+            self.assertEqual(open(os.path.join(home, "SOUL.md")).read(), "volume soul")
+            self.assertEqual(open(os.path.join(legacy + ".image", "SOUL.md")).read(), "image soul")
+
+
+class Ports(unittest.TestCase):
+    def test_reads_the_forwarder_targets_from_command_lines(self):
+        cmdlines = [["/usr/bin/portfwd", "8080", "9119"], ["python3", "/app/shim.py"], ["portfwd", "8081", "9119"], ["portfwd", "x"], ["portfwd", "8082", "18789"]]
+        self.assertEqual(shim.forwarded_ports(cmdlines), [9119, 18789])
+
+    def test_gateway_env_enables_the_local_api_server_without_overriding_a_choice(self):
+        env = shim.hermes_env()
+        self.assertEqual(env["API_SERVER_ENABLED"], "true")
+        self.assertEqual(env["API_SERVER_HOST"], "127.0.0.1")
+        self.assertEqual(env["HERMES_HOME"], shim.HOME)
+        with mock.patch.dict(os.environ, {"API_SERVER_PORT": "9000"}):
+            self.assertEqual(shim.hermes_env()["API_SERVER_PORT"], "9000")
 
 
 if __name__ == "__main__":
