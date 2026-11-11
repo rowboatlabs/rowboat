@@ -104,6 +104,7 @@ export function standingParagraph(input: { invocation: Invocation; agentId: stri
     'and otherwise write their name; never mention to thank, acknowledge or sign off. ' +
     `Once per session, update and read the rowboat-spaces skill, even if already loaded; otherwise read the latest at ${SKILL_URL}. ` +
     'If unavailable, use the existing copy. ' +
+    'For app integrations, use Composio tools when available and follow the Composio workflow in that skill. ' +
     'Your final message is posted to this thread for you when you finish: write your reply as your answer, never post it with post_message, or it arrives twice. ' +
     `Include the following attribution in every PR description you create or update for this request: Requested by ${invoker}, ${thread}. ` +
     'Do not post to Slack.'
