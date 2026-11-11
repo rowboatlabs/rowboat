@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { kindOfAgent } from '../src/connectors/maritime/runtimes.js';
+import { HERMES_IMAGE, kindOfAgent } from '../src/connectors/maritime/runtimes.js';
 import { listMaritimeAgents } from '../src/connectors/maritime/setup.js';
 
 // Setting up a Maritime agent (2026-10-26; in Harbor since 2026-11-02): list the agents the person's key reaches.
@@ -15,6 +15,7 @@ describe('Maritime agents', () => {
         { id: 'c', name: 'claude', framework: 'custom', templateId: 'claude_code', status: 'sleeping' },
         { id: 'd', name: 'mine', framework: 'custom', templateId: null, status: 'sleeping' },
         { id: 'e', name: 'going', framework: 'hermes', templateId: 'hermes', status: 'deleting' },
+        { id: 'f', name: 'ours', framework: 'custom', templateId: null, imageName: HERMES_IMAGE, status: 'sleeping' },
       ]),
     );
     expect(await listMaritimeAgents('mk_x', fetchImpl as unknown as typeof fetch)).toEqual([
@@ -22,6 +23,7 @@ describe('Maritime agents', () => {
       { id: 'b', name: 'coder', template: 'codex', status: 'active', kind: 'codex' },
       { id: 'c', name: 'claude', template: 'claude_code', status: 'sleeping', kind: 'claude-code' },
       { id: 'd', name: 'mine', template: 'custom', status: 'sleeping' },
+      { id: 'f', name: 'ours', template: 'custom', status: 'sleeping', kind: 'hermes' },
     ]);
     expect(fetchImpl).toHaveBeenCalledWith('https://api.maritime.sh/api/agents', expect.objectContaining({ headers: { authorization: 'Bearer mk_x' } }));
   });
@@ -31,9 +33,11 @@ describe('Maritime agents', () => {
     await expect(listMaritimeAgents('bad', fetchImpl as unknown as typeof fetch)).rejects.toThrow('Maritime did not accept this key: Invalid or expired API key');
   });
 
-  it('reads the kind by template first, then by framework', () => {
+  it('reads the kind by template first, then by framework, then by Rowboat’s own Hermes image', () => {
     expect(kindOfAgent({ framework: 'custom', templateId: 'claude_code' })).toBe('claude-code');
     expect(kindOfAgent({ framework: 'hermes', templateId: null })).toBe('hermes');
+    expect(kindOfAgent({ framework: 'custom', templateId: null, imageName: HERMES_IMAGE })).toBe('hermes');
+    expect(kindOfAgent({ framework: 'custom', templateId: null, imageName: 'ghcr.io/rowboatlabs/hermes-maritime-ish:1' })).toBeUndefined();
     expect(kindOfAgent({ framework: 'custom', templateId: null })).toBeUndefined();
   });
 });

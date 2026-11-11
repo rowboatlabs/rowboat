@@ -31,11 +31,11 @@ export async function listMaritimeAgents(key: string, fetchImpl: Fetch = fetch, 
     }
     throw new Error(res.status === 401 || res.status === 403 ? `Maritime did not accept this key: ${reason}` : reason);
   }
-  const body = (await res.json()) as Array<{ id: string; name?: string; framework?: string; templateId?: string | null; status?: string }>;
+  const body = (await res.json()) as Array<{ id: string; name?: string; framework?: string; templateId?: string | null; imageName?: string | null; status?: string }>;
   return (Array.isArray(body) ? body : [])
     .filter((a) => a.status !== 'deleting')
     .map((a) => {
-      const record = { framework: a.framework ?? '', templateId: typeof a.templateId === 'string' ? a.templateId : null };
+      const record = { framework: a.framework ?? '', templateId: typeof a.templateId === 'string' ? a.templateId : null, imageName: typeof a.imageName === 'string' ? a.imageName : null };
       const kind = kindOfAgent(record);
       return { id: a.id, name: a.name ?? null, status: a.status ?? '', template: record.templateId ?? record.framework, ...(kind ? { kind } : {}) };
     });
