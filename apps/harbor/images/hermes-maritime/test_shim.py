@@ -79,6 +79,20 @@ class Schedules(unittest.TestCase):
         self.assertTrue(shim.STATE["last_push_ok"])
 
 
+class Pusher(unittest.TestCase):
+    def test_pushes_at_boot_on_a_changed_list_and_on_the_half_hour_but_not_on_a_mere_run(self):
+        p = shim.SchedulePusher()
+        a = [{"id": "x", "cron": "* * * * *"}]
+        self.assertTrue(p.due(a, 1.0, 1000.0))
+        p.note(a, 1.0, 1000.0)
+        self.assertFalse(p.due(a, 1.0, 1010.0))      # nothing changed
+        self.assertFalse(p.due(a, 2.0, 1020.0))      # a run touched the file; same schedules
+        b = [{"id": "x", "cron": "*/5 * * * *"}]
+        self.assertTrue(p.due(b, 3.0, 1030.0))       # a schedule changed
+        p.note(b, 3.0, 1030.0)
+        self.assertTrue(p.due(b, 3.0, 1030.0 + shim.REPUSH_S + 1))  # the periodic safety net
+
+
 class Http(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

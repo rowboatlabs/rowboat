@@ -263,22 +263,43 @@ def push_schedules(entries: list[dict]) -> bool | None:
     return ok
 
 
+class SchedulePusher:
+    """Decides when the schedule list goes to Maritime: at boot, when the list itself changes
+    (a run touches jobs.json without changing any schedule, so the file's time is not enough),
+    and every half hour regardless."""
+
+    def __init__(self) -> None:
+        self.last_mtime: float | None = None
+        self.last_entries: list[dict] | None = None
+        self.last_push = 0.0
+
+    def due(self, entries: list[dict], mtime: float | None, now: float) -> bool:
+        if self.last_entries is None or now - self.last_push > REPUSH_S:
+            return True
+        if mtime == self.last_mtime:
+            return False
+        return entries != self.last_entries
+
+    def note(self, entries: list[dict], mtime: float | None, now: float) -> None:
+        self.last_entries, self.last_mtime, self.last_push = entries, mtime, now
+
+
 def watch_jobs() -> None:
-    """Push at boot, whenever jobs.json changes, and every half hour regardless."""
-    last_mtime: float | None = None
-    last_push = 0.0
+    pusher = SchedulePusher()
     while not _stopping.is_set():
         try:
             mtime: float | None = os.stat(JOBS_FILE).st_mtime
         except OSError:
             mtime = None
         now = time.time()
-        if mtime != last_mtime or now - last_push > REPUSH_S:
-            entries = schedules()
+        entries = schedules()
+        if pusher.due(entries, mtime, now):
             ok = push_schedules(entries)
             if ok is not None:
                 log(f"pushed {len(entries)} schedule(s): {'ok' if ok else 'rejected'}")
-            last_mtime, last_push = mtime, now
+            pusher.note(entries, mtime, now)
+        elif mtime != pusher.last_mtime:
+            pusher.last_mtime = mtime
         time.sleep(JOBS_POLL_S)
 
 
