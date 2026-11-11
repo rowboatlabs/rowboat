@@ -204,8 +204,40 @@ class Ports(unittest.TestCase):
         self.assertEqual(env["API_SERVER_ENABLED"], "true")
         self.assertEqual(env["API_SERVER_HOST"], "127.0.0.1")
         self.assertEqual(env["HERMES_HOME"], shim.HOME)
+        self.assertGreaterEqual(len(env["API_SERVER_KEY"]), 32)
         with mock.patch.dict(os.environ, {"API_SERVER_PORT": "9000"}):
             self.assertEqual(shim.hermes_env()["API_SERVER_PORT"], "9000")
+
+    def test_firing_a_job_calls_the_gateway_api_with_the_key_and_ticks_only_when_it_is_down(self):
+        seen = {}
+
+        class Resp:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def ok(req, timeout=0):
+            seen["url"] = req.full_url
+            seen["auth"] = dict(req.header_items()).get("Authorization")
+            return Resp()
+
+        ticks = []
+        with mock.patch.object(shim.urllib.request, "urlopen", ok), mock.patch.object(shim.subprocess, "run", lambda *a, **k: ticks.append(a[0])):
+            shim.fire_job("aaa111", None)
+        self.assertEqual(seen["url"], "http://127.0.0.1:8642/api/jobs/aaa111/run")
+        self.assertEqual(seen["auth"], f"Bearer {shim.API_SERVER_KEY}")
+        self.assertEqual(ticks, [])
+
+        def down(req, timeout=0):
+            raise urllib.error.URLError("refused")
+
+        with mock.patch.object(shim.urllib.request, "urlopen", down), mock.patch.object(shim.subprocess, "run", lambda *a, **k: ticks.append(a[0])):
+            shim.fire_job("aaa111", None)
+        self.assertEqual(ticks, [["hermes", "cron", "tick"]])
 
 
 if __name__ == "__main__":

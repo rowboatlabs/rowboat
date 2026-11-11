@@ -164,7 +164,7 @@ const GATEWAY_RETRIES = 24;
  * gateway up itself. Maritime's template is Hermes 0.14, too old for `hermes chat --format stream-json`.
  */
 export const HERMES_IMAGE_REPO = 'ghcr.io/rowboatlabs/hermes-maritime';
-export const HERMES_IMAGE = `${HERMES_IMAGE_REPO}:0.22.5-2`;
+export const HERMES_IMAGE = `${HERMES_IMAGE_REPO}:0.22.5-3`;
 /** The model Maritime's own Hermes template configures for its proxy: the trial's choice when nothing else named one. */
 const MARITIME_PROXY_MODEL = 'gpt-5.4';
 

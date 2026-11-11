@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import secrets
 import shutil
 import signal
 import socket
@@ -143,8 +144,10 @@ def as_hermes(user: pwd.struct_passwd | None):
 
 
 # Hermes's own API server, on localhost: how a scheduled occurrence fires its job at once
-# (`POST /api/jobs/<id>/run`), as Maritime's wrapper did on the `hermes` framework.
-API_SERVER_ENV = {"API_SERVER_ENABLED": "true", "API_SERVER_HOST": "127.0.0.1", "API_SERVER_PORT": "8642"}
+# (`POST /api/jobs/<id>/run`), as Maritime's wrapper did on the `hermes` framework. Hermes
+# refuses to start it without a bearer key, so the shim mints one per boot for itself.
+API_SERVER_KEY = os.environ.get("API_SERVER_KEY") or secrets.token_hex(24)
+API_SERVER_ENV = {"API_SERVER_ENABLED": "true", "API_SERVER_HOST": "127.0.0.1", "API_SERVER_PORT": "8642", "API_SERVER_KEY": API_SERVER_KEY}
 
 
 def hermes_env() -> dict[str, str]:
@@ -281,7 +284,10 @@ def watch_jobs() -> None:
 
 def fire_job(job_id: str, user: pwd.struct_passwd | None) -> None:
     """Run a job now: through the gateway's API, else by one scheduler tick."""
-    req = urllib.request.Request(f"{GATEWAY_API}/api/jobs/{job_id}/run", data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        f"{GATEWAY_API}/api/jobs/{job_id}/run", data=b"{}", method="POST",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {API_SERVER_KEY}"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             if 200 <= resp.status < 300:
