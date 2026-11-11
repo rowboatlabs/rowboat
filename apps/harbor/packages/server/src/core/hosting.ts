@@ -452,8 +452,9 @@ export class Hosting {
     const at = this.k.now();
     for (const key of await this.k.store.listAgentKeys([agentId])) if (!key.revokedAt) await this.k.store.revokeAgentKey(key.id, at);
     // The gateway key goes now too (2026-11-04); the worker revokes it again before the platform is told, should this fail.
-    if (this.billing && row.billingCustomer) {
-      await this.billing.revokeGatewayKey(row.billingCustomer, row.externalUserId).catch((err) => console.log('[harbor] hosting: gateway key not revoked yet', { id: row.id, error: (err as Error).message }));
+    const customer = await this.gatewayCustomer(row);
+    if (this.billing && customer) {
+      await this.billing.revokeGatewayKey(customer, row.externalUserId).catch((err) => console.log('[harbor] hosting: gateway key not revoked yet', { id: row.id, error: (err as Error).message }));
     }
     await this.hooks?.stop(agentId);
     const next: StoredAgentHosting = { ...row, status: 'deleting', updatedAt: at };
@@ -886,7 +887,7 @@ export class Hosting {
       }
     }
     for (const row of await this.k.store.listHostingsByStatus(['ready'])) {
-      if (this.billing && row.billingCustomer && row.externalId && !this.composioConfigured.has(row.id)) {
+      if (this.billing && row.externalId && !this.composioConfigured.has(row.id)) {
         try {
           await this.prepareComposio(provider, row);
         } catch {
@@ -937,7 +938,8 @@ export class Hosting {
       if (billing && row.externalId) {
         await this.settle(provider, row, billing.accounts, billing.customer).catch((err) => console.log('[harbor] hosting: last machine cost not reported', { id: row.id, error: (err as Error).message }));
       }
-      if (billing) await billing.accounts.revokeGatewayKey(billing.customer, row.externalUserId);
+      const customer = await this.gatewayCustomer(row);
+      if (this.billing && customer) await this.billing.revokeGatewayKey(customer, row.externalUserId);
       await provider.deprovision(row.externalUserId);
       if (billing) await billing.accounts.unregisterAgent(billing.customer, row.externalUserId);
       await this.move(row, 'deleted');
@@ -951,29 +953,31 @@ export class Hosting {
    * Done before `ready`, so no turn runs on the platform's credit.
    */
   private async fundOnReady(provider: HostingProvider, row: StoredAgentHosting): Promise<void> {
-    if (!this.billing || !row.billingCustomer || !row.externalId) return;
+    if (!this.billing || !row.externalId) return;
     const ops = provider.manage(row.externalId, row.externalUserId);
-    await this.prepareComposio(provider, row, true);
-    if (row.funding !== 'credits' && !row.llm) {
+    await this.prepareComposio(provider, row, !!row.billingCustomer);
+    if (row.billingCustomer && row.funding !== 'credits' && !row.llm) {
       await ops.withoutPlatformLlm();
     }
   }
 
   /**
-   * 2026-11-11: every billed runtime gets the same identity for Composio and,
-   * when selected, model calls. Check platform metadata once per Harbor boot
+   * 2026-11-11: each managed runtime with a Rowboat owner gets an identity for
+   * Composio and, when selected, model calls. Check metadata once per Harbor boot
    * to upgrade existing VMs without reading redacted secrets. A missing key
    * needs a mint; existing keys survive restarts and model changes.
    */
   private async prepareComposio(provider: HostingProvider, row: StoredAgentHosting, initial = false): Promise<void> {
     const billing = this.billing;
-    if (!billing || !row.billingCustomer || !row.externalId || this.composioConfigured.has(row.id)) return;
+    if (!billing || !row.externalId || this.composioConfigured.has(row.id)) return;
+    const customer = await this.gatewayCustomer(row);
+    if (!customer) return;
     const ops = provider.manage(row.externalId, row.externalUserId);
     const env = await ops.env();
     const hasKey = env.some(v => v.key === 'ROWBOAT_GATEWAY_KEY' && v.secret);
     const url = env.find(v => v.key === 'ROWBOAT_COMPOSIO_MCP_URL');
     if (initial || !hasKey) {
-      const { key } = await billing.mintGatewayKey(row.billingCustomer, { ref: row.externalUserId, name: row.displayName });
+      const { key } = await billing.mintGatewayKey(customer, { ref: row.externalUserId, name: row.displayName });
       // 2026-11-11: install the model credential first. A partial setup must
       // never leave a credit-funded model using the key that mint just rotated.
       if (row.funding === 'credits') {
@@ -985,6 +989,16 @@ export class Hosting {
       await ops.useComposio({ url: billing.composioMcpUrl });
     }
     this.composioConfigured.add(row.id);
+  }
+
+  /**
+   * 2026-11-11: pre-billing agents have no billingCustomer. Resolve their
+   * creator/owner's Rowboat identity for tool access without enrolling the
+   * legacy hosting in billing.
+   */
+  private async gatewayCustomer(row: StoredAgentHosting): Promise<string | undefined> {
+    if (!this.billing) return undefined;
+    return row.billingCustomer ?? this.billing.accountFor(await this.k.store.listIdentitiesOf(row.createdBy));
   }
 
   /**

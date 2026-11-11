@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { routes, type AgentListing, type Invocation, type Member } from '@rowboat/spaces-protocol';
 import { httpBilling, type BillingAccounts, type RegisterAgentInput } from '../src/billing.js';
 import { MemoryBlobStore } from '../src/blobs.js';
@@ -394,6 +394,113 @@ describe('upgrading existing managed agents to Composio', () => {
       expect(billing.keys.get(ref)!.key).toBe(key.key);
       expect(env.get('ROWBOAT_GATEWAY_KEY')?.value).toBe(key.key);
       expect(env.get(modelKeyVar)?.value).toBe(kind === 'hermes' && !own ? key.key : modelKey);
+    } finally {
+      await harbor.close();
+      await store.db.close();
+    }
+  });
+});
+
+describe('agents created before the deployment enabled billing', () => {
+  it.each([
+    { kind: 'hermes', own: false },
+    { kind: 'hermes', own: true },
+    { kind: 'codex', own: true },
+    { kind: 'claude-code', own: true },
+  ])('adds Composio to legacy $kind (own model: $own) without changing its funding or charging historical hosting', async ({ kind, own }) => {
+    const store = await freshStore();
+    const billing = new FakeBilling();
+    const start = (billed: boolean) => startHarbor({
+      store: store.store, name: 'Legacy', seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
+      blobs: new MemoryBlobStore(),
+      hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url }), tickMs: 25, ...(billed ? { billing, settleEveryMs: 25 } : {}) },
+    });
+    let harbor = await start(false);
+    try {
+      await store.store.putIdentity(ISSUER, RAMNIQUE, 'ramnique');
+      const created = await restClient(harbor, 'dev-ramnique').post('/v1/agents/managed', {
+        displayName: 'Legacy', kind, ...(kind === 'claude-code' ? { anthropicApiKey: 'sk-ant-legacy-owner' } : {}),
+      });
+      expect(created.status).toBe(200);
+      const agent = created.body.agent as Member;
+      await until(async () => (await store.store.getAgentHosting(agent.id))?.status === 'ready', 'legacy setup');
+      if (kind === 'hermes' && own) {
+        expect((await restClient(harbor, 'dev-ramnique').put(`/v1/agents/${agent.id}/hosting/llm`, { provider: 'openrouter', apiKey: 'sk-or-legacy-owner' })).status).toBe(200);
+      } else if (kind === 'codex') {
+        fake.signIns.add(agent.agentInstance!);
+        expect((await restClient(harbor, 'dev-ramnique').post(`/v1/agents/${agent.id}/hosting/sign-in`, {})).body.signedIn).toBe(true);
+      }
+      await harbor.close();
+      const row = (await store.store.getAgentHosting(agent.id))!;
+      expect(row.billingCustomer).toBeUndefined();
+      const env = fake.env.get(agent.agentInstance!)!;
+      const originalEnv = new Map(env);
+      expect(env.has('ROWBOAT_GATEWAY_KEY')).toBe(false);
+      const ref = row.externalUserId;
+      // A pre-billing VM may already have accrued a month's platform usage.
+      // Installing tool credentials must not enroll or settle that machine.
+      fake.usage.set(ref, { hosting: 1200, llm: 300 });
+      harbor = await start(true);
+      await until(async () => env.has('ROWBOAT_GATEWAY_KEY'), 'pre-billing Composio upgrade');
+      expect(billing.keys.get(ref)).toMatchObject({ customer: RAMNIQUE, revoked: false });
+      expect(env.get('ROWBOAT_GATEWAY_KEY')).toEqual({ value: billing.keys.get(ref)!.key, isSecret: true });
+      expect(env.get('ROWBOAT_COMPOSIO_MCP_URL')).toEqual({ value: billing.composioMcpUrl, isSecret: false });
+      for (const [name, value] of originalEnv) expect(env.get(name)).toEqual(value);
+      expect(await store.store.getAgentHosting(agent.id)).toEqual(row);
+      if (kind === 'codex') expect(fake.signIns.has(agent.agentInstance!)).toBe(true);
+      const page = await restClient(harbor, 'dev-ramnique').get(`/v1/agents/${agent.id}/hosting`);
+      expect(page.body.hosting.billed).toBeUndefined();
+      expect(page.body.env.find((v: { key: string }) => v.key === 'ROWBOAT_GATEWAY_KEY')).toEqual({ key: 'ROWBOAT_GATEWAY_KEY', secret: true });
+      expect(billing.registered.size).toBe(0);
+      expect(billing.reports).toEqual([]);
+      const key = billing.keys.get(ref)!.key;
+      await harbor.close();
+      const before = fake.received.length;
+      harbor = await start(true);
+      await until(async () => fake.received.slice(before).some(r => r.path === `/api/agents/${agent.agentInstance}/env`), 'legacy metadata check after restart');
+      expect(billing.keys.get(ref)!.key).toBe(key);
+      expect((await restClient(harbor, 'dev-ramnique').delete(`/v1/agents/${agent.id}/hosting`)).status).toBe(200);
+      expect(billing.keys.get(ref)!.revoked).toBe(true);
+      await until(async () => (await store.store.getAgentHosting(agent.id))?.status === 'deleted', 'legacy deletion');
+      expect(billing.reports).toEqual([]);
+      expect(billing.unregistered).toEqual([]);
+    } finally {
+      await harbor.close();
+      await store.db.close();
+    }
+  });
+
+  it('waits for the legacy owner’s matching identity instead of using another member’s account', async () => {
+    const store = await freshStore();
+    const billing = new FakeBilling();
+    const start = (billed: boolean) => startHarbor({
+      store: store.store, name: 'Identity', seedMembers: [{ id: 'owner', displayName: 'Owner' }, { id: 'other', displayName: 'Other' }],
+      blobs: new MemoryBlobStore(),
+      hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url }), tickMs: 25, ...(billed ? { billing } : {}) },
+    });
+    let harbor = await start(false);
+    try {
+      await store.store.putIdentity('https://other-issuer.test', RAMNIQUE, 'owner');
+      await store.store.putIdentity(ISSUER, HARSH, 'other');
+      const created = await restClient(harbor, 'dev-owner').post('/v1/agents/managed', { displayName: 'Unlinked', kind: 'hermes' });
+      expect(created.status).toBe(200);
+      const agent = created.body.agent as Member;
+      await until(async () => (await store.store.getAgentHosting(agent.id))?.status === 'ready', 'unlinked legacy setup');
+      await harbor.close();
+      const ref = (await store.store.getAgentHosting(agent.id))!.externalUserId;
+      const accountFor = vi.spyOn(billing, 'accountFor');
+      harbor = await start(true);
+      await until(async () => accountFor.mock.calls.length > 0, 'unlinked owner check');
+      expect(billing.keys.size).toBe(0);
+      const usageBefore = fake.usageReads.length;
+      const env = fake.env.get(agent.agentInstance!)!;
+      expect(env.has('ROWBOAT_GATEWAY_KEY')).toBe(false);
+      await store.store.putIdentity(ISSUER, RAMNIQUE, 'owner');
+      await until(async () => env.has('ROWBOAT_GATEWAY_KEY'), 'newly linked owner upgrade');
+      expect(billing.keys.get(ref)).toMatchObject({ customer: RAMNIQUE, revoked: false });
+      expect(billing.keys.size).toBe(1);
+      expect(billing.registered.size).toBe(0);
+      expect(fake.usageReads.slice(usageBefore).some(r => r.externalUserId === ref)).toBe(false);
     } finally {
       await harbor.close();
       await store.db.close();
