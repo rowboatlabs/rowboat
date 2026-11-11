@@ -10,7 +10,7 @@ import { SeatChoice, type Seat } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
 import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
-import { refreshMembers, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
+import { refreshMembers, refreshOrgRoster, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
 import { PersonalitySection } from '@/components/spaces/agent-personality'
 import { SuperAgentSection } from '@/components/spaces/agent-super'
@@ -117,6 +117,10 @@ export function AgentPage({ org, listing, onChanged }: {
         } finally {
             setBusy(false)
         }
+    }
+
+    if (gone && hosting) {
+        return <HostingOverview orgId={org.id} agent={agent} hosting={hosting} canManage={canManage} state={hostingState} onChanged={onChanged} />
     }
 
     // Jev is built in (2026-10-07): no setup steps, no keys, nothing to set.
@@ -362,7 +366,7 @@ function vmTabs({ orgId, agent, hermes, state, signIn }: { orgId: string; agent:
 const MOVING: ReadonlySet<string> = new Set(['creating', 'deploying', 'checking', 'deleting'])
 const HOSTING_POLL_MS = 4_000
 
-function hostingLine(hosting: spaces.AgentHosting, name: string): string {
+function hostingLine(hosting: spaces.AgentHosting): string {
     switch (hosting.status) {
         case 'creating':
             return 'Being created on Maritime…'
@@ -375,9 +379,9 @@ function hostingLine(hosting: spaces.AgentHosting, name: string): string {
         case 'failed':
             return `Could not be set up: ${hosting.error ?? 'Maritime gave no reason'}. Delete it from the Danger zone and create it again.`
         case 'deleting':
-            return 'Removing from Maritime… its keys are already revoked.'
+            return 'Removing from Maritime… its keys are revoked, it has left every space, and its DMs are read-only.'
         case 'deleted':
-            return `Removed from Maritime on ${when(hosting.updatedAt)}. Its keys are revoked; remove ${name} from spaces like any member.`
+            return `Removed from Maritime on ${when(hosting.updatedAt)}. Its messages and DM history are preserved.`
     }
 }
 
@@ -410,7 +414,7 @@ function HostingOverview({ orgId, agent, hosting, canManage, state, onChanged }:
                 {hosting.status === 'ready' && canManage && hosting.billed && <SizeBlock orgId={orgId} agentId={agent.id} />}
                 <p role="status" className={`text-[11px] ${hosting.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
                     {moving && <Loader2 className="mr-1 inline size-3 animate-spin align-[-2px]" />}
-                    {hostingLine(hosting, agent.displayName)}
+                    {hostingLine(hosting)}
                 </p>
             </div>
         </>
@@ -643,6 +647,7 @@ function DeleteAgentRow({ orgId, agent, onChanged }: { orgId: string; agent: spa
         setBusy(true)
         try {
             await window.ipc.invoke('spaces:deleteManagedAgent', { orgId, agentId: agent.id })
+            refreshOrgRoster(orgId)
             await onChanged()
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not delete the agent', 'error')
@@ -654,7 +659,7 @@ function DeleteAgentRow({ orgId, agent, onChanged }: { orgId: string; agent: spa
     return (
         <DangerRow
             title={`Delete ${agent.displayName} from Maritime`}
-            note="Removes the VM and its volume, revokes every key at once and leaves the agent in Rowboat as deleted. Its messages stay."
+            note="Deletes the Maritime VM and its volume, revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages stay."
             below={
                 confirming && (
                     <form

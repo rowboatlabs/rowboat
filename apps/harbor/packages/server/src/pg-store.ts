@@ -1940,7 +1940,7 @@ export class PgStore implements Store {
     if (connections.length === 0) return [];
     const rows = await this.sql.query<MemberRow>(
       `select id, display_name, title, avatar_url, kind, owner_id, agent_kind, agent_connection, agent_instance, super_agent, instructions, deactivated_at, removed_at, availability from members
-       where kind = 'agent' and removed_at is null and agent_connection = any($1::text[]) order by id`,
+       where kind = 'agent' and removed_at is null and deactivated_at is null and agent_connection = any($1::text[]) order by id`,
       [[...connections]]);
     return rows.map(rowToMember);
   }

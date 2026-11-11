@@ -85,6 +85,11 @@ describe('policy', () => {
     expect(canDeleteSpace(adminRow, direct)).toMatchObject({ code: 'invalid_request' });
     expect(canWriteSpace(shared)).toBeNull();
     expect(canWriteSpace({ ...shared, archived: true })).toMatchObject({ code: 'forbidden' });
+    const deleted: Member = { id: 'agent', displayName: 'Deleted', kind: 'agent', ownerId: 'a', deactivatedAt: NOW };
+    expect(canWriteSpace(direct, [person('a'), deleted])).toMatchObject({ code: 'forbidden' });
+    expect(canWriteSpace(shared, [deleted])).toBeNull();
+    expect(canWriteSpace(direct, [{ ...deleted, deactivatedAt: undefined }])).toBeNull();
+    expect(canCreateAgentKey(person('a'), deleted)).toMatchObject({ code: 'invalid_request' });
   });
 
   it('membership acts are a space admin’s, never on a DM (2026-10-19; per space since 2026-11-09)', () => {

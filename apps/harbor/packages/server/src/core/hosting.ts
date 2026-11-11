@@ -247,6 +247,7 @@ export class Hosting {
   private settledAt = 0;
   private settleEveryMs = SETTLE_EVERY_MS;
   private composioConfigured = new Set<string>();
+  private repairedDeletions = false;
 
   constructor(
     private readonly k: Kernel,
@@ -447,19 +448,22 @@ export class Hosting {
   }
 
   private async remove(agentId: string, row: StoredAgentHosting): Promise<AgentHosting> {
-    if (row.status === 'deleted' || row.status === 'deleting') return publicShape(row);
+    if (row.status === 'deleted' || row.status === 'deleting') {
+      await this.spaces.deactivateAgent(agentId);
+      return publicShape(row);
+    }
     this.k.guardWrite();
     const at = this.k.now();
-    for (const key of await this.k.store.listAgentKeys([agentId])) if (!key.revokedAt) await this.k.store.revokeAgentKey(key.id, at);
+    const next: StoredAgentHosting = { ...row, status: 'deleting', updatedAt: at };
+    delete next.error;
+    await this.k.store.putHosting(next);
+    await this.spaces.deactivateAgent(agentId);
     // The gateway key goes now too (2026-11-04); the worker revokes it again before the platform is told, should this fail.
     const customer = await this.gatewayCustomer(row);
     if (this.billing && customer) {
       await this.billing.revokeGatewayKey(customer, row.externalUserId).catch((err) => console.log('[harbor] hosting: gateway key not revoked yet', { id: row.id, error: (err as Error).message }));
     }
     await this.hooks?.stop(agentId);
-    const next: StoredAgentHosting = { ...row, status: 'deleting', updatedAt: at };
-    delete next.error;
-    await this.k.store.putHosting(next);
     void this.tick();
     return publicShape(next);
   }
@@ -867,6 +871,16 @@ export class Hosting {
   private async drive(): Promise<void> {
     const provider = this.provider;
     if (!provider || this.k.readOnly) return;
+    // Repair the active members left by hosting-only deletion before this release (2026-11-11).
+    if (!this.repairedDeletions) {
+      for (const row of await this.k.store.listHostingsByStatus(['deleted'])) {
+        if (row.agentId) {
+          await this.spaces.deactivateAgent(row.agentId);
+          await this.hooks?.stop(row.agentId);
+        }
+      }
+      this.repairedDeletions = true;
+    }
     for (const row of await this.k.store.listHostingsByStatus(['creating', 'deploying', 'checking', 'deleting'])) {
       try {
         await this.step(provider, row);
@@ -932,6 +946,10 @@ export class Hosting {
       return;
     }
     if (row.status === 'deleting') {
+      if (row.agentId) {
+        await this.spaces.deactivateAgent(row.agentId);
+        await this.hooks?.stop(row.agentId);
+      }
       // Billed (2026-11-04): the machine's last cost reported while the platform still has it, the gateway key
       // revoked, then the agent off the platform and out of its owner's plan. Each is safe to repeat on a retry.
       const billing = this.billing && row.billingCustomer ? { accounts: this.billing, customer: row.billingCustomer } : undefined;

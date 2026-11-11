@@ -343,6 +343,7 @@ export class Spaces {
     const by = this.k.attributionOf(ctx, input);
     const at = this.k.now();
     const { memberships, added } = await this.k.lockedAs(ctx, spaceId, async () => {
+      for (const id of ids) enforce(canReachMember((await this.k.store.getMember(id))!));
       const existing = new Map<string, Membership>();
       for (const id of ids) {
         const m = await this.k.store.getMembership(spaceId, id);
@@ -694,6 +695,27 @@ export class Spaces {
   async deactivateSelf(ctx: ActorCtx): Promise<void> {
     for (const space of await this.k.store.listSpacesFor(ctx.memberId)) await this.leaveSpace(ctx, space.id);
     await this.k.store.deactivateMember(ctx.memberId, this.k.now());
+  }
+
+  /** Managed deletion (2026-11-11): keep authorship and DM history, but retire every shared-space seat. */
+  async deactivateAgent(agentId: string): Promise<void> {
+    const agent = await this.k.store.getMember(agentId);
+    if (!agent || agent.kind !== 'agent') return;
+    const at = agent.deactivatedAt ?? this.k.now();
+    const by: Attribution = { memberId: agent.ownerId ?? agent.id, actingMode: 'direct' };
+    if (!agent.deactivatedAt) {
+      await this.k.store.deactivateMember(agentId, at);
+      await this.k.publishProfile((await this.k.store.getMember(agentId))!);
+    }
+    for (const key of await this.k.store.listAgentKeys([agentId])) {
+      if (!key.revokedAt) await this.k.store.revokeAgentKey(key.id, at);
+    }
+    for (const space of await this.k.store.listSpacesFor(agentId)) {
+      await this.k.locked(space.id, async () => {
+        await this.removeMembershipLocked(space.id, agentId, by, at, 'removed');
+      });
+      this.k.hub.publishToMember(agentId, { kind: 'space_removed', spaceId: space.id, by: by.memberId, at });
+    }
   }
 
   async publishPresence(
