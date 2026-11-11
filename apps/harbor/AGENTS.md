@@ -29,7 +29,7 @@ Two pnpm workspace packages under `packages/`:
 | `http.ts`, `ws.ts`, `mcp.ts` | the three faces; `origin.ts` (the public origin behind the proxy); `cors.ts` (the browser origins the render face answers); `session.ts` (the web app's session cookie: minting it, and when a request may use it); the consent page and `DELETE /v1/me` mount here since 2026-11-09 |
 | `auth.ts`, `auth-oidc.ts` | the drivers, `bindAuth` / `ServerAuth` (which resolves agent keys ahead of any driver), `authenticateRequest`, the RFC 9728 helpers; `consent.ts` (the login page); `agent-keys.ts` (minting and hashing an agent key) |
 | `runtime.ts` | `buildRuntime` — the one assembly of the server |
-| `billing.ts` | billing for managed agents (2026-11-04): the `BillingAccounts` Harbor reports to and asks, and its HTTP client for rowboatx-backend's internal routes; `core/hosting.ts` owns when it is called |
+| `billing.ts` | billing for managed agents (2026-11-04): the `BillingAccounts` Harbor reports to and asks, and its HTTP client for rowboatx-backend's internal routes and LLM/Composio gateway addresses; `core/hosting.ts` owns when it is called |
 | `server.ts`, `main.ts` | `startHarbor` and the dev seed; the binary (PGlite in dev, Postgres with `DATABASE_URL`). The multi-org deployment, directory and apex modules were deleted 2026-11-09 |
 | `notify.ts`, `push.ts` | the one notification decision; Expo delivery |
 | `hub.ts`, `blobs*.ts`, `mime.ts`, `merge.ts`, `search.ts`, `mentions-backfill.ts` | in-process fan-out, blob drivers, sniffing, the three-way merge, query parsing, the mentions backfill |

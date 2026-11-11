@@ -270,6 +270,13 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
         await api.setSpendLimit(agentId, null);
         await reload();
       }),
+    useComposio: ({ url, apiKey }) =>
+      refusing(async () => {
+        const put = await putter();
+        await put('ROWBOAT_COMPOSIO_MCP_URL', url, false);
+        if (apiKey) await put('ROWBOAT_GATEWAY_KEY', apiKey, true);
+        await reload();
+      }),
     // An agent its owner funds (2026-11-04, Codex on a deployment that bills): no trial, so the platform's proxy
     // token is a dud from the start and the agent runs once its owner signs in or adds a key.
     withoutPlatformLlm: () =>

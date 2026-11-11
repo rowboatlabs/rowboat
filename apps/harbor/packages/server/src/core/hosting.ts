@@ -136,6 +136,8 @@ export interface HostingOps {
   setLlm(input: { kind: string; provider: LlmProvider; apiKey: string; model?: string }): Promise<void>;
   /** Rowboat's LLM gateway on a key billed to the owner (2026-11-04), with what the runtime needs to use it, applied. */
   useGateway(input: { kind: string; baseUrl: string; apiKey: string; model?: string }): Promise<void>;
+  /** Model-independent MCP access (2026-11-11): omit the key when updating only the endpoint. */
+  useComposio(input: { url: string; apiKey?: string }): Promise<void>;
   /** Nothing on the platform's own model credit (2026-11-04): the agent runs on what its owner brings. */
   withoutPlatformLlm(): Promise<void>;
   /** The machine's size, the platform's range and its estimated cost per memory size (2026-11-04). */
@@ -244,6 +246,7 @@ export class Hosting {
   private billing: BillingAccounts | undefined;
   private settledAt = 0;
   private settleEveryMs = SETTLE_EVERY_MS;
+  private composioConfigured = new Set<string>();
 
   constructor(
     private readonly k: Kernel,
@@ -882,8 +885,15 @@ export class Hosting {
         }
       }
     }
-    // A trial that ran out of time, with credit left or not, is over.
     for (const row of await this.k.store.listHostingsByStatus(['ready'])) {
+      if (this.billing && row.billingCustomer && row.externalId && !this.composioConfigured.has(row.id)) {
+        try {
+          await this.prepareComposio(provider, row);
+        } catch {
+          console.log('[harbor] hosting: Composio setup will retry', { id: row.id });
+        }
+      }
+      // A trial that ran out of time, with credit left or not, is over.
       if (row.funding !== 'trial' || !row.trial || row.trial.closedAt || !row.externalId || Date.parse(row.trial.endsAt) > Date.now()) continue;
       try {
         await this.endTrial(row, provider.manage(row.externalId, row.externalUserId), 'expired');
@@ -936,20 +946,45 @@ export class Hosting {
 
   /**
    * A billed agent's model access once its machine answers (2026-11-04): a
-   * Hermes on Rowboat's gateway with a key minted now for its owner (a retry
-   * mints again, and the backend revokes the earlier key), a Codex with the
-   * platform's own model credit taken away until its owner brings theirs.
+   * Hermes on Rowboat's gateway, a Codex with the platform's own model
+   * credit taken away until its owner brings theirs.
    * Done before `ready`, so no turn runs on the platform's credit.
    */
   private async fundOnReady(provider: HostingProvider, row: StoredAgentHosting): Promise<void> {
     if (!this.billing || !row.billingCustomer || !row.externalId) return;
     const ops = provider.manage(row.externalId, row.externalUserId);
-    if (row.funding === 'credits') {
-      const { key } = await this.billing.mintGatewayKey(row.billingCustomer, { ref: row.externalUserId, name: row.displayName });
-      await ops.useGateway({ kind: row.kind, baseUrl: this.billing.gatewayUrl, apiKey: key, model: GATEWAY_MODEL });
-    } else if (!row.llm) {
+    await this.prepareComposio(provider, row, true);
+    if (row.funding !== 'credits' && !row.llm) {
       await ops.withoutPlatformLlm();
     }
+  }
+
+  /**
+   * 2026-11-11: every billed runtime gets the same identity for Composio and,
+   * when selected, model calls. Check platform metadata once per Harbor boot
+   * to upgrade existing VMs without reading redacted secrets. A missing key
+   * needs a mint; existing keys survive restarts and model changes.
+   */
+  private async prepareComposio(provider: HostingProvider, row: StoredAgentHosting, initial = false): Promise<void> {
+    const billing = this.billing;
+    if (!billing || !row.billingCustomer || !row.externalId || this.composioConfigured.has(row.id)) return;
+    const ops = provider.manage(row.externalId, row.externalUserId);
+    const env = await ops.env();
+    const hasKey = env.some(v => v.key === 'ROWBOAT_GATEWAY_KEY' && v.secret);
+    const url = env.find(v => v.key === 'ROWBOAT_COMPOSIO_MCP_URL');
+    if (initial || !hasKey) {
+      const { key } = await billing.mintGatewayKey(row.billingCustomer, { ref: row.externalUserId, name: row.displayName });
+      // 2026-11-11: install the model credential first. A partial setup must
+      // never leave a credit-funded model using the key that mint just rotated.
+      if (row.funding === 'credits') {
+        const model = !initial ? env.find(v => v.key === 'ROWBOAT_LLM_MODEL')?.value : undefined;
+        await ops.useGateway({ kind: row.kind, baseUrl: billing.gatewayUrl, apiKey: key, model: model ?? GATEWAY_MODEL });
+      }
+      await ops.useComposio({ url: billing.composioMcpUrl, apiKey: key });
+    } else if (url?.value !== billing.composioMcpUrl || url.secret) {
+      await ops.useComposio({ url: billing.composioMcpUrl });
+    }
+    this.composioConfigured.add(row.id);
   }
 
   /**
