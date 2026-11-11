@@ -10,7 +10,7 @@ const fixture = vi.hoisted(() => {
     return { space, org, orgs: [org], empty: [], map: new Map(), members: [{ id: 'me', displayName: 'Me', kind: 'human' }],
         feed: { topics: [], changeSets: [], loaded: true },
         stream: { messages, topicsByRoot: new Map(), ready: true, hasMore: false, loadingOlder: false },
-        presence: { working: new Map(), typing: new Map(), here: [] }, inline: false,
+        presence: { working: new Map(), typing: new Map(), here: [] as string[] }, online: new Set<string>(['me']), inline: false,
     }
 })
 vi.mock('@/hooks/use-spaces', () => ({
@@ -21,7 +21,7 @@ vi.mock('@/hooks/use-space-chat', () => ({
     useStream: () => fixture.stream, useSpacePresence: () => fixture.presence,
     useSpacesUnreadCounts: () => fixture.map, prefetchThread: vi.fn(), STREAM_READ_KEY: '__stream__',
 }))
-vi.mock('@/hooks/use-space-members', () => ({ useSpaceMembers: () => fixture.members, useOrgRoster: () => fixture.members, refreshMembers: vi.fn() }))
+vi.mock('@/hooks/use-space-members', () => ({ usePeopleOnline: () => fixture.online, useSpaceMembers: () => fixture.members, useOrgRoster: () => fixture.members, refreshMembers: vi.fn() }))
 vi.mock('@/hooks/use-space-invocations', () => ({ useSpaceInvocations: () => fixture.map }))
 vi.mock('@/hooks/use-space-boards', () => ({ noteListingFromEntries: vi.fn() }))
 vi.mock('@/lib/spaces-read-state', () => ({
@@ -62,6 +62,8 @@ function App() {
 let width = 1200
 beforeEach(() => {
     fixture.inline = false
+    fixture.online = new Set(['me'])
+    fixture.presence.here = []
     width = 1200
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width)
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
@@ -126,4 +128,16 @@ describe('Threads list and pane navigation', () => {
         expect(list.closest('.hidden')).toBeNull()
         expect(screen.queryByTestId('thread')).not.toBeInTheDocument()
     })
+})
+
+it('uses account online status in the member header even without space viewing presence', () => {
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'Members — 1, 1 online' })).toBeInTheDocument()
+})
+
+it('does not show an online dot just because a member is viewing the space', () => {
+    fixture.online = new Set()
+    fixture.presence.here = ['me']
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'Members — 1' })).toBeInTheDocument()
 })

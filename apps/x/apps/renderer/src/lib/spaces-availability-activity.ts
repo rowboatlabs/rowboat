@@ -1,26 +1,23 @@
-// One activity reporter per renderer (2026-11-05). Heartbeats carry activity,
-// not merely connectivity, and stop when the last Spaces consumer leaves.
+// One foreground reporter per renderer (2026-11-11, unified online status).
+// Reading without input stays online; background connections cannot renew it.
 export function startActivityReporter(orgIds: () => string[], send: (orgId: string, active: boolean) => void) {
-    let lastInput = document.visibilityState === 'visible' ? Date.now() : 0
-    let lastSent = 0
     const publish = () => {
-        const active = Date.now() - lastInput < 10 * 60_000
+        const active = document.visibilityState === 'visible' && document.hasFocus()
         for (const orgId of orgIds()) send(orgId, active)
-        lastSent = Date.now()
     }
-    const input = () => { lastInput = Date.now(); if (Date.now() - lastSent >= 15_000) publish() }
-    const focus = () => { if (document.visibilityState === 'visible') { lastInput = Date.now(); publish() } }
-    const events = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const
-    for (const event of events) window.addEventListener(event, input, { passive: true })
-    window.addEventListener('focus', focus)
-    document.addEventListener('visibilitychange', focus)
+    const away = () => { for (const orgId of orgIds()) send(orgId, false) }
+    window.addEventListener('focus', publish)
+    window.addEventListener('blur', away)
+    window.addEventListener('pagehide', away)
+    document.addEventListener('visibilitychange', publish)
     const interval = setInterval(publish, 15_000)
     publish()
     return () => {
         clearInterval(interval)
-        for (const event of events) window.removeEventListener(event, input)
-        window.removeEventListener('focus', focus)
-        document.removeEventListener('visibilitychange', focus)
-        for (const orgId of orgIds()) send(orgId, false)
+        window.removeEventListener('focus', publish)
+        window.removeEventListener('blur', away)
+        window.removeEventListener('pagehide', away)
+        document.removeEventListener('visibilitychange', publish)
+        away()
     }
 }

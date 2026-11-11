@@ -146,7 +146,10 @@ export class SpacesLive {
     };
   }
 
+  private active = false;
+
   activity(active: boolean): void {
+    this.active = active;
     if (this.ws?.readyState === this.WebSocketImpl.OPEN) this.ws.send(JSON.stringify({ kind: 'activity', active }));
     else this.ensureConnected();
   }
@@ -323,6 +326,7 @@ export class SpacesLive {
     ws.addEventListener('open', () => {
       if (this.ws !== ws) return; // a bounced socket finishing its handshake late
       this.attempts = 0;
+      ws.send(JSON.stringify({ kind: 'activity', active: this.active }));
       this.lastTraffic = Date.now();
       this.setStatus('open');
       // Resubscribe everything with the last offsets we saw — replay fills the gap.

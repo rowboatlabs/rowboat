@@ -104,6 +104,7 @@ describe('presence', () => {
   it('keeps human presence separate from agent presence', async () => {
     const harsh = await liveClient(harbor, 'dev-harsh');
     const gagan = await liveClient(harbor, 'dev-gagan');
+    gagan.send({ kind: 'activity', active: true });
     await harsh.until((frames) => frames.some(f => f.kind === 'member_presence' && f.memberId === 'gagan' && f.online));
     expect((await roster('dev-harsh')).onlinePeople).toContain('gagan');
     gagan.close();
@@ -120,13 +121,16 @@ describe('human online status', () => {
   it('counts multiple tabs and survives a reconnect until the final connection leaves', async () => {
     const observer = await liveClient(harbor, 'dev-harsh');
     const first = await liveClient(harbor, 'dev-gagan');
+    first.send({ kind: 'activity', active: true });
     await observer.until(frames => frames.some(f => f.kind === 'member_presence' && f.memberId === 'gagan' && f.online));
     const second = await liveClient(harbor, 'dev-gagan');
+    second.send({ kind: 'activity', active: true });
     first.close();
     await new Promise(resolve => setTimeout(resolve, GRACE_MS * 2));
     expect((await roster('dev-harsh')).onlinePeople).toContain('gagan');
     second.close();
     const reconnected = await liveClient(harbor, 'dev-gagan');
+    reconnected.send({ kind: 'activity', active: true });
     await new Promise(resolve => setTimeout(resolve, GRACE_MS * 2));
     expect(observer.frames.filter(f => f.kind === 'member_presence' && f.memberId === 'gagan')).toHaveLength(1);
     reconnected.close();
