@@ -29,7 +29,7 @@ export function AvailabilityMenu() {
 
 function MemberAvailability({ orgId, member }: { orgId: string; member: spaces.Member }) {
     const now = useAvailabilityClock()
-    const online = usePeopleOnline(orgId).has(member.id) && !member.availability?.manualAway
+    const online = usePeopleOnline(orgId).has(member.id)
     const [dialog, setDialog] = useState<'status' | 'schedule' | 'pause' | null>(null)
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState('')
@@ -48,7 +48,7 @@ function MemberAvailability({ orgId, member }: { orgId: string; member: spaces.M
     }
     return <>
         <div className="flex items-center justify-between px-3 py-2 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className={`size-2 rounded-full ${online ? 'bg-emerald-500' : 'border border-muted-foreground'}`} />{online ? 'Active' : 'Away'}</span>
+            <span className="flex items-center gap-1.5"><span className={`size-2 rounded-full ${online ? 'bg-emerald-500' : 'border border-muted-foreground'}`} />{online ? 'Online' : 'Away'}</span>
             <span role="status">{busy ? 'Saving…' : paused ? 'Notifications paused' : ''}</span>
         </div>
         {error && <p role="alert" className="px-3 py-1 text-xs text-destructive">{error}</p>}
@@ -59,7 +59,7 @@ function MemberAvailability({ orgId, member }: { orgId: string; member: spaces.M
             </button>
             {status && <button type="button" aria-label="Clear status" disabled={busy} className="mr-1 rounded-md p-1.5 text-muted-foreground hover:bg-accent" onClick={() => void save({ status: null })}><X className="size-3.5" /></button>}
         </div>
-        <button type="button" className={ROW} disabled={busy} onClick={() => void save({ manualAway: online ? true : false })}><span className={`mx-0.5 size-3 rounded-full ${online ? 'border border-muted-foreground' : 'bg-emerald-500'}`} />Set yourself as {online ? 'away' : 'active'}</button>
+        <button type="button" className={ROW} disabled={busy} onClick={() => void save({ manualAway: online ? true : false })}><span className={`mx-0.5 size-3 rounded-full ${online ? 'border border-muted-foreground' : 'bg-emerald-500'}`} />Set yourself as {online ? 'away' : 'online'}</button>
         <NotificationMenu paused={paused}>
                 <DropdownMenuLabel>Pause notifications</DropdownMenuLabel>
                 {[30, 60, 120, 240, 1440].map(minutes => <DropdownMenuItem key={minutes} disabled={busy} onSelect={() => void save({ pausedUntil: new Date(Date.now() + minutes * 60_000).toISOString(), resumedUntil: null })}>{minutes < 60 ? `${minutes} minutes` : `${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}`}</DropdownMenuItem>)}

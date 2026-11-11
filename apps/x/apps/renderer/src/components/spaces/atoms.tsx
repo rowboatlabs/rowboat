@@ -97,7 +97,8 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
     const now = useAvailabilityClock()
     const prefs = availability ?? byId.get(id)?.availability
     const paused = notificationsPaused(prefs, now)
-    const active = online && !prefs?.manualAway
+    // Manual away is already resolved by the server (2026-11-11, shared status).
+    const active = online
     const refs = useSpaceRefs()
     const photo = useProfileImage(orgId ?? refs?.orgId, avatarUrl ?? byId.get(id)?.avatarUrl)
     const [failedPhoto, setFailedPhoto] = useState<string>()
@@ -148,7 +149,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
     const name = member?.displayName ?? names.get(id) ?? id
     const [editing, setEditing] = useState(false)
     const peopleOnline = usePeopleOnline(refs?.orgId ?? '')
-    const isHere = member?.kind === 'agent' ? here.has(id) : peopleOnline.has(id) && !member?.availability?.manualAway
+    const isHere = member?.kind === 'agent' ? here.has(id) : peopleOnline.has(id)
     // An agent that is not yours takes no DM (2026-11-09, the reach rule); one whose seat here is its owner's alone takes no mention.
     const messageable = !member || canMessageDirect(member, selfId ?? undefined)
     const reachable = !member || !answersOwnerOnly(member, selfId ?? undefined)
@@ -201,7 +202,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                         )}
                         {member?.role === 'member' && <p className="text-xs text-muted-foreground">Member</p>}
                         <div className={cn('text-xs', isHere ? 'text-emerald-600' : 'text-muted-foreground')}>
-                            {isHere ? 'Here now' : 'Away'}
+                            {isHere ? (member?.kind === 'agent' ? 'Here now' : 'Online') : 'Away'}
                         </div>
                     </div>
                 </div>

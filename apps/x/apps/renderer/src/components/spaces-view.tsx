@@ -862,7 +862,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const selfName = memberNames.get(org.memberId) ?? org.memberId
 
     const peopleOnline = usePeopleOnline(org.id)
-    const here = members.filter(m => m.kind === 'human' && peopleOnline.has(m.id) && !m.availability?.manualAway).map(m => m.id)
+    const here = members.filter(m => m.kind === 'human' && peopleOnline.has(m.id)).map(m => m.id)
     const hereSet = new Set(here)
     // The header's face pile: people before integrations, whoever is here first.
     const facepile = [...members].sort((a, b) => Number(a.kind === 'agent') - Number(b.kind === 'agent')

@@ -8,6 +8,7 @@ const orgs = [
 ]
 vi.mock('@/hooks/use-spaces', () => ({ useSpacesOrgs: () => ({ orgs }) }))
 vi.mock('@/hooks/use-space-members', () => ({
+  usePeopleOnline: () => new Set(['me']),
   useOrgRosters: () => new Map([
     ['server', [{ id: 'me', displayName: 'Arjun Maheswaran' }]],
   ]),
@@ -35,7 +36,7 @@ describe('the Spaces account row', () => {
     render(<SpacesAccount onOpenSettings={vi.fn()} />)
     // The row itself carries your name and presence (2026-11-09).
     expect(screen.getByRole('button', { name: 'Your account' })).toHaveTextContent('Arjun Maheswaran')
-    expect(screen.getByRole('button', { name: 'Your account' })).toHaveTextContent('Active')
+    expect(screen.getByRole('button', { name: 'Your account' })).toHaveTextContent('Online')
     fireEvent.click(screen.getByRole('button', { name: 'Your account' }))
     await waitFor(() => expect(screen.getByText('arjun@rowboatlabs.com')).toBeInTheDocument())
     expect(screen.getAllByText('Arjun Maheswaran').length).toBeGreaterThan(0)
