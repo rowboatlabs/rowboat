@@ -93,7 +93,7 @@ function bearerOf(authorization: string | undefined, queryToken?: string | null)
 async function resolveAgentKey(store: Store, keyId: string): Promise<Member> {
   const key = await store.getAgentKey(keyId);
   const agent = key && !key.revokedAt ? await store.getMember(key.agentId) : undefined;
-  if (!key || !agent || agent.kind !== 'agent') throw new HarborError('unauthorized', 'unknown or revoked agent key');
+  if (!key || !agent || agent.kind !== 'agent' || agent.deactivatedAt || agent.removedAt) throw new HarborError('unauthorized', 'unknown or revoked agent key');
   const now = new Date();
   await store.touchAgentKey(key.id, now.toISOString(), new Date(now.getTime() - TOUCH_EVERY_MS).toISOString());
   return agent;

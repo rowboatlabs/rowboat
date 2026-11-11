@@ -157,6 +157,9 @@ describe('an agent Harbor reaches through a platform', () => {
     expect([...envs.keys()]).toEqual([agent.id]);
     await host.stopAll();
     expect(stopped).toContain(agent.id);
+    envs.clear();
+    host.ensure({ ...agent, deactivatedAt: harbor.service.now() });
+    expect(envs.size).toBe(0);
   });
 });
 

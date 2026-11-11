@@ -14,7 +14,7 @@ import { EngineCard, LocalAgentFields, useLocalAgents, useLocalEngine } from '@/
 import { PersonalityFields, saveAgentProfile } from '@/components/spaces/agent-personality'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
+import { applyProfileUpdate, refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { AGENT_SETUPS, KINDS, MANAGED_KINDS, PLATFORMS, agentLabel, agentSetup, instanceLabel, isBot, kindInfo, personalAgentName, setupFor, type AgentSetup, type Logo } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
@@ -319,6 +319,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const roster = useOrgRoster(org.id, spaceIds)
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
     const [agents, setAgents] = useState<spaces.AgentListing[] | null>(null)
+    const activeAgents = agents?.filter(({ agent, hosting }) => !agent.deactivatedAt && !agent.removedAt && hosting?.status !== 'deleting' && hosting?.status !== 'deleted') ?? null
     const [screen, setScreen] = useState<Screen>({ name: 'list' })
     const [busy, setBusy] = useState(false)
     const [chosen, setChosen] = useState<string | null>(null)
@@ -376,7 +377,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
 
     const load = useCallback(async () => {
         try {
-            setAgents((await window.ipc.invoke('spaces:listAgents', { orgId: org.id })).agents)
+            const { agents: listing } = await window.ipc.invoke('spaces:listAgents', { orgId: org.id })
+            setAgents(listing)
+            for (const { agent } of listing) {
+                if (agent.deactivatedAt || agent.removedAt) applyProfileUpdate(org.id, agent)
+            }
         } catch (err) {
             setAgents([])
             toast(err instanceof Error ? err.message : 'Could not load agents', 'error')
@@ -608,9 +613,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             description="Agents work things out for themselves; bots run a service's commands. Each is a member with its own key: add one, connect it, then add it to spaces."
                         />
                         <Body>
-                            {agents === null ? (
+                            {activeAgents === null ? (
                                 <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading agents…</div>
-                            ) : agents.length === 0 ? (
+                            ) : activeAgents.length === 0 ? (
                                 <div className="flex flex-col items-center gap-2 py-8 text-center">
                                     <Bot className="size-6 text-muted-foreground" />
                                     <div className="text-sm font-medium">You have no agents or bots yet</div>
@@ -621,7 +626,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 </div>
                             ) : (
                                 <div className="flex flex-col gap-3">
-                                    {([['Agents', agents.filter((a) => !isBot(a.agent.agentKind))], ['Bots', agents.filter((a) => isBot(a.agent.agentKind))]] as const).map(([heading, group]) =>
+                                    {([['Agents', activeAgents.filter((a) => !isBot(a.agent.agentKind))], ['Bots', activeAgents.filter((a) => isBot(a.agent.agentKind))]] as const).map(([heading, group]) =>
                                         group.length === 0 ? null : (
                                             <section key={heading} aria-label={heading}>
                                                 <h3 className="mb-1 text-[11px] font-medium text-muted-foreground">{heading}</h3>

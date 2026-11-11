@@ -3,7 +3,7 @@ import { onServer } from '@x/shared/dist/spaces.js'
 import { MemberDirectory } from '@/components/spaces/member-directory'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
-import { SpaceAccessContext, useSpaceAccess } from '@/lib/spaces-access'
+import { SpaceAccessProvider, useSpaceAccess } from '@/lib/spaces-access'
 import { StartHere } from '@/components/spaces/start-here'
 import '@/styles/spaces.css'
 import '@/styles/spaces-header.css'
@@ -233,7 +233,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
             />
             <div className="flex min-w-0 min-h-0 flex-1 flex-col">
             {selectedSpace ? (
-                <SpaceAccessContext.Provider value={{ writable: !selectedSpace.archived, archived: selectedSpace.archived === true }}>
+                <SpaceAccessProvider orgId={selectedOrg.id} space={selectedSpace}>
                 <SpacePane
                     key={`${selectedOrg.id}/${selectedSpace.id}`}
                     org={selectedOrg}
@@ -247,7 +247,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                     railPeekRef={railPeekRef}
                     active={active}
                 />
-                </SpaceAccessContext.Provider>
+                </SpaceAccessProvider>
             ) : selection?.spaceId ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-sm text-muted-foreground">
                     <p>This chat is unavailable or you are no longer in it.</p>

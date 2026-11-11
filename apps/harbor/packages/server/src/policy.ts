@@ -116,8 +116,12 @@ export function canListOnInvite(space: Space, membership: Membership | undefined
  * An archived space refuses every write that would add to it (spec §6,
  * 2026-10-13). Asked by the space lock for every member's act; leaving and
  * unarchiving opt out, and personal state (read marks, follows) never asks.
+ * A deleted agent's DM is read-only too (2026-11-11, spec §8 Managed deletion).
  */
-export function canWriteSpace(space: Space): Decision {
+export function canWriteSpace(space: Space, members: readonly Member[] = []): Decision {
+  if (space.kind === 'direct' && members.some((m) => m.kind === 'agent' && (m.deactivatedAt || m.removedAt))) {
+    return { code: 'forbidden', message: 'this agent was deleted — its conversation is read-only' };
+  }
   if (!space.archived) return null;
   return { code: 'forbidden', message: 'this space is archived — an admin can unarchive it' };
 }
@@ -194,6 +198,7 @@ export function canAddAgent(actor: Member): Decision {
  * §4 Agent members). An agent without an owner takes no keys.
  */
 export function canCreateAgentKey(actor: Member, agent: Member): Decision {
+  if (agent.deactivatedAt || agent.removedAt) return { code: 'invalid_request', message: 'this agent was deleted' };
   if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
   return { code: 'forbidden', message: 'only the agent’s owner can create its keys' };
 }

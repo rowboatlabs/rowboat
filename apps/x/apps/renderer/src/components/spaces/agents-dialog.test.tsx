@@ -926,7 +926,10 @@ describe('AgentsDialog', () => {
         // Back on Overview: the Danger zone has nothing left.
         expect(await screen.findByRole('status')).toHaveTextContent('Removing from Maritime')
         expect(screen.queryByRole('tab', { name: 'Danger zone' })).toBeNull()
-        expect(screen.getByText('No active keys.')).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'New key' })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+        expect(await screen.findByText('You have no agents or bots yet')).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /Scout/ })).toBeNull()
     })
 
     // The management area (2026-10-27): the owner manages the VM from the page.

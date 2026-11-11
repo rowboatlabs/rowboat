@@ -95,8 +95,8 @@ export function isOwnAgent(member: Pick<spaces.Member, 'kind' | 'ownerId'>, self
  * 2026-11-09)? A person: yes, when they are a contact (the server checks the
  * shared space). An agent: its owner only. Pickers offer exactly these.
  */
-export function canMessageDirect(member: Pick<spaces.Member, 'kind' | 'ownerId'>, selfMemberId: string | undefined): boolean {
-    return member.kind !== 'agent' || isOwnAgent(member, selfMemberId)
+export function canMessageDirect(member: Pick<spaces.Member, 'kind' | 'ownerId' | 'deactivatedAt' | 'removedAt'>, selfMemberId: string | undefined): boolean {
+    return !isDeparted(member) && (member.kind !== 'agent' || isOwnAgent(member, selfMemberId))
 }
 
 /**

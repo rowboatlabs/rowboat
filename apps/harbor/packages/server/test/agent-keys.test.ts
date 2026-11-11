@@ -106,6 +106,13 @@ describe('the key, on every face', () => {
   it('is refused when unknown', async () => {
     expect((await as('rbk_not-a-real-key-at-all').get('/v1/me')).status).toBe(401);
   });
+
+  it('refuses a deactivated agent even if a key has not been revoked yet', async () => {
+    const { agent: retired, key } = (await as('dev-harsh').post('/v1/agents', { displayName: 'Retired' })).body;
+    await harbor.store.deactivateMember(retired.id, harbor.service.now());
+    expect((await harbor.store.getAgentKey(key.id))?.revokedAt).toBeUndefined();
+    expect((await as(key.secret).get('/v1/me')).status).toBe(401);
+  });
 });
 
 describe('who controls the keys', () => {

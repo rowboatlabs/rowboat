@@ -151,7 +151,10 @@ export class Kernel {
       const space = await this.requireSpace(spaceId);
       const membership = await this.store.getMembership(spaceId, ctx.memberId);
       enforce(canAccessSpace(space, membership));
-      if (opts.archived !== 'allow') enforce(canWriteSpace(space));
+      if (opts.archived !== 'allow') {
+        const members = space.kind === 'direct' ? await this.store.listSpaceMembers(spaceId) : [];
+        enforce(canWriteSpace(space, members));
+      }
       return fn(membership!);
     });
   }

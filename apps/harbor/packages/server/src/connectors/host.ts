@@ -56,7 +56,7 @@ export class HostedConnectors {
 
   /** Start the agent's connector if Harbor runs one for its connection and it isn't running yet. */
   ensure(agent: Member): void {
-    if (this.running.has(agent.id) || !agent.agentConnection) return;
+    if (agent.deactivatedAt || agent.removedAt || this.running.has(agent.id) || !agent.agentConnection) return;
     const platform = PLATFORMS[agent.agentConnection];
     if (!platform) return;
     this.running.set(agent.id, platform.start(this.env(agent)));
