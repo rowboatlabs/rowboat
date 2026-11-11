@@ -216,11 +216,12 @@ describe('managed agents on a deployment that bills', () => {
     expect(page.body.usage).toMatchObject({ machineCents: 3, llmCents: 0.25 });
   });
 
-  it('takes the agent off the gateway when its owner adds a key', async () => {
+  it('changes model configuration without revoking or rotating the agent’s gateway key', async () => {
+    const key = billing.keys.get(refOf(hermes))!.key;
     const r = await as('dev-ramnique').put(`/v1/agents/${hermes.id}/hosting/llm`, { provider: 'openrouter', apiKey: 'sk-or-owner-key-1234' });
     expect(r.status).toBe(200);
     expect(r.body.hosting).toMatchObject({ funding: 'own', billed: true, llm: { provider: 'openrouter' } });
-    expect(billing.keys.get(refOf(hermes))!.revoked).toBe(true);
+    expect(billing.keys.get(refOf(hermes))).toMatchObject({ key, revoked: false });
     expect(envOf(hermes).get('OPENROUTER_API_KEY')?.value).toBe('sk-or-owner-key-1234');
   });
 
@@ -294,6 +295,7 @@ describe('managed agents on a deployment that bills', () => {
 
   it('on delete, revokes the gateway key, reports the last cost, leaves the platform and the plan', async () => {
     const ref = refOf(hermes);
+    expect(billing.keys.get(ref)!.revoked).toBe(false);
     const reads = fake.usageReads.length;
     expect((await as('dev-ramnique').delete(`/v1/agents/${hermes.id}/hosting`)).status).toBe(200);
     await until(async () => ((await listing(hermes.id))?.hosting?.status === 'deleted' ? true : undefined), 'deleted');

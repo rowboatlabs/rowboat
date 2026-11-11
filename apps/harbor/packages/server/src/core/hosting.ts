@@ -527,6 +527,8 @@ export class Hosting {
    * the cap with it (the provider's doing), then the record says `own`; a
    * failure before the record leaves the trial as it was, and a retry does
    * the same again. Also how a key is replaced.
+   * The agent's gateway identity is independent of model configuration
+   * (spec §8 Maritime, amended 2026-11-11).
    */
   async setLlm(ctx: ActorCtx, agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }): Promise<AgentHosting> {
     const { row, ops } = await this.managed(ctx, agentId);
@@ -540,8 +542,6 @@ export class Hosting {
     // Codex honours a ChatGPT sign-in over a key on its built-in provider: the sign-in goes first, so the key is what it runs on.
     if (row.llm?.provider === 'chatgpt') await this.platform(() => ops.signOut(row.kind));
     await this.platform(() => ops.setLlm({ kind: row.kind, provider: input.provider, apiKey, ...(model ? { model } : {}) }));
-    // Off Rowboat's credits (2026-11-04): the gateway key is revoked before the record says `own`, so a failure leaves a retry to do both.
-    if (row.funding === 'credits' && this.billing && row.billingCustomer) await this.billing.revokeGatewayKey(row.billingCustomer, row.externalUserId);
     const at = this.k.now();
     const next: StoredAgentHosting = {
       ...row,
