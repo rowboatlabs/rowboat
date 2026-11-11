@@ -1,21 +1,34 @@
 import posthog from 'posthog-js'
 
+/** Which surface sends the events: the desktop renderer, or the Spaces web app (2026-11-11). */
+export type AnalyticsPlatform = 'desktop' | 'web'
+
 let appVersion: string | undefined
 let apiUrl: string | undefined
+let platform: AnalyticsPlatform = 'desktop'
 
 function appVersionProperties(): Record<string, string> {
   return appVersion ? { app_version: appVersion } : {}
 }
 
-export function configureAnalyticsContext(props: { appVersion?: string; apiUrl?: string }) {
+export function configureAnalyticsContext(props: { appVersion?: string; apiUrl?: string; platform?: AnalyticsPlatform }) {
   appVersion = props.appVersion?.trim() || undefined
   apiUrl = props.apiUrl?.trim() || undefined
+  platform = props.platform ?? platform
 
-  // `platform` distinguishes desktop events from any other surface (e.g. the
-  // web dashboard's autocapture) sharing the PostHog project.
-  const eventProperties = { platform: 'desktop', ...appVersionProperties() }
+  // `platform` distinguishes desktop events from any other surface (the
+  // Spaces web app, mobile, the web dashboard's autocapture) sharing the
+  // PostHog project.
+  const eventProperties = { platform, ...appVersionProperties() }
   posthog.register(eventProperties)
 
+  // The person properties stay the desktop's: one person uses both surfaces,
+  // and `platform: 'desktop'` on the person segments desktop users. The web
+  // app marks the person with `has_used_web` instead (2026-11-11).
+  if (platform !== 'desktop') {
+    posthog.people.set_once({ [`has_used_${platform}`]: true })
+    return
+  }
   const personProperties = {
     ...(apiUrl ? { api_url: apiUrl } : {}),
     ...eventProperties,
@@ -32,7 +45,7 @@ export function identifyUser(userId: string, properties?: Record<string, unknown
 
 export function resetAnalyticsIdentity() {
   posthog.reset()
-  configureAnalyticsContext({ appVersion, apiUrl })
+  configureAnalyticsContext({ appVersion, apiUrl, platform })
 }
 
 export function chatSessionCreated(runId: string) {

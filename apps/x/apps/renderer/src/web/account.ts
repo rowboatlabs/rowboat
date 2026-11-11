@@ -10,7 +10,7 @@ import {
     SessionEndedError,
     type SpacesTokens,
 } from '@x/spaces-client'
-import { tokenEmail } from '@/lib/spaces-account'
+import { tokenEmail, tokenSubject } from '@/lib/spaces-account'
 import { DEV_HARBOR, SERVER_URL } from './config'
 
 // The browser's Rowboat session (2026-10-09, the Spaces web app): the phone's
@@ -85,6 +85,14 @@ window.addEventListener('storage', (event) => {
  */
 export function sessionEmail(): string | null {
     return tokenEmail(readSession()?.tokens.access)
+}
+
+/**
+ * The signed-in account's id (the access token's `sub`), for analytics only
+ * (web/analytics.ts). The same id Harbor bills by (harbor billing.ts `accountFor`).
+ */
+export function sessionSubject(): string | null {
+    return tokenSubject(readSession()?.tokens.access)
 }
 
 /** A local dev Harbor needs no session: its tokens are dev tokens. */
