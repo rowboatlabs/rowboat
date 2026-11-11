@@ -12,7 +12,7 @@ const KEY = 'rbg_composio_identity';
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
 
-function turn(kind: string, services: boolean, session?: string, dir?: string) {
+function turn(kind: string, services: boolean, session?: string, dir?: string, fromReloadFile = false) {
   const root = dir ?? mkdtempSync(join(tmpdir(), 'maritime-composio-'));
   if (!dir) dirs.push(root);
   mkdirSync(join(root, 'bin'), { recursive: true });
@@ -52,19 +52,45 @@ if (name === 'hermes' && args[0] === 'config' && args[1] === 'set') {
     serverUrl: 'https://spaces.rowboat.test', agentKey: 'rbk_spaces_identity',
     promptPath: join(root, 'request.prompt'), outPath: join(root, 'turn.jsonl'),
     errPath: join(root, 'turn.err'), lastPath: join(root, 'turn.last'), ...(session ? { session } : {}),
-  }).replaceAll('/opt/data', root).replaceAll('/data', root);
+  }).replaceAll('/opt/data', root).replaceAll('/data', root).replaceAll('/etc/maritime-env', join(root, 'maritime-env'));
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}`, CAPTURE: capture,
     ROWBOAT_LLM_PROVIDER: 'openrouter', OPENROUTER_API_KEY: 'sk_or_own_model', ROWBOAT_LLM_MODEL: '',
   };
   delete env.ROWBOAT_COMPOSIO_MCP_URL;
   delete env.ROWBOAT_GATEWAY_KEY;
-  if (services) Object.assign(env, { ROWBOAT_COMPOSIO_MCP_URL: ENDPOINT, ROWBOAT_GATEWAY_KEY: KEY });
+  if (services) {
+    if (fromReloadFile) {
+      // 2026-11-11: reload updates this file, while exec still has its boot env.
+      writeFileSync(join(root, 'maritime-env'), `export ROWBOAT_COMPOSIO_MCP_URL='${ENDPOINT}'\nexport ROWBOAT_GATEWAY_KEY='${KEY}'\n`, { mode: 0o600 });
+    } else Object.assign(env, { ROWBOAT_COMPOSIO_MCP_URL: ENDPOINT, ROWBOAT_GATEWAY_KEY: KEY });
+  }
   execFileSync('sh', ['-c', script], { env, stdio: 'pipe' });
   const calls = readFileSync(capture, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { name: string; args: string[] });
   return { root, calls };
 }
 
 describe('managed runtimes receive Composio independently of their model', () => {
+  it.each(['hermes', 'codex', 'claude-code'])('loads reloaded Composio credentials when %s exec has only the boot environment', kind => {
+    const { root, calls } = turn(kind, true, 'existing-thread', undefined, true);
+    if (kind === 'hermes') {
+      expect(readFileSync(join(root, '.env'), 'utf8')).toContain(`ROWBOAT_GATEWAY_KEY=${KEY}`);
+      const config = readFileSync(join(root, 'config.yaml'), 'utf8');
+      expect(config).toContain('mcp_servers.composio.url: ${ROWBOAT_COMPOSIO_MCP_URL}');
+      expect(config).not.toContain(KEY);
+      const observations = readFileSync(join(root, 'mcp-observations.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(observations.every(row => row.complete && row.profileReady)).toBe(true);
+    } else if (kind === 'codex') {
+      const args = calls.find(call => call.args[0] === 'exec')!.args;
+      expect(args).toContain(`mcp_servers.composio.url="${ENDPOINT}"`);
+      expect(args).toContain('mcp_servers.composio.bearer_token_env_var="ROWBOAT_GATEWAY_KEY"');
+      expect(args.join(' ')).not.toContain(KEY);
+    } else {
+      const config = JSON.parse(readFileSync(join(root, 'rowboat/mcp.json'), 'utf8'));
+      expect(config.mcpServers.composio.headers.Authorization).toBe('Bearer ${ROWBOAT_GATEWAY_KEY}');
+      expect(JSON.stringify(config)).not.toContain(KEY);
+    }
+  });
+
   it('writes Hermes profile secrets and placeholder config, restoring them after a boot rewrite', () => {
     const first = turn('hermes', true);
     expect(readFileSync(join(first.root, '.env'), 'utf8')).toContain(`ROWBOAT_GATEWAY_KEY=${KEY}`);
