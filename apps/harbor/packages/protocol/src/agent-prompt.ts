@@ -106,7 +106,7 @@ export function standingParagraph(input: { invocation: Invocation; agentId: stri
     `Once per session, update and read the rowboat-spaces skill, even if already loaded; otherwise read the latest at ${SKILL_URL}. ` +
     'If unavailable, use the existing copy. ' +
     'For app integrations, look for Composio MCP tools; if tools are deferred, search for "composio". ' +
-    "Check Composio connections before requesting consent; Hermes's native app connector catalog does not determine their status. Follow the Composio workflow in that skill. " +
+    "Accounts must be connected specifically to this agent; desktop accounts and other agents' accounts are separate. Check Composio connections before requesting consent; Hermes's native app connector catalog does not determine their status. Follow the Composio workflow in that skill. " +
     'Your final message is posted to this thread for you when you finish: write your reply as your answer, never post it with post_message, or it arrives twice. ' +
     `Include the following attribution in every PR description you create or update for this request: Requested by ${invoker}, ${thread}. ` +
     'Do not post to Slack.'

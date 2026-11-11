@@ -96,6 +96,11 @@ function parse(text: string): unknown {
 /** Shell-quote one word. */
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+// 2026-11-11: Maritime's reload writes this root-readable shell environment;
+// exec retains the container's boot env (observed on the custom Hermes image).
+// Load it before dropping privileges or configuring MCP and model access.
+const MARITIME_ENV = 'if [ -r /etc/maritime-env ]; then . /etc/maritime-env; fi';
+
 /** Reasoning effort, the harness's own three levels (Codex's and Hermes's flag). */
 const EFFORTS = ['low', 'medium', 'high'].map((id) => ({ id, label: id[0]!.toUpperCase() + id.slice(1) }));
 /** What the Hermes turn runs on the VM for its model list: Hermes's own catalog for the configured provider, cached by Hermes itself. */
@@ -197,6 +202,7 @@ const hermes: Runtime = {
     // so the two values are written there too, with `hermes config set`, whenever they differ.
     return [
       'set -e',
+      MARITIME_ENV,
       `export HERMES_HOME=/opt/data HOME=/opt/data ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'export PATH="/command:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"',
       'mkdir -p /opt/data/rowboat /opt/data/workspace',
@@ -250,6 +256,7 @@ const hermes: Runtime = {
   options: (models) => [...modelOption(models), { type: 'select', key: 'effort', label: 'Effort', choices: EFFORTS }],
   modelsCommand: () => [
     'set -e',
+    MARITIME_ENV,
     'export HERMES_HOME=/opt/data HOME=/opt/data',
     'export PATH="/command:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"',
     'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" "$@"; }; else run() { "$@"; }; fi',
@@ -276,6 +283,7 @@ const codex: Runtime = {
     // The template's own flags (its server.js, read 2026-10-26): the VM is the sandbox, the final message goes to -o.
     return [
       'set -e',
+      MARITIME_ENV,
       `export CODEX_HOME=/data/.codex ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
@@ -323,6 +331,7 @@ const codex: Runtime = {
   options: (models) => [...modelOption(models), { type: 'select', key: 'effort', label: 'Effort', choices: EFFORTS }],
   modelsCommand: () => [
     'set -e',
+    MARITIME_ENV,
     'export CODEX_HOME=/data/.codex',
     // Match the turn’s account routing (2026-11-01): a ChatGPT sign-in must not fall back to the platform proxy.
     'if [ "$ROWBOAT_LLM_PROVIDER" != openai ] && codex login status 2>&1 | grep -q ChatGPT; then unset OPENAI_BASE_URL; fi',
@@ -353,6 +362,7 @@ const claudeCode: Runtime = {
     // the CLI ships inside the Agent SDK the template installs, or on PATH in an image that installs it.
     return [
       'set -e',
+      MARITIME_ENV,
       `export IS_SANDBOX=1 CLAUDE_CONFIG_DIR=/data/.claude ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
@@ -384,6 +394,7 @@ const claudeCode: Runtime = {
   options: (models) => modelOption(models),
   modelsCommand: () => [
     'set -e',
+    MARITIME_ENV,
     `f=/data/rowboat/models.json; if [ -n "$ANTHROPIC_API_KEY" ] && { [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +1440 2>/dev/null)" ]; }; then curl -sf -m 15 "\${ANTHROPIC_BASE_URL:-https://api.anthropic.com}/v1/models?limit=100" -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" > "$f.tmp" && mv "$f.tmp" "$f" || true; fi`,
   ].join('\n'),
   models(text) {
