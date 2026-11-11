@@ -73,7 +73,7 @@ export class MaritimeConnector implements RunningConnector {
   private stopped = false;
   private readonly stopping = new AbortController();
   private declared = '';
-  /** The harness's own model list, as the last catalogue refresh left it on the VM (runtimes.ts `modelsPath`): the composer's Model option. */
+  /** The harness's own model list, as the last catalogue refresh left it on the VM (`<root>/rowboat/models.json`): the composer's Model option. */
   private models: ModelChoice[] = [];
   private modelsText = '';
   private refreshingModels = false;
@@ -171,6 +171,28 @@ export class MaritimeConnector implements RunningConnector {
     if (executionId) await this.safe(async () => (await this.api()).cancelExecution(this.maritimeAgentId, executionId), undefined);
   }
 
+  /**
+   * Where this box's files API is rooted (2026-11-11): the runtime's root, unless the runtime roots
+   * differently by framework, in which case the box's Maritime record says which. Read once; a
+   * failure to read it falls back to the runtime's root and asks again next time.
+   */
+  private rootPromise: Promise<string> | undefined;
+  private root(): Promise<string> {
+    this.rootPromise ??= (async () => {
+      const runtime = this.runtime;
+      if (!runtime.rootFor || !this.maritimeAgentId) return runtime.root;
+      try {
+        const agent = await (await this.api()).agent(this.maritimeAgentId);
+        return runtime.rootFor(agent.framework);
+      } catch (err) {
+        this.env.log('could not read the Maritime record for the files root; using the runtime default', { error: (err as Error).message });
+        this.rootPromise = undefined;
+        return runtime.root;
+      }
+    })();
+    return this.rootPromise;
+  }
+
   // --- one invocation --------------------------------------------------------------------
 
   private async run(invocation: Invocation): Promise<void> {
@@ -184,7 +206,7 @@ export class MaritimeConnector implements RunningConnector {
     if (!awake) return;
     const runtime = this.runtime;
     const session = record.session ?? runtime.sessionFor?.(`${spaceId}-${threadRootId}`.toLowerCase());
-    const dir = `${runtime.root}/rowboat`;
+    const dir = `${await this.root()}/rowboat`;
     const files = { prompt: `${dir}/${invocation.id}.prompt`, out: `${dir}/${invocation.id}.jsonl`, err: `${dir}/${invocation.id}.err`, last: `${dir}/${invocation.id}.last` };
     record = { ...record, ...(session ? { session } : {}), turn: { invocationId: invocation.id, triggerMessageId: invocation.trigger.messageId, files } };
     await this.save(spaceId, threadRootId, record);
@@ -414,7 +436,7 @@ export class MaritimeConnector implements RunningConnector {
           execution = await api.execution(this.maritimeAgentId, execution.executionId);
         }
         if (this.stopped || execution.status !== 'completed' || execution.exitCode !== 0) return;
-        const text = await api.readFile(this.maritimeAgentId, this.runtime.modelsPath);
+        const text = await api.readFile(this.maritimeAgentId, `${await this.root()}/rowboat/models.json`);
         if (!text || text === this.modelsText) return;
         const models = this.runtime.models(text);
         if (models.length === 0) return;
