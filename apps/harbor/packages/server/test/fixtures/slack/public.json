@@ -1,0 +1,12 @@
+{
+  "users.json": [
+    {"id":"U1","name":"alex","profile":{"display_name":"Alex"}},
+    {"id":"U2","name":"former","deleted":true},
+    {"id":"UNUSED","name":"Not in channel"}
+  ],
+  "channels.json": [{"id":"C1","name":"general","members":["U1","U2"],"topic":{"value":"Team chat"},"purpose":{"value":"Announcements"}}],
+  "general/2026-01-01.json": [
+    {"type":"message","user":"U2","ts":"1767225600.000002","thread_ts":"1767225600.000001","text":"A reply"},
+    {"type":"message","user":"U1","ts":"1767225600.000001","text":"Hello <@U2>","reactions":[{"name":"wave","count":5,"users":["U2"]}],"files":[{"id":"F1","name":"notes.pdf","permalink":"https://example.slack.com/files/U1/F1"}]}
+  ]
+}

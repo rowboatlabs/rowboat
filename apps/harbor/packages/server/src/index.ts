@@ -39,3 +39,6 @@ export { DEFAULT_ORG_ID } from './pg-store.js';
 export { migrate, MIGRATIONS } from './migrations.js';
 export type { Migration } from './migrations.js';
 export type { BindIdentity } from './service.js';
+
+export { previewSlackExport, SlackExportError, SLACK_PREVIEW_LIMITS } from './imports/slack.js';
+export type { SlackPreview, SlackChannel, SlackMessage, SlackIdentity, SlackReaction, SlackWarning, SlackLimits } from './imports/slack.js';
