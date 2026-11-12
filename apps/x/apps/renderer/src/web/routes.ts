@@ -34,6 +34,7 @@ export function parseRoute(pathname: string): WebRoute {
     if (section !== 's' || !spaceId) return { rail: GENERAL }
     const rail: RailSelection =
         kind === 'discussions' ? { kind: 'discussions', ...(id === 't' && parts[4] ? { rootMessageId: parts[4] } : {}) }
+        : kind === 'settings' ? { kind: 'settings' }
         : kind === 'files' ? { kind: 'files' }
         : kind === 't' && id ? { kind: 'thread', rootMessageId: id }
         : kind === 'a' && id ? { kind: 'file', assetId: id }
@@ -50,6 +51,7 @@ export function routePath(target: { spaceId?: string; view?: OrgView; rail?: Rai
     switch (rail.kind) {
         case 'discussions':
             return `${space}/discussions${rail.rootMessageId ? `/t/${encodeURIComponent(rail.rootMessageId)}` : ''}`
+        case 'settings':
         case 'files':
             return `${space}/${rail.kind}`
         case 'thread':

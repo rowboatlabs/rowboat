@@ -10,7 +10,7 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 // pass): New space leads, Activity and Threads above, then Agents (highlighted),
 // Groups and People, each newest first with its own +; your link at the foot.
 
-const { org, topics, activity } = vi.hoisted(() => ({
+const { org, topics, activity, permissions } = vi.hoisted(() => ({
     org: {
         id: 'server', name: 'Spaces', memberId: 'me', directLabels: {},
         spaces: [{ id: 'main', name: 'main', createdAt: '2026-09-01' }, { id: 'founders', name: 'founders', createdAt: '2026-09-02' }],
@@ -18,6 +18,7 @@ const { org, topics, activity } = vi.hoisted(() => ({
     },
     topics: [{ id: 'archived', rootMessageId: 'archived', title: 'Archived discussion', lastActivityAt: '2026-09-05', archived: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: `topic${i}`, rootMessageId: `root${i}`, title: `Discussion ${i}`, lastActivityAt: `2026-09-0${i + 1}` }))],
     activity: {} as Record<string, string>,
+    permissions: { role: 'admin' },
 }))
 vi.mock('@/hooks/use-spaces', () => ({ useSpacesOrgs: vi.fn(() => ({ orgs: [org], loading: false, refresh: vi.fn() })), useSpaceFeed: () => ({ topics, loaded: true }), openSelfDirect: vi.fn(), refreshSpacesOrgs: vi.fn() }))
 // The unread map is the ONE thing both surfaces read; here it is built from the
@@ -39,6 +40,7 @@ vi.mock('@/hooks/use-space-chat', async () => {
 vi.mock('@/hooks/use-space-members', async importOriginal => ({
     ...await importOriginal<typeof import('@/hooks/use-space-members')>(),
     prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me',
+    useSpaceMembers: () => [{ id: 'me', role: permissions.role }],
     useOrgRoster: () => [{ id: 'p0', displayName: 'Person 0', kind: 'human' }, { id: 'p1', displayName: 'Person 1', kind: 'human' }, { id: 'claude', displayName: 'Claude', kind: 'agent', ownerId: 'me', agentKind: 'claude-code' }],
 }))
 vi.mock('@/components/spaces-view', () => ({}))
@@ -52,6 +54,7 @@ vi.mock('@/lib/spaces-direct', () => ({
     spaceDisplayName: (_org: unknown, dm: { name: string }) => dm.name,
 }))
 beforeEach(() => {
+    permissions.role = 'admin'
     applyMemberPresence(org.id, 'p0', true)
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
     vi.stubGlobal('ipc', { on: vi.fn(() => () => {}), invoke: vi.fn(async () => ({ threads: [], spaces: [] })) })
@@ -130,6 +133,23 @@ describe('the chat list', () => {
         fireEvent.keyDown(screen.getByRole('button', { name: 'Options for founders' }), { key: 'Enter' })
         fireEvent.click(screen.getByRole('menuitem', { name: 'Rename space' }))
         expect(screen.getByDisplayValue('founders')).toBeInTheDocument()
+    })
+
+    it('opens settings for the selected space from its options menu', () => {
+        const onOpenSettings = vi.fn()
+        nav({ onOpenSettings })
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Options for founders' }), { key: 'Enter' })
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Space settings' }))
+        expect(onOpenSettings).toHaveBeenCalledTimes(1)
+        expect(onOpenSettings.mock.calls[0][0]).toBe(org.id)
+        expect(onOpenSettings.mock.calls[0][1]).toBe(org.spaces.find(s => s.name === 'founders')!.id)
+    })
+
+    it('hides settings from a non-admin in the target space', () => {
+        permissions.role = 'member'
+        nav({ onOpenSettings: vi.fn() })
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Options for founders' }), { key: 'Enter' })
+        expect(screen.queryByRole('menuitem', { name: 'Space settings' })).not.toBeInTheDocument()
     })
 
     it('nests and expands discussions under a group', () => {

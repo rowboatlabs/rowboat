@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { railKey, readRailSelection } from './spaces-selection'
 
 describe('space collection navigation', () => {
-    it.each(['files', 'discussions'] as const)('round-trips the %s destination through history', (kind) => {
+    it.each(['files', 'discussions', 'settings'] as const)('round-trips the %s destination through history', (kind) => {
         const restored = readRailSelection(JSON.parse(JSON.stringify({ kind })))
         expect(restored).toEqual({ kind })
         expect(railKey(restored)).toBe(kind)

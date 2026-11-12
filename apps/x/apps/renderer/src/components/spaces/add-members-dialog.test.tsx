@@ -63,6 +63,21 @@ describe('AddMembersDialog', () => {
         expect(screen.queryByRole('checkbox', { name: /Gone/ })).not.toBeInTheDocument()
     })
 
+    it('limits the agent picker to owned agents and preserves the add route', async () => {
+        render(<AddMembersDialog kind="agents" org={org} space={space} members={[ram]} open onOpenChange={vi.fn()} />)
+        await waitFor(() => expect(screen.getByRole('checkbox', { name: /Replicas/ })).toBeInTheDocument())
+        expect(screen.queryByRole('checkbox', { name: /Harsh|Scout/ })).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('checkbox', { name: /Replicas/ }))
+        fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:addMembers', { orgId: org.id, spaceId: space.id, memberIds: [replicas.id], invocableBy: 'members' }))
+    })
+
+    it('keeps agents out of the people picker', async () => {
+        render(<AddMembersDialog kind="people" org={org} space={space} members={[ram]} open onOpenChange={vi.fn()} />)
+        await waitFor(() => expect(screen.getByRole('checkbox', { name: /Harsh/ })).toBeInTheDocument())
+        expect(screen.queryByRole('checkbox', { name: /Replicas|Scout/ })).not.toBeInTheDocument()
+    })
+
     it('adds nobody until someone is picked', async () => {
         render(<AddMembersDialog org={org} space={space} members={[ram]} open onOpenChange={vi.fn()} />)
         await waitFor(() => expect(screen.getByRole('checkbox', { name: /Harsh/ })).toBeInTheDocument())
