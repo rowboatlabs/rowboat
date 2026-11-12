@@ -431,6 +431,15 @@ export class Hosting {
     return this.remove(agentId, row);
   }
 
+  /** Delete any agent its owner made (2026-11-13): a managed one with its hosting, any other as Agents.delete does. */
+  async deleteAgent(ctx: ActorCtx, agentId: string): Promise<{ agent: Member; hosting?: AgentHosting }> {
+    await this.agents.deletable(ctx, agentId);
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row) return { agent: await this.agents.delete(ctx, agentId) };
+    const hosting = await this.remove(agentId, row);
+    return { agent: (await this.k.store.getMember(agentId))!, hosting };
+  }
+
   /** Account deletion (2026-11-09): every managed agent the person owns goes with them, so nothing keeps billing. */
   async deleteOwnedBy(ownerId: string): Promise<void> {
     for (const agent of await this.k.store.listAgents(ownerId)) {

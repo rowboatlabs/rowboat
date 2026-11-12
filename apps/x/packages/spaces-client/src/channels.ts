@@ -23,7 +23,7 @@ export type HarborChannel =
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listContacts'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
-  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
+  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:deleteAgent' | 'spaces:setHostingLlm'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower' | 'spaces:getHostingSize' | 'spaces:setHostingSize'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
   | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
@@ -142,6 +142,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
     'spaces:managedAgentKinds': async (args) => getClient(args.orgId).managedAgentKinds(),
     'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
     'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),
+    'spaces:deleteAgent': async (args) => getClient(args.orgId).deleteAgent(args.agentId),
     'spaces:setHostingLlm': async ({ orgId, agentId, ...input }) => ({ hosting: await getClient(orgId).setHostingLlm(agentId, input) }),
     'spaces:getHosting': async (args) => getClient(args.orgId).getHosting(args.agentId),
     'spaces:setHostingEnv': async (args) => ({ env: await getClient(args.orgId).setHostingEnv(args.agentId, args.key, args.value, args.secret ?? false) }),

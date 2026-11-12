@@ -3994,6 +3994,11 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
     res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
   },
+  /** Delete an agent its owner made, whatever runs it (2026-11-13); a managed one's hosting goes too. */
+  'spaces:deleteAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>(), hosting: z.custom<SpacesTypes.AgentHosting>().optional() }),
+  },
   /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */
   'spaces:setHostingLlm': {
     req: z.object({ orgId: z.string(), agentId: z.string(), provider: z.custom<SpacesTypes.LlmProvider>(), apiKey: z.string(), model: z.string().optional() }),

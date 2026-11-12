@@ -430,6 +430,11 @@ export class SpacesClient {
     return this.request('POST', routes.createManagedAgent.path, routes.createManagedAgent.response, input);
   }
 
+  /** Delete an agent its owner made, whatever runs it (api.ts deleteAgent, 2026-11-13); a managed one's hosting goes too. */
+  async deleteAgent(agentId: string): Promise<{ agent: Member; hosting?: AgentHosting }> {
+    return this.request('DELETE', `/v1/agents/${encodeURIComponent(agentId)}`, routes.deleteAgent.response);
+  }
+
   /** Delete a managed agent's hosting (api.ts deleteManagedAgent): its keys go at once, the platform's resources in the background. */
   async deleteManagedAgent(agentId: string): Promise<AgentHosting> {
     return (await this.request('DELETE', `/v1/agents/${encodeURIComponent(agentId)}/hosting`, routes.deleteManagedAgent.response)).hosting;

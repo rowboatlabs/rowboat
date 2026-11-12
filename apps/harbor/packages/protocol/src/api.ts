@@ -563,6 +563,17 @@ export const routes = {
     response: z.object({ hosting: AgentHosting }),
   },
   /**
+   * Delete an agent its owner made, whatever runs it (2026-11-13): retired as
+   * a managed agent is (deleteManagedAgent), and a managed one's hosting goes
+   * too. The owner only. Render face only, like keys.
+   */
+  deleteAgent: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ agent: Member, hosting: AgentHosting.optional() }),
+  },
+  /**
    * Managing a managed agent's VM (spec §8 Maritime, the management area,
    * 2026-10-27): the owner or an admin, on a hosting that is `ready`, through
    * Harbor with the deployment's own platform key. Render face only. Each

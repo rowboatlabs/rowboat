@@ -249,6 +249,9 @@ export class HarborService {
   deleteManagedAgent(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
     return this.hosting.deleteManaged(ctx, agentId);
   }
+  deleteAgent(ctx: ActorCtx, agentId: string): Promise<{ agent: Member; hosting?: AgentHosting }> {
+    return this.hosting.deleteAgent(ctx, agentId);
+  }
   /** Managing a managed agent's VM (the management area, 2026-10-27): the owner or an admin, through the deployment's key. */
   getHosting(ctx: ActorCtx, agentId: string) {
     return this.hosting.get(ctx, agentId);

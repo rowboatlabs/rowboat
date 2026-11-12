@@ -24,6 +24,7 @@ import {
   canCreateAgentKey,
   canRenameAgent,
   canRevokeAgentKey,
+  canDeleteAgent,
   canSetAgentHook,
   canSetSuperAgent,
   canSuperAgentCreate,
@@ -163,6 +164,9 @@ describe('policy', () => {
     expect(canRevokeAgentKey(owner, hermes)).toBeNull();
     expect(canRevokeAgentKey(admin, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canRevokeAgentKey(other, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canDeleteAgent(owner, hermes)).toBeNull();
+    expect(canDeleteAgent(admin, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canDeleteAgent(other, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canSetAgentHook(owner, hermes)).toBeNull();
     expect(canSetAgentHook(admin, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canClearAgentHook(admin, hermes)).toMatchObject({ code: 'forbidden' });

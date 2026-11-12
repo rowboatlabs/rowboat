@@ -91,6 +91,7 @@ export async function buildRuntime(input: RuntimeInput): Promise<Runtime> {
     added: (agent) => connectors.ensure(agent),
     alert: (connection, payload) => connectors.alert(connection, payload),
     setup: (connection) => connectors.setup(connection),
+    stop: (agentId) => connectors.stop(agentId),
   });
   // Managed hosting (spec §8 Maritime, 2026-10-26): agents Rowboat's own account creates, when the deployment has its key.
   const provider = input.hosting?.provider ?? hostingFromEnv();

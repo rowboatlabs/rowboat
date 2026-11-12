@@ -466,6 +466,10 @@ export function buildHttpApp(deps: {
     );
   });
 
+  app.delete(routes.deleteAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteAgent.params, c.req.param());
+    return reply(c, routes.deleteAgent.response, await service.deleteAgent(actor(c), agentId));
+  });
   app.delete(routes.deleteManagedAgent.path, async (c) => {
     const { agentId } = parseWith(routes.deleteManagedAgent.params, c.req.param());
     return reply(c, routes.deleteManagedAgent.response, { hosting: await service.deleteManagedAgent(actor(c), agentId) });
