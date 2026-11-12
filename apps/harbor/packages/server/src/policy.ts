@@ -272,6 +272,12 @@ export function canDecideSuperAgentRequest(actor: Member, superAgent: Member | u
 }
 
 /** Revoking: the owner — the off switch for an agent that misbehaves (an admin's too until 2026-11-09; nothing stands above the owner now). */
+/** Deleting an agent (2026-11-13): its owner alone, as with its keys. */
+export function canDeleteAgent(actor: Member, agent: Member): Decision {
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
+  return { code: 'forbidden', message: 'only the agent’s owner can delete it' };
+}
+
 export function canRevokeAgentKey(actor: Member, agent: Member): Decision {
   if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
   return { code: 'forbidden', message: 'only the agent’s owner can revoke its keys' };

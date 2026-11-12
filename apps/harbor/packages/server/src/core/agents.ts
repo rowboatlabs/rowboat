@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
-import { canAddAgent, canClearAgentHook, canCreateAgentKey, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
+import { canAddAgent, canClearAgentHook, canCreateAgentKey, canDeleteAgent, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
 import type { StoredAgentKey } from '../store.js';
 import type { Kernel, ActorCtx } from './kernel.js';
 import { oneLine, type Spaces } from './spaces.js';
@@ -39,6 +39,8 @@ export interface AgentConnectorHooks {
   alert(connection: string, payload: unknown): string | undefined;
   /** The platform's setup for the Add flow, when its agent is an instance (2026-11-02). */
   setup(connection: string): PlatformSetup | undefined;
+  /** Stop the agent's connector, if Harbor runs one (an agent deleted, 2026-11-13). */
+  stop(agentId: string): Promise<void>;
 }
 
 /** The secret in a hook's address: like an agent key, random enough that a fast hash is safe to store. */
@@ -290,6 +292,28 @@ export class Agents {
     enforce(canCreateAgentKey(await this.actor(ctx), await this.agent(agentId)));
     this.k.guardWrite();
     return this.mint(ctx, agentId);
+  }
+
+  /** Whether the caller may delete this agent: its owner (2026-11-13). Answers the agent. */
+  async deletable(ctx: ActorCtx, agentId: string): Promise<Member> {
+    const agent = await this.agent(agentId);
+    enforce(canDeleteAgent(await this.actor(ctx), agent));
+    return agent;
+  }
+
+  /**
+   * Delete an agent no platform of Rowboat's hosts (2026-11-13), the way a
+   * managed one goes: deactivated, its keys revoked, out of every shared
+   * space, its connector and alert hook stopped. Its messages and DMs stay.
+   * Idempotent.
+   */
+  async delete(ctx: ActorCtx, agentId: string): Promise<Member> {
+    await this.deletable(ctx, agentId);
+    this.k.guardWrite();
+    await this.spaces.deactivateAgent(agentId);
+    await this.hooks?.stop(agentId);
+    await this.k.store.deleteAgentHook(agentId);
+    return (await this.k.store.getMember(agentId))!;
   }
 
   /** Revoke a key. Idempotent: a revoked key keeps its first revocation time. */

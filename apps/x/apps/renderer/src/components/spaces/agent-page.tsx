@@ -16,6 +16,7 @@ import { PersonalitySection } from '@/components/spaces/agent-personality'
 import { SuperAgentSection } from '@/components/spaces/agent-super'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, LOCAL_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { toast } from '@/lib/toast'
 
 // One agent's page in the Agents dialog (2026-10-01; tabs 2026-10-27): a rail
@@ -270,7 +271,8 @@ export function AgentPage({ org, listing, onChanged }: {
         )
     }
     if (hosting && ready && canManage && hosting.llm?.provider === 'chatgpt') danger.push(<SignOutRow key="sign-out" orgId={org.id} agent={agent} onChanged={onChanged} />)
-    if (hosting && canManage && !gone) danger.push(<DeleteAgentRow key="agent" orgId={org.id} agent={agent} onChanged={onChanged} />)
+    // Any agent its owner made can be deleted (2026-11-13), not only a managed one.
+    if (canManage && !gone && !agent.deactivatedAt) danger.push(<DeleteAgentRow key="agent" orgId={org.id} agent={agent} hosted={Boolean(hosting)} local={isLocal} onChanged={onChanged} />)
     if (danger.length > 0) {
         tabs.push({
             id: 'danger',
@@ -636,8 +638,8 @@ function SignOutRow({ orgId, agent, onChanged }: { orgId: string; agent: spaces.
     )
 }
 
-/** Delete the agent from Maritime, on the Danger zone: the person types its name first. */
-function DeleteAgentRow({ orgId, agent, onChanged }: { orgId: string; agent: spaces.Member; onChanged: () => Promise<void> }) {
+/** Delete the agent, on the Danger zone: the person types its name first. A managed one leaves Maritime too. */
+function DeleteAgentRow({ orgId, agent, hosted, local, onChanged }: { orgId: string; agent: spaces.Member; hosted: boolean; local: boolean; onChanged: () => Promise<void> }) {
     const [confirming, setConfirming] = useState(false)
     const [name, setName] = useState('')
     const [busy, setBusy] = useState(false)
@@ -646,7 +648,9 @@ function DeleteAgentRow({ orgId, agent, onChanged }: { orgId: string; agent: spa
         if (busy || !matches) return
         setBusy(true)
         try {
-            await window.ipc.invoke('spaces:deleteManagedAgent', { orgId, agentId: agent.id })
+            await window.ipc.invoke('spaces:deleteAgent', { orgId, agentId: agent.id })
+            // A local agent's key and folder live on this computer: they go with it.
+            if (local && LOCAL_RUNTIME) await window.ipc.invoke('spaces:forgetLocalAgent', { orgId, agentId: agent.id }).catch(() => {})
             refreshOrgRoster(orgId)
             await onChanged()
         } catch (err) {
@@ -658,8 +662,14 @@ function DeleteAgentRow({ orgId, agent, onChanged }: { orgId: string; agent: spa
     }
     return (
         <DangerRow
-            title={`Delete ${agent.displayName} from Maritime`}
-            note="Deletes the Maritime VM and its volume, revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages stay."
+            title={hosted ? `Delete ${agent.displayName} from Maritime` : `Delete ${agent.displayName}`}
+            note={
+                hosted
+                    ? 'Deletes the Maritime VM and its volume, revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages stay.'
+                    : local
+                      ? 'Stops it on this computer, revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages and your folder stay.'
+                      : 'Revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages stay.'
+            }
             below={
                 confirming && (
                     <form

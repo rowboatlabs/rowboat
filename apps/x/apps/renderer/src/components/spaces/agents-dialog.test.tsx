@@ -179,9 +179,12 @@ const invoke = vi.fn(async (channel: string, args: Record<string, string>) => {
         case 'spaces:createHostingTrigger': triggerList = [...triggerList, { id: `t${triggerList.length + 1}`, type: args.type!, enabled: true, config: args.config as unknown as Record<string, unknown> }]; return { triggers: triggerList }
         case 'spaces:updateHostingTrigger': triggerList = triggerList.map((t) => (t.id === args.triggerId ? { ...t, enabled: Boolean(args.enabled) } : t)); return { triggers: triggerList }
         case 'spaces:deleteHostingTrigger': triggerList = triggerList.filter((t) => t.id !== args.triggerId); return { triggers: triggerList }
-        case 'spaces:deleteManagedAgent': {
-            listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, keys: l.keys.map((k) => ({ ...k, revokedAt: '2026-10-26T11:00:00Z' })), hosting: hosting('deleting', { updatedAt: '2026-10-26T11:00:00Z' }) } : l))
-            return { hosting: hosting('deleting') }
+        case 'spaces:deleteAgent': {
+            // A managed agent's hosting goes to `deleting`; any other agent is retired (2026-11-13).
+            const target = listing.find((l) => l.agent.id === args.agentId)!
+            const agent = target.hosting ? target.agent : { ...target.agent, deactivatedAt: '2026-11-13T11:00:00Z' }
+            listing = listing.map((l) => (l.agent.id === args.agentId ? { ...l, agent, keys: l.keys.map((k) => ({ ...k, revokedAt: '2026-10-26T11:00:00Z' })), ...(l.hosting ? { hosting: hosting('deleting', { updatedAt: '2026-10-26T11:00:00Z' }) } : {}) } : l))
+            return { agent, ...(target.hosting ? { hosting: hosting('deleting') } : {}) }
         }
         case 'spaces:setAgentCredential': return { credential: { hint: `…${args.secret!.slice(-4)}`, setBy: 'me', setAt: '2026-09-30T12:00:00Z' } }
         case 'spaces:createAgentKey': return { key: { ...key('k2', args.agentId!), secret: ROTATED } }
@@ -462,7 +465,7 @@ describe('AgentsDialog', () => {
         await screen.findByRole('heading', { name: 'Hermes' })
         expect(screen.getAllByText(/Key made .* · last used/)).toHaveLength(1) // the live key, not the revoked one
         expect(screen.queryByRole('heading', { name: 'Defaults' })).toBeNull() // Hermes declares no options
-        expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Setup']) // nothing to put in a Danger zone
+        expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Setup', 'Danger zone']) // its owner may delete it (2026-11-13)
         fireEvent.click(screen.getByRole('tab', { name: 'Setup' }))
         expect(await screen.findByText(/ROWBOAT_AGENT_KEY 'YOUR_AGENT_KEY'/)).toBeInTheDocument()
         expect(screen.getByText(/A key is shown only once/)).toBeInTheDocument()
@@ -749,7 +752,9 @@ describe('AgentsDialog', () => {
         expect(within(screen.getByRole('region', { name: 'Bots' })).getByText('Cal.com bot · Yours · 1 key')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: /Cal/ }))
         fireEvent.click(await screen.findByRole('tab', { name: 'Alerts' }))
-        expect(screen.queryByRole('tab', { name: 'Danger zone' })).toBeNull() // nothing to turn off yet
+        fireEvent.click(screen.getByRole('tab', { name: 'Danger zone' }))
+        expect(screen.queryByRole('button', { name: 'Turn alerts off' })).toBeNull() // nothing to turn off yet
+        fireEvent.click(screen.getByRole('tab', { name: 'Alerts' }))
         fireEvent.change(await screen.findByLabelText('Space for alerts'), { target: { value: 'S1' } })
         listing = [listing[0]!, { ...listing[1]!, hook: { spaceId: 'S1', setBy: 'me', setAt: '2026-10-03T10:00:00Z' } }]
         fireEvent.click(screen.getByRole('button', { name: 'Get address' }))
@@ -903,6 +908,18 @@ describe('AgentsDialog', () => {
         open.mockRestore()
     })
 
+    it('deletes any agent its owner made, not only a managed one (2026-11-13)', async () => {
+        render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
+        fireEvent.click(await screen.findByRole('button', { name: /Hermes/ }))
+        fireEvent.click(await screen.findByRole('tab', { name: 'Danger zone' }))
+        expect(screen.getByText(/Revokes every key, removes the agent from all spaces/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Delete agent' }))
+        fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Hermes' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Delete Hermes' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:deleteAgent', { orgId: 'org-1', agentId: 'hermes' }))
+        expect(invoke).not.toHaveBeenCalledWith('spaces:deleteManagedAgent', expect.anything())
+    })
+
     it('deletes a managed agent from Maritime on a second click; its owner may, nobody else (2026-11-09)', async () => {
         const scoutM = { ...scout, id: 'sm', displayName: 'Scout', agentKind: 'codex', agentConnection: 'maritime', agentInstance: 'agt-m1' } as spaces.Member
         listing = [{ agent: scoutM, keys: [key('k7', 'sm')], hosting: hosting('ready') }]
@@ -922,7 +939,7 @@ describe('AgentsDialog', () => {
         expect(screen.getByRole('button', { name: 'Delete Scout' })).toBeDisabled()
         fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Scout' } })
         fireEvent.click(screen.getByRole('button', { name: 'Delete Scout' }))
-        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:deleteManagedAgent', { orgId: 'org-1', agentId: 'sm' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:deleteAgent', { orgId: 'org-1', agentId: 'sm' }))
         // Back on Overview: the Danger zone has nothing left.
         expect(await screen.findByRole('status')).toHaveTextContent('Removing from Maritime')
         expect(screen.queryByRole('tab', { name: 'Danger zone' })).toBeNull()
