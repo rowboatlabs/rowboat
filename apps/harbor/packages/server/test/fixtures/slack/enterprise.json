@@ -1,0 +1,12 @@
+{
+  "org_users.json": [{"id":"U1","profile":{"real_name":"Alex"}},{"id":"B1","name":"Build bot","is_bot":true}],
+  "channels.json": [],
+  "groups.json": [{"id":"G1","name":"private-team","members":["U1"],"is_archived":true}],
+  "private-team/2026-01-01.json": [
+    {"type":"message","user":"B1","subtype":"bot_message","ts":"1767225600.000001","text":"Build passed"},
+    {"type":"message","user":"U1","ts":"1767225600.000002","thread_ts":"1767225500.000001","text":"Missing parent"}
+  ],
+  "dms.json": [{"id":"D1","members":["U1","U2"]}],
+  "D1/2026-01-01.json": [{"type":"message","ts":"1767225600.000003","text":"Do not import this"}],
+  "canvases.json": [{"id":"F1"}]
+}

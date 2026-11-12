@@ -20,6 +20,7 @@ Two pnpm workspace packages under `packages/`:
 | `core/super-agents.ts` | super agents (spec §4 Agent members, 2026-11-02; the owner's switch since 2026-11-09): a super agent's `create_agent` and `delete_agent`, at once, as an approval card Harbor raises on its turn and applies once its owner allows it, or as a setup card its owner completes by adding the agent with the card as `request` |
 | `core/assets.ts` | assets by id, versions, the change log, blobs, history, diff |
 | `core/images.ts` | profile images: a member's avatar, the server's image registry (`images`) and its read gate |
+| `imports/slack.ts`, `imports/preview-slack.ts` | bounded, read-only Slack JSON ZIP parsing and the local preview command (2026-11-12); normalized source records and warnings, no database or service writes; format and limits in `packages/server/src/imports/README.md` |
 | `core/feed.ts` | messages, threads, topics, reactions, polls, search, mention stamps and their backfill, and the secrets a message shares with the members it mentions (sealed apart from the log, read only by those readers, 2026-11-04) |
 | `core/read-state.ts` | read marks, follows, unread, Activity, read-all |
 | `service.ts` | `HarborService`, the facade: one delegate per public method, `server` / `readOnly` accessors |
