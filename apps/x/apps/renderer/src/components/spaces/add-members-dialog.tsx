@@ -19,7 +19,8 @@ import { isDeparted, isOwnAgent } from '@/lib/spaces-direct'
 // who is already here. They learn of it by their sidebar and the stream's
 // join line; no notification in v1.
 
-export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
+export function AddMembersDialog({ org, space, members, open, onOpenChange, kind }: {
+    kind?: 'people' | 'agents'
     org: OrgWithSpaces
     space: spaces.Space
     /** Who is in the space now — never offered. */
@@ -38,8 +39,8 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
     const candidates = useMemo(() => {
         const q = query.trim().toLowerCase()
         // A deleted account is never offered (2026-10-13), nor an agent that is not yours (2026-11-09): Harbor refuses the add.
-        return roster.filter((m) => !inSpace.has(m.id) && !isDeparted(m) && (m.kind !== 'agent' || isOwnAgent(m, org.memberId)) && (!q || m.displayName.toLowerCase().includes(q)))
-    }, [roster, inSpace, query, org.memberId])
+        return roster.filter((m) => !inSpace.has(m.id) && (!kind || (kind === 'agents' ? m.kind === 'agent' : m.kind !== 'agent')) && !isDeparted(m) && (m.kind !== 'agent' || isOwnAgent(m, org.memberId)) && (!q || m.displayName.toLowerCase().includes(q)))
+    }, [roster, inSpace, query, org.memberId, kind])
     const pickedAgents = useMemo(() => roster.filter((m) => picked.has(m.id) && m.kind === 'agent').length, [roster, picked])
 
     useEffect(() => {
@@ -76,8 +77,8 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-sm gap-0 p-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                 <DialogHeader className="px-4 pb-2 pt-4">
-                    <DialogTitle className="text-sm">Add people to #{space.name}</DialogTitle>
-                    <DialogDescription className="text-xs">People you share a space with, and your own agents. They’ll see #{space.name} in their sidebar.</DialogDescription>
+                    <DialogTitle className="text-sm">Add {kind === 'agents' ? 'agents' : 'people'} to #{space.name}</DialogTitle>
+                    <DialogDescription className="text-xs">{kind === 'agents' ? 'Choose your existing agents to add to this space.' : kind === 'people' ? 'Choose people you share a space with.' : `People you share a space with, and your own agents. They’ll see #${space.name} in their sidebar.`}</DialogDescription>
                 </DialogHeader>
                 <div className="px-3 pb-2">
                     <Input
@@ -91,7 +92,7 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange }: {
                 <div className="max-h-72 overflow-y-auto border-t border-border p-1.5">
                     {candidates.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                            {query.trim() ? 'No one matches.' : `Everyone you know is already in #${space.name}. Invite someone new with the group’s link.`}
+                            {query.trim() ? 'No one matches.' : kind === 'agents' ? 'No agents available to add. Use Connect an agent to set one up.' : `Everyone you know is already in #${space.name}. Invite someone new with the group’s link.`}
                         </div>
                     ) : (
                         candidates.map((m) => {

@@ -150,3 +150,5 @@ The available automation environment has no connected browser for live applicati
 5. Slack Help Center. [Use threads to organize discussions](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions). Accessed September 9, 2026. Rooted discussions and thread navigation.
 
 Space settings access (2026-11-12): only an admin of the selected space sees its settings menu entries or can open its settings page, including by direct URL. Archive and delete are in Settings → Space actions, removed from the space-name dropdown. Existing backend rules remain: rename/add are member operations, role/removal/archive/delete are admin operations, and agent access is owner-controlled.
+
+Space settings agents (2026-11-12): Add agents filters the existing membership picker to owned agents not already in the space; Add people filters to humans. Connect an agent and each Agent settings button reuse the main Agents dialog and its backend operations. Seat permissions reuse the Agents page’s SeatChoice control; only owners can change remote-agent seats, and local agents stay owner-only.
