@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings · Spaces prototype</title>
+<style>
+:root{color-scheme:light;--bg:#fff;--rail:#f7f7f8;--ink:#22252a;--muted:#696d76;--line:#e6e7eb;--blue:#3469d5;--wash:#eaf0fc;--input:#fff}
+:root[data-theme=dark]{color-scheme:dark;--bg:#191b20;--rail:#14161a;--ink:#e9ebef;--muted:#a3a8b3;--line:#343740;--blue:#8aafff;--wash:#26354e;--input:#202329}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}button,input,select{border:1px solid var(--line);border-radius:7px;color:inherit;background:var(--input)}button{padding:8px 14px}button:hover:not(:disabled){background:var(--wash)}:focus-visible{outline:2px solid var(--blue);outline-offset:3px}input,select{padding:10px 12px;max-width:100%}input[type=text]{width:100%}input[type=checkbox],input[type=radio]{accent-color:var(--blue);width:17px;height:17px;flex-shrink:0}h1,h2,h3,p{margin:0}h1{font-size:27px;letter-spacing:-.8px;font-weight:650}h2{font-size:16px;font-weight:600}h3{font-size:14px}p,.muted{color:var(--muted)}small{font-size:12px;color:var(--muted)}.app{display:grid;grid-template-columns:240px 1fr;min-height:100vh}.sidebar{background:var(--rail);border-right:1px solid var(--line);padding:28px 18px;display:flex;flex-direction:column;gap:30px}.brand{display:flex;align-items:center;gap:10px;padding:0 12px;font-size:17px;font-weight:650;letter-spacing:-.5px}.brand svg{width:26px;height:26px}.side-title{padding:0 12px;margin-bottom:12px;font-size:12px;color:var(--muted)}nav{display:grid;gap:5px}nav button{display:flex;gap:12px;align-items:center;text-align:left;border:0;background:none;padding:10px 12px;color:var(--muted)}nav button[aria-current=page]{color:var(--blue);background:var(--wash);font-weight:600}nav svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.6;fill:none}.account{margin-top:auto;border-top:1px solid var(--line);padding:20px 8px 0;display:flex;align-items:center;gap:10px;min-width:0}.avatar{width:36px;height:36px;display:grid;place-items:center;flex-shrink:0;border-radius:9px;background:#e8e1f6;color:#65518b;font-size:12px;font-weight:600}.account strong{display:block;font-size:13px}.account small{display:block}.topbar{height:65px;border-bottom:1px solid var(--line);padding:0 38px;display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:13px}.badge{font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 7px;letter-spacing:.3px}.content{max-width:850px;margin:auto;padding:48px 52px 28px}.intro{margin-top:7px;margin-bottom:30px}.notice{padding:12px 15px;background:var(--rail);border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--muted);margin-bottom:30px}.section{padding:25px 0;border-top:1px solid var(--line)}.section:first-of-type{border-top:0;padding-top:0}.section>p{font-size:13px;margin-top:4px}.row{display:flex;align-items:center;justify-content:space-between;gap:24px;padding-top:21px}.row p{font-size:13px;margin-top:3px}.row label{font-weight:500}.fields{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:23px}.field label{display:block;font-size:13px;font-weight:550;margin-bottom:7px}.field small{display:block;margin-top:7px}.wide{grid-column:1/-1}.profile-top{display:flex;align-items:center;gap:16px;margin:24px 0}.profile-top .avatar{width:64px;height:64px;font-size:20px;border-radius:14px}.switch{appearance:none;width:36px!important;height:21px!important;border:0;border-radius:20px;background:#b6bac3;position:relative;padding:0;cursor:pointer;margin:0}.switch:after{content:'';position:absolute;top:3px;left:3px;width:15px;height:15px;background:white;border-radius:50%;transition:transform .15s}.switch:checked{background:var(--blue)}.switch:checked:after{transform:translateX(15px)}fieldset{border:0;padding:0;margin:22px 0 0}legend{font-weight:550;font-size:13px;margin-bottom:12px}.choices{display:grid;gap:12px}.choices label{display:flex;align-items:center;gap:10px}.hours{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:17px}.days{display:flex;gap:7px;flex-wrap:wrap;margin-top:16px}.days label{position:relative}.days input{position:absolute;opacity:0}.days span{display:grid;place-items:center;border:1px solid var(--line);border-radius:7px;width:35px;height:35px;font-size:12px;cursor:pointer}.days input:checked+span{background:var(--wash);color:var(--blue);border-color:var(--blue)}.days input:focus-visible+span{outline:2px solid var(--blue);outline-offset:2px}.theme-options{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:20px}.theme-choice{position:relative;cursor:pointer}.theme-choice input{position:absolute;top:10px;right:10px;z-index:1}.theme-card{padding:9px;border:1px solid var(--line);border-radius:9px}.theme-choice input:checked+.theme-card{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}.mini{height:87px;display:flex;border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#fff}.mini aside{width:27%;background:#f2f3f5;border-right:1px solid #ddd}.mini article{padding:18px 10px;flex:1}.mini i{display:block;width:75%;height:5px;background:#d7dbe2;margin-bottom:9px;border-radius:3px}.mini i:first-child{width:45%;background:#9db7ed}.mini.dark{background:#202329;border-color:#42454d}.mini.dark aside{background:#17191e;border-color:#42454d}.mini.dark i{background:#555b68}.mini.system{background:linear-gradient(90deg,#fff 50%,#202329 50%)}.theme-card b{display:block;font-size:12px;font-weight:500;margin:9px 3px 1px}.preview{border:1px solid var(--line);border-radius:9px;margin-top:20px;padding:22px;display:flex;gap:12px}.preview .message{font-size:15px;line-height:24px}.preview .message p{color:var(--ink);margin-top:3px}.preview.compact{padding:12px}.preview.compact .avatar{display:none}.preview.compact .message{font-size:13px;line-height:20px}.savebar{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:22px;margin-top:8px}.savebar small{margin-right:auto}.primary{background:var(--blue);color:var(--bg);border-color:var(--blue);font-weight:550}.primary:hover:not(:disabled){background:var(--blue);filter:brightness(.95)}[hidden]{display:none!important}#feedback{min-height:22px;margin-top:15px;font-size:12px;color:var(--blue)}
+@media(max-width:700px){.app{grid-template-columns:1fr}.sidebar{padding:16px;border-right:0;border-bottom:1px solid var(--line);gap:18px}.brand{padding:0}.side-title,.account{display:none}nav{display:flex;gap:5px}nav button{flex:1;justify-content:center;padding:9px 6px;gap:7px;font-size:12px}nav svg{width:16px}.topbar{height:48px;padding:0 22px}.content{padding:28px 22px}.fields{grid-template-columns:1fr}.theme-options{gap:8px}.savebar{flex-wrap:wrap}.savebar small{width:100%}.row{gap:16px}.mini article{padding:20px 7px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<div class="brand"><svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M3 17h22l-5 7H8zM14 3v14M14 4l8 10h-8M11 7l-6 7h6" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Spaces</div>
+<div><div class="side-title">Your settings</div><nav aria-label="Settings sections">
+<button type="button" data-page="profile" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0116 0v2"/></svg>Profile</button>
+<button type="button" data-page="notifications"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9 21h6"/></svg>Notifications</button>
+<button type="button" data-page="appearance"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M12 3a9 9 0 010 18" fill="currentColor"/></svg>Appearance</button>
+</nav></div>
+<div class="account"><span class="avatar initials">HV</span><div><strong class="profile-name">Harshvardhan Vatsa</strong><small>Personal settings</small></div></div>
+</aside>
+<main>
+<header class="topbar"><span>Settings <span aria-hidden="true"> / </span> <span id="breadcrumb">Profile</span></span><span class="badge">PROTOTYPE</span></header>
+<div class="content">
+<form id="settings">
+<section id="profile" aria-labelledby="profile-heading">
+<h1 id="profile-heading" tabindex="-1">Your profile</h1><p class="intro">A familiar face, wherever you work together.</p>
+<div class="notice">Interactive preview · Changes apply only to this demo and reset when you reload.</div>
+<div class="section"><h2>About you</h2><p>How you appear to people and agents in Spaces.</p>
+<div class="profile-top"><span class="avatar initials">HV</span><div><strong class="profile-name">Harshvardhan Vatsa</strong><p>Profile preview</p></div></div>
+<div class="fields"><div class="field wide"><label for="displayName">Display name</label><input id="displayName" name="displayName" type="text" value="Harshvardhan Vatsa" required maxlength="80"><small>Use the name your teammates know you by.</small></div>
+<div class="field wide"><label for="title">What you do</label><input id="title" name="title" type="text" value="Building Rowboat" maxlength="120" placeholder="e.g. Product designer"><small>A little context for the people you work with.</small></div></div></div>
+<div class="section"><h2>In conversation</h2><p>Your profile as it appears in a thread.</p><div class="preview"><span class="avatar initials">HV</span><div class="message"><strong class="profile-name">Harshvardhan Vatsa</strong> <small>10:42 AM</small><p>Let’s make room for good work.</p><small id="title-preview">Building Rowboat</small></div></div></div>
+</section>
+<section id="notifications" aria-labelledby="notifications-heading" hidden>
+<h1 id="notifications-heading" tabindex="-1">Notifications</h1><p class="intro">Stay in the loop. Keep your focus.</p>
+<div class="notice">Demo preferences only · No browser permission is requested and no notifications are sent.</div>
+<div class="section"><h2>When to notify you</h2><p>Choose what deserves your attention.</p><fieldset><legend>Notify me about</legend><div class="choices"><label><input type="radio" name="notify" value="mentions" checked>Mentions, direct messages, and followed threads</label><label><input type="radio" name="notify" value="none">Nothing for now</label></div></fieldset>
+<div class="row"><div><label for="sound">Notification sounds</label><p>Play a sound when a new notification arrives.</p></div><input class="switch" role="switch" id="sound" name="sound" type="checkbox" checked></div></div>
+<div class="section"><div class="row" style="padding-top:0"><div><label for="schedule">Working hours</label><p>Only notify you during your chosen hours.</p></div><input class="switch" role="switch" id="schedule" name="schedule" type="checkbox" checked></div>
+<div id="schedule-controls"><fieldset><legend>Days</legend><div class="days" id="days"></div></fieldset>
+<div class="hours"><label for="start">From</label><input id="start" name="start" type="time" value="09:00" required><label for="end">to</label><input id="end" name="end" type="time" value="18:00" required></div>
+<div class="field" style="margin-top:20px"><label for="timezone">Time zone</label><select name="timezone" id="timezone"><option value="Asia/Kolkata">India Standard Time · Kolkata</option><option value="America/Los_Angeles">Pacific Time · Los Angeles</option><option value="Europe/London">United Kingdom · London</option><option value="UTC">Coordinated Universal Time · UTC</option></select><small>Outside these hours, notifications stay quiet.</small></div></div></div>
+</section>
+<section id="appearance" aria-labelledby="appearance-heading" hidden>
+<h1 id="appearance-heading" tabindex="-1">Appearance</h1><p class="intro">Make Spaces feel like your space.</p>
+<div class="section"><h2>Theme</h2><p>Choose a look, or follow your device.</p><fieldset class="theme-options"><legend class="muted">Color scheme</legend>
+<label class="theme-choice"><input type="radio" name="theme" value="light" checked><div class="theme-card"><div class="mini" aria-hidden="true"><aside></aside><article><i></i><i></i><i></i></article></div><b>Light</b></div></label>
+<label class="theme-choice"><input type="radio" name="theme" value="dark"><div class="theme-card"><div class="mini dark" aria-hidden="true"><aside></aside><article><i></i><i></i><i></i></article></div><b>Dark</b></div></label>
+<label class="theme-choice"><input type="radio" name="theme" value="system"><div class="theme-card"><div class="mini system" aria-hidden="true"><aside></aside><article><i></i><i></i><i></i></article></div><b>System</b></div></label>
+</fieldset></div>
+<div class="section"><h2>Message display</h2><p>Find a comfortable rhythm for conversations.</p><div class="row"><label for="density">Density</label><select id="density" name="density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></div>
+<div class="preview" id="density-preview"><span class="avatar initials">HV</span><div class="message"><strong class="profile-name">Harshvardhan Vatsa</strong> <small>10:42 AM</small><p>A little more space to think.</p><p class="muted">Replies and ideas, all in one place.</p></div></div></div>
+</section>
+<footer class="savebar"><small id="save-status">No unsaved changes</small><button id="discard" type="button" disabled>Discard</button><button class="primary" id="save" type="submit" disabled>Save changes</button></footer>
+<div id="feedback" role="status" aria-live="polite"></div>
+</form>
+</div>
+</main>
+</div>
+<script>
+// 2026-11-12: Keep this design prototype in memory so it cannot alter live account preferences.
+const form = document.querySelector('#settings');
+const $ = (selector) => document.querySelector(selector);
+const media = window.matchMedia('(prefers-color-scheme: dark)');
+const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+$('#days').innerHTML = dayNames.map((day,i) => `<label><input type="checkbox" name="day${i}" aria-label="${day}" ${i<5?'checked':''}><span aria-hidden="true">${day.slice(0,2)}</span></label>`).join('');
+const read = () => Object.fromEntries([...form.elements].filter(el => el.name).map(el => [el.type==='radio' ? el.name+':'+el.value : el.name, el.type==='checkbox'||el.type==='radio' ? el.checked : el.value]));
+let saved = read();
+let activePage = 'profile';
+function showPage(page, focus = true) {
+  activePage = page;
+  for (const button of document.querySelectorAll('[data-page]')) {
+    const selected = button.dataset.page === page;
+    if (selected) button.setAttribute('aria-current','page'); else button.removeAttribute('aria-current');
+    document.getElementById(button.dataset.page).hidden = !selected;
+    if (selected) $('#breadcrumb').textContent = button.textContent.trim();
+  }
+  if (focus) document.getElementById(page+'-heading').focus();
+}
+function update() {
+  const dirty = JSON.stringify(read()) !== JSON.stringify(saved);
+  $('#save').disabled = $('#discard').disabled = !dirty;
+  $('#save-status').textContent = dirty ? 'You have unsaved changes' : 'No unsaved changes';
+  const name = $('#displayName').value.trim() || 'Your name';
+  document.querySelectorAll('.profile-name').forEach(el => el.textContent = name);
+  document.querySelectorAll('.initials').forEach(el => el.textContent = name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase());
+  $('#title-preview').textContent = $('#title').value;
+  $('#schedule-controls').hidden = !$('#schedule').checked;
+  const theme = form.elements.theme.value;
+  document.documentElement.dataset.theme = theme === 'system' ? (media.matches?'dark':'light') : theme;
+  $('#density-preview').classList.toggle('compact', $('#density').value === 'compact');
+}
+document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click',()=>showPage(button.dataset.page)));
+form.addEventListener('input',()=>{ $('#feedback').textContent=''; update(); });
+media.addEventListener('change', update);
+$('#discard').addEventListener('click',()=>{
+  for(const el of form.elements) if(el.name) {
+    const key = el.type==='radio' ? el.name+':'+el.value : el.name;
+    if(el.type==='checkbox'||el.type==='radio') el.checked=saved[key]; else el.value=saved[key];
+  }
+  update(); $('#feedback').textContent='Changes discarded.';
+});
+// Validate across sections manually so a hidden required field never traps focus on save.
+form.noValidate = true;
+form.addEventListener('submit', event => {
+  event.preventDefault();
+  const name = $('#displayName');
+  name.setCustomValidity(name.value.trim() ? '' : 'Enter a display name.');
+  const start = $('#start'), end = $('#end');
+  start.required = end.required = $('#schedule').checked;
+  end.setCustomValidity($('#schedule').checked && start.value >= end.value ? 'Choose an end time after the start time.' : '');
+  const invalid = [...form.elements].find(el => el.willValidate && !el.validity.valid);
+  if(invalid) { showPage(invalid.closest('section').id); invalid.reportValidity(); return; }
+  if($('#schedule').checked && !dayNames.some((_,i)=>form.elements['day'+i].checked)) {
+    showPage('notifications'); form.elements.day0.focus(); $('#feedback').textContent='Choose at least one working day.'; return;
+  }
+  name.value = name.value.trim(); saved = read(); update();
+  $('#feedback').textContent='Saved for this preview. Your live settings are unchanged.';
+});
+update();
+</script>
+</body>
+</html>
