@@ -100,7 +100,7 @@ function profile(person: spaces.Member, selfId = 'me') {
 it('shows title and presence and offers editing only for your own profile', async () => {
     profile(member)
     expect(screen.getByRole('dialog')).toHaveTextContent('Engineer')
-    expect(screen.getByText('Here now')).toBeInTheDocument()
+    expect(screen.getByText('Online')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }))
     expect(await screen.findByLabelText('Display name')).toHaveValue('Harsh')
 })
@@ -132,7 +132,7 @@ it('loads photos through the selected org and falls back to initials on decode f
     expect(screen.getByText('HV')).toBeInTheDocument()
 })
 
-it('does not show a manually away person as here even with an active connection', () => {
+it('uses server presence even when profile preferences have not caught up', () => {
     profile({ ...member, availability: { manualAway: true } })
-    expect(screen.queryByText('Here now')).not.toBeInTheDocument()
+    expect(screen.getByText('Online')).toBeInTheDocument()
 })

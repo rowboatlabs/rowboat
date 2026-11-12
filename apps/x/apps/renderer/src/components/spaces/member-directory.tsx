@@ -2,7 +2,6 @@ import { Tabs } from 'radix-ui'
 import { Bot, Users } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { AgentBadge, MemberAvatar, MemberProfilePopover } from './atoms'
-import { cn } from '@/lib/utils'
 
 export function MemberDirectory({ members, here, selfId }: {
     members: readonly spaces.SpaceMember[]
@@ -36,10 +35,7 @@ export function MemberDirectory({ members, here, selfId }: {
                         return (
                             <MemberProfilePopover key={m.id} id={m.id}>
                                 <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
-                                    <span className="relative shrink-0">
-                                        <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
-                                        {isHere && <span className={cn('absolute -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover', m.kind === 'agent' ? '-top-0.5' : '-bottom-0.5')} />}
-                                    </span>
+                                    <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} online={m.kind === 'human' ? isHere : undefined} />
                                     <span className="min-w-0 flex-1 truncate text-sm">
                                         {m.displayName}
                                         {m.id === selfId && <span className="text-muted-foreground"> (you)</span>}
@@ -47,7 +43,7 @@ export function MemberDirectory({ members, here, selfId }: {
                                     {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
                                     {m.role === 'admin' && <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>}
                                     {m.kind === 'agent' && m.invocableBy === 'owner' && <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground" title="Only its owner can ask it here">owner only</span>}
-                                    {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
+                                    {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">Online</span>}
                                 </button>
                             </MemberProfilePopover>
                         )

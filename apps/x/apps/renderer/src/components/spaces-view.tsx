@@ -43,7 +43,7 @@ import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { loadOlderStreamMessages, STREAM_READ_KEY, useSpacePresence, useSpacesUnreadCounts, useStream } from '@/hooks/use-space-chat'
-import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
+import { refreshMembers, useOrgRoster, useSpaceMembers, usePeopleOnline } from '@/hooks/use-space-members'
 import type { Profile } from '@/components/spaces/member-text'
 import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
@@ -861,7 +861,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     const selfName = memberNames.get(org.memberId) ?? org.memberId
 
-    const here = presence.here.filter((id) => members.some((m) => m.id === id))
+    const peopleOnline = usePeopleOnline(org.id)
+    const here = members.filter(m => m.kind === 'human' && peopleOnline.has(m.id)).map(m => m.id)
     const hereSet = new Set(here)
     // The header's face pile: people before integrations, whoever is here first.
     const facepile = [...members].sort((a, b) => Number(a.kind === 'agent') - Number(b.kind === 'agent')
@@ -1031,7 +1032,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 </div>
                                 <div className="mt-2 text-xs text-muted-foreground">
                                     {members.length} {members.length === 1 ? 'member' : 'members'}
-                                    {here.length > 0 && ` · ${here.length} here`}
+                                    {here.length > 0 && ` · ${here.length} online`}
                                 </div>
                             </div>
                             <div className="spaces-menu-sep" />
@@ -1098,8 +1099,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         <button
                             type="button"
                             className="spaces-header-button"
-                            aria-label={`Members — ${members.length}${here.length > 0 ? `, ${here.length} here` : ''}`}
-                            title={here.length > 0 ? `${members.length} members · ${here.length} here` : `${members.length} members`}
+                            aria-label={`Members — ${members.length}${here.length > 0 ? `, ${here.length} online` : ''}`}
+                            title={here.length > 0 ? `${members.length} members · ${here.length} online` : `${members.length} members`}
                         >
                             <span className="spaces-facepile flex" aria-hidden="true">
                                 {facepile.map((m) => <MemberAvatar key={m.id} id={m.id} name={m.displayName} size="sm" agent={m.kind === 'agent'} agentKind={m.agentKind} />)}
@@ -1120,7 +1121,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         ) : <>
                             <div className="flex items-baseline justify-between px-2.5 pb-2 pt-1.5">
                                 <span className="text-sm font-semibold">Members</span>
-                                <span className="text-xs text-muted-foreground">{members.length}{here.length > 0 && ` · ${here.length} here now`}</span>
+                                <span className="text-xs text-muted-foreground">{members.length}{here.length > 0 && ` · ${here.length} online`}</span>
                             </div>
                             {writable && !isDirect && (
                                 <div className="flex flex-col gap-0.5 px-1 pb-1">

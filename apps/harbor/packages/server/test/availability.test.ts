@@ -67,6 +67,7 @@ it('manual away overrides active devices; idle tabs cannot hide an active one; D
   try {
     await as('alice').put('/v1/me', { availability: { manualAway: true } });
     first.send({ kind: 'activity', active: true });
+    second.send({ kind: 'activity', active: true });
     expect((await as('bob').get('/v1/contacts')).body.onlinePeople).not.toContain('alice');
     await as('alice').put('/v1/me', { availability: { manualAway: false } });
     await observer.until(frames => frames.some(f => f.kind === 'member_presence' && f.memberId === 'alice' && f.online));
@@ -96,10 +97,14 @@ it('suppresses notification recipients without suppressing the message or unread
   expect((await decideNotifications(harbor.store, space, message)).map(row => row.memberId)).toContain('alice');
 });
 
-it('expires a connected client with no activity reports after ten minutes', async () => {
+it('requires explicit activity and expires abandoned leases after ten minutes', async () => {
   await as('alice').put('/v1/me', { availability: { manualAway: false } });
   const client = await liveClient(harbor, 'dev-alice');
   try {
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect((await as('bob').get('/v1/contacts')).body.onlinePeople).not.toContain('alice');
+    client.send({ kind: 'activity', active: true });
+    await client.until(frames => frames.some(f => f.kind === 'member_presence' && f.memberId === 'alice' && f.online));
     expect((await as('bob').get('/v1/contacts')).body.onlinePeople).toContain('alice');
     const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 10 * 60_000 + 1);
     try { expect((await as('bob').get('/v1/contacts')).body.onlinePeople).not.toContain('alice'); }

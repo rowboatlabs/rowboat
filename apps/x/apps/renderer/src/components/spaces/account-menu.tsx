@@ -6,7 +6,7 @@ import { useAvailabilityClock } from '@/hooks/use-availability-clock'
 import type { spaces } from '@x/shared'
 import { ProfileSettings } from '@/components/spaces/profile-settings'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { useOrgRosters } from '@/hooks/use-space-members'
+import { useOrgRosters, usePeopleOnline } from '@/hooks/use-space-members'
 import { useProfileImage } from '@/hooks/use-profile-image'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { ACCOUNT_ROW } from '@/lib/spaces-account'
@@ -54,7 +54,8 @@ export function SpacesAccountMenu({ email, children, variant = 'face' }: { email
     const faceId = me?.id ?? email ?? 'you'
     const now = useAvailabilityClock()
     const status = currentStatus(me?.availability, now)
-    const presence = me?.availability?.manualAway ? 'Away' : 'Active'
+    const online = usePeopleOnline(profileOrg?.id ?? '').has(me?.id ?? '')
+    const presence = online ? 'Online' : 'Away'
     return (
         <>
             <Popover>

@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ServerSpaceNavigation } from './spaces-sidebar-section'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { forgetOrg } from '@/lib/spaces-read-state'
+import { applyMemberPresence } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 // The sidebar (spec §10, 2026-11-09, sections since the evening's design
@@ -35,8 +36,9 @@ vi.mock('@/hooks/use-space-chat', async () => {
         },
     }
 })
-vi.mock('@/hooks/use-space-members', () => ({
-    prefetchMembers: vi.fn(), usePeopleOnline: () => new Set(['p0']), useSelfDisplayName: () => 'Me',
+vi.mock('@/hooks/use-space-members', async importOriginal => ({
+    ...await importOriginal<typeof import('@/hooks/use-space-members')>(),
+    prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me',
     useOrgRoster: () => [{ id: 'p0', displayName: 'Person 0', kind: 'human' }, { id: 'p1', displayName: 'Person 1', kind: 'human' }, { id: 'claude', displayName: 'Claude', kind: 'agent', ownerId: 'me', agentKind: 'claude-code' }],
 }))
 vi.mock('@/components/spaces-view', () => ({}))
@@ -50,6 +52,7 @@ vi.mock('@/lib/spaces-direct', () => ({
     spaceDisplayName: (_org: unknown, dm: { name: string }) => dm.name,
 }))
 beforeEach(() => {
+    applyMemberPresence(org.id, 'p0', true)
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
     vi.stubGlobal('ipc', { on: vi.fn(() => () => {}), invoke: vi.fn(async () => ({ threads: [], spaces: [] })) })
 })
@@ -146,4 +149,12 @@ describe('the chat list', () => {
         expect(screen.getByTestId('avatar-Person 0')).toHaveAttribute('data-online', 'true')
         expect(screen.getByTestId('avatar-Person 1')).toHaveAttribute('data-online', 'false')
     })
+})
+
+it('updates the People sidebar when live online status changes', () => {
+    nav()
+    for (const online of [true, false, true]) {
+        act(() => applyMemberPresence(org.id, 'p0', online))
+        expect(screen.getByTestId('avatar-Person 0')).toHaveAttribute('data-online', String(online))
+    }
 })
