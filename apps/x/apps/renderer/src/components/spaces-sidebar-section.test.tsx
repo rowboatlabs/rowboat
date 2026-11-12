@@ -87,6 +87,13 @@ describe('the chat list', () => {
         expect(names('People')).toEqual(['Person 1', 'Person 0', 'Me', 'New message'])
     })
 
+    it.each(['deactivated', 'removed'])('keeps a %s agent missing from contacts under Agents', (status) => {
+        const gone = { id: 'gone-dm', name: `Old agent (${status})`, createdAt: '2026-11-12', participants: ['me', 'gone-agent'] }
+        nav({ org: { ...org, directs: [...org.directs, gone], directKinds: { [gone.id]: 'agent' } } as unknown as OrgWithSpaces })
+        expect(names('Agents')).toContain(gone.name)
+        expect(names('People')).not.toContain(gone.name)
+    })
+
     it('leads with New space, then Activity, Threads and the Agents section, and pins your link to the foot', () => {
         const openActivity = vi.fn()
         const openAgents = vi.fn()

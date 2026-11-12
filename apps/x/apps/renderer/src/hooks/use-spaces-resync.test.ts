@@ -151,3 +151,23 @@ it('applies live profile updates and refreshes DM labels from the org listing', 
     expect(listing()).toBe(2)
     update.mockRestore()
 })
+
+it.each(['deactivatedAt', 'removedAt'])('resolves historical DM kinds with %s and preserves them on fetch failure', async (status) => {
+    const original = invoke.getMockImplementation()!
+    let failRoster = false
+    invoke.mockImplementation(async (channel: string) => {
+        if (channel === 'spaces:listSpaces') return { spaces: [
+            { id: 'dm', name: 'Old agent', kind: 'direct', participants: ['me', 'bot'], createdAt: '2026-11-12' },
+        ] }
+        if (channel === 'spaces:listMembers') {
+            if (failRoster) throw new Error('offline')
+            return { members: [{ id: 'bot', displayName: 'Old agent', kind: 'agent', [status]: '2026-11-12' }] }
+        }
+        return original(channel)
+    })
+    const mod = await boot()
+    expect(mod.getSpacesOrgs()[0].directKinds).toEqual({ dm: 'agent' })
+    failRoster = true
+    await mod.refreshSpacesOrgs()
+    expect(mod.getSpacesOrgs()[0].directKinds).toEqual({ dm: 'agent' })
+})
