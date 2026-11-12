@@ -44,6 +44,11 @@ export function SpaceSettings({ org, space, members, onBack, onShowSidebar }: {
     }
     const tabs: {id: Tab; label: string; count?: number}[] = [{id:'general',label:'General'}, {id:'people',label:'People',count:people.length}, {id:'agents',label:'Agents',count:agents.length}, {id:'actions',label:'Space actions'}]
     const roster = (tab === 'agents' ? agents : people).filter(m => m.displayName.toLowerCase().includes(query.trim().toLowerCase())).sort((a,b) => a.displayName.localeCompare(b.displayName))
+    if (!admin) return <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+        <h1 className="text-xl font-semibold">Space settings</h1>
+        <p role="status" className="text-sm text-muted-foreground">Only admins of this space can open settings.</p>
+        <Button variant="outline" onClick={onBack}>Back to space</Button>
+    </div>
     return <div className="spaces-surface flex min-h-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-5"><Button size="icon" variant="ghost" aria-label="Toggle sidebar" onClick={onShowSidebar}><PanelLeft className="size-4" /></Button><span className="truncate text-sm font-medium"># {space.name}</span>{space.archived && <span className="text-xs text-muted-foreground">Archived</span>}</header>
         <div className="flex-1 overflow-y-auto"><div className="mx-auto max-w-4xl px-5 py-8 sm:px-10">

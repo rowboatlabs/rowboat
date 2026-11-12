@@ -14,7 +14,7 @@ import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeftOpen, PenTool, Rows3, Settings, Trash2, UserPlus, Users } from 'lucide-react'
+import { Archive, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeftOpen, PenTool, Rows3, Settings, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -27,7 +27,6 @@ import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { AddMembersDialog } from '@/components/spaces/add-members-dialog'
-import { ArchiveSpaceDialog, DeleteSpaceDialog } from '@/components/spaces/space-admin-dialogs'
 import { MemberAdminProvider } from '@/components/spaces/member-admin'
 import { InviteLinkPanel } from '@/components/spaces/invite-link'
 import { SpaceInvocationsProvider } from '@/components/spaces/invocation-lines'
@@ -932,10 +931,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [peopleView, setPeopleView] = useState<'list' | 'invite'>('list')
     // Archive and delete are a space admin's, on a shared space (harbor #1186, #1189; spec §4 Roles, 2026-11-09).
     const canAdminSpace = selfIsAdmin && !isDirect
-    const [archiveOpen, setArchiveOpen] = useState(false)
     // Anyone in a space invites to it (2026-11-09): no policy knob.
     const mayInvite = !isDirect
-    const [deleteOpen, setDeleteOpen] = useState(false)
     const [unarchiving, setUnarchiving] = useState(false)
     const unarchive = async () => {
         setUnarchiving(true)
@@ -1039,7 +1036,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     {here.length > 0 && ` · ${here.length} online`}
                                 </div>
                             </div>
-                            {!isDirect && <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); select({ kind: 'settings' }) }}><Settings aria-hidden="true" /> Space settings</button>}
+                            {canAdminSpace && <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); select({ kind: 'settings' }) }}><Settings aria-hidden="true" /> Space settings</button>}
                             <div className="spaces-menu-sep" />
                             <button type="button" className="spaces-menu-row" onClick={() => setTitleMenuView('bookmarks')}>
                                 <Bookmark /> Pinned & saved <ChevronRight className="ml-auto" />
@@ -1064,22 +1061,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     <LinkIcon /> Copy member link
                                 </button>
                             )}
-                            {canAdminSpace && <>
-                                <div className="spaces-menu-sep" />
-                                <div className="spaces-menu-label">Admin</div>
-                                {archived ? (
-                                    <button type="button" className="spaces-menu-row" disabled={unarchiving} onClick={() => { setTitleMenuOpen(false); void unarchive() }}>
-                                        <ArchiveRestore /> Unarchive space
-                                    </button>
-                                ) : (
-                                    <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); setArchiveOpen(true) }}>
-                                        <Archive /> Archive space
-                                    </button>
-                                )}
-                                <button type="button" className="spaces-menu-row spaces-menu-row--danger" onClick={() => { setTitleMenuOpen(false); setDeleteOpen(true) }}>
-                                    <Trash2 /> Delete space…
-                                </button>
-                            </>}
+
                             <div className="spaces-menu-sep" />
                             <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-0.5 text-[11.5px] text-muted-foreground">
                                 <span className="shrink-0">You are</span>
@@ -1354,8 +1336,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 </div>
                 </div>
             </div>
-            {canAdminSpace && <ArchiveSpaceDialog orgId={org.id} space={space} open={archiveOpen} onOpenChange={setArchiveOpen} />}
-            {canAdminSpace && <DeleteSpaceDialog orgId={org.id} space={space} open={deleteOpen} onOpenChange={setDeleteOpen} />}
             {writable && scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
             {writable && !isDirect && (
                 <AddMembersDialog org={org} space={space} members={members} open={addMembersOpen} onOpenChange={setAddMembersOpen} />

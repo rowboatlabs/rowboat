@@ -18,7 +18,7 @@ import { NewChatDialog } from '@/components/spaces/new-chat-dialog'
 import { PersonalLinkDialog } from '@/components/spaces/personal-link-dialog'
 import { RemoveServerDialog } from '@/components/spaces/remove-server-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
-import { prefetchMembers, useOrgRoster, useSelfDisplayName, usePeopleOnline } from '@/hooks/use-space-members'
+import { prefetchMembers, useSpaceMembers, useOrgRoster, useSelfDisplayName, usePeopleOnline } from '@/hooks/use-space-members'
 import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
@@ -199,7 +199,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenSettings, onOpe
                             </SidebarMenuButton>
                         </ContextMenuTrigger>
                         <ContextMenuContent>
-                            {onOpenSettings && <ContextMenuItem onSelect={() => onOpenSettings(org.id, space.id)}><Settings className="mr-2 size-3.5" />Space settings</ContextMenuItem>}
+                            {onOpenSettings && <AdminSettingsItem orgId={org.id} spaceId={space.id} selfId={org.memberId} onOpen={onOpenSettings} context />}
                             <ContextMenuItem disabled={space.archived} onClick={() => startRename(space)}>
                                 <Pencil className="mr-2 size-3.5" /> Rename space
                             </ContextMenuItem>
@@ -216,7 +216,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenSettings, onOpe
                         </DropdownMenuTrigger>
                         {/* Focus returning to the trigger would blur the rename input and commit it. */}
                         <DropdownMenuContent align="start" onCloseAutoFocus={(event) => event.preventDefault()}>
-                            <DropdownMenuItem onSelect={() => onOpenSettings?.(org.id, space.id)} disabled={!onOpenSettings}><Settings className="size-3.5" /> Space settings</DropdownMenuItem>
+                            {onOpenSettings && <AdminSettingsItem orgId={org.id} spaceId={space.id} selfId={org.memberId} onOpen={onOpenSettings} />}
                             <DropdownMenuItem onSelect={() => startRename(space)}>
                                 <Pencil className="size-3.5" /> Rename space
                             </DropdownMenuItem>
@@ -526,4 +526,14 @@ function CollapsibleSpace({ orgId, spaceId, name, showArchived, countOverride, d
         </div>
         {count > 0 && expanded && discussions()}
     </SidebarMenuItem>
+}
+
+// 2026-11-12: Resolve the role in the target space; global or other-space admin status is insufficient.
+function AdminSettingsItem({ orgId, spaceId, selfId, onOpen, context = false }: {
+    orgId: string; spaceId: string; selfId: string; onOpen: (orgId: string, spaceId: string) => void; context?: boolean
+}) {
+    const members = useSpaceMembers(orgId, spaceId)
+    if (members.find(member => member.id === selfId)?.role !== 'admin') return null
+    const Item = context ? ContextMenuItem : DropdownMenuItem
+    return <Item onSelect={() => onOpen(orgId, spaceId)}><Settings className="size-3.5" />Space settings</Item>
 }
