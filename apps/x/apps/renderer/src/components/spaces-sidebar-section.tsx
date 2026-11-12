@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Bell, ChevronDown, ChevronRight, CornerDownRight, Hash, Link as LinkIcon, LogIn, MessageSquarePlus, MessagesSquare, MoreHorizontal, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
+import { Archive, Bell, ChevronDown, ChevronRight, CornerDownRight, Hash, Link as LinkIcon, LogIn, MessageSquarePlus, MessagesSquare, MoreHorizontal, Settings, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -34,7 +34,7 @@ type NewChatStart = 'menu' | 'group' | 'message'
  * Your personal link is pinned to the foot; the host adds your account row
  * under it (SpaceRail's `account`).
  */
-function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenSettings, onOpenThreads, threadsActive = false, onOpenActivity, onOpenAgents, agentsActive = false, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
     /** Your threads across the server's spaces, sessions among them (2026-11-05); absent = no row. */
     onOpenThreads?: (orgId: string) => void
@@ -45,6 +45,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
     activeDiscussionCount?: number
     renderDiscussions?: (spaceId: string) => ReactNode
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenSettings?: (orgId: string, spaceId: string) => void
     /** Your agents (2026-10-21); absent = no Agents header row or "Add an agent". */
     onOpenAgents?: (orgId: string) => void
     agentsActive?: boolean
@@ -198,6 +199,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                             </SidebarMenuButton>
                         </ContextMenuTrigger>
                         <ContextMenuContent>
+                            {onOpenSettings && <ContextMenuItem onSelect={() => onOpenSettings(org.id, space.id)}><Settings className="mr-2 size-3.5" />Space settings</ContextMenuItem>}
                             <ContextMenuItem disabled={space.archived} onClick={() => startRename(space)}>
                                 <Pencil className="mr-2 size-3.5" /> Rename space
                             </ContextMenuItem>
@@ -214,6 +216,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenThreads, thread
                         </DropdownMenuTrigger>
                         {/* Focus returning to the trigger would blur the rename input and commit it. */}
                         <DropdownMenuContent align="start" onCloseAutoFocus={(event) => event.preventDefault()}>
+                            <DropdownMenuItem onSelect={() => onOpenSettings?.(org.id, space.id)} disabled={!onOpenSettings}><Settings className="size-3.5" /> Space settings</DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => startRename(space)}>
                                 <Pencil className="size-3.5" /> Rename space
                             </DropdownMenuItem>
@@ -430,10 +433,11 @@ function RailCollapse({ id, open, children }: { id?: string, open: boolean, chil
 }
 
 /** The Spaces rail's navigation: the server-level rows, then the chat list; nested discussions are optional for legacy consumers. */
-export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
+export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenSettings, onOpenThreads, threadsActive = false, onOpenActivity, onOpenAgents, agentsActive = false, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount = 0, showArchived = false, showDiscussions = true }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenSettings?: (orgId: string, spaceId: string) => void
     onOpenThreads?: (orgId: string) => void
     threadsActive?: boolean
     /** Your agents (2026-10-21); absent = no row. */
@@ -453,7 +457,7 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenThreads
     // A column that fills its scroller, so the link row can sit at the foot.
     return <div className="spaces-rail-nav flex min-h-full flex-1 flex-col">
         <ChatList org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
-            onOpenSpace={onOpenSpace} onOpenThreads={onOpenThreads} threadsActive={threadsActive} onOpenActivity={onOpenActivity} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
+            onOpenSpace={onOpenSpace} onOpenSettings={onOpenSettings} onOpenThreads={onOpenThreads} threadsActive={threadsActive} onOpenActivity={onOpenActivity} onOpenAgents={onOpenAgents} agentsActive={agentsActive} activityActive={activityActive} onChanged={() => void refresh()}
             renderDiscussions={showDiscussions && renderActiveDiscussions ? (id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}
                 onSelect={(selection) => onOpenDiscussion?.(id, selection)} /> : undefined} />

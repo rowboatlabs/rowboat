@@ -1,3 +1,4 @@
+import { SpaceSettings } from '@/components/spaces/space-settings'
 import { SpacesSkeleton } from '@/components/spaces/spaces-skeleton'
 import { onServer } from '@x/shared/dist/spaces.js'
 import { MemberDirectory } from '@/components/spaces/member-directory'
@@ -221,6 +222,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                     if (selectedSpace && orgId === selectedOrg.id && spaceId === selectedSpace.id) onRailSelect({ kind: 'general' })
                     else onSwitchSpace(orgId, spaceId)
                 }}
+                onOpenSettings={(orgId, spaceId) => onSwitchSpace(orgId, spaceId, { kind: 'settings' })}
                 onOpenThreads={onOpenThreads} threadsActive={selection?.view === 'threads'}
                 onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'}
                 onOpenActivity={onOpenActivity} activityActive={selection?.view === 'activity'}
@@ -245,7 +247,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                     railOpen={railPinned}
                     onToggleRail={toggleRailPin}
                     railPeekRef={railPeekRef}
-                    active={active}
+                    active={active && railSelection.kind !== 'settings'}
                 />
                 </SpaceAccessProvider>
             ) : selection?.spaceId ? (
@@ -947,6 +949,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         }
     }
 
+    if (selection.kind === 'settings' && !isDirect) return <SpaceSettings org={org} space={space} members={members} onBack={() => select({ kind: 'general' })} onShowSidebar={onToggleRail} />
+
     return (
         <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
         <SpaceProfilesProvider members={profiles} here={hereSet} selfId={org.memberId}>
@@ -1035,6 +1039,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     {here.length > 0 && ` · ${here.length} online`}
                                 </div>
                             </div>
+                            {!isDirect && <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); select({ kind: 'settings' }) }}>Space settings</button>}
                             <div className="spaces-menu-sep" />
                             <button type="button" className="spaces-menu-row" onClick={() => setTitleMenuView('bookmarks')}>
                                 <Bookmark /> Pinned & saved <ChevronRight className="ml-auto" />

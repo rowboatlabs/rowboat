@@ -13,6 +13,7 @@ import { isBlobAppUrl } from './spaces-presentation'
 
 export type RailSelection =
     | { kind: 'general' }
+    | { kind: 'settings' }
     | { kind: 'discussions'; rootMessageId?: string }
     | { kind: 'files' }
     | { kind: 'thread'; rootMessageId: string }
@@ -27,6 +28,7 @@ export type RailSelection =
 export function railKey(sel: RailSelection | undefined): string {
     if (!sel || sel.kind === 'general') return 'general'
     if (sel.kind === 'discussions') return sel.rootMessageId ? `discussions:${sel.rootMessageId}` : 'discussions'
+    if (sel.kind === 'settings') return sel.kind
     if (sel.kind === 'files') return sel.kind
     if (sel.kind === 'thread') return `thread:${sel.rootMessageId}`
     if (sel.kind === 'attachment') return `attachment:${sel.src}`
@@ -48,6 +50,8 @@ export function readRailSelection(raw: unknown): RailSelection {
     switch (sel.kind) {
         case 'discussions':
             return { kind: 'discussions', ...(typeof sel.rootMessageId === 'string' && sel.rootMessageId ? { rootMessageId: sel.rootMessageId } : {}) }
+        case 'settings':
+            return { kind: 'settings' }
         case 'files':
             return { kind: 'files' }
         case 'general':

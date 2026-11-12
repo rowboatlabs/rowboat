@@ -44,6 +44,8 @@ Threads (2026-11-05, "coding session: threads" in Main) is a rail row beside Act
 
 A separate global app rail, huddles, workspace theming controls, a cross-space list of everyone's threads, and reply broadcasting are not introduced. Those require broader product decisions or behavior beyond a visual redesign. Files, boards, named discussions, agent execution, and permissions retain their existing roles.
 
+Space settings (2026-11-12) opens from a space’s sidebar options/right-click menu or its header menu, keeping the sidebar visible. General, People, Agents, and Space actions organize name/link, live membership and role management, owner-controlled agent access, and the existing archive/delete confirmations. Back to space returns to its conversation.
+
 ## Component mapping
 
 | Reference pattern | Existing Spaces fit | Implemented adaptation |

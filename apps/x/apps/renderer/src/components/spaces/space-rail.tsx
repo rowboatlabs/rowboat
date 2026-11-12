@@ -7,10 +7,11 @@ import { useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 
 /** Stable space/people navigation. Space contents live in the top strip. */
-export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsActive = false, onOpenActivity, activityActive = false, onOpenAgents, agentsActive = false, open, onTogglePin, peekRef, edgeless = false, account }: {
+export function SpaceRail({ org, spaceId, onOpenSpace, onOpenSettings, onOpenThreads, threadsActive = false, onOpenActivity, activityActive = false, onOpenAgents, agentsActive = false, open, onTogglePin, peekRef, edgeless = false, account }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenSettings?: (orgId: string, spaceId: string) => void
     /** Your threads across the org (2026-11-05); absent = no row. */
     onOpenThreads?: (orgId: string) => void
     threadsActive?: boolean
@@ -43,7 +44,7 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenThreads, threadsAct
             {/* A column, so the navigation can pin its Invite row to the foot. */}
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2">
                 <ServerSpaceNavigation onOpenActivity={onOpenActivity} activityActive={activityActive}
-                    onOpenAgents={onOpenAgents} agentsActive={agentsActive} org={org} spaceId={spaceId} onOpenSpace={onOpenSpace} onOpenThreads={onOpenThreads} threadsActive={threadsActive} showDiscussions={false} />
+                    onOpenAgents={onOpenAgents} agentsActive={agentsActive} org={org} spaceId={spaceId} onOpenSpace={onOpenSpace} onOpenSettings={onOpenSettings} onOpenThreads={onOpenThreads} threadsActive={threadsActive} showDiscussions={false} />
             </div>
             {account && <div className="shrink-0 border-t border-border px-2 pb-2 pt-1.5">{account}</div>}
         </SpaceRailSections>}

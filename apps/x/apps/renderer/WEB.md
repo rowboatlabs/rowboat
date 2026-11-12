@@ -54,3 +54,5 @@ Availability (2026-11-05): the bottom-left account menu offers active/away, cust
 Notification navigation (2026-11-06): the account menu’s Notifications submenu contains pause durations, custom pause, resume, and a shortcut to the schedule. Preferences opens the Notifications section with Working hours, day presets, hours, and timezone.
 
 Availability menu interactions (2026-11-09): the Notifications submenu opens immediately on mouse hover and closes 120 ms after the pointer leaves both trigger and submenu. The delay allows crossing the portal gap. Keyboard navigation retains focus until Escape or focus leaves; window blur dismisses the submenu. Schedule day controls appear only for Custom, which preserves the currently selected days.
+
+Space settings (2026-11-12): the space sidebar’s ⋯ and right-click menus, and the space header menu, open `/s/<space>/settings`. General renames the space and copies its link; People and Agents use the live roster to manage roles, membership, and owner-controlled agent access. Space actions reuse the archive/delete confirmations. Settings does not mark the conversation as read.

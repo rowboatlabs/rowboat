@@ -5,6 +5,7 @@ import { parseRoute, routePath } from './routes'
 describe('web routes', () => {
     const rails: RailSelection[] = [
         { kind: 'general' },
+        { kind: 'settings' },
         { kind: 'discussions' },
         { kind: 'discussions', rootMessageId: 'thread/with spaces' },
         { kind: 'files' },

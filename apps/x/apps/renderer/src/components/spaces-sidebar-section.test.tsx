@@ -132,6 +132,16 @@ describe('the chat list', () => {
         expect(screen.getByDisplayValue('founders')).toBeInTheDocument()
     })
 
+    it('opens settings for the selected space from its options menu', () => {
+        const onOpenSettings = vi.fn()
+        nav({ onOpenSettings })
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Options for founders' }), { key: 'Enter' })
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Space settings' }))
+        expect(onOpenSettings).toHaveBeenCalledTimes(1)
+        expect(onOpenSettings.mock.calls[0][0]).toBe(org.id)
+        expect(onOpenSettings.mock.calls[0][1]).toBe(org.spaces.find(s => s.name === 'founders')!.id)
+    })
+
     it('nests and expands discussions under a group', () => {
         const onOpenDiscussion = vi.fn()
         nav({ showDiscussions: true, onOpenDiscussion, activeDiscussionCount: 0, renderActiveDiscussions: () => null })
