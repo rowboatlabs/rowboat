@@ -1,0 +1,50 @@
+name: mobile parity
+
+# A Spaces change on the web/desktop says what happens on the phone
+# (2026-11-13). The rules live in .github/scripts/mobile-parity.cjs.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+  # _target so a merged fork PR can still open its follow-up issue. Safe: this
+  # job checks out the base branch only and never runs the PR's code.
+  pull_request_target:
+    types: [closed]
+
+concurrency:
+  group: mobile-parity-${{ github.event_name }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  mobile-line:
+    name: Mobile line
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await require('./.github/scripts/mobile-parity.cjs').check({ github, context, core });
+
+  follow-up-issue:
+    name: Open mobile follow-up issue
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await require('./.github/scripts/mobile-parity.cjs').openFollowUp({ github, context, core });

@@ -24,4 +24,5 @@ cd ../x && pnpm install && npm test
 - Comments explain **why**, with the date and the decision or PR they implement. The code says what.
 - Documents own one kind of fact each and link to each other rather than restate. There are no status documents: status is the PR description and `git log`.
 - A PR that changes a documented behavior changes the document in the same PR. For harbor the three questions are in its guide.
+- A PR that changes Spaces in the renderer (`components/spaces/`, `web/`, `lib/spaces-*`) says what happens on the phone with one `Mobile:` line in its description: `done`, `follow-up` (an issue opens on merge), `follow-up #123`, or `not needed — <why>`. CI checks it; the rules are in `.github/scripts/mobile-parity.cjs`.
 - Nothing speculative: no seat reserved for a rule or a feature that has no route yet.
