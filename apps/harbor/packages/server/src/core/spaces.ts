@@ -132,7 +132,7 @@ export class Spaces {
   async createSpace(ctx: ActorCtx, name: string): Promise<Space> {
     this.k.guardWrite();
     const now = this.k.now();
-    const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', archived: false };
+    const space: Space = { id: this.k.ulid(), name, createdAt: now, kind: 'shared', archived: false, graph: false };
     await this.k.store.putSpace(space);
     return this.k.locked(space.id, async () => {
       const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: now, role: 'admin' };
@@ -271,7 +271,7 @@ export class Spaces {
 
     this.k.guardWrite();
     const now = this.k.now();
-    const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', participants, archived: false };
+    const space: Space = { id: this.k.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', participants, archived: false, graph: false };
     try {
       await this.k.store.putSpace(space);
     } catch (err) {
