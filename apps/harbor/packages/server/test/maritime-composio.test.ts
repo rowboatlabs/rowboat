@@ -47,6 +47,9 @@ if (name === 'hermes' && args[0] === 'config' && args[1] === 'set') {
     writeFileSync(path, stub);
     chmodSync(path, 0o755);
   }
+  // No npm on this VM (2026-11-13): the turn falls back to the template's CLI, the stub, and the test stays offline.
+  writeFileSync(join(root, 'bin', 'npm'), '#!/bin/sh\nexit 1\n');
+  chmodSync(join(root, 'bin', 'npm'), 0o755);
   writeFileSync(join(root, 'request.prompt'), 'List calendar events.');
   const script = RUNTIMES[kind]!.command({
     serverUrl: 'https://spaces.rowboat.test', agentKey: 'rbk_spaces_identity',

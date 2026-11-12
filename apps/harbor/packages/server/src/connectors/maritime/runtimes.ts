@@ -354,6 +354,20 @@ const codex: Runtime = {
 
 // --- Claude Code ------------------------------------------------------------------------------
 
+// A current Claude Code on the volume (2026-11-13): the template's own CLI was 2.1.150, and the API
+// refuses newer models to it ("version 2.1.280 or newer is required"), so Opus 5.5 and Fable 5.2 failed.
+// The first turn installs it (falling back to the template's CLI when npm can't); the catalogue
+// refresh after a turn renews it daily in the background, staged and swapped in so a turn never
+// starts on a half-written install.
+const CLAUDE_CLI_DIR = '/data/rowboat/claude-code';
+const CLAUDE_CLI_BIN = `${CLAUDE_CLI_DIR}/node_modules/.bin/claude`;
+const CLAUDE_CLI_INSTALL = (prefix: string) => `npm install --prefix ${prefix} --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code@latest`;
+const CLAUDE_CLI_REFRESH = [
+  `if command -v npm >/dev/null 2>&1 && { [ ! -x ${CLAUDE_CLI_BIN} ] || [ -n "$(find ${CLAUDE_CLI_DIR}/.checked -mmin +1440 2>/dev/null)" ] || [ ! -e ${CLAUDE_CLI_DIR}/.checked ]; }; then`,
+  `  ( rm -rf ${CLAUDE_CLI_DIR}.new && ${CLAUDE_CLI_INSTALL(`${CLAUDE_CLI_DIR}.new`)} && [ -x ${CLAUDE_CLI_DIR}.new/node_modules/.bin/claude ] && touch ${CLAUDE_CLI_DIR}.new/.checked && rm -rf ${CLAUDE_CLI_DIR}.old && { [ ! -d ${CLAUDE_CLI_DIR} ] || mv ${CLAUDE_CLI_DIR} ${CLAUDE_CLI_DIR}.old; } && mv ${CLAUDE_CLI_DIR}.new ${CLAUDE_CLI_DIR} ) >/dev/null 2>&1 </dev/null &`,
+  'fi',
+].join('\n');
+
 const claudeCode: Runtime = {
   root: '/data',
   command(input) {
@@ -367,7 +381,9 @@ const claudeCode: Runtime = {
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
       `if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then printf '%s' ${q(mcpJson(input.serverUrl, true))}; else printf '%s' ${q(mcpJson(input.serverUrl))}; fi > /data/rowboat/mcp.json`,
-      'CLI="$(command -v claude 2>/dev/null || true)"',
+      `if [ ! -x ${CLAUDE_CLI_BIN} ] && command -v npm >/dev/null 2>&1; then ${CLAUDE_CLI_INSTALL(CLAUDE_CLI_DIR)} >/dev/null 2>&1 && touch ${CLAUDE_CLI_DIR}/.checked || true; fi`,
+      `CLI=""; if [ -x ${CLAUDE_CLI_BIN} ]; then CLI=${CLAUDE_CLI_BIN}; fi`,
+      '[ -n "$CLI" ] || CLI="$(command -v claude 2>/dev/null || true)"',
       '[ -n "$CLI" ] || for f in /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /app/node_modules/@anthropic-ai/claude-code/cli.js; do [ -f "$f" ] && CLI="node $f" && break; done',
       '[ -n "$CLI" ] || { echo "no Claude Code CLI found in this VM" >&2; exit 127; }',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
@@ -382,7 +398,9 @@ const claudeCode: Runtime = {
     const session = str(result?.session_id) ?? str(all.find((e) => str(e.session_id))?.session_id);
     const failure = failureOf('claude-code', asEvents) ?? (exitCode !== undefined && exitCode !== null && exitCode !== 0 ? stderrTail(err) || 'Claude Code stopped with an error' : undefined);
     // A failed result's `result` is the error, now the failure's reason (2026-11-13): not an answer to post.
-    const answer = ((failure ? undefined : str(result?.result)) ?? answerOf('claude-code', asEvents) ?? '').trim();
+    const said = ((failure ? undefined : str(result?.result)) ?? answerOf('claude-code', asEvents) ?? '').trim();
+    // Claude writes a failed call's error as its last message too: posting it would say the failure twice (2026-11-13).
+    const answer = failure && said === failure.trim() ? '' : said;
     return { ...(answer ? { answer } : {}), ...(failure ? { failure } : {}), ...(session ? { session } : {}) };
   },
   activity(out) {
@@ -396,6 +414,7 @@ const claudeCode: Runtime = {
   modelsCommand: () => [
     'set -e',
     MARITIME_ENV,
+    CLAUDE_CLI_REFRESH,
     `f=/data/rowboat/models.json; if [ -n "$ANTHROPIC_API_KEY" ] && { [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +1440 2>/dev/null)" ]; }; then curl -sf -m 15 "\${ANTHROPIC_BASE_URL:-https://api.anthropic.com}/v1/models?limit=100" -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" > "$f.tmp" && mv "$f.tmp" "$f" || true; fi`,
   ].join('\n'),
   models(text) {
