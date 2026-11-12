@@ -22,6 +22,7 @@ The renderer's Spaces section also builds as a standalone web app (2026-10-09): 
   - Videos play the same way (2026-11-04): a `<video>` loads the blob URL on the cookie and seeks with byte ranges, which is why the Content Security Policy's `media-src` allows `https:`, as `img-src` does.
   - Downloads are links with `download=1`.
   - HTML documents render as `srcdoc` in the viewer's sandbox, without their relative files.
+- **Analytics** (2026-11-11, `src/web/analytics.ts`). PostHog with the desktop's key, every event tagged `platform: 'web'`; the Spaces components' events and a pageview per navigation. Identity, events and the CSP entry are in [`ANALYTICS.md`](../../ANALYTICS.md#spaces-web-app).
 - **No local runtime.** Nothing that needs the person's own machine is shown: `LOCAL_RUNTIME` in `lib/feature-flags.ts` is false here. That covers their Rowboat agent, scheduled sends and reminders, and voice.
 
 ## Run it
@@ -43,7 +44,7 @@ Against a deployment, with real sign-in: set `VITE_SPACES_SERVER_URL` (default p
   - the install and build commands, as `scripts/vercel-install.sh` and `scripts/vercel-build.sh`, because Vercel caps a command at 256 characters (Harbor's protocol package first, then the renderer's workspace dependencies)
   - the rewrite of every path to `web.html`
   - the Content Security Policy. Tokens sit in page storage, so no inline or foreign script may run, and `components/streamdown.tsx` sanitizes every Markdown it renders.
-- **Environment:** `VITE_SPACES_SERVER_URL` for the server it serves, and `VITE_ROWBOAT_ACCOUNT_URL` for the Rowboat account app the account menu's **Plan & usage** opens (2026-11-04; default production, `https://app.x.rowboatlabs.com`). Two Vercel projects, one per deployment:
+- **Environment:** `VITE_PUBLIC_POSTHOG_KEY` (optionally `VITE_PUBLIC_POSTHOG_HOST`) for analytics; without it nothing is sent. `VITE_SPACES_SERVER_URL` for the server it serves, and `VITE_ROWBOAT_ACCOUNT_URL` for the Rowboat account app the account menu's **Plan & usage** opens (2026-11-04; default production, `https://app.x.rowboatlabs.com`). Two Vercel projects, one per deployment:
   - staging: `https://staging.spaces.rowboatlabs.com`, with `VITE_SPACES_SERVER_URL=https://spaces.staging.x.rowboatlabs.com`
   - production: `https://spaces.rowboatlabs.com`, with the default server
 - **The deploy build doesn't typecheck.** `build:web` is `vite build` only, because CI typechecks every PR. A web-only install has no Electron types, and the renderer's `tsc -b` reaches into the desktop's main process. pnpm is pinned with `npx pnpm@10`, because this workspace's lockfile is not in the Vercel project's root directory, so Vercel can't pick the pnpm version from it.

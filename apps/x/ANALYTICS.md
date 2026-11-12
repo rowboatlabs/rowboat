@@ -239,6 +239,17 @@ Captured by the iOS app (`apps/mobile/src/lib/analytics.ts`, typed wrappers like
 - `mobile_note_opened` — a note opened in the read-only browser
 - `mobile_voice_used` — reserved; fires once voice ships in the dev build
 
+### Spaces web app
+
+The web app (`apps/renderer/src/web/`, see `apps/renderer/WEB.md`) renders the desktop's Spaces components, so it sends the same **Spaces** events above from the same call sites, plus `$pageview` on every navigation (the address bar is its navigation). Added 2026-11-11.
+
+- **Init**: `src/web/analytics.ts` (`startAnalytics`, called from `src/web/main.tsx` after the sign-in callback). Every event carries `platform: 'web'` and `spaces_server_url` (staging vs production). No `app_version`.
+- **Identity**: anonymous until signed in, then `identify(<access token sub>, { email })`. The `sub` is the account id Harbor bills by; desktop identifies with the Rowboat API's `user.id`, so the two surfaces merge into one person only where those are the same id.
+- **`user_signed_in`** on the load that completes the sign-in callback; **`user_signed_out`** from the account menu's Sign out (sent by beacon, since the page reloads), then `reset()`. A session ended at the sign-in server resets on the next load.
+- **Person properties**: the web never overwrites the desktop's (`platform`, `api_url`); it sets `has_used_web` once.
+- **No external scripts**: the page's CSP allows none, so `disable_external_dependency_loading` is on and session recording and surveys are off. `respect_dnt` honours the browser's Do Not Track. The CSP's `connect-src` allows `https://*.i.posthog.com`; a different `VITE_PUBLIC_POSTHOG_HOST` (a proxy, self-hosted) must be added there.
+- **Config**: `VITE_PUBLIC_POSTHOG_KEY` (and optionally `VITE_PUBLIC_POSTHOG_HOST`) set on each Vercel project. Without the key nothing is sent.
+
 ## Person properties
 
 Persistent across sessions for the same user. Set via `posthog.people.set` or as the `properties` arg to `identify`.
@@ -320,6 +331,7 @@ When opted out:
 | `packages/shared/src/analytics.ts` | Shared use-case taxonomy and durable turn analytics schema |
 | `apps/renderer/src/lib/analytics.ts` | Renderer event wrappers |
 | `apps/renderer/src/hooks/useAnalyticsIdentity.ts` | Renderer identify/reset on OAuth events |
+| `apps/renderer/src/web/analytics.ts` | Spaces web app init, identify and sign-in/out events |
 | `packages/core/src/auth/oauth-flows.ts` | Core identify/reset/sign-in/sign-out events |
 | `apps/server/src/standalone.ts` | Child startup identity and shutdown flush |
 | `apps/main/src/main.ts` | `before-quit` hook flushes queued events |
