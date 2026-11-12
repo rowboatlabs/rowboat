@@ -6,7 +6,7 @@ import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, Sc
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
-import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
+import type { Member, SearchResults, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
 import { Avatar, AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError } from '@/lib/spaces/errors';
@@ -20,6 +20,7 @@ import { isNetworkError } from '@/lib/spaces/errors';
 import { takeSpacesChanged } from '@/lib/spaces/invites';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet } from '@/components/bottom-sheet';
+import { SearchHits, noHits, type HitSpace } from '@/components/search-results';
 import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
@@ -154,7 +155,8 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
 
 
   // One screen per tab of the Spaces bar ((tabs)/_layout.tsx): Home, DMs,
-  // More, and the search tab — a jump list over spaces and people.
+  // More, and the search tab — spaces and people by name, then messages,
+  // discussions and files across every space (2026-11-12).
   const [query, setQuery] = useState('');
   const TITLES: Record<SpacesTabKey, string> = { home: 'Spaces', dms: 'Direct messages', more: 'More', search: 'Search' };
   useParentHeader(TITLES[tab]);
@@ -179,7 +181,7 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
                 autoFocus
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Jump to a space or person"
+                placeholder="Search messages, files, spaces, people"
                 placeholderTextColor={colors.tertiaryLabel}
                 autoCorrect={false}
                 clearButtonMode="while-editing"
@@ -444,8 +446,55 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
   const spacesWaiting = sum((spaces ?? []).map((sp) => badgeFor(sp.id, false)));
   const waitingIn = (list: Member[]) => sum(list.map((m) => { const dm = dmWith(m.id); return dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 }; }));
 
-  // Search is a jump list: spaces and people whose names contain the query.
+  // Search: spaces and people whose names contain the query, then the
+  // server's search over every space you are in (GET /v1/search, 2026-11-12),
+  // what the web's ⌘K palette shows. Debounced, one request per pause.
   const q = query.trim().toLowerCase();
+  const [hits, setHits] = useState<SearchResults | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<unknown>(null);
+  useEffect(() => {
+    const text = query.trim();
+    if (mode !== 'search' || !text) {
+      setHits(null);
+      setSearching(false);
+      setSearchError(null);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      client
+        .search(undefined, { q: text, limit: 20 })
+        .then((r) => {
+          if (cancelled) return;
+          setHits(r);
+          setSearchError(null);
+        })
+        .catch((err) => {
+          // Offline is already said at the top of the screen; the name matches still show.
+          if (!cancelled) setSearchError(isNetworkError(err) ? null : err);
+        })
+        .finally(() => !cancelled && setSearching(false));
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [client, mode, query]);
+  // A hit opens in its space: a DM is titled by the other person, as its row is.
+  const spaceFor = useCallback(
+    (spaceId: string): HitSpace | undefined => {
+      const sp = spaces?.find((x) => x.id === spaceId);
+      if (sp) return { title: sp.name };
+      const dm = directs.find((x) => x.id === spaceId);
+      if (!dm) return undefined;
+      const otherId = dm.participants?.find((id) => id !== org.memberId) ?? org.memberId;
+      const other = members.get(dm.id)?.find((m) => m.id === otherId) ?? orgMembers.find((m) => m.id === otherId);
+      return { title: other ? (otherId === org.memberId ? `${other.displayName} (you)` : memberLabel(other)) : 'Direct message', kind: 'direct' };
+    },
+    [spaces, directs, members, orgMembers, org.memberId],
+  );
   const shownSpaces = mode === 'dms' ? null : mode === 'search' && q ? (spaces?.filter((s) => s.name.toLowerCase().includes(q)) ?? null) : spaces;
   const shownMembers = mode === 'search' && q ? orgMembers.filter((m) => m.displayName.toLowerCase().includes(q)) : orgMembers;
   // People and your agents in their own sections (2026-11-09, as the desktop's sidebar has them).
@@ -544,6 +593,19 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
           )}
         </View>
       ) : null)}
+      {mode === 'search' && q ? (
+        <>
+          {searchError ? <StatusBanner error={searchError} /> : null}
+          {hits && !noHits(hits, spaceFor) ? (
+            <Card>
+              <View style={{ paddingVertical: 6 }}>
+                <SearchHits results={hits} org={org.address} me={org.memberId} spaceFor={spaceFor} showSpace />
+              </View>
+            </Card>
+          ) : null}
+          {searching ? <ActivityIndicator style={{ alignSelf: 'center' }} /> : null}
+        </>
+      ) : null}
       {/* Your personal link (harbor spec §4 Invites, 2026-11-09): how someone outside your groups reaches you. Under everything. */}
       {mode === 'home' ? (
         <Card>
@@ -554,8 +616,8 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
           </CardRow>
         </Card>
       ) : null}
-      {mode === 'search' && q && (shownSpaces?.length ?? 0) === 0 && shownMembers.length === 0 ? (
-        <Text style={{ ...type.body, textAlign: 'center', color: colors.tertiaryLabel, paddingTop: 24 }}>No spaces or people match “{query.trim()}”</Text>
+      {mode === 'search' && q && !searching && !searchError && (shownSpaces?.length ?? 0) === 0 && shownMembers.length === 0 && (!hits || noHits(hits, spaceFor)) ? (
+        <Text style={{ ...type.body, textAlign: 'center', color: colors.tertiaryLabel, paddingTop: 24 }}>No results for “{query.trim()}”</Text>
       ) : null}
     </View>
   );

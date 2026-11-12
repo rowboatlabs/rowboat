@@ -1,16 +1,17 @@
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { Image } from '@/components/sf-image';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, Text, TextInput, View } from 'react-native';
 import type { SearchResults } from '@rowboat/spaces-protocol';
 
+import { SearchHits, noHits } from '@/components/search-results';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { useColors } from '@/theme/colors';
 
 // Search one space (server-side FTS): the native header search bar drives
 // GET /v1/spaces/:id/search; message hits open their thread, file hits the
-// file. Debounced — one request per pause, not per keystroke.
+// file, discussion hits their thread. Debounced — one request per pause, not per keystroke.
 export default function SpaceSearchScreen() {
   const colors = useColors();
   const account = useSpacesAccount();
@@ -43,7 +44,8 @@ export default function SpaceSearchScreen() {
     return () => clearTimeout(t);
   }, [client, space, query]);
 
-  const base = { org, space, title, me };
+  // Every hit is in this space (2026-11-12: discussions shown too, as the web's bar has them).
+  const spaceFor = useCallback((id: string) => (id === space ? { title: title ?? '' } : undefined), [space, title]);
 
   return (
     <ScrollView
@@ -70,49 +72,11 @@ export default function SpaceSearchScreen() {
       </View>
       {busy ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
       {error ? <Text selectable style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16 }}>{error}</Text> : null}
-      {!busy && results && results.messages.length === 0 && results.assets.length === 0 ? (
+      {!busy && results && noHits(results, spaceFor) ? (
         <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>No results for “{query.trim()}”</Text>
       ) : null}
-
-      {results?.messages.length ? <Section label="Messages" /> : null}
-      {results?.messages.map((hit) => (
-        <Pressable
-          key={hit.messageId}
-          onPress={() => router.push({ pathname: '/spaces/thread', params: { ...base, root: hit.threadRootId } })}
-          style={({ pressed }) => ({
-            marginHorizontal: 8, paddingHorizontal: 8, paddingVertical: 10, gap: 2, borderRadius: 10, borderCurve: 'continuous',
-            backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
-          })}
-        >
-          <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>
-            {hit.topicTitle ? `${hit.topicTitle} · ` : ''}{new Date(hit.postedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-          </Text>
-          <Text numberOfLines={3} style={{ fontSize: 15, lineHeight: 20, color: colors.label }}>{hit.snippet}</Text>
-        </Pressable>
-      ))}
-
-      {results?.assets.length ? <Section label="Files" /> : null}
-      {results?.assets.map((hit) => (
-        <Pressable
-          key={hit.id}
-          onPress={() => router.push({ pathname: '/spaces/file', params: { org, space, assetId: hit.id, path: hit.path, title: hit.path.split('/').pop() ?? hit.path, mime: hit.blob?.mime ?? '' } })}
-          style={({ pressed }) => ({
-            flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 8, paddingHorizontal: 8, paddingVertical: 10,
-            borderRadius: 10, borderCurve: 'continuous', backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
-          })}
-        >
-          <Image source="sf:doc.text" style={{ width: 16, height: 16 }} tintColor={colors.secondaryLabel} />
-          <View style={{ flex: 1 }}>
-            <Text numberOfLines={1} style={{ fontSize: 15, color: colors.label }}>{hit.path}</Text>
-            {hit.snippet ? <Text numberOfLines={2} style={{ fontSize: 13, color: colors.secondaryLabel }}>{hit.snippet}</Text> : null}
-          </View>
-        </Pressable>
-      ))}
+      {results ? <SearchHits results={results} org={org} me={me} spaceFor={spaceFor} /> : null}
     </ScrollView>
   );
 }
 
-function Section({ label }: { label: string }) {
-  const colors = useColors();
-  return <Text style={{ fontSize: 13, fontWeight: '600', color: colors.secondaryLabel, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }}>{label}</Text>;
-}
