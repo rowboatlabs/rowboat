@@ -31,6 +31,7 @@ describe('what a turn says', () => {
     expect(answerOf('claude-code', [tool, final, sub])).toBe('All fixed.');
     expect(failureOf('claude-code', [final, { type: 'claude-result', payload: { subtype: 'success', is_error: false } }])).toBeUndefined();
     expect(failureOf('claude-code', [{ type: 'claude-result', payload: { subtype: 'error_during_execution', is_error: false } }])).toBe('Claude Code stopped with an error');
+    expect(failureOf('claude-code', [{ type: 'claude-result', payload: { subtype: 'success', is_error: true, result: 'API Error: 401 invalid x-api-key' } }])).toBe('API Error: 401 invalid x-api-key');
   });
 
   it('reads Codex: a shell command given as argv, a patch, and its answer', () => {

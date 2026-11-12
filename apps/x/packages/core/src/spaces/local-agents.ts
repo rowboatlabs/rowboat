@@ -99,6 +99,60 @@ function saveRecord(record: LocalAgentRecord): void {
   writeConfig(config);
 }
 
+// Before the one-server registry (2026-11-09, 64539ba3) each record named its
+// own org; orgs.ts now has one record, SPACES_SERVER_ID, and left the old
+// `spaces_orgs.json` in place. A record still naming an old org found no
+// server, so its agent never started and its turns sat pending (2026-11-13).
+const LEGACY_ORGS_FILE = path.join(WorkDir, 'config', 'spaces_orgs.json');
+
+function legacyOrgUrls(): Map<string, string> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(LEGACY_ORGS_FILE, 'utf-8')) as { orgs?: Array<{ id?: unknown; baseUrl?: unknown }> };
+    const urls = new Map<string, string>();
+    for (const org of raw.orgs ?? []) {
+      if (typeof org.id === 'string' && typeof org.baseUrl === 'string') urls.set(org.id, org.baseUrl);
+    }
+    return urls;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Whether an old org lived on this server: the same host, or one of its org subdomains (rowboat.spaces.x… under spaces.x…). */
+export function sameServer(orgUrl: string, serverUrl: string): boolean {
+  try {
+    const org = new URL(orgUrl).host;
+    const server = new URL(serverUrl).host;
+    return org === server || org.endsWith(`.${server}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Move records whose old org lived on the current server onto it. A record
+ * from an org on another server (a dev Harbor) stays as it is: its key means
+ * nothing here, and the app keeps saying it is not signed in to its server.
+ */
+export function adoptLegacyRecords(): void {
+  const server = orgs.getOrg(orgs.SPACES_SERVER_ID);
+  if (!server) return;
+  const config = readConfig();
+  if (config.agents.every((r) => r.orgId === orgs.SPACES_SERVER_ID)) return;
+  const urls = legacyOrgUrls();
+  let moved = false;
+  const agents = config.agents.map((r) => {
+    const url = r.orgId === orgs.SPACES_SERVER_ID ? undefined : urls.get(r.orgId);
+    if (!url || !sameServer(url, server.baseUrl)) return r;
+    moved = true;
+    return { ...r, orgId: orgs.SPACES_SERVER_ID };
+  });
+  if (!moved) return;
+  // One record per agent: the latest one saved wins, as saveRecord would have it.
+  config.agents = agents.filter((r, i) => !agents.slice(i + 1).some((later) => sameAgent(later, r)));
+  writeConfig(config);
+}
+
 function seenKey(agentId: string, threadRootId: string): string {
   return `${agentId}/${threadRootId}`;
 }
@@ -562,13 +616,23 @@ export async function defaultLocalAgentFolder(): Promise<string> {
   return os.homedir();
 }
 
-/** At launch: every local agent this computer runs, for each server it is still signed in to. */
+let unwatchServer: (() => void) | undefined;
+
+/**
+ * At launch, and again whenever the server record changes: Rowboat's record
+ * comes back from the account session after launch (2026-11-13), and agents
+ * started before it lands would otherwise wait for the next launch.
+ */
 export function startLocalAgents(): void {
+  adoptLegacyRecords();
   for (const record of readConfig().agents) startRunner(record);
   changed();
+  unwatchServer ??= orgs.onServerChanged(() => startLocalAgents());
 }
 
 export function stopLocalAgents(): void {
+  unwatchServer?.();
+  unwatchServer = undefined;
   for (const runner of runners.values()) runner.stop();
   runners.clear();
 }

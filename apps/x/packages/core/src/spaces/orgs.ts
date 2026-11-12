@@ -327,6 +327,7 @@ function setRecord(record: OrgRecord, opts: { resetAlways?: boolean } = {}): Org
     (existing.auth.kind !== 'dev' && record.auth.kind !== 'dev' && existing.auth.issuer !== record.auth.issuer);
   writeRecord(record);
   if (existing && (changed || opts.resetAlways)) resetRuntime(record.id);
+  if (changed) serverChanged();
   return record;
 }
 
@@ -353,6 +354,7 @@ export async function removeOrg(orgId: string): Promise<void> {
   if (!record || record.id !== orgId) return;
   writeRecord(null);
   resetRuntime(orgId);
+  serverChanged();
 }
 
 /**
@@ -447,6 +449,24 @@ export async function describeOrgAuth(record: OrgRecord): Promise<{
   return { authKind: record.auth.kind };
 }
 
+const serverListeners = new Set<() => void>();
+
+/**
+ * The server record appeared, went, or now points somewhere else (2026-11-13):
+ * Rowboat's record is restored from the account session after launch, so
+ * anything started at launch (local agents) must start again when it lands.
+ */
+export function onServerChanged(listener: () => void): () => void {
+  serverListeners.add(listener);
+  return () => {
+    serverListeners.delete(listener);
+  };
+}
+
+function serverChanged(): void {
+  for (const listener of serverListeners) listener();
+}
+
 type RuntimeResetListener = (orgId: string) => void;
 const runtimeResetListeners = new Set<RuntimeResetListener>();
 
@@ -499,6 +519,7 @@ export function dropSessionOrgs(): void {
   if (!record || record.auth.kind !== 'session') return;
   writeRecord(null);
   resetRuntime(record.id);
+  serverChanged();
 }
 
 export function getClient(orgId: string): SpacesClient {

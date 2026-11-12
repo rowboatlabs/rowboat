@@ -380,8 +380,9 @@ const claudeCode: Runtime = {
     const asEvents: AgentEvent[] = all.map((e) => ({ type: `claude-${str(e.type) ?? 'unknown'}`, payload: e }));
     const result = [...all].reverse().find((e) => e.type === 'result');
     const session = str(result?.session_id) ?? str(all.find((e) => str(e.session_id))?.session_id);
-    const answer = (str(result?.result) ?? answerOf('claude-code', asEvents) ?? '').trim();
     const failure = failureOf('claude-code', asEvents) ?? (exitCode !== undefined && exitCode !== null && exitCode !== 0 ? stderrTail(err) || 'Claude Code stopped with an error' : undefined);
+    // A failed result's `result` is the error, now the failure's reason (2026-11-13): not an answer to post.
+    const answer = ((failure ? undefined : str(result?.result)) ?? answerOf('claude-code', asEvents) ?? '').trim();
     return { ...(answer ? { answer } : {}), ...(failure ? { failure } : {}), ...(session ? { session } : {}) };
   },
   activity(out) {
