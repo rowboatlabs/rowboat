@@ -139,7 +139,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenSettings, onOpe
     const groups = org.spaces.filter((space) => !space.archived).map((space) => ({ space })).sort(byActivity).map((row) => row.space)
     const directs: Direct[] = org.directs.map((space) => {
         const otherId = directAvatarId(space, org.memberId)
-        return { space, otherId, agent: contacts.find((m) => m.id === otherId)?.kind === 'agent' }
+        return { space, otherId, agent: (org.directKinds?.[space.id] ?? contacts.find((m) => m.id === otherId)?.kind) === 'agent' }
     }).sort(byActivity)
     const agentChats = directs.filter((row) => row.agent)
     const peopleChats = directs.filter((row) => !row.agent)

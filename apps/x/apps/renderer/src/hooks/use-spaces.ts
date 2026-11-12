@@ -13,11 +13,13 @@ export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
     spaces: spaces.Space[]
     /**
      * Direct messages (kind 'direct'), kept apart so no space consumer ever
-     * lists one by accident; the sidebar renders them as people.
+     * lists one by accident; the sidebar groups them by participant kind.
      */
     directs: spaces.Space[]
     /** DM space id → the other participant's current display name (resolved from the DM's own roster). */
     directLabels: Record<string, string>
+    /** DM participant kinds survive removal from active contacts (2026-11-12, inactive-agent sidebar fix). */
+    directKinds?: Record<string, spaces.Member['kind']>
     /** Set when the server could not be reached — the sidebar's "unreachable" state. */
     error?: string
 }
@@ -76,21 +78,25 @@ export function refreshSpacesOrgs(): Promise<void> {
                         // roster is the lookup (one exact fetch per DM, no
                         // dependency on the org roster's cache state).
                         const directLabels: Record<string, string> = {}
+                        const directKinds: Record<string, spaces.Member['kind']> = {}
                         await Promise.all(directs.map(async (dm) => {
                             // One participant = your self-DM; its roster is you.
                             const self = (dm.participants ?? []).length === 1 && dm.participants![0] === org.memberId
                             const who = self ? org.memberId : (dm.participants ?? []).find((id) => id !== org.memberId)
                             if (!who) return
+                            const previousKind = previous?.directKinds?.[dm.id]
+                            if (previousKind) directKinds[dm.id] = previousKind
                             try {
                                 const { members } = await window.ipc.invoke('spaces:listMembers', { orgId: org.id, spaceId: dm.id })
                                 const other = members.find((m) => m.id === who)
+                                if (other) directKinds[dm.id] = other.kind
                                 const name = other ? memberLabel(other) : who
                                 directLabels[dm.id] = self ? `${name} (you)` : name
                             } catch {
                                 directLabels[dm.id] = previous?.directLabels[dm.id] ?? (self ? 'You' : who)
                             }
                         }))
-                        return { ...org, spaces: shared, directs, directLabels }
+                        return { ...org, spaces: shared, directs, directLabels, directKinds }
                     } catch (err) {
                         return { ...org, spaces: [], directs: [], directLabels: {}, error: err instanceof Error ? err.message : String(err) }
                     }
