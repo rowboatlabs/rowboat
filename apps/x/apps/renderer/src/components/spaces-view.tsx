@@ -39,6 +39,7 @@ import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
 import { getStreamView, setStreamView, useStreamView } from '@/lib/spaces-stream-view'
 import { SpaceThreadsView } from '@/components/spaces/space-threads-view'
 import { SpaceFilesView } from '@/components/spaces/space-files-view'
+import { SpaceGraphView } from '@/components/spaces/space-graph-view'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
@@ -331,7 +332,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [filesError, setFilesError] = useState<string | null>(null)
     // 2026-11-03: Threads uses the stream's side-pane layout and keeps its list in place.
     const threadsListOpen = selection.kind === 'discussions'
-    const collectionOpen = selection.kind === 'files'
+    // Files and the graph each take the whole pane; the stream stays mounted behind them.
+    const collectionOpen = selection.kind === 'files' || selection.kind === 'graph'
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     // The listing (module store): resolves a canonical link's address + space
     // to the server this install is in.
@@ -623,7 +625,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // right; anything from Chat reopens the left — and, narrow, closes the
     // doc so the chat actually shows.
     const placeSelection = (next: RailSelection) => {
-        if (next.kind === 'discussions' || next.kind === 'files') return
+        if (next.kind === 'discussions' || next.kind === 'files' || next.kind === 'graph') return
         if (next.kind === 'file' || next.kind === 'whiteboard') {
             setDocKey(next.assetId)
             setDocIsBoard(next.kind === 'whiteboard' || spaces.isWhiteboardPath(entryById.get(next.assetId)?.path ?? ''))
@@ -1072,7 +1074,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     </PopoverContent>
                 </Popover>
 
-                <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect}
+                <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect} graph={space.graph === true || selection.kind === 'graph'}
                     entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} />
 
                 <div className="min-w-0 flex-1" />
@@ -1158,6 +1160,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+                    {selection.kind === 'graph' && <SpaceGraphView orgId={org.id} space={space} members={members} admin={canAdminSpace} refreshTick={refreshTick}
+                        onOpenThread={(rootMessageId) => select({ kind: 'thread', rootMessageId })} onOpenSettings={() => select({ kind: 'settings' })} />}
                     {selection.kind === 'files' && <>
                         {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">
                             Could not refresh files. <button type="button" className="underline" onClick={() => setRefreshTick((tick) => tick + 1)}>Retry</button>

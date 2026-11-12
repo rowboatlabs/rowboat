@@ -296,3 +296,32 @@
   .spaces-chev,
   .spaces-collapse { transition: none; }
 }
+
+/* The space graph (2026-11-12, harbor spec §8 Space graph). Six kinds of node
+   need six colours that stay apart in both themes, which the product palette
+   (black, one blue) does not have; they are scoped here and used nowhere else. */
+.space-graph {
+  --graph-person: #d9480f;
+  --graph-agent: #d9930d;
+  --graph-topic: #2f6fde;
+  --graph-reference: #2b9a66;
+  --graph-code: #8e5bd0;
+  --graph-thread: #8d887e;
+  --graph-floor: #c2255c;
+  --graph-edge: rgba(0, 0, 0, 0.16);
+  --graph-edge-faint: rgba(0, 0, 0, 0.04);
+  --graph-halo: color-mix(in srgb, var(--background) 82%, transparent);
+}
+.dark .space-graph {
+  --graph-person: #ff7a45;
+  --graph-agent: #f0b75a;
+  --graph-topic: #6ea0ff;
+  --graph-reference: #4cc38a;
+  --graph-code: #b08cf0;
+  --graph-thread: #8b877f;
+  --graph-floor: #f06595;
+  --graph-edge: rgba(255, 255, 255, 0.14);
+  --graph-edge-faint: rgba(255, 255, 255, 0.035);
+}
+.space-graph-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+.space-graph-dot[data-type='thread'] { border-radius: 2px; }
