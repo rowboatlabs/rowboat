@@ -14,7 +14,7 @@ import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { SecondaryRailPeek } from '@/components/secondary-rail'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeftOpen, PenTool, Rows3, Trash2, UserPlus, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeftOpen, PenTool, Rows3, Settings, Trash2, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -1039,7 +1039,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     {here.length > 0 && ` · ${here.length} online`}
                                 </div>
                             </div>
-                            {!isDirect && <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); select({ kind: 'settings' }) }}>Space settings</button>}
+                            {!isDirect && <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); select({ kind: 'settings' }) }}><Settings aria-hidden="true" /> Space settings</button>}
                             <div className="spaces-menu-sep" />
                             <button type="button" className="spaces-menu-row" onClick={() => setTitleMenuView('bookmarks')}>
                                 <Bookmark /> Pinned & saved <ChevronRight className="ml-auto" />
