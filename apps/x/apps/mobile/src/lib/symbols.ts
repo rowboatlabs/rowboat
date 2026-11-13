@@ -79,6 +79,5 @@ export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   trash: 'delete',
   'wifi.slash': 'wifi_off',
   xmark: 'close',
-  'xmark.circle': 'cancel',
   'xmark.circle.fill': 'cancel',
 };
