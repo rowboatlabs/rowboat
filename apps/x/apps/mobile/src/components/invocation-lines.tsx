@@ -13,7 +13,8 @@ import { useColors, type Colors } from '@/theme/colors';
 // invocation-lines.tsx, brought to the phone 2026-11-13): what the agent is
 // doing about it right now — queued, working with its activity, waiting on a
 // person, refused and why, failed. Done shows nothing: the agent's reply is
-// the answer. The invoker can cancel a queued one; the invoker or a space
+// the answer. Cancelled shows nothing either (2026-11-13): someone chose to
+// call it off, and a line saying so under the message was only noise. The invoker can cancel a queued one; the invoker or a space
 // admin can stop a running one when the agent's connector declared it can
 // stop. Desktop's hover card of the turn's activity is a sheet here, opened
 // by tapping a running line.
@@ -36,7 +37,7 @@ export function InvocationLines({ invocations, memberNames, me, isAdmin, canStop
   const colors = useColors();
   const [busy, setBusy] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
-  const list = invocations.filter((i) => i.state !== 'done');
+  const list = invocations.filter((i) => i.state !== 'done' && i.state !== 'cancelled');
   if (list.length === 0) return null;
 
   const cancel = async (invocation: Invocation) => {
@@ -178,9 +179,8 @@ function describe(invocation: Invocation, name: string, colors: Colors): { icon:
     case 'refused':
       return { icon: 'sf:nosign', text: `${name} didn’t take this: ${invocation.refusal?.message ?? 'not allowed'}`, tone: muted };
     case 'failed':
-      return { icon: 'sf:exclamationmark.circle', text: invocation.error ? `${name} couldn’t finish: ${invocation.error}` : `${name} couldn’t finish`, tone: colors.destructive };
-    case 'cancelled':
-      return { icon: 'sf:xmark', text: `${name}: cancelled`, tone: muted };
+      // Quiet, not red (2026-11-13): it's past, and the thread goes on without it.
+      return { icon: 'sf:exclamationmark.circle', text: invocation.error ? `${name} couldn’t finish · ${invocation.error}` : `${name} couldn’t finish`, tone: muted };
     default:
       return { icon: 'sf:clock', text: name, tone: muted };
   }
