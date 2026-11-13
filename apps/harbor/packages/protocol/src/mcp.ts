@@ -16,6 +16,7 @@ import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } f
 import { CreateInviteResult } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
+import { SpaceGraph } from './graph.js';
 
 // Decision 5 (CONTRACT.md): the agent face — direct projections of the core
 // operations; the MCP server attributes every call as the token's member with
@@ -181,6 +182,29 @@ export const archiveSpace = tool({
     'refuses new messages, files and members until unarchived. Only when your person asked for it.',
   input: z.object({ spaceId: SpaceId }),
   output: z.object({ space: Space }),
+});
+
+export const setSpaceGraph = tool({
+  name: 'set_space_graph',
+  description:
+    'Turn a shared space\'s knowledge graph on or off (admins only; DMs refuse). While on, the server sends the ' +
+    'space\'s messages to Jev, a decision model, to be classified; turning it off deletes what was derived. ' +
+    'Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, enabled: z.boolean() }),
+  output: z.object({ space: Space }),
+});
+
+export const readGraph = tool({
+  name: 'read_graph',
+  description:
+    'What a space knows about something, from its knowledge graph: the threads about it, who did the work, the pull ' +
+    'requests and topics they touch. Pass `about` (a topic, a person or agent\'s name, or a reference like "#1234") to ' +
+    'get its threads, strongest first; omit it for the space\'s heaviest threads. Each thread carries what kind it is, ' +
+    'whether it is resolved, whether a decision was made and its importance, as judged by Jev; each edge carries its ' +
+    'events, so recent work can be told from old. Weigh edges with strength × events, newest counting most. Read a ' +
+    'thread itself with read_thread. `status` says when the graph is off or still building.',
+  input: z.object({ spaceId: SpaceId, about: z.string().min(1).max(400).optional(), limit: z.number().int().positive().max(200).optional() }),
+  output: SpaceGraph,
 });
 
 export const unarchiveSpace = tool({
@@ -872,6 +896,8 @@ export const mcpTools = [
   restoreAsset,
   assetHistory,
   diff,
+  setSpaceGraph,
+  readGraph,
   createAgent,
   deleteAgent,
 ] as const;
@@ -894,6 +920,7 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   readThread.name,
   readActivity.name,
   searchSpace.name,
+  readGraph.name,
   listTopics.name,
   listArchivedThreads.name,
   listMyThreads.name,

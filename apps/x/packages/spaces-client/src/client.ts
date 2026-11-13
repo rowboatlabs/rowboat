@@ -53,6 +53,7 @@ import {
   type SearchKind,
   type SearchResults,
   type Space,
+  type SpaceGraph,
   type Topic,
   type TopicListing,
   type UnreadSnapshot,
@@ -363,6 +364,20 @@ export class SpacesClient {
   /** A new group; its creator is its admin (api.ts createSpace; spec §4 Roles, 2026-11-09). */
   async createSpace(name: string): Promise<Space> {
     return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
+  }
+
+  /** Turn the space graph on or off (api.ts setSpaceGraph): an admin act. An unchanged value is a no-op. */
+  async setSpaceGraph(spaceId: string, enabled: boolean): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/graph'), routes.setSpaceGraph.response, { enabled, actingMode: 'direct' })).space;
+  }
+
+  /** The space graph (api.ts getSpaceGraph): whole, or only what is `about` one thing. */
+  async getSpaceGraph(spaceId: string, opts: { about?: string; limit?: number } = {}): Promise<SpaceGraph> {
+    const qs = new URLSearchParams();
+    if (opts.about !== undefined) qs.set('about', opts.about);
+    if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
+    const query = qs.toString();
+    return this.request('GET', this.space(spaceId, `/graph${query ? `?${query}` : ''}`), routes.getSpaceGraph.response);
   }
 
   /** Rename a shared space (api.ts renameSpace). Identical name = idempotent no-op. */

@@ -39,6 +39,7 @@ import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
 import { getStreamView, setStreamView, useStreamView } from '@/lib/spaces-stream-view'
 import { SpaceThreadsView } from '@/components/spaces/space-threads-view'
 import { SpaceFilesView } from '@/components/spaces/space-files-view'
+import { SpaceGraphView } from '@/components/spaces/space-graph-view'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
@@ -59,6 +60,10 @@ import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { cn } from '@/lib/utils'
 import * as analytics from '@/lib/analytics'
+import { useSidebarShortcut } from '@/hooks/use-sidebar-shortcut'
+import { Keys } from '@/components/keys'
+import { SHORTCUTS } from '@/lib/shortcuts'
+import { useTitlebarTabsClearance } from '@/hooks/use-titlebar-tabs-clearance'
 
 export { OrgMonogram } from '@/components/spaces/atoms'
 
@@ -169,6 +174,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         setRailPinned(pin)
     }
     const railPeekRef = useRef<SecondaryRailPeek | null>(null)
+    useSidebarShortcut(active, toggleRailPin)
     const [signingIn, setSigningIn] = useState(false)
     const signInRowboat = async () => {
         setSigningIn(true)
@@ -331,7 +337,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [filesError, setFilesError] = useState<string | null>(null)
     // 2026-11-03: Threads uses the stream's side-pane layout and keeps its list in place.
     const threadsListOpen = selection.kind === 'discussions'
-    const collectionOpen = selection.kind === 'files'
+    // Files and the graph each take the whole pane; the stream stays mounted behind them.
+    const collectionOpen = selection.kind === 'files' || selection.kind === 'graph'
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     // The listing (module store): resolves a canonical link's address + space
     // to the server this install is in.
@@ -623,7 +630,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // right; anything from Chat reopens the left — and, narrow, closes the
     // doc so the chat actually shows.
     const placeSelection = (next: RailSelection) => {
-        if (next.kind === 'discussions' || next.kind === 'files') return
+        if (next.kind === 'discussions' || next.kind === 'files' || next.kind === 'graph') return
         if (next.kind === 'file' || next.kind === 'whiteboard') {
             setDocKey(next.assetId)
             setDocIsBoard(next.kind === 'whiteboard' || spaces.isWhiteboardPath(entryById.get(next.assetId)?.path ?? ''))
@@ -926,6 +933,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [addMembersOpen, setAddMembersOpen] = useState(false)
     // The header's two menus each swap to a sub-view (pins, invite link) in place.
     const [titleMenuOpen, setTitleMenuOpen] = useState(false)
+    // The title stops short of the desktop's centred Spaces | Local tabs (2026-11-13).
+    const titleRef = useRef<HTMLButtonElement | null>(null)
+    useTitlebarTabsClearance(titleRef)
     const [titleMenuView, setTitleMenuView] = useState<'menu' | 'bookmarks'>('menu')
     const [peopleOpen, setPeopleOpen] = useState(false)
     const [peopleView, setPeopleView] = useState<'list' | 'invite'>('list')
@@ -990,11 +1000,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             {railHasUnread && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 rounded-full bg-foreground" />}
                         </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={6}>Show sidebar</TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">Show sidebar <Keys keys={SHORTCUTS.toggleSidebar} tone="dark" /></TooltipContent>
                 </Tooltip>}
                 <Popover open={titleMenuOpen} onOpenChange={(open) => { setTitleMenuOpen(open); if (!open) setTitleMenuView('menu') }}>
                     <PopoverTrigger asChild>
                         <button
+                            ref={titleRef}
                             type="button"
                             aria-label={isDirect ? 'Conversation menu' : 'Group menu'}
                             className="spaces-title-button shrink"
@@ -1072,7 +1083,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     </PopoverContent>
                 </Popover>
 
-                <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect}
+                <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect} graph={space.graph === true || selection.kind === 'graph'}
                     entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} />
 
                 <div className="min-w-0 flex-1" />
@@ -1158,6 +1169,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+                    {selection.kind === 'graph' && <SpaceGraphView orgId={org.id} space={space} members={members} admin={canAdminSpace} refreshTick={refreshTick}
+                        onOpenThread={(rootMessageId) => select({ kind: 'thread', rootMessageId })} onOpenSettings={() => select({ kind: 'settings' })} />}
                     {selection.kind === 'files' && <>
                         {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">
                             Could not refresh files. <button type="button" className="underline" onClick={() => setRefreshTick((tick) => tick + 1)}>Retry</button>

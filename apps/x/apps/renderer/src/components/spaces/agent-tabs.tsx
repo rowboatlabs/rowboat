@@ -6,8 +6,9 @@ import { cn } from '@/lib/utils'
 // one per job, and the chosen job's screen on the right. A screen mounts the
 // first time it is chosen and stays mounted, hidden, after that: an open file
 // or a running command survives a look at another tab, and nothing loads
-// before someone asks for it. Anything that cannot be undone lives on one
-// tab, Danger zone, apart from the rest and marked in red.
+// before someone asks for it. Since 2026-11-13 there is no Danger zone tab:
+// each delete sits on the row it deletes and asks once more (ConfirmButton);
+// deleting the agent is on its card's ⋯ menu (delete-agent-dialog.tsx).
 
 export type AgentTab = {
     id: string
@@ -15,7 +16,6 @@ export type AgentTab = {
     icon: ReactNode
     /** Shown beside the label: how many of the thing the screen lists. */
     count?: number | undefined
-    danger?: boolean
     content: ReactNode
 }
 
@@ -42,11 +42,10 @@ export function AgentTabs({ tabs, value, onChange }: { tabs: AgentTab[]; value: 
     return (
         <div className="grid min-w-0 gap-5 sm:grid-cols-[10.5rem_minmax(0,1fr)]">
             <div role="tablist" aria-label="Agent" aria-orientation="vertical" onKeyDown={onKeyDown} className="flex gap-0.5 overflow-x-auto sm:sticky sm:top-0 sm:flex-col sm:self-start">
-                {tabs.map((t, i) => {
+                {tabs.map((t) => {
                     const selected = t.id === active.id
                     return (
                         <Fragment key={t.id}>
-                            {t.danger && i > 0 && <hr className="my-1.5 hidden border-border sm:block" />}
                             <button
                                 type="button"
                                 role="tab"
@@ -57,9 +56,7 @@ export function AgentTabs({ tabs, value, onChange }: { tabs: AgentTab[]; value: 
                                 onClick={() => onChange(t.id)}
                                 className={cn(
                                     'flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:w-full',
-                                    selected && !t.danger && 'bg-accent font-semibold text-foreground',
-                                    t.danger && 'text-destructive hover:bg-destructive/10 hover:text-destructive',
-                                    selected && t.danger && 'bg-destructive/10 font-semibold',
+                                    selected && 'bg-accent font-semibold text-foreground',
                                 )}
                             >
                                 <span className="shrink-0 [&>svg]:size-3.5">{t.icon}</span>
@@ -94,6 +91,11 @@ export function ScreenHeader({ title, note, action }: { title: string; note?: st
             {action && <div className="flex shrink-0 flex-wrap items-center gap-1.5">{action}</div>}
         </div>
     )
+}
+
+/** A screen of several sections (Overview, 2026-11-13): the same gap above and below each, a hairline between them. */
+export function Sections({ children }: { children: ReactNode }) {
+    return <div className="flex min-w-0 flex-col divide-y divide-border [&>*]:py-5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">{children}</div>
 }
 
 /** A small heading inside a screen, for a second group below the first. */
@@ -163,26 +165,6 @@ export function RowAction({ children, onClick, disabled, pressed, className }: {
         >
             {children}
         </button>
-    )
-}
-
-/** The red-bordered list on the Danger zone tab: one row per action, explained, with its control at the end. */
-export function DangerZone({ children }: { children: ReactNode }) {
-    return <div className="flex flex-col divide-y divide-destructive/25 rounded-lg border border-destructive/35">{children}</div>
-}
-
-export function DangerRow({ title, note, children, below }: { title: string; note: string; children?: ReactNode; below?: ReactNode }) {
-    return (
-        <div className="flex flex-col gap-2 p-3">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <div className="min-w-0 flex-1 basis-56">
-                    <p className="text-xs font-semibold text-foreground">{title}</p>
-                    <p className="text-[11px] leading-snug text-muted-foreground">{note}</p>
-                </div>
-                {children && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">{children}</div>}
-            </div>
-            {below}
-        </div>
     )
 }
 
