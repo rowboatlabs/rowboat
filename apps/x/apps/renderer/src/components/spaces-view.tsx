@@ -60,6 +60,10 @@ import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { cn } from '@/lib/utils'
 import * as analytics from '@/lib/analytics'
+import { useSidebarShortcut } from '@/hooks/use-sidebar-shortcut'
+import { Keys } from '@/components/keys'
+import { SHORTCUTS } from '@/lib/shortcuts'
+import { useTitlebarTabsClearance } from '@/hooks/use-titlebar-tabs-clearance'
 
 export { OrgMonogram } from '@/components/spaces/atoms'
 
@@ -170,6 +174,7 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         setRailPinned(pin)
     }
     const railPeekRef = useRef<SecondaryRailPeek | null>(null)
+    useSidebarShortcut(active, toggleRailPin)
     const [signingIn, setSigningIn] = useState(false)
     const signInRowboat = async () => {
         setSigningIn(true)
@@ -928,6 +933,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [addMembersOpen, setAddMembersOpen] = useState(false)
     // The header's two menus each swap to a sub-view (pins, invite link) in place.
     const [titleMenuOpen, setTitleMenuOpen] = useState(false)
+    // The title stops short of the desktop's centred Spaces | Local tabs (2026-11-13).
+    const titleRef = useRef<HTMLButtonElement | null>(null)
+    useTitlebarTabsClearance(titleRef)
     const [titleMenuView, setTitleMenuView] = useState<'menu' | 'bookmarks'>('menu')
     const [peopleOpen, setPeopleOpen] = useState(false)
     const [peopleView, setPeopleView] = useState<'list' | 'invite'>('list')
@@ -992,11 +1000,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             {railHasUnread && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 rounded-full bg-foreground" />}
                         </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={6}>Show sidebar</TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">Show sidebar <Keys keys={SHORTCUTS.toggleSidebar} tone="dark" /></TooltipContent>
                 </Tooltip>}
                 <Popover open={titleMenuOpen} onOpenChange={(open) => { setTitleMenuOpen(open); if (!open) setTitleMenuView('menu') }}>
                     <PopoverTrigger asChild>
                         <button
+                            ref={titleRef}
                             type="button"
                             aria-label={isDirect ? 'Conversation menu' : 'Group menu'}
                             className="spaces-title-button shrink"
