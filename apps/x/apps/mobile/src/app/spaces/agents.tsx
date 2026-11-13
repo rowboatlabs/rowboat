@@ -12,10 +12,9 @@ import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
 // Agents (2026-11-13, desktop agents-view.tsx): the agents you own, what each
-// runs on and its one-line description, and New agent when the server can
-// run one for you ("Rowboat runs it", managedAgentKinds). The desktop's other
-// two ways in stay there: an agent on your own computer is run by the desktop
-// app, and connecting one you already run hands over a key and terminal steps.
+// runs on and its one-line description, and New agent: Rowboat runs it, or
+// connect one you already run (new-agent.tsx). The desktop's third way, an
+// agent on your own computer, is run by the desktop app, so it stays there.
 // Others' agents aren't listed: the phone shows them in each space's members.
 export default function AgentsScreen() {
   const colors = useColors();
@@ -23,7 +22,6 @@ export default function AgentsScreen() {
   const client = useOrgClient(params.org);
 
   const [agents, setAgents] = useState<AgentListing[] | null>(null);
-  const [creates, setCreates] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -42,9 +40,7 @@ export default function AgentsScreen() {
   useFocusEffect(
     useCallback(() => {
       void load();
-      // A server with no managed hosting just has no New agent (desktop does the same).
-      client.managedAgentKinds().then(({ kinds }) => setCreates(kinds.length > 0)).catch(() => setCreates(false));
-    }, [client, load]),
+    }, [load]),
   );
 
   // A new agent is deploying for a minute or three: keep its row fresh until it is ready.
@@ -101,25 +97,12 @@ export default function AgentsScreen() {
       ) : null}
 
       {agents !== null ? (
-        <Group
-          footer={
-            creates
-              ? 'Rowboat runs it in the cloud, so it works from any device. To run one on your computer, or connect one you already run, use the desktop app.'
-              : 'To run an agent on your computer, or connect one you already run, use the desktop app.'
-          }
-        >
-          {creates ? (
-            <Row first onPress={() => router.push({ pathname: '/spaces/new-agent', params: { org: params.org, me: params.me } })}>
-              <Glyph icon="sf:plus" />
-              <Text style={{ flex: 1, ...type.body, color: colors.label }}>New agent</Text>
-              <Chevron />
-            </Row>
-          ) : (
-            <Row first>
-              <Glyph icon="sf:desktopcomputer" />
-              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>Add agents from the desktop app</Text>
-            </Row>
-          )}
+        <Group footer="Rowboat runs it in the cloud, or connect one you already run: Hermes, Replicas, Conductor, Agent37, Maritime or your own. To run one on your computer, use the desktop app.">
+          <Row first onPress={() => router.push({ pathname: '/spaces/new-agent', params: { org: params.org, me: params.me } })}>
+            <Glyph icon="sf:plus" />
+            <Text style={{ flex: 1, ...type.body, color: colors.label }}>New agent</Text>
+            <Chevron />
+          </Row>
         </Group>
       ) : null}
     </ScrollView>
