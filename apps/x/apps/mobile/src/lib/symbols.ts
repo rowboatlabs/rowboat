@@ -5,6 +5,7 @@ import type { AndroidSymbol } from 'expo-symbols';
 // components/sf-image.tsx draws the Material Symbol named here instead. An SF
 // name missing from this map renders nothing on Android: add it here.
 export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
+  archivebox: 'archive',
   'arrow.down': 'arrow_downward',
   'arrow.up': 'arrow_upward',
   'arrow.up.right': 'arrow_outward',
@@ -28,6 +29,7 @@ export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   doc: 'draft',
   'doc.on.doc': 'content_copy',
   'doc.text': 'description',
+  ellipsis: 'more_horiz',
   envelope: 'mail',
   'exclamationmark.circle': 'error',
   'exclamationmark.triangle': 'warning',
@@ -66,6 +68,7 @@ export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   'stop.fill': 'stop',
   'sun.max': 'light_mode',
   trash: 'delete',
+  'tray.and.arrow.up': 'unarchive',
   'wifi.slash': 'wifi_off',
   xmark: 'close',
 };
