@@ -26,7 +26,7 @@ import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveR
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
-import { postMessageReliably } from '@/lib/spaces/send';
+import { foldLive, lastConfirmedOffset, pendingMessage, postMessageReliably, settlePending, withoutPending } from '@/lib/spaces/send';
 import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
 
 /** Rows whose link cards must be in before a channel is revealed, and how long we'll wait. */
@@ -223,12 +223,14 @@ export default function SpaceChatScreen() {
         );
       }
       if (prev.some((m) => m.id === message.id)) return prev;
-      if (awayRef.current) setNewWhileAway(true);
-      return [...prev, message];
+      // Your own echo may take its pending copy's place (2026-11-13).
+      const next = foldLive(prev, message);
+      if (awayRef.current && next.length > prev.length) setNewWhileAway(true);
+      return next;
     });
   }, []);
 
-  if (lastOffset.current === undefined && messages?.length) lastOffset.current = messages.at(-1)?.offset;
+  if (lastOffset.current === undefined && messages?.length) lastOffset.current = lastConfirmedOffset(messages);
 
   const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
@@ -276,7 +278,8 @@ export default function SpaceChatScreen() {
 
   // Write-through (tail only).
   useEffect(() => {
-    if (messages) saveValue(streamCacheKey, messages.slice(-STREAM_CACHE_LIMIT));
+    // Pending sends (2026-11-13) are never saved: they have no real id yet.
+    if (messages) saveValue(streamCacheKey, withoutPending(messages).slice(-STREAM_CACHE_LIMIT));
   }, [streamCacheKey, messages]);
 
   // Newest first for the inverted list: row 0 sits at the bottom, so content
@@ -349,22 +352,28 @@ export default function SpaceChatScreen() {
   const send = async (body: string): Promise<boolean> => {
     if (sending) return false;
     setSending(true);
+    // Show it now, not when the POST returns (2026-11-13): a pending copy,
+    // faded, settled by the server's message or removed on failure.
+    const pending = pendingMessage(space, me, body);
+    setMessages((prev) => (prev ? [...prev, pending] : prev));
+    // Your own message: always land on it, wherever you were scrolled.
+    // (2026-10-05) The old animated scroll started BEFORE the new row was
+    // laid out, aimed at the old end, and kept running over the follow-up
+    // jump — the message stayed just below the fold until you re-entered.
+    // Now: follow the bottom, and scroll once the row exists.
+    atBottom.current = true;
+    dragging.current = false;
+    programmaticUntil.current = Date.now() + 800;
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 250);
     try {
       const { message, invocations: started } = await postMessageReliably(client, space, { body }, me);
-      foldMessage(message);
+      setMessages((prev) => (prev ? settlePending(prev, pending.id, message) : prev));
       setInvocations((prev) => foldInvocations(prev, started));
-      // Your own message: always land on it, wherever you were scrolled.
-      // (2026-10-05) The old animated scroll started BEFORE the new row was
-      // laid out, aimed at the old end, and kept running over the follow-up
-      // jump — the message stayed just below the fold until you re-entered.
-      // Now: follow the bottom, and scroll once the row exists.
-      atBottom.current = true;
-      dragging.current = false;
-      programmaticUntil.current = Date.now() + 800;
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 250);
       return true;
     } catch (err) {
+      // The composer brings the text back as "Not sent"; the pending row goes.
+      setMessages((prev) => prev?.filter((m) => m.id !== pending.id) ?? null);
       // Offline is said by the composer ("Not sent"); anything else is the server's words.
       if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
       return false;
@@ -375,7 +384,8 @@ export default function SpaceChatScreen() {
 
   // Read state (org-owned, CONTRACT.md): the newest offset on screen is our
   // stream mark. Debounced — Slack's advice, don't mark on every tick.
-  const newest = messages?.at(-1)?.offset;
+  // A pending send's offset is a placeholder (2026-11-13), never a mark.
+  const newest = lastConfirmedOffset(messages);
   useEffect(() => {
     if (newest === undefined) return;
     const t = setTimeout(() => void client.markRead(space, { offset: newest }).catch(() => {}), 800);
