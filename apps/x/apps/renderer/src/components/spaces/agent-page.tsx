@@ -1,18 +1,17 @@
 import { useEffect, useState, type ReactNode, useMemo } from 'react'
-import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, ScrollText, SlidersHorizontal, Sparkles, SquareTerminal, Terminal, Trash2, TriangleAlert } from 'lucide-react'
+import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, ScrollText, SlidersHorizontal, Sparkles, SquareTerminal, Terminal } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SizeBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
+import { CommandsScreen, EnvScreen, FilesScreen, LogsScreen, MachineBlock, SizeBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
 import { HOME, useHostingState, type HostingState } from '@/components/spaces/agent-hosting-state'
 import { TerminalScreen } from '@/components/spaces/agent-terminal'
 import { SeatChoice, type Seat } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
-import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
+import { AgentTabs, ConfirmButton, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import { refreshMembers, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
-import { DeleteAgentDialog } from '@/components/spaces/delete-agent-dialog'
 import { PersonalitySection } from '@/components/spaces/agent-personality'
 import { SuperAgentSection } from '@/components/spaces/agent-super'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
@@ -34,9 +33,9 @@ import { toast } from '@/lib/toast'
 // the VM (agent-hosting.tsx). Who pays for its model comes first on Overview
 // (2026-10-27): a new Hermes or Codex is on Rowboat's trial credit, there to
 // try it, and the one thing to do is add your own key, which ends the trial
-// for good; Claude Code runs on the owner's key from the start. Whatever
-// cannot be undone, on any agent, is on the Danger zone tab and asks once
-// more.
+// for good; Claude Code runs on the owner's key from the start. A delete
+// sits beside what it deletes and asks once more; deleting the agent is on
+// its card's ⋯ menu (2026-11-13, the Danger zone tab removed).
 //
 // Who can use it (2026-10-27): Overview says whether it is a channel or a
 // personal agent, and its owner switches it there, either way, any time.
@@ -255,39 +254,6 @@ export function AgentPage({ org, listing, onChanged }: {
         })
     }
 
-    const danger: ReactNode[] = []
-    if (hosting && ready && canManage) danger.push(<HostingDangerRows key="vm" orgId={org.id} agent={agent} hermes={hermes} state={hostingState} />)
-    if (setup.alerts && hook && canManage) {
-        danger.push(
-            <AlertsOffRow
-                key="alerts"
-                orgId={org.id}
-                agent={agent}
-                onCleared={async () => {
-                    setHookUrl(null)
-                    await onChanged()
-                }}
-            />,
-        )
-    }
-    if (hosting && ready && canManage && hosting.llm?.provider === 'chatgpt') danger.push(<SignOutRow key="sign-out" orgId={org.id} agent={agent} onChanged={onChanged} />)
-    // Any agent its owner made can be deleted (2026-11-13), not only a managed one.
-    if (canManage && !gone && !agent.deactivatedAt) danger.push(<DeleteAgentRow key="agent" orgId={org.id} agent={agent} hosted={Boolean(hosting)} local={isLocal} onChanged={onChanged} />)
-    if (danger.length > 0) {
-        tabs.push({
-            id: 'danger',
-            label: 'Danger zone',
-            icon: <TriangleAlert />,
-            danger: true,
-            content: (
-                <>
-                    <ScreenHeader title="Danger zone" note="Nothing here can be undone. Each action asks once more before it runs." />
-                    <DangerZone>{danger}</DangerZone>
-                </>
-            ),
-        })
-    }
-
     return <AgentTabs tabs={tabs} value={tab} onChange={setTab} />
 }
 
@@ -379,7 +345,7 @@ function hostingLine(hosting: spaces.AgentHosting): string {
         case 'ready':
             return `Running on Rowboat's Maritime account since ${when(hosting.updatedAt)}. It sleeps between turns and wakes when mentioned.`
         case 'failed':
-            return `Could not be set up: ${hosting.error ?? 'Maritime gave no reason'}. Delete it from the Danger zone and create it again.`
+            return `Could not be set up: ${hosting.error ?? 'Maritime gave no reason'}. Delete it from its ⋯ menu on the Agents page and create it again.`
         case 'deleting':
             return 'Removing from Maritime… its keys are revoked, it has left every space, and its DMs are read-only.'
         case 'deleted':
@@ -556,6 +522,7 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                             {plan ? 'Use a key instead' : llm ? 'Replace key' : 'Add your API key'}
                         </Button>
                     )}
+                    {canManage && !editing && plan && ready && <SignOutButton orgId={orgId} agent={agent} onChanged={onChanged} />}
                     {!canManage && !llm && <Tag tone="warn">owner needed</Tag>}
                 </div>
                 {form}
@@ -615,8 +582,8 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
     )
 }
 
-/** Sign a Codex out of its owner's ChatGPT plan, on the Danger zone: it answers nothing until a key or a new sign-in. */
-function SignOutRow({ orgId, agent, onChanged }: { orgId: string; agent: spaces.Member; onChanged: () => Promise<void> }) {
+/** Sign a Codex out of its owner's ChatGPT plan (codex logout on the VM): it answers nothing until a key or a new sign-in. */
+function SignOutButton({ orgId, agent, onChanged }: { orgId: string; agent: spaces.Member; onChanged: () => Promise<void> }) {
     const [busy, setBusy] = useState(false)
     const signOut = async () => {
         if (busy) return
@@ -631,33 +598,7 @@ function SignOutRow({ orgId, agent, onChanged }: { orgId: string; agent: spaces.
             setBusy(false)
         }
     }
-    return (
-        <DangerRow title="Sign out of ChatGPT" note={`Runs codex logout on the VM. ${agent.displayName} answers nothing until you sign in again from the Terminal tab or add an API key.`}>
-            <ConfirmButton label="Sign out" confirmLabel="Confirm sign out" busy={busy} onConfirm={() => void signOut()} />
-        </DangerRow>
-    )
-}
-
-/** Delete the agent, on the Danger zone: the button opens the same dialog as the Agents page's ⋯ menu (2026-11-13). */
-function DeleteAgentRow({ orgId, agent, hosted, local, onChanged }: { orgId: string; agent: spaces.Member; hosted: boolean; local: boolean; onChanged: () => Promise<void> }) {
-    const [open, setOpen] = useState(false)
-    return (
-        <DangerRow
-            title={`Delete ${agent.displayName}`}
-            note={
-                hosted
-                    ? 'Deletes its Maritime VM, revokes every key and removes it from all spaces.'
-                    : local
-                      ? 'Stops it on this computer, revokes every key and removes it from all spaces.'
-                      : 'Revokes every key and removes it from all spaces.'
-            }
-        >
-            <Button size="sm" variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setOpen(true)}>
-                <Trash2 className="size-3.5" /> Delete agent
-            </Button>
-            <DeleteAgentDialog orgId={orgId} agent={agent} hosted={hosted} open={open} onOpenChange={setOpen} onDeleted={onChanged} />
-        </DangerRow>
-    )
+    return <ConfirmButton label="Sign out" confirmLabel="Confirm sign out" busy={busy} onConfirm={() => void signOut()} />
 }
 
 /**
@@ -746,7 +687,7 @@ function DefaultsSection({ orgId, agent, canEdit }: { orgId: string; agent: spac
  * Where the service's alerts land (Harbor spec §8 Alerts, 2026-10-03): its
  * owner picks a space the agent is in and gets a secret address, shown this
  * once, to paste into the service's webhook settings. Getting a new one stops
- * the old; turning alerts off is on the Danger zone.
+ * the old; Turn alerts off stops it.
  */
 function AlertsScreen({ org, agent, hook, note, canSet, url, onUrl, onChanged }: {
     org: OrgWithSpaces
@@ -755,10 +696,25 @@ function AlertsScreen({ org, agent, hook, note, canSet, url, onUrl, onChanged }:
     note: string
     canSet: boolean
     url: string | null
-    onUrl: (url: string) => void
+    onUrl: (url: string | null) => void
     onChanged: () => Promise<void>
 }) {
     const [spaceId, setSpaceId] = useState(hook?.spaceId ?? '')
+    const [clearing, setClearing] = useState(false)
+    const clear = async () => {
+        if (clearing) return
+        setClearing(true)
+        try {
+            await window.ipc.invoke('spaces:clearAgentHook', { orgId: org.id, agentId: agent.id })
+            onUrl(null)
+            toast('Alerts turned off', 'success')
+            await onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not turn alerts off', 'error')
+        } finally {
+            setClearing(false)
+        }
+    }
     const [busy, setBusy] = useState(false)
     const spaceName = (id: string) => org.spaces.find((s) => s.id === id)?.name ?? 'a space'
 
@@ -803,31 +759,10 @@ function AlertsScreen({ org, agent, hook, note, canSet, url, onUrl, onChanged }:
                         {busy && <Loader2 className="size-3 animate-spin" />}
                         {hook ? 'New address' : 'Get address'}
                     </Button>
+                    {hook && <ConfirmButton label="Turn alerts off" confirmLabel="Confirm turn off" busy={clearing} onConfirm={() => void clear()} />}
                 </div>
             )}
         </>
-    )
-}
-
-function AlertsOffRow({ orgId, agent, onCleared }: { orgId: string; agent: spaces.Member; onCleared: () => Promise<void> }) {
-    const [busy, setBusy] = useState(false)
-    const clear = async () => {
-        if (busy) return
-        setBusy(true)
-        try {
-            await window.ipc.invoke('spaces:clearAgentHook', { orgId, agentId: agent.id })
-            toast('Alerts turned off', 'success')
-            await onCleared()
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not turn alerts off', 'error')
-        } finally {
-            setBusy(false)
-        }
-    }
-    return (
-        <DangerRow title="Turn alerts off" note={`The address stops working at once. ${agent.displayName} can get a new one on the Alerts tab.`}>
-            <ConfirmButton label="Turn alerts off" confirmLabel="Confirm turn off" busy={busy} onConfirm={() => void clear()} />
-        </DangerRow>
     )
 }
 

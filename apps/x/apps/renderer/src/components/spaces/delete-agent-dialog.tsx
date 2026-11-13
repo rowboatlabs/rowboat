@@ -10,10 +10,9 @@ import { LOCAL_CONNECTION } from '@/lib/agent-kinds'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { toast } from '@/lib/toast'
 
-// Delete an agent you own (2026-11-13): one dialog, opened from the agent
-// card's ⋯ menu or the agent page's Danger zone, in place of the inline form
-// that grew under the Danger zone row. Like deleting a space, it asks for the
-// name: the server does not confirm on its own.
+// Delete an agent you own (2026-11-13): opened from the agent card's ⋯ menu,
+// which replaced the agent page's Danger zone. Like deleting a space, it asks
+// for the name: the server does not confirm on its own.
 
 export function DeleteAgentDialog({ orgId, agent, hosted, open, onOpenChange, onDeleted }: {
     orgId: string

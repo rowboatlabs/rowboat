@@ -282,7 +282,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, onOpenSettings }: {
                                     <KeyRound className="size-3.5" /> {yours ? 'Keys and setup' : 'Keys'}
                                 </DropdownMenuItem>
                             )}
-                            {/* Deleting sits in the menu too (2026-11-13), not only on the agent's Danger zone. */}
+                            {/* The one place an agent is deleted (2026-11-13). */}
                             {canOpen && (
                                 <>
                                     <DropdownMenuSeparator />
