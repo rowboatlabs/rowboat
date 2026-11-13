@@ -68,6 +68,18 @@ export function canArchiveSpace(actor: Membership | undefined, space: Space, act
   return { code: 'forbidden', message: `only an admin of this space can ${act} it` };
 }
 
+/**
+ * The space graph is an admin's switch on a shared space (spec §8 Space
+ * graph, 2026-11-12): turning it on sends every message there to Jev, which
+ * is the space's call and not any one member's. A DM has no admin, so it
+ * has no graph.
+ */
+export function canSetSpaceGraph(actor: Membership | undefined, space: Space): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message has no graph' };
+  if (isAdmin(actor)) return null;
+  return { code: 'forbidden', message: 'only an admin of this space can turn its graph on or off' };
+}
+
 /** Deleting a space is an admin act too, on the same terms as archiving it (spec §6, built 2026-10-14). */
 export function canDeleteSpace(actor: Membership | undefined, space: Space): Decision {
   if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message cannot be deleted' };

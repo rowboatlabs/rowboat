@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
 export { Availability, NotificationSchedule, currentStatus, notificationsPaused } from '@rowboat/spaces-protocol';
 export { LLM_PROVIDERS, ownerSetsUp } from '@rowboat/spaces-protocol';
+// The space graph (harbor spec §8 Space graph, 2026-11-12): the one computation of an edge's weight, so the app and the server agree.
+export { weighGraph, GRAPH_HALF_LIFE_DAYS } from '@rowboat/spaces-protocol';
+export type { SpaceGraph, GraphThread, GraphEntity, GraphEdge, GraphThreadKind, GraphEntityKind, GraphRelation, WeighedEdge, GraphWeightOptions } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
   AgentCredential,

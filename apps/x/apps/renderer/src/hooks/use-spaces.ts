@@ -497,6 +497,15 @@ function wireFeedBus(): void {
             void refreshSpacesOrgs()
         }
         if (frame.event.type === 'space_renamed') void refreshSpacesOrgs()
+        // The space graph was turned on or off (2026-11-12): the event carries
+        // the row, so the Graph tab appears or goes for every member at once.
+        if (frame.event.type === 'space_graph_changed') {
+            const updated = frame.event.space
+            orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
+                ...o, spaces: o.spaces.map(s => s.id === updated.id ? updated : s),
+            }) }
+            emitOrgs()
+        }
         // A role or an agent's seat changed in this space (2026-11-09): the roster
         // carries both, so the admin controls and the seat badges follow at once.
         if (frame.event.type === 'role_changed' || frame.event.type === 'agent_access_changed') refreshMembers(event.orgId, frame.spaceId, { force: true })
