@@ -11,6 +11,7 @@ export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   'arrowshape.turn.up.left': 'reply',
   at: 'alternate_email',
   bell: 'notifications',
+  bookmark: 'bookmark',
   'bell.fill': 'notifications_active',
   'bell.slash': 'notifications_off',
   brain: 'psychology',
