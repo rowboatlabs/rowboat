@@ -16,7 +16,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
-import { MessageActionSheet, MessageBody, MessageRow, applyReaction, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
+import { MessageActionSheet, MessageBody, MessageRow, applyReaction, chipMentions, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { setActiveSpace } from '@/lib/push';
@@ -633,7 +633,7 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
 }) {
   const colors = useColors();
   const name = member ? memberLabel(member) : message.author.memberId;
-  const body = nameFileLinks(spaces.decorateMentions(message.body, memberNames), fileNames);
+  const body = nameFileLinks(chipMentions(message.body, memberNames), fileNames);
   // Same authed blob-image rule the chat rows use — the default renderer
   // can't fetch Harbor blobs.
   const imageRule = useMemo(

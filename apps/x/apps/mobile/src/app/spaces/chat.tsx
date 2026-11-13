@@ -624,6 +624,7 @@ export default function SpaceChatScreen() {
               message={m}
               member={profiles.get(m.author.memberId)}
               memberNames={memberNames} fileNames={fileNames}
+              members={profiles}
               me={me}
               onToggleReaction={toggleReaction}
               onOpenThread={openThread}

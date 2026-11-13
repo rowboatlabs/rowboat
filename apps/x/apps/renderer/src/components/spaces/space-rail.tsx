@@ -1,6 +1,7 @@
 import type { ReactNode, RefObject } from 'react'
 import { SpaceRailSections } from '@/components/spaces/space-rail-sections'
 import { SecondaryRailToggle } from '@/components/secondary-rail-toggle'
+import { SHORTCUTS } from '@/lib/shortcuts'
 import { SecondaryRail, type SecondaryRailPeek } from '@/components/secondary-rail'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { useSpacesUnreadCounts } from '@/hooks/use-space-chat'
@@ -29,7 +30,7 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenSettings, onOpenThr
 }) {
     const unread = useSpacesUnreadCounts()
     const hasUnread = [...unread].some(([key, badge]) => key.startsWith(`${org.id}/`) && badge.unread > 0)
-    return <SecondaryRail edgeDot={hasUnread} edgeless={edgeless} open={open} onTogglePin={onTogglePin} peekRef={peekRef} widthStorageKey="spaces:railWidth">
+    return <SecondaryRail floating edgeDot={hasUnread} edgeless={edgeless} open={open} onTogglePin={onTogglePin} peekRef={peekRef} widthStorageKey="spaces:railWidth">
         {({ togglePin }) => <SpaceRailSections>
             <div className="flex shrink-0 items-center gap-1.5 px-2 py-1.5">
                 {/* One server (2026-11-09): the rail's header is the product, not a server name. The
@@ -39,7 +40,7 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenSettings, onOpenThr
                 {/* Docked: the close. Peeked: the lock. The lock lives here, in the drawer, because
                     the drawer slides out over the header's own button (2026-11-09, the sidebar beside
                     the content), so that button can preview the rail but not dock it. */}
-                <SecondaryRailToggle open={open} onToggle={togglePin} />
+                <SecondaryRailToggle open={open} onToggle={togglePin} shortcut={SHORTCUTS.toggleSidebar} />
             </div>
             {/* A column, so the navigation can pin its Invite row to the foot. */}
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2">

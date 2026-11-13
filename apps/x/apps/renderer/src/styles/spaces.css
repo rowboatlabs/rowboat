@@ -325,3 +325,11 @@
 }
 .space-graph-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
 .space-graph-dot[data-type='thread'] { border-radius: 2px; }
+
+/* The Spaces rail floats the same way when docked (2026-11-13): the same
+   16px corners, hairline ring and soft shadow as the main sidebar (sidebar.css). */
+.rowboat-floating-rail {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 8%, transparent),
+    0 4px 16px rgb(0 0 0 / .08);
+}
