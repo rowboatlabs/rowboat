@@ -20,7 +20,7 @@ import { useColors, type Colors } from '@/theme/colors';
 
 const RUNNING: readonly Invocation['state'][] = ['working', 'waiting'];
 
-export function InvocationLines({ invocations, memberNames, me, isAdmin, canStop, client, onUpdated }: {
+export function InvocationLines({ invocations, memberNames, me, isAdmin, canStop, client, onUpdated, compact, onOpen }: {
   /** This message's invocations, in any state. */
   invocations: readonly Invocation[];
   memberNames: ReadonlyMap<string, string>;
@@ -32,12 +32,37 @@ export function InvocationLines({ invocations, memberNames, me, isAdmin, canStop
   client: SpacesClient;
   /** The cancel's own answer, folded at once: the live frame may trail it. */
   onUpdated: (invocation: Invocation) => void;
+  /** In the space's stream (2026-11-13): one small icon per agent beside the replies link; the lines, Stop and Cancel are in the thread. */
+  compact?: boolean;
+  /** Compact only: opens the message's thread, where the full lines are. */
+  onOpen?: () => void;
 }) {
   const colors = useColors();
   const [busy, setBusy] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const list = invocations.filter((i) => i.state !== 'done');
   if (list.length === 0) return null;
+  if (compact) {
+    const said = list.map((i) => describe(i, memberNames.get(i.agentId) ?? 'The agent', colors));
+    return (
+      <Pressable
+        hitSlop={8}
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={said.map((d) => d.text).join('. ')}
+        accessibilityHint="Opens the thread"
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, alignSelf: 'flex-start' }}
+      >
+        {list.map((invocation, n) =>
+          invocation.state === 'working' ? (
+            <TypingDots key={invocation.id} color={said[n].tone} />
+          ) : (
+            <Image key={invocation.id} source={said[n].icon} style={{ width: 13, height: 13 }} tintColor={said[n].tone} />
+          ),
+        )}
+      </Pressable>
+    );
+  }
 
   const cancel = async (invocation: Invocation) => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
