@@ -13,8 +13,7 @@ import { useColors, type Colors } from '@/theme/colors';
 // invocation-lines.tsx, brought to the phone 2026-11-13): what the agent is
 // doing about it right now — queued, working with its activity, waiting on a
 // person, refused and why, failed. Done shows nothing: the agent's reply is
-// the answer. Cancelled shows nothing either (2026-11-13): someone chose to
-// call it off, and a line saying so under the message was only noise. The invoker can cancel a queued one; the invoker or a space
+// the answer. The invoker can cancel a queued one; the invoker or a space
 // admin can stop a running one when the agent's connector declared it can
 // stop. Desktop's hover card of the turn's activity is a sheet here, opened
 // by tapping a running line.
@@ -37,7 +36,7 @@ export function InvocationLines({ invocations, memberNames, me, isAdmin, canStop
   const colors = useColors();
   const [busy, setBusy] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
-  const list = invocations.filter((i) => i.state !== 'done' && i.state !== 'cancelled');
+  const list = invocations.filter((i) => i.state !== 'done');
   if (list.length === 0) return null;
 
   const cancel = async (invocation: Invocation) => {
@@ -62,9 +61,10 @@ export function InvocationLines({ invocations, memberNames, me, isAdmin, canStop
         const canCancel = mine && (invocation.state === 'queued' || invocation.state === 'pending');
         const stoppable = running && (mine || isAdmin) && canStop.has(invocation.agentId);
         const { icon, text, tone } = describe(invocation, name, colors);
+        const past = invocation.state === 'cancelled' || invocation.state === 'failed';
         return (
           <View key={invocation.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            {invocation.state === 'working' ? <TypingDots color={tone} /> : <Image source={icon} style={{ width: 13, height: 13 }} tintColor={tone} />}
+            {invocation.state === 'working' ? <TypingDots color={tone} /> : <Image source={icon} style={{ width: past ? 11 : 13, height: past ? 11 : 13 }} tintColor={tone} />}
             <Pressable
               disabled={!running}
               onPress={() => setHistoryFor(invocation.id)}
@@ -72,7 +72,7 @@ export function InvocationLines({ invocations, memberNames, me, isAdmin, canStop
               accessibilityHint={running ? `Shows what ${name} has done this turn` : undefined}
               style={{ flexShrink: 1 }}
             >
-              <Text numberOfLines={2} style={{ fontSize: 13, color: tone }}>{text}</Text>
+              <Text numberOfLines={past ? 1 : 2} style={{ fontSize: past ? 12 : 13, color: tone }}>{text}</Text>
             </Pressable>
             {invocation.link ? (
               <Pressable hitSlop={8} onPress={() => void Linking.openURL(invocation.link!).catch(() => {})} accessibilityRole="link">
@@ -179,8 +179,10 @@ function describe(invocation: Invocation, name: string, colors: Colors): { icon:
     case 'refused':
       return { icon: 'sf:nosign', text: `${name} didn’t take this: ${invocation.refusal?.message ?? 'not allowed'}`, tone: muted };
     case 'failed':
-      // Quiet, not red (2026-11-13): it's past, and the thread goes on without it.
-      return { icon: 'sf:exclamationmark.circle', text: invocation.error ? `${name} couldn’t finish · ${invocation.error}` : `${name} couldn’t finish`, tone: muted };
+      // Past states are quiet (2026-11-13): grey, not red; the thread goes on.
+      return { icon: 'sf:exclamationmark.circle', text: invocation.error ? `${name} couldn’t finish · ${invocation.error}` : `${name} couldn’t finish`, tone: colors.tertiaryLabel };
+    case 'cancelled':
+      return { icon: 'sf:xmark.circle', text: `${name} · request cancelled`, tone: colors.tertiaryLabel };
     default:
       return { icon: 'sf:clock', text: name, tone: muted };
   }

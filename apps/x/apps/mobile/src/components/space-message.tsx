@@ -368,7 +368,6 @@ export const MessageRow = memo(function MessageRow({
             <MessageLinkPreviews body={message.body} />
           </>
         )}
-        {invocationLines}
         {message.reactions.length > 0 || alwaysShowReactionBar ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
             {message.reactions.map((g) => {
@@ -421,6 +420,9 @@ export const MessageRow = memo(function MessageRow({
             </Text>
           </Pressable>
         ) : null}
+        {/* The agent lines close the message (2026-11-13): after its reactions and
+            replies, so the message and its thread read together and the status sits under them. */}
+        {invocationLines}
       </View>
     </Pressable>
     {reactorsFor !== null ? (
