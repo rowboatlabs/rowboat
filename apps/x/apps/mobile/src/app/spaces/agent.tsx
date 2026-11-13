@@ -1,7 +1,7 @@
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import type { AgentListing, Space } from '@rowboat/spaces-protocol';
+import type { AgentListing, Space, SpaceMember } from '@rowboat/spaces-protocol';
 
 import { Field, PersonalityFields } from '@/components/agent-form';
 import { Avatar } from '@/components/avatar';
@@ -27,6 +27,13 @@ type Place = { space: Space; seat: Seat | null; admin: boolean };
 // steps, option defaults and the machine's own tabs (terminal, files, logs,
 // environment, model key) stay on the desktop. Taking an agent out of a space
 // is for that space's admins, as Harbor rules.
+//
+// Someone else's agent (2026-11-13, Gagan: "I only see my agents"): Harbor
+// lists only your own, so it is read from the rosters of the spaces you share,
+// as the desktop Agents page does, and shown read-only: its owner, what it
+// runs on, its description, and in each shared space who can ask it. No
+// Message button: Harbor refuses a DM with an agent you don't own (the reach
+// rule, 2026-11-09). Nothing to edit or delete; nothing stands above the owner.
 export default function AgentScreen() {
   const colors = useColors();
   const params = useLocalSearchParams<{ org: string; me: string; agent: string; title?: string }>();
@@ -34,6 +41,8 @@ export default function AgentScreen() {
 
   const [listing, setListing] = useState<AgentListing | null | undefined>(undefined);
   const [places, setPlaces] = useState<Place[] | null>(null);
+  /** Its row in a shared space's roster, and its owner's name there: how someone else's agent is seen. */
+  const [seen, setSeen] = useState<{ agent: SpaceMember; owner: string | null } | null>(null);
   const [error, setError] = useState<unknown>(null);
 
   const loadAgent = useCallback(async () => {
@@ -52,6 +61,9 @@ export default function AgentScreen() {
     try {
       const spaces = (await client.listSpaces()).filter((s) => s.kind !== 'direct' && !s.archived).sort((a, b) => a.name.localeCompare(b.name));
       const rosters = await Promise.all(spaces.map((s) => client.listMembers(s.id).catch(() => null)));
+      const all = rosters.flatMap((r) => r ?? []);
+      const row = all.find((m) => m.id === params.agent);
+      setSeen(row ? { agent: row, owner: all.find((m) => m.id === row.ownerId)?.displayName ?? null } : null);
       setPlaces(
         spaces.flatMap((space, i) => {
           const roster = rosters[i];
@@ -82,7 +94,11 @@ export default function AgentScreen() {
     return () => clearInterval(timer);
   }, [moving, loadAgent]);
 
-  if (listing === undefined) {
+  // Not one of yours: wait for the rosters, then show it from there.
+  const shown: AgentListing | null | undefined =
+    listing !== null ? listing : places === null ? undefined : seen ? { agent: seen.agent, keys: [] } : null;
+
+  if (shown === undefined) {
     return (
       <ScrollView style={{ flex: 1, backgroundColor: colors.groupedBackground }} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 32 }}>
         <Stack.Screen options={{ title: params.title ?? '' }} />
@@ -90,23 +106,24 @@ export default function AgentScreen() {
       </ScrollView>
     );
   }
-  if (listing === null) {
+  if (shown === null) {
     return (
       <ScrollView style={{ flex: 1, backgroundColor: colors.groupedBackground }} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 24, gap: 12 }}>
         <Stack.Screen options={{ title: params.title ?? '' }} />
         <StatusBanner error={error} />
-        {!error ? <Text style={{ ...type.body, textAlign: 'center', color: colors.secondaryLabel }}>This agent is gone, or isn’t yours.</Text> : null}
+        {!error ? <Text style={{ ...type.body, textAlign: 'center', color: colors.secondaryLabel }}>This agent is gone, or in no space you share.</Text> : null}
       </ScrollView>
     );
   }
 
   return (
     <AgentPage
-      key={`${listing.agent.displayName}|${listing.agent.title ?? ''}|${listing.agent.instructions ?? ''}`}
+      key={`${shown.agent.displayName}|${shown.agent.title ?? ''}|${shown.agent.instructions ?? ''}`}
       org={params.org}
       me={params.me}
       client={client}
-      listing={listing}
+      listing={shown}
+      ownerName={seen?.owner ?? null}
       places={places}
       error={error}
       onChanged={loadAgent}
@@ -116,11 +133,13 @@ export default function AgentScreen() {
 }
 
 /** The page proper, keyed on the saved name and profile: a save resets the form to them. */
-function AgentPage({ org, me, client, listing, places, error, onChanged, onPlacesChanged }: {
+function AgentPage({ org, me, client, listing, ownerName, places, error, onChanged, onPlacesChanged }: {
   org: string;
   me: string;
   client: ReturnType<typeof useOrgClient>;
   listing: AgentListing;
+  /** Its owner's name, when it isn't yours. */
+  ownerName: string | null;
   places: Place[] | null;
   error: unknown;
   onChanged: () => Promise<void>;
@@ -133,6 +152,9 @@ function AgentPage({ org, me, client, listing, places, error, onChanged, onPlace
   const editable = mine && !gone;
   const local = agent.agentConnection === LOCAL_CONNECTION;
   const moving = hosting ? MOVING_HOSTING.has(hosting.status) : false;
+  const owner = mine ? 'you' : (ownerName ?? 'its owner');
+  // Someone else's lists only the spaces you share with it.
+  const shownPlaces = mine ? places : (places?.filter((p) => p.seat !== null) ?? null);
 
   const [name, setName] = useState(agent.displayName);
   const [title, setTitle] = useState(agent.title ?? '');
@@ -239,7 +261,11 @@ function AgentPage({ org, me, client, listing, places, error, onChanged, onPlace
       <View style={{ alignItems: 'center', gap: 8 }}>
         <Avatar id={agent.id} name={agent.displayName} size={72} url={agent.avatarUrl} />
         <Text style={{ ...type.title, color: colors.label }}>{agent.displayName}</Text>
-        <Text style={{ ...type.caption, color: colors.secondaryLabel }}>{agentLabel(agent)}{hosting ? ' · Run by Rowboat' : ''}</Text>
+        <Text style={{ ...type.caption, color: colors.secondaryLabel }}>
+          {mine ? '' : agent.ownerId ? `${ownerName ?? 'Someone else'}’s · ` : 'Built in · '}
+          {agentLabel(agent)}
+          {hosting ? ' · Run by Rowboat' : ''}
+        </Text>
       </View>
 
       {hosting ? (
@@ -257,7 +283,7 @@ function AgentPage({ org, me, client, listing, places, error, onChanged, onPlace
         </Group>
       ) : null}
 
-      {!gone ? (
+      {mine && !gone ? (
         <Group>
           <Row first onPress={() => void message()} disabled={opening}>
             <Glyph icon="sf:bubble.left" />
@@ -289,18 +315,20 @@ function AgentPage({ org, me, client, listing, places, error, onChanged, onPlace
       ) : null}
 
       {!gone ? (
-        places === null ? (
+        shownPlaces === null ? (
           <ActivityIndicator />
-        ) : places.length > 0 ? (
+        ) : shownPlaces.length > 0 ? (
           <Group
-            label="Where it works"
+            label={mine ? 'Where it works' : 'Spaces you share'}
             footer={
-              local
-                ? 'Tap a space to add it. It runs on your computer, so only you can ask it, wherever it is.'
-                : 'Tap a space to add it, or to choose who can ask it there. Only a space’s admins can take it out.'
+              !mine
+                ? `Who can ask it in each space. Only ${owner} can change that.`
+                : local
+                  ? 'Tap a space to add it. It runs on your computer, so only you can ask it, wherever it is.'
+                  : 'Tap a space to add it, or to choose who can ask it there. Only a space’s admins can take it out.'
             }
           >
-            {places.map((place, i) => (
+            {shownPlaces.map((place, i) => (
               <Row key={place.space.id} first={i === 0} disabled={busySpace === place.space.id} {...(editable ? { onPress: () => openPlace(place) } : {})}>
                 <Glyph icon="sf:number" />
                 <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{place.space.name}</Text>
@@ -308,14 +336,14 @@ function AgentPage({ org, me, client, listing, places, error, onChanged, onPlace
                   <ActivityIndicator />
                 ) : (
                   <Text style={{ ...type.caption, color: place.seat ? colors.secondaryLabel : colors.tertiaryLabel }}>
-                    {place.seat === null ? (editable ? 'Add' : 'Not in it') : place.seat === 'owner' || local ? 'Only you' : 'Everyone'}
+                    {place.seat === null ? (editable ? 'Add' : 'Not in it') : place.seat === 'owner' || local ? (mine ? 'Only you' : `Only ${owner}`) : 'Everyone'}
                   </Text>
                 )}
               </Row>
             ))}
           </Group>
         ) : (
-          <Text style={{ ...type.caption, color: colors.secondaryLabel, paddingHorizontal: 16 }}>You’re in no spaces yet. Create one and add it there.</Text>
+          <Text style={{ ...type.caption, color: colors.secondaryLabel, paddingHorizontal: 16 }}>{mine ? 'You’re in no spaces yet. Create one and add it there.' : 'You share no spaces with it now.'}</Text>
         )
       ) : null}
 
