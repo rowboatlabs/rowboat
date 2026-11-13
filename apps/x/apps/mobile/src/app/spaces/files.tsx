@@ -10,19 +10,18 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@x/spaces-client';
 import { friendlyError } from '@/lib/spaces/errors';
-import { FileActionSheet, type SheetFile } from '@/components/file-action-sheet';
+import { FileActionSheet, FolderActionSheet, type SheetFile } from '@/components/file-action-sheet';
+import { saveUpload, type UploadChoice, type UploadClash } from '@/lib/spaces/file-actions';
+import type { Asset } from '@rowboat/spaces-protocol';
 import { useColors } from '@/theme/colors';
 
-// A space's files (S3, read-only): entries grouped into a collapsible tree on
+// A space's files: entries grouped into a collapsible tree on
 // '/' (folders are display only — same shape as the Brain tree). Changesets
 // arriving over the WS refresh the listing.
+// Long-press a folder to rename, move or trash it (2026-11-13); Trash in the
+// header brings deleted files back.
 
-interface Entry {
-  id: string;
-  path: string;
-  updatedAt: string;
-  mime?: string;
-}
+type Entry = Asset;
 
 interface Node {
   name: string;
@@ -83,11 +82,19 @@ export default function SpaceFilesScreen() {
     if (!asset) return;
     setUploading(true);
     try {
-      const bytes = new Uint8Array(await (await fetch(asset.uri)).arrayBuffer());
-      const blob = await client.uploadBlob(space, bytes, { declaredMime: asset.mimeType ?? 'application/octet-stream' });
       const name = asset.name.replace(/[/\\]/g, '_');
-      await client.createAsset(space, { path: name, blob: blob.hash, actingMode: 'direct', reason: 'Uploaded from the phone' });
-      await refresh();
+      // A name already taken asks Replace / Keep both (2026-11-13, the
+      // desktop's file-conflict.tsx); the bytes upload once, after the choice.
+      const saved = await saveUpload(client, space, {
+        path: name,
+        reason: 'Uploaded from the phone',
+        ask: askUploadClash,
+        getBlob: async () => {
+          const bytes = new Uint8Array(await (await fetch(asset.uri)).arrayBuffer());
+          return (await client.uploadBlob(space, bytes, { declaredMime: asset.mimeType ?? 'application/octet-stream' })).hash;
+        },
+      });
+      if (saved) await refresh();
     } catch (err) {
       Alert.alert("Couldn't upload", friendlyError(err));
     } finally {
@@ -98,7 +105,7 @@ export default function SpaceFilesScreen() {
   const refresh = useCallback(async () => {
     try {
       const result = await client.listAssets(space);
-      setEntries(result.map((e) => ({ id: e.id, path: e.path, updatedAt: e.updatedAt, mime: e.blob?.mime })));
+      setEntries(result);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -128,11 +135,12 @@ export default function SpaceFilesScreen() {
 
   const tree = useMemo(() => buildTree(entries ?? []), [entries]);
   const [sheetFile, setSheetFile] = useState<SheetFile | null>(null);
+  const [sheetFolder, setSheetFolder] = useState<string | null>(null);
 
   const open = (node: Node) => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     if (!node.entry) return;
-    router.push({ pathname: '/spaces/file', params: { org, space, assetId: node.entry.id, path: node.path, title: node.name, mime: node.entry.mime ?? '' } });
+    router.push({ pathname: '/spaces/file', params: { org, space, assetId: node.entry.id, path: node.path, title: node.name, mime: node.entry.blob?.mime ?? '' } });
   };
 
   const toggle = (path: string) => {
@@ -149,15 +157,14 @@ export default function SpaceFilesScreen() {
       <View key={`${node.kind}:${node.path}`}>
         <Pressable
           onPress={() => (node.kind === 'dir' ? toggle(node.path) : open(node))}
-          // Long-press a file: send it in the chat, copy or share its link (2026-10-28).
-          onLongPress={
-            node.kind === 'dir' || !node.entry
-              ? undefined
-              : () => {
-                  if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  setSheetFile({ assetId: node.entry!.id, name: node.name, path: node.path });
-                }
-          }
+          // Long-press a file: send it in the chat, copy or share its link (2026-10-28);
+          // rename, history, Trash (2026-11-13). A folder: rename or Trash.
+          onLongPress={() => {
+            if (node.kind === 'file' && !node.entry) return;
+            if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            if (node.kind === 'dir') setSheetFolder(node.path);
+            else setSheetFile({ assetId: node.entry!.id, name: node.name, path: node.path, version: node.entry!.version });
+          }}
           style={({ pressed }) => ({
             flexDirection: 'row', alignItems: 'center', gap: 8,
             paddingVertical: 10, paddingRight: 16, paddingLeft: 16 + depth * 18,
@@ -196,9 +203,14 @@ export default function SpaceFilesScreen() {
         options={{
           title: title ? `${title} files` : 'Files',
           headerRight: () => (
-            <Pressable hitSlop={10} disabled={uploading} onPress={() => void upload()} style={{ opacity: uploading ? 0.5 : 1 }}>
-              {uploading ? <ActivityIndicator size="small" /> : <Image source="sf:square.and.arrow.up" style={{ width: 20, height: 22 }} contentFit="contain" tintColor={colors.label} />}
-            </Pressable>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+              <Pressable hitSlop={10} accessibilityLabel="Trash" onPress={() => router.push({ pathname: '/spaces/file-trash', params: { org, space } })}>
+                <Image source="sf:trash" style={{ width: 20, height: 22 }} contentFit="contain" tintColor={colors.label} />
+              </Pressable>
+              <Pressable hitSlop={10} accessibilityLabel="Upload a file" disabled={uploading} onPress={() => void upload()} style={{ opacity: uploading ? 0.5 : 1 }}>
+                {uploading ? <ActivityIndicator size="small" /> : <Image source="sf:square.and.arrow.up" style={{ width: 20, height: 22 }} contentFit="contain" tintColor={colors.label} />}
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -208,13 +220,30 @@ export default function SpaceFilesScreen() {
       {entries?.length === 0 ? (
         <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>No files yet.</Text>
       ) : null}
-      <FileActionSheet file={sheetFile} client={client} org={org} space={space} spaceName={title} onClose={() => setSheetFile(null)} />
+      <FileActionSheet file={sheetFile} client={client} org={org} space={space} spaceName={title} onClose={() => setSheetFile(null)} onDeleted={() => void refresh()} />
+      <FolderActionSheet folder={sheetFolder} entries={entries ?? []} client={client} org={org} space={space} onClose={() => setSheetFolder(null)} onChanged={() => void refresh()} />
     </ScrollView>
   );
 }
 
+/** The desktop's clash notice as a system alert: Keep both, Replace, or Cancel. */
+function askUploadClash(clash: UploadClash): Promise<UploadChoice> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      clash.changed ? `“${clash.path}” changed while saving` : `“${clash.path}” already exists`,
+      'Keep both saves a numbered copy. Replace saves a new version and keeps the existing file’s history.',
+      [
+        { text: 'Keep both', onPress: () => resolve('keep') },
+        { text: 'Replace', onPress: () => resolve('replace') },
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve('cancel') },
+      ],
+      { cancelable: true, onDismiss: () => resolve('cancel') },
+    );
+  });
+}
+
 function fileIcon(node: Node): string {
-  const mime = node.entry?.mime ?? '';
+  const mime = node.entry?.blob?.mime ?? '';
   if (mime.startsWith('image/')) return 'sf:photo';
   if (node.name.endsWith('.md')) return 'sf:doc.text';
   if (mime) return 'sf:doc';
