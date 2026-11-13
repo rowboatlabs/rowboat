@@ -217,6 +217,14 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
                   <Text style={{ flex: 1, ...type.body, color: colors.label }}>Settings</Text>
                   <Chevron />
                 </CardRow>
+                {/* Your agents (2026-11-13): list, create one Rowboat runs, and manage each. */}
+                {current ? (
+                  <CardRow onPress={() => router.push({ pathname: '/spaces/agents', params: { org: current.address, me: current.memberId } })}>
+                    <Glyph icon="sf:cpu" />
+                    <Text style={{ flex: 1, ...type.body, color: colors.label }}>Agents</Text>
+                    <Chevron />
+                  </CardRow>
+                ) : null}
               </Card>
               <Card>
                 <CardRow first onPress={() => router.push('/spaces/join')}>
