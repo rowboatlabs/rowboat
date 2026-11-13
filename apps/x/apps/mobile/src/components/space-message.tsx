@@ -17,6 +17,7 @@ import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 import { memberLabel } from '@/lib/spaces/profiles';
 import { blobLinkName, isVideoName } from '@/lib/spaces/open-blob';
+import { isPending } from '@/lib/spaces/send';
 import { MessageVideo } from '@/components/blob-video';
 
 /** The contract's file link: https://<org>/s/<spaceId>/a/<assetId> (the label is the file's name at write time). */
@@ -338,6 +339,9 @@ export const MessageRow = memo(function MessageRow({
   const dark = colors.isDark;
   const name = member ? memberLabel(member) : message.author.memberId;
   const agent = message.author.actingMode !== 'direct';
+  // A send not yet confirmed (2026-11-13): faded, and no actions — it has no
+  // real id for reactions, edits, deletes or a thread yet.
+  const pending = isPending(message);
   const time = new Date(message.postedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   // Wire member addresses ("@01ABC…") → bold display names, code spans untouched.
   const body = useMemo(
@@ -389,15 +393,16 @@ export const MessageRow = memo(function MessageRow({
     <>
     <Pressable
       // Tap opens the thread (Slack); long-press keeps the action sheet.
-      onPress={onOpenThread ? () => onOpenThread(message) : undefined}
-      onLongPress={() => {
+      onPress={onOpenThread && !pending ? () => onOpenThread(message) : undefined}
+      onLongPress={pending ? undefined : () => {
         if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         onLongPress(message);
       }}
       delayLongPress={250}
       style={({ pressed }) => ({
         flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 6,
-        backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+        backgroundColor: pressed && !pending ? colors.secondaryBackground : 'transparent',
+        opacity: pending ? 0.6 : 1,
       })}
     >
       <View
@@ -450,7 +455,7 @@ export const MessageRow = memo(function MessageRow({
             <MessageLinkPreviews body={message.body} />
           </>
         )}
-        {message.reactions.length > 0 || alwaysShowReactionBar ? (
+        {!pending && (message.reactions.length > 0 || alwaysShowReactionBar) ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
             {message.reactions.map((g) => {
               const mine = g.memberIds.includes(me);

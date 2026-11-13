@@ -35,6 +35,73 @@ export async function postMessageReliably(
   }
 }
 
+// Your message shows the moment you send it (2026-11-13): the screens add a
+// pending copy before the POST and swap in the server's message when it
+// returns (or drop it on failure; the composer's "Not sent" keeps the text).
+// A pending row has no real id or offset, so it must never become a read
+// mark, a live replay offset, or a cached row, and has no actions.
+const PENDING_PREFIX = 'pending:';
+/** Above any real stream offset, so a pending row always sorts last. */
+const PENDING_OFFSET = Number.MAX_SAFE_INTEGER;
+
+export function isPending(message: Pick<Message, 'id'>): boolean {
+  return message.id.startsWith(PENDING_PREFIX);
+}
+
+export function pendingMessage(spaceId: string, me: string, body: string, threadRoot?: string): Message {
+  return {
+    id: `${PENDING_PREFIX}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+    spaceId,
+    ...(threadRoot ? { threadRoot } : {}),
+    author: { memberId: me, actingMode: 'direct' },
+    body,
+    postedAt: new Date().toISOString(),
+    offset: PENDING_OFFSET,
+    replyCount: 0,
+    replyAuthors: [],
+    reactions: [],
+    mentions: [],
+    mentionsHere: false,
+    mentionsRowboat: false,
+  };
+}
+
+/** The list without pending rows, for caches. */
+export function withoutPending(list: Message[]): Message[] {
+  return list.some(isPending) ? list.filter((m) => !isPending(m)) : list;
+}
+
+/** The newest confirmed offset: read marks and live replay never see a pending one. */
+export function lastConfirmedOffset(list: readonly Message[] | null | undefined): number | undefined {
+  if (!list) return undefined;
+  for (let i = list.length - 1; i >= 0; i--) if (!isPending(list[i]!)) return list[i]!.offset;
+  return undefined;
+}
+
+/**
+ * Settle a pending row with the server's message: replace it in place, or
+ * just drop it when the live socket already delivered that id. Never two copies.
+ */
+export function settlePending(list: Message[], pendingId: string, real: Message): Message[] {
+  if (list.some((m) => m.id === real.id)) return list.filter((m) => m.id !== pendingId);
+  if (!list.some((m) => m.id === pendingId)) return [...list, real];
+  return list.map((m) => (m.id === pendingId ? real : m));
+}
+
+/**
+ * A live message of yours that arrives before the POST returns takes the
+ * place of its pending copy (same author and body), so the row isn't shown
+ * twice in the meantime. settlePending then finds the real id and drops nothing more.
+ */
+export function foldLive(list: Message[], incoming: Message): Message[] {
+  if (list.some((m) => m.id === incoming.id)) return list;
+  if (incoming.author.actingMode === 'direct') {
+    const i = list.findIndex((m) => isPending(m) && m.author.memberId === incoming.author.memberId && m.body === incoming.body && m.threadRoot === incoming.threadRoot);
+    if (i >= 0) return list.map((m, j) => (j === i ? incoming : m));
+  }
+  return [...list, incoming];
+}
+
 async function findLanded(
   client: SpacesClient,
   spaceId: string,
