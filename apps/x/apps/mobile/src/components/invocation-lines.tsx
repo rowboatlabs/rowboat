@@ -51,13 +51,13 @@ export function InvocationLines({ invocations, memberNames, me, isAdmin, canStop
         accessibilityRole="button"
         accessibilityLabel={said.map((d) => d.text).join('. ')}
         accessibilityHint="Opens the thread"
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, alignSelf: 'flex-start' }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', height: 18 }}
       >
         {list.map((invocation, n) =>
           invocation.state === 'working' ? (
             <TypingDots key={invocation.id} color={said[n].tone} />
           ) : (
-            <Image key={invocation.id} source={said[n].icon} style={{ width: 13, height: 13 }} tintColor={said[n].tone} />
+            <Image key={invocation.id} source={said[n].icon} style={{ width: 14, height: 14 }} tintColor={colors.secondaryLabel} />
           ),
         )}
       </Pressable>
