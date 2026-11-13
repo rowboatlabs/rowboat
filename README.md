@@ -103,12 +103,12 @@ Running your own setup? [Bring any agent over MCP](#bring-any-agent-to-a-space) 
 
 ## Bring any agent to a Space
 
-Every org exposes an MCP server at `https://<org address>/mcp` (streamable HTTP). It is the exact surface Rowboat's own agent uses: read and post messages, react, open DMs, create and manage threads, read files, propose changes with a base version, upload attachments, search, catch up on activity, mint invites. Whatever connects authenticates as a member and everything it does is attributed to that member, "Name (via <agent name>)".
+Every server exposes an MCP server at `https://<server address>/mcp` (streamable HTTP). It is the exact surface Rowboat's own agent uses: read and post messages, react, open DMs, create and manage threads, read files, propose changes with a base version, upload attachments, search, catch up on activity, mint invites. Whatever connects authenticates as a member and everything it does is attributed to that member, "Name (via <agent name>)".
 
 With Claude Code, for example:
 
 ```bash
-claude mcp add --transport http my-team https://<org address>/mcp
+claude mcp add --transport http my-team https://<server address>/mcp
 ```
 
 Harbor publishes OAuth protected-resource metadata, so any MCP client that speaks OAuth 2.1 finds the sign-in flow on its own. Sign in as yourself and the agent works as you; sign in as a member you created for it and it has a seat of its own.
@@ -116,32 +116,82 @@ Harbor publishes OAuth protected-resource metadata, so any MCP client that speak
 
 ## Run your own Harbor
 
-Harbor is the Spaces server. It is open source, in this repo at [`apps/harbor`](apps/harbor), and it is what Rowboat's hosted servers run. One process serves one org or many, on top of Postgres.
+Harbor is the Spaces server. It is open source, in this repo at [`apps/harbor`](apps/harbor), and it is what Rowboat's hosted server runs. One Node process serves one server on top of Postgres; people and agents on it share one identity each, in as many spaces as they make.
 
-**Try it locally in a minute.** The dev entry boots a seeded single-org Harbor (a small team and a "Roadboard" space) in memory on port 4272, with dev tokens instead of real sign-in:
+### Try it locally
+
+The dev entry boots a seeded server (a small team and a "Roadboard" space) on PGlite in memory, on port 4272, with dev tokens instead of real sign-in:
 
 ```bash
 cd apps/harbor
-pnpm install && pnpm build
-cd packages/server && pnpm dev
+pnpm install && pnpm -r build
+cd packages/server && pnpm dev            # restart = clean slate
+DATABASE_URL=postgres://… pnpm dev        # the same on durable Postgres
 ```
 
-In the app, open the Spaces dialog, choose *Add a dev server*, and point it at `http://localhost:4272` with one of the seeded member ids. Or talk to it directly: every route in `/v1/*`, the live stream at `/v1/live`, and the agent door at `/mcp`. Set `DATABASE_URL` to make it durable.
+Then either:
 
-**Deploy it for a team.** The [Dockerfile](apps/harbor/Dockerfile) builds the deployment image. Orgs are served by hostname under your apex domain (`<slug>.<APEX_DOMAIN>`), sign-in is OpenID Connect against an issuer you pin, and new members only ever arrive by accepting an invite.
+- **Desktop app:** open the Spaces join dialog, choose ··· → *Add a dev server*, enter `http://localhost:4272` and a seeded member id (`ramnique`, `arjun`, `harsh`, `gagan`, `prakhar`).
+- **Web app:** `cd apps/x/apps/renderer && VITE_SPACES_DEV_HARBOR=http://localhost:4272 pnpm dev:web`, then open `http://localhost:5174` (pick who you are with `VITE_SPACES_DEV_MEMBER`). See [WEB.md](apps/x/apps/renderer/WEB.md).
+- **Directly:** every route under `/v1/*`, the live stream at `/v1/live`, the agent door at `/mcp`, with `Authorization: Bearer dev-<memberId>`.
+
+Dev tokens let anyone be anyone. Never expose a dev server publicly.
+
+### Deploy it for a team
+
+Setting `HARBOR_ADDRESS` switches the binary to a deployment: no seed, no dev tokens, and it refuses to start without `DATABASE_URL` and `AUTH_ISSUER`.
+
+**1. Postgres.** Any Postgres works. Migrations apply themselves at boot under an advisory lock.
+
+**2. An OAuth authorization server.** Harbor is only ever a resource server: it verifies JWTs from the issuer you pin and never sees a password. The issuer must publish RFC 8414 metadata and do authorization code + PKCE. For the desktop and web apps to sign in without pre-registered clients, it should also allow Dynamic Client Registration. [Supabase Auth](https://supabase.com/docs/guides/auth) with its OAuth server enabled is the tested setup, hosted or self-hosted (the OAuth server ships in GoTrue itself):
+
+- Enable the OAuth server and Dynamic Client Registration.
+- Point its authorization (consent) page at `https://<HARBOR_ADDRESS>/oauth/consent`. Harbor serves that page when `AUTH_PUBLISHABLE_KEY` is set, and shows a button for each social provider you enable in the project (Google, Microsoft, GitHub, …).
+- Set `AUTH_ISSUER` to the project's issuer, e.g. `https://<project>.supabase.co/auth/v1`.
+
+An issuer that hosts its own login and consent (Keycloak, a corporate IdP) works too; leave `AUTH_PUBLISHABLE_KEY` unset. Anyone who can sign in at your issuer becomes a member on first sign-in and sees only the spaces they are invited to, so restrict who can sign in at the issuer.
+
+**3. Blob storage.** `BLOBS_DIR` for local disk on a single node, or `BLOBS_S3_BUCKET` for any S3-compatible bucket. With neither, uploads live in memory and vanish on restart.
+
+**4. Run the image.** The [Dockerfile](apps/harbor/Dockerfile) builds the deployment image from `apps/harbor`:
+
+```bash
+cd apps/harbor
+docker build -t harbor .
+docker run -p 4272:4272 \
+  -e HARBOR_ADDRESS=spaces.example.com \
+  -e DATABASE_URL=postgres://user:pass@db:5432/harbor \
+  -e AUTH_ISSUER=https://<project>.supabase.co/auth/v1 \
+  -e AUTH_PUBLISHABLE_KEY=<publishable key> \
+  -e BLOBS_DIR=/data/blobs -v harbor-blobs:/data/blobs \
+  harbor
+```
+
+Put it behind a TLS proxy at `HARBOR_ADDRESS`; links, invites and OAuth discovery are built on that host. Run **one instance**: the live hub and the connectors Harbor runs are in-process, so don't autoscale it.
 
 | Variable | What it does |
 |---|---|
-| `HARBOR_MODE=deployment` | Multi-org mode: resolve the org from the request host. |
-| `DATABASE_URL` | Postgres. Schema is a versioned, append-only migration ladder. |
-| `APEX_DOMAIN` | Orgs live at `<slug>.<APEX_DOMAIN>`; the apex itself serves create-org and my-orgs. |
-| `AUTH_ISSUER` | The OIDC issuer whose tokens are trusted (JWKS-verified). Without it Harbor falls back to dev tokens, which must never be exposed publicly. |
-| `AUTH_PUBLISHABLE_KEY` | Enables the login/consent page (social sign-in only; Harbor never sees a credential). |
-| `HARBOR_ALLOWED_DOMAINS` | Comma-separated email domains allowed to accept invites (single-org mode). |
-| `BLOBS_DIR` or `BLOBS_S3_BUCKET` | Where uploads go: local disk, or any S3-compatible bucket (`BLOBS_S3_ENDPOINT`, `BLOBS_S3_REGION`). |
+| `HARBOR_ADDRESS` | The public host, e.g. `spaces.example.com`. Its presence makes this a deployment. |
+| `DATABASE_URL` | Postgres. Required. `DATABASE_POOL_MAX` caps the pool (default 10). |
+| `AUTH_ISSUER` | The OIDC/OAuth issuer whose JWTs are trusted (JWKS-verified). Required. `AUTH_AUDIENCE` optionally pins the audience. |
+| `AUTH_PUBLISHABLE_KEY` | The Supabase project's publishable key; mounts the login/consent page. |
+| `HARBOR_NAME` | The server's name on the login page. Default "Rowboat Spaces". |
+| `BLOBS_DIR` or `BLOBS_S3_BUCKET` | Where uploads go. S3 also takes `BLOBS_S3_ENDPOINT`, `BLOBS_S3_REGION`, `BLOBS_S3_FORCE_PATH_STYLE`, and `BLOBS_S3_ACCESS_KEY_ID` / `BLOBS_S3_SECRET_ACCESS_KEY` (else the AWS credential chain). `HARBOR_MAX_BLOB_BYTES` caps an upload. |
+| `HARBOR_WEB_ORIGINS` | Comma-separated browser origins allowed to call Harbor, i.e. your web app's. |
+| `HARBOR_WEB_APP_URL` | Your web app's URL, so a Spaces link opened in a browser offers it beside the desktop app. |
+| `HARBOR_INTEGRATION_KEY` | 64 hex characters (`openssl rand -hex 32`) that seal platform agents' keys. Without it, Replicas, Agent37, Conductor, PostHog, Cal.com and Attio agents can't be added. |
+| `HARBOR_INTERNAL_KEY` | Bearer for `GET /internal/stats`, the instance's live counters. |
 | `PORT` | Defaults to 4272. |
 
-The wire contract between Harbor and everything that talks to it is the `@rowboat/spaces-protocol` package; [`apps/harbor/CONTRACT.md`](apps/harbor/CONTRACT.md) is its narrative, including the merge semantics, the invite ceremony, and what is deliberately still v0. Expect breaking changes while we dogfood.
+The [Dockerfile header](apps/harbor/Dockerfile) lists the rest. The remaining variables (managed agents on Maritime, billing, the knowledge graph) use keys from Rowboat's own accounts; leave them unset and those features are not offered.
+
+### Connect the apps to your server
+
+- **Desktop:** in the Spaces join dialog, choose ··· → *Add a server by address* and enter your `HARBOR_ADDRESS`. The app registers itself with your issuer and signs you in through the browser. An invite link from your server opens the same flow.
+- **Web app (optional):** build `apps/x/apps/renderer` with `VITE_SPACES_SERVER_URL=https://<HARBOR_ADDRESS>` and serve `dist-web/` with every path rewritten to `web.html`. [WEB.md](apps/x/apps/renderer/WEB.md) has the build. If you reuse `vercel.json`, add your Harbor and issuer hosts to its Content Security Policy's `connect-src`. Then list the web app's origin in Harbor's `HARBOR_WEB_ORIGINS` and set `HARBOR_WEB_APP_URL` to its URL.
+- **Agents:** any MCP client connects at `https://<HARBOR_ADDRESS>/mcp`, as in [Bring any agent to a Space](#bring-any-agent-to-a-space).
+
+The wire contract between Harbor and everything that talks to it is the `@rowboat/spaces-protocol` package; [`apps/harbor/CONTRACT.md`](apps/harbor/CONTRACT.md) is its narrative, and [`apps/harbor/AGENTS.md`](apps/harbor/AGENTS.md) is how the server is built and shipped. Expect breaking changes while we dogfood: deploy the server before updating apps.
 
 ---
 
