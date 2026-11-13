@@ -12,7 +12,7 @@ import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { PollCard } from '@/components/poll-card';
 import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
 import { EmojiPicker } from '@/components/emoji-picker';
-import { AuthedImage } from '@/components/avatar';
+import { Avatar, AuthedImage } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 import { memberLabel } from '@/lib/spaces/profiles';
@@ -150,12 +150,43 @@ export function MessageBody({ body, fileNames, rules, onLinkPress }: {
 }
 
 /**
- * Markdown link rule: a file link is a file label (📄 name, no underline);
- * other links keep the default look. Taps go through onLinkPress either way.
+ * Mentions read as Slack's chips (2026-11-13): tokens keep their link form with
+ * the roster's current name ("[@Name](#member:id)", "[@here](#here)"), so the
+ * link rule can paint them; space tokens stay bold "#Space" as before.
+ */
+export function chipMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
+  return spaces.mapMentionTokens(body, (ref) => {
+    if (ref.kind === 'space') return `**#${ref.label}**`;
+    if (ref.kind === 'member') return `[@${(memberNames.get(ref.id) ?? ref.label).replace(/[[\]\n]/g, ' ').trim() || ref.id}](#member:${ref.id})`;
+    return `[@${ref.kind}](#${ref.kind})`;
+  });
+}
+
+const MENTION_HREF_RE = /^#(member:|here$|rowboat$)/;
+// The link blue the reply chips already use, and a faint wash of it behind mentions.
+const LINK_BLUE = '#0a84ff';
+
+type LinkNode = { key: string; attributes: { href?: string }; content?: string; children?: LinkNode[] };
+const nodeText = (node: LinkNode): string => node.content || (node.children ?? []).map(nodeText).join('');
+
+/** A mention chip: blue on a faint blue wash, small rounded corners (an inline view, so the corners round). */
+function MentionChip({ label }: { label: string }) {
+  return (
+    <View style={{ backgroundColor: 'rgba(10,132,255,0.13)', borderRadius: 4, borderCurve: 'continuous', paddingHorizontal: 3, transform: [{ translateY: 4 }] }}>
+      <Text style={{ fontSize: 16, lineHeight: 20, color: LINK_BLUE }}>{label}</Text>
+    </View>
+  );
+}
+
+/**
+ * Markdown link rule: a file link is a file label (📄 name, no underline), a
+ * mention is a chip; other links keep the default look. Taps go through
+ * onLinkPress either way.
  */
 export function fileLinkRule(labelColor: string) {
-  return (node: { key: string; attributes: { href?: string } }, children: ReactNode, _parent: unknown, styles: { link?: object }, onLinkPress?: (url: string) => boolean) => {
+  return (node: LinkNode, children: ReactNode, _parent: unknown, styles: { link?: object }, onLinkPress?: (url: string) => boolean) => {
     const href = String(node.attributes.href ?? '');
+    if (MENTION_HREF_RE.test(href)) return <MentionChip key={node.key} label={nodeText(node)} />;
     const file = parseAssetLink(href) !== null;
     return (
       <Text
@@ -203,11 +234,68 @@ function avatarColor(id: string, dark: boolean): string {
   return `hsl(${AVATAR_HUES[h % AVATAR_HUES.length]}, 45%, ${dark ? 32 : 82}%)`;
 }
 
+/**
+ * When the last reply landed, like Slack's reply row (2026-11-13): the time
+ * today, "Yesterday at 10:02 PM", "Sep 1 at 11:02 PM", and the year once it
+ * isn't this one.
+ */
+export function replyTimeLabel(iso: string, now = new Date()): string {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (at.toDateString() === now.toDateString()) return time;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (at.toDateString() === yesterday.toDateString()) return `Yesterday at ${time}`;
+  const day = at.toLocaleDateString([], at.getFullYear() === now.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${day} at ${time}`;
+}
+
+/**
+ * Slack's reply row under a root in the stream (2026-11-13): who replied (the
+ * first few, rounded squares), "N replies" in link blue, then when the last one
+ * landed. One tap target that opens the thread. `trailing` sits at the end of
+ * the row, vertically centered (the combined branches put the agent status there).
+ */
+export function ReplyRow({ message, members, memberNames, onPress, trailing }: {
+  message: Message;
+  members?: ReadonlyMap<string, Member>;
+  memberNames?: ReadonlyMap<string, string>;
+  onPress: () => void;
+  trailing?: ReactNode;
+}) {
+  const colors = useColors();
+  const authors = message.replyAuthors.slice(0, 4);
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={6}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, alignSelf: 'flex-start' }}
+    >
+      {authors.length > 0 ? (
+        <View style={{ flexDirection: 'row', gap: 3 }}>
+          {authors.map((id) => {
+            const m = members?.get(id);
+            return <Avatar key={id} id={id} name={(m ? memberLabel(m) : memberNames?.get(id)) ?? '?'} url={m?.avatarUrl} size={22} radius={5} />;
+          })}
+        </View>
+      ) : null}
+      <Text style={{ fontSize: 13, fontWeight: '500', color: LINK_BLUE }}>
+        {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}
+      </Text>
+      {message.lastReplyAt ? (
+        <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{replyTimeLabel(message.lastReplyAt)}</Text>
+      ) : null}
+      {trailing}
+    </Pressable>
+  );
+}
+
 export const MessageRow = memo(function MessageRow({
   message,
   member,
   memberNames,
   fileNames,
+  members,
   me,
   onToggleReaction,
   onOpenThread,
@@ -226,6 +314,8 @@ export const MessageRow = memo(function MessageRow({
   memberNames?: ReadonlyMap<string, string>;
   /** asset id → file name, so bare file links show the file's name. */
   fileNames?: ReadonlyMap<string, string>;
+  /** id → member, for the reply row's avatars. */
+  members?: ReadonlyMap<string, Member>;
   me: string;
   onToggleReaction: (message: Message, emoji: string) => void;
   /** Omit on the thread screen (replies have no threads). */
@@ -251,7 +341,7 @@ export const MessageRow = memo(function MessageRow({
   const time = new Date(message.postedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   // Wire member addresses ("@01ABC…") → bold display names, code spans untouched.
   const body = useMemo(
-    () => nameFileLinks(memberNames ? spaces.decorateMentions(message.body, memberNames) : message.body, fileNames),
+    () => nameFileLinks(memberNames ? chipMentions(message.body, memberNames) : message.body, fileNames),
     [message.body, memberNames, fileNames],
   );
 
@@ -406,11 +496,7 @@ export const MessageRow = memo(function MessageRow({
           </View>
         ) : null}
         {onOpenThread && message.replyCount > 0 ? (
-          <Pressable onPress={() => onOpenThread(message)} hitSlop={6} style={{ marginTop: 4, alignSelf: 'flex-start' }}>
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#0a84ff' }}>
-              {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'} ›
-            </Text>
-          </Pressable>
+          <ReplyRow message={message} members={members} memberNames={memberNames} onPress={() => onOpenThread(message)} />
         ) : null}
       </View>
     </Pressable>
