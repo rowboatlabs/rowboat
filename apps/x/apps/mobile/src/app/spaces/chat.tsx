@@ -10,12 +10,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useHomeBackButton } from '@/components/home-back';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
-import { onServer, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
+import { onServer, type Approval, type Invocation, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
 import { spaces } from '@x/shared';
 
 import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { applyPollVote } from '@/components/poll-card';
+import { ApprovalCard } from '@/components/approval-card';
+import { InvocationLines } from '@/components/invocation-lines';
+import { foldInvocations, frameInvocation, invocationsByMessage, useAgentsCanStop } from '@/lib/spaces/invocations';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
@@ -294,9 +297,19 @@ export default function SpaceChatScreen() {
     const off = live.subscribe(
       space,
       (frame) => {
+        if (frame.kind === 'invocation_state') {
+          setInvocations((prev) => foldInvocations(prev, [frameInvocation(frame)]));
+          return;
+        }
+        // State frames are never replayed: each (re)subscribe reads the snapshot.
+        if (frame.kind === 'subscribed') {
+          client.listInvocations(space).then((list) => setInvocations((prev) => foldInvocations(prev, list))).catch(() => {});
+          return;
+        }
         if (frame.kind !== 'event') return;
         const event = frame.event;
-        if (event.type === 'message') foldMessage(event.message);
+        if (event.type === 'approval') patchApproval(event.approval);
+        else if (event.type === 'message') foldMessage(event.message);
         else if (event.type === 'message_deleted') {
           // A deleted reply leaves its root's count (the server's count is live replies only).
           const { messageId, threadRoot, at } = event.deletion;
@@ -336,8 +349,9 @@ export default function SpaceChatScreen() {
     if (sending) return false;
     setSending(true);
     try {
-      const { message } = await postMessageReliably(client, space, { body }, me);
+      const { message, invocations: started } = await postMessageReliably(client, space, { body }, me);
       foldMessage(message);
+      setInvocations((prev) => foldInvocations(prev, started));
       // Your own message: always land on it, wherever you were scrolled.
       // (2026-10-05) The old animated scroll started BEFORE the new row was
       // laid out, aimed at the old end, and kept running over the follow-up
@@ -376,6 +390,34 @@ export default function SpaceChatScreen() {
   const replaceMessage = useCallback((folded: Message) => {
     setMessages((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
   }, []);
+
+  // Agent lines under the messages that invoked an agent, and approval cards
+  // (2026-11-13, desktop parity): the space's invocations, read on every
+  // (re)subscribe and folded from live `invocation_state` frames.
+  const [invocations, setInvocations] = useState<Invocation[]>([]);
+  const self = members.get(me);
+  // The roster is held as Member; listMembers' rows carry the space role. An admin may stop anyone's agent.
+  const isAdmin = !!self && 'role' in self && self.role === 'admin';
+  const linesByMessage = useMemo(() => invocationsByMessage(invocations), [invocations]);
+  const runningAgents = useMemo(
+    () => [...new Set(invocations.filter((i) => i.state === 'working' || i.state === 'waiting').map((i) => i.agentId))],
+    [invocations],
+  );
+  const canStop = useAgentsCanStop(client, org, runningAgents);
+  const foldInvocation = useCallback((updated: Invocation) => setInvocations((prev) => foldInvocations(prev, [updated])), []);
+  const linesFor = (message: Message) => {
+    const list = linesByMessage.get(message.id);
+    if (!list?.some((i) => i.state !== 'done')) return undefined;
+    return <InvocationLines invocations={list} memberNames={memberNames} me={me} isAdmin={isAdmin} canStop={canStop} client={client} onUpdated={foldInvocation} />;
+  };
+  // An approval event carries the whole approval; keep whichever copy is newer.
+  const patchApproval = useCallback((approval: Approval) => {
+    setMessages((prev) => prev?.map((m) => (m.approval?.id === approval.id && m.approval.updatedAt <= approval.updatedAt ? { ...m, approval } : m)) ?? null);
+  }, []);
+  const cardFor = (message: Message) =>
+    message.approval ? (
+      <ApprovalCard approval={message.approval} client={client} me={me} memberNames={memberNames} ownerOf={(id) => members.get(id)?.ownerId} onDecided={patchApproval} />
+    ) : undefined;
   const vote = useCallback(
     (message: Message, answerIds: number[]) => {
       void (async () => {
@@ -624,6 +666,8 @@ export default function SpaceChatScreen() {
               onEndPoll={endPoll}
               onOpenAsset={openAssetLink}
               onOpenBlob={openBlobLink}
+              approvalCard={cardFor(m)}
+              invocationLines={linesFor(m)}
             />
           ))}
         </ScrollView>
