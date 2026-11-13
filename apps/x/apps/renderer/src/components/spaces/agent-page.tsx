@@ -8,7 +8,7 @@ import { HOME, useHostingState, type HostingState } from '@/components/spaces/ag
 import { TerminalScreen } from '@/components/spaces/agent-terminal'
 import { SeatChoice, type Seat } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
-import { AgentTabs, ConfirmButton, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
+import { AgentTabs, ConfirmButton, Empty, Sections, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
 import { refreshMembers, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
@@ -55,10 +55,7 @@ function when(iso: string | undefined): string {
 function Section({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
     return (
         <section className="flex min-w-0 flex-col gap-2">
-            <div>
-                <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-                {note && <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{note}</p>}
-            </div>
+            <ScreenHeader title={title} note={note} />
             {children}
         </section>
     )
@@ -141,8 +138,9 @@ export function AgentPage({ org, listing, onChanged }: {
             id: 'overview',
             label: 'Overview',
             icon: <LayoutDashboard />,
+            // One section style, divided by hairlines (2026-11-13): every heading the same size, every gap the same.
             content: (
-                <>
+                <Sections>
                     {hosting && <HostingOverview orgId={org.id} agent={agent} hosting={hosting} canManage={canManage} state={hostingState} onChanged={onChanged} />}
                     {/* Keyed on the saved values: a save elsewhere resets the form to them. */}
                     {agent.ownerId && <PersonalitySection key={`${agent.title ?? ''}|${agent.instructions ?? ''}`} orgId={org.id} agent={agent} canEdit={mine} onSaved={onChanged} />}
@@ -150,10 +148,7 @@ export function AgentPage({ org, listing, onChanged }: {
                     {agent.ownerId && <SeatsSection org={org} agent={agent} mine={mine} ownerName={ownerName} />}
                     {agent.ownerId && <SuperAgentSection orgId={org.id} agent={agent} canSwitch={mine} ownerName={ownerName} onChanged={onChanged} />}
                     {isLocal && (
-                        <div className="flex flex-col gap-0.5">
-                            <h3 className="text-sm font-semibold text-foreground">Who can use it</h3>
-                            <p className="text-xs leading-snug text-muted-foreground">Personal: it runs on {mine ? 'your' : `${ownerName}’s`} computer, so only {mine ? 'you' : ownerName} can mention it or DM it. Everyone sees it and its replies.</p>
-                        </div>
+                        <ScreenHeader title="Who can use it" note={`Personal: it runs on ${mine ? 'your' : `${ownerName}’s`} computer, so only ${mine ? 'you' : ownerName} can mention it or DM it. Everyone sees it and its replies.`} />
                     )}
                     <div className="flex flex-col gap-2">
                         <ScreenHeader
@@ -167,7 +162,7 @@ export function AgentPage({ org, listing, onChanged }: {
                             }
                             action={
                                 mine && !isLocal && (
-                                    <Button size="sm" variant={hosting ? 'outline' : 'default'} disabled={busy} onClick={() => void newKey()}>
+                                    <Button size="sm" variant="outline" disabled={busy} onClick={() => void newKey()}>
                                         {busy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} New key
                                     </Button>
                                 )
@@ -195,7 +190,7 @@ export function AgentPage({ org, listing, onChanged }: {
                         )}
                     </div>
                     <DefaultsSection orgId={org.id} agent={agent} canEdit={mine} />
-                </>
+                </Sections>
             ),
         },
     ]
@@ -217,7 +212,7 @@ export function AgentPage({ org, listing, onChanged }: {
                         action={
                             mine &&
                             !secret && (
-                                <Button size="sm" disabled={busy} onClick={() => void newKey()}>
+                                <Button size="sm" variant="outline" disabled={busy} onClick={() => void newKey()}>
                                     {busy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} New key
                                 </Button>
                             )
@@ -286,12 +281,11 @@ function SeatsSection({ org, agent, mine, ownerName }: { org: OrgWithSpaces; age
     }
     return (
         <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold text-foreground">Where it works</h3>
             {seats.length === 0 ? (
-                <p className="text-xs leading-snug text-muted-foreground">
-                    {mine ? 'Not in any of your spaces yet. Add it from a space’s member list, or mention it there.' : `In none of the spaces you share with ${ownerName}.`}
-                </p>
+                <ScreenHeader title="Where it works" note={mine ? 'Not in any of your spaces yet. Add it from a space’s member list, or mention it there.' : `In none of the spaces you share with ${ownerName}.`} />
             ) : (
+                <>
+                <ScreenHeader title="Where it works" />
                 <ul className="flex flex-col gap-2">
                     {seats.map(({ space, row }) => (
                         <li key={space.id} className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2">
@@ -306,6 +300,7 @@ function SeatsSection({ org, agent, mine, ownerName }: { org: OrgWithSpaces; age
                         </li>
                     ))}
                 </ul>
+                </>
             )}
         </div>
     )

@@ -93,6 +93,11 @@ export function ScreenHeader({ title, note, action }: { title: string; note?: st
     )
 }
 
+/** A screen of several sections (Overview, 2026-11-13): the same gap above and below each, a hairline between them. */
+export function Sections({ children }: { children: ReactNode }) {
+    return <div className="flex min-w-0 flex-col divide-y divide-border [&>*]:py-5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">{children}</div>
+}
+
 /** A small heading inside a screen, for a second group below the first. */
 export function Subhead({ children }: { children: ReactNode }) {
     return <h4 className="text-xs font-semibold text-foreground">{children}</h4>
