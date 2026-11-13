@@ -2,14 +2,14 @@ import { reportMobileActivity } from '../../lib/spaces/activity';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useHomeBackButton } from '@/components/home-back';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
-import { onServer, type Invocation, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
+import { onServer, type Approval, type Invocation, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
 
 import { spaces } from '@x/shared';
 
@@ -19,6 +19,9 @@ import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
 import { MessageActionSheet, MessageBody, MessageRow, applyReaction, chipMentions, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
+import { ApprovalCard } from '@/components/approval-card';
+import { InvocationLines } from '@/components/invocation-lines';
+import { foldInvocations, frameInvocation, invocationsByMessage, useAgentsCanStop } from '@/lib/spaces/invocations';
 import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { AuthedImage } from '@/components/avatar';
@@ -82,8 +85,10 @@ export default function SpaceThreadScreen() {
   const [following, setFollowing] = useState<boolean | null>(initial?.following ?? null);
   // Thread follow-ups (Harbor spec §8, 2026-10-27): a reply that mentions
   // nobody goes to the agent you last invoked here. The line over the composer
-  // names it; its × sends the next reply to people only. Your invocations are
-  // read once on open and added from your own posts, which is all it needs.
+  // names it; its × sends the next reply to people only.
+  // The thread's invocations are also the agent lines under messages
+  // (2026-11-13): read on open and on every resubscribe, folded from live
+  // `invocation_state` frames and from your own posts.
   const [invocations, setInvocations] = useState<Invocation[]>([]);
   const [peopleOnly, setPeopleOnly] = useState(false);
   const [draftMentions, setDraftMentions] = useState(false);
@@ -158,7 +163,7 @@ export default function SpaceThreadScreen() {
       .catch(() => {});
     client
       .listInvocations(space, root)
-      .then((list) => !cancelled && setInvocations(list))
+      .then((list) => !cancelled && setInvocations((prev) => foldInvocations(prev, list)))
       .catch(() => {});
     client
       .listThread(space, root)
@@ -204,9 +209,20 @@ export default function SpaceThreadScreen() {
     const off = live.subscribe(
       space,
       (frame) => {
+        if (frame.kind === 'invocation_state') {
+          if (frame.invocation.conversation.threadRootId === root) setInvocations((prev) => foldInvocations(prev, [frameInvocation(frame)]));
+          return;
+        }
+        // State frames are never replayed: a resubscribe reads the snapshot again.
+        if (frame.kind === 'subscribed') {
+          client.listInvocations(space, root).then((list) => setInvocations((prev) => foldInvocations(prev, list))).catch(() => {});
+          return;
+        }
         if (frame.kind !== 'event') return;
         const event = frame.event;
-        if (event.type === 'message' && event.message.threadRoot === root) {
+        if (event.type === 'approval') {
+          patchApproval(event.approval);
+        } else if (event.type === 'message' && event.message.threadRoot === root) {
           setReplies((prev) => {
             if (!prev || prev.some((m) => m.id === event.message.id)) return prev;
             // Your own echo may take its pending copy's place (2026-11-13).
@@ -303,7 +319,7 @@ export default function SpaceThreadScreen() {
         { body, threadRoot: root, ...(toPeople ? { peopleOnly: true } : {}) },
         me,
       );
-      setInvocations((prev) => [...prev, ...started]);
+      setInvocations((prev) => foldInvocations(prev, started));
       setReplies((prev) => (prev ? settlePending(prev, pending.id, message) : prev));
       return true;
     } catch (err) {
@@ -335,6 +351,34 @@ export default function SpaceThreadScreen() {
     setRootMessage((prev) => (prev && prev.id === folded.id ? folded : prev));
     setReplies((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
   }, []);
+
+  // Agent lines and approval cards (2026-11-13, desktop parity). Roles are the
+  // space's: an admin may stop anyone's agent. Harbor refuses anything else.
+  // The roster is held as Member; listMembers' rows carry the space role.
+  const self = members.get(me);
+  const isAdmin = !!self && 'role' in self && self.role === 'admin';
+  const linesByMessage = useMemo(() => invocationsByMessage(invocations), [invocations]);
+  const runningAgents = useMemo(
+    () => [...new Set(invocations.filter((i) => i.state === 'working' || i.state === 'waiting').map((i) => i.agentId))],
+    [invocations],
+  );
+  const canStop = useAgentsCanStop(client, org, runningAgents);
+  const foldInvocation = useCallback((updated: Invocation) => setInvocations((prev) => foldInvocations(prev, [updated])), []);
+  const linesFor = (message: Message) => {
+    const list = linesByMessage.get(message.id);
+    if (!list?.some((i) => i.state !== 'done')) return undefined;
+    return <InvocationLines invocations={list} memberNames={memberNames} me={me} isAdmin={isAdmin} canStop={canStop} client={client} onUpdated={foldInvocation} />;
+  };
+  // An approval event carries the whole approval; keep whichever copy is newer.
+  const patchApproval = useCallback((approval: Approval) => {
+    const patch = (m: Message) => (m.approval?.id === approval.id && m.approval.updatedAt <= approval.updatedAt ? { ...m, approval } : m);
+    setRootMessage((prev) => (prev ? patch(prev) : prev));
+    setReplies((prev) => prev?.map(patch) ?? null);
+  }, []);
+  const cardFor = (message: Message) =>
+    message.approval ? (
+      <ApprovalCard approval={message.approval} client={client} me={me} memberNames={memberNames} ownerOf={(id) => members.get(id)?.ownerId} onDecided={patchApproval} />
+    ) : undefined;
   const quote = useCallback((message: Message) => composerRef.current?.quote(spaces.resolveMentions(message.body, memberNames)), [memberNames]);
   const beginEdit = useCallback((message: Message) => composerRef.current?.beginEdit(message.id, message.body), []);
   const saveEdit = useCallback(
@@ -505,6 +549,8 @@ export default function SpaceThreadScreen() {
               onRemoveVote={removeVote}
               onEndPoll={endPoll}
               onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
+              approvalCard={cardFor(rootMessage)}
+              invocationLines={linesFor(rootMessage)}
             />
           ) : null}
           {rootMessage && visibleReplies !== null ? (
@@ -532,7 +578,8 @@ export default function SpaceThreadScreen() {
           {rootMessage && replies === null && !error ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
           {visibleReplies?.map((m) => (
             <MessageRow key={m.id} message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} fileNames={fileNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
-              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll} />
+              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll}
+              approvalCard={cardFor(m)} invocationLines={linesFor(m)} />
           ))}
         </ScrollView>
       )}
@@ -606,7 +653,7 @@ export default function SpaceThreadScreen() {
 
 // The root, Slack-style: 40pt avatar, bold name with the timestamp UNDER it,
 // full-size body, then reaction pills + the always-on emoji+ pill.
-function RootMessage({ message, member, memberNames, fileNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset, onOpenBlob }: {
+function RootMessage({ message, member, memberNames, fileNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset, onOpenBlob, approvalCard, invocationLines }: {
   message: Message;
   member?: Member;
   memberNames: ReadonlyMap<string, string>;
@@ -620,6 +667,9 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
   onEndPoll: (message: Message) => void;
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
   onOpenBlob?: (link: { host: string; spaceId: string; hash: string; url: string }) => void;
+  /** As on MessageRow (2026-11-13): an approval card in place of the body, and the agent lines under it. */
+  approvalCard?: ReactNode;
+  invocationLines?: ReactNode;
 }) {
   const colors = useColors();
   const name = member ? memberLabel(member) : message.author.memberId;
@@ -662,7 +712,9 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
           <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>{stamp}</Text>
         </View>
       </View>
-      {message.poll ? (
+      {message.approval && approvalCard ? (
+        approvalCard
+      ) : message.poll ? (
         <PollCard message={message} poll={message.poll} me={me} onVote={onVote} onRemoveVote={onRemoveVote} onEndPoll={onEndPoll} />
       ) : (
         <>
@@ -685,6 +737,7 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
           <MessageLinkPreviews body={message.body} />
         </>
       )}
+      {invocationLines}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
         {message.reactions.map((g) => {
           const mine = g.memberIds.includes(me);
