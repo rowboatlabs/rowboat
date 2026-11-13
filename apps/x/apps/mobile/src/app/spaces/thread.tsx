@@ -25,7 +25,7 @@ import { AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
-import { postMessageReliably } from '@/lib/spaces/send';
+import { foldLive, lastConfirmedOffset, pendingMessage, postMessageReliably, settlePending, withoutPending } from '@/lib/spaces/send';
 import { PIN_EMOJI } from '@/lib/spaces/pins';
 import { toggleSaved, useSaved } from '@/lib/spaces/saved';
 import { loadRoster, loadThread, peekRoster, peekThread, peekValue, saveRoster, saveThread } from '@/lib/spaces/cache';
@@ -91,7 +91,8 @@ export default function SpaceThreadScreen() {
   const [draftMentions, setDraftMentions] = useState(false);
   // Only while that conversation is the thread's latest (2026-11-05, "reply ux" in Main).
   const followUp = useMemo(() => {
-    const thread = rootMessage ? [rootMessage, ...(replies ?? [])] : [];
+    // Not a pending send (2026-11-13): it isn't the thread's yet.
+    const thread = rootMessage ? [rootMessage, ...withoutPending(replies ?? [])] : [];
     const id = spaces.followUpAgentId(invocations, root, me, thread);
     const agent = id ? members.get(id) : undefined;
     return agent && !answersOwnerOnly(agent, me) ? agent : undefined;
@@ -194,7 +195,8 @@ export default function SpaceThreadScreen() {
 
   // Write-through: whatever is on screen is what the next open paints.
   useEffect(() => {
-    if (rootMessage && replies) saveThread(org, space, { root: rootMessage, messages: replies, following });
+    // Pending sends (2026-11-13) are never saved: they have no real id yet.
+    if (rootMessage && replies) saveThread(org, space, { root: rootMessage, messages: withoutPending(replies), following });
   }, [org, space, rootMessage, replies, following]);
 
   useEffect(() => {
@@ -209,8 +211,10 @@ export default function SpaceThreadScreen() {
         if (event.type === 'message' && event.message.threadRoot === root) {
           setReplies((prev) => {
             if (!prev || prev.some((m) => m.id === event.message.id)) return prev;
-            scrollToNewest();
-            return [...prev, event.message];
+            // Your own echo may take its pending copy's place (2026-11-13).
+            const next = foldLive(prev, event.message);
+            if (next.length > prev.length) scrollToNewest();
+            return next;
           });
         } else if (event.type === 'message_deleted') {
           const patch = (m: Message) => (m.id === event.deletion.messageId ? { ...m, body: '', deletedAt: event.deletion.at } : m);
@@ -288,6 +292,12 @@ export default function SpaceThreadScreen() {
     // The × holds for one reply.
     const toPeople = peopleOnly && followUp !== undefined && !spaces.mentionsAnyone(body);
     setPeopleOnly(false);
+    // Show it now, not when the POST returns (2026-11-13): a pending copy,
+    // faded, settled by the server's message or removed on failure. Follow-ups
+    // and invocations still read only the server's message.
+    const pending = { ...pendingMessage(space, me, body, root), ...(toPeople ? { peopleOnly: true as const } : {}) };
+    setReplies((prev) => (prev ? [...prev, pending] : prev));
+    scrollToNewest();
     try {
       const { message, invocations: started } = await postMessageReliably(
         client,
@@ -296,10 +306,11 @@ export default function SpaceThreadScreen() {
         me,
       );
       setInvocations((prev) => [...prev, ...started]);
-      setReplies((prev) => (prev && !prev.some((m) => m.id === message.id) ? [...prev, message] : prev));
-      scrollToNewest();
+      setReplies((prev) => (prev ? settlePending(prev, pending.id, message) : prev));
       return true;
     } catch (err) {
+      // The composer brings the text back as "Not sent"; the pending row goes.
+      setReplies((prev) => prev?.filter((m) => m.id !== pending.id) ?? null);
       if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
       return false;
     } finally {
@@ -309,7 +320,8 @@ export default function SpaceThreadScreen() {
 
   // Thread read mark: the newest reply on screen (a thread takes a mark
   // whether or not we follow it — CONTRACT.md amendment 2026-09-11).
-  const newestReply = replies?.at(-1)?.offset;
+  // A pending send's offset is a placeholder (2026-11-13), never a mark.
+  const newestReply = lastConfirmedOffset(replies);
   useEffect(() => {
     if (newestReply === undefined) return;
     const t = setTimeout(() => void client.markRead(space, { threadRootId: root, offset: newestReply }).catch(() => {}), 800);
