@@ -10,7 +10,7 @@ import type { Member, SearchResults, Space, UnreadSnapshot } from '@rowboat/spac
 import { Avatar, AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError } from '@/lib/spaces/errors';
-import { canMessageDirect, memberLabel } from '@/lib/spaces/profiles';
+import { canMessageDirect, isDeparted, memberLabel } from '@/lib/spaces/profiles';
 import { useBlockedIds } from '@/lib/spaces/moderation';
 import { useMyAvatar } from '@/lib/spaces/my-avatar';
 import { useParentHeader } from '@/lib/use-parent-header';
@@ -508,16 +508,36 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
   // People and your agents in their own sections (2026-11-09, as the desktop's sidebar has them).
   const shownPeople = shownMembers.filter((m) => m.kind !== 'agent');
   const shownAgents = shownMembers.filter((m) => m.kind === 'agent');
-  // Home's Agents section (2026-11-13, the desktop sidebar's order: Agents, Spaces,
-  // People). The desktop lists the agents you have a DM with; the phone has no
-  // per-DM activity time, so unread first, then those DMs, then by name, capped
-  // at five so Home stays short. "View all agents" reaches the rest.
+  // Home's Agents section (2026-11-13). The desktop lists the agents you have a
+  // DM with; the phone has no per-DM activity time, so unread first, then those
+  // DMs, then by name, capped at five so Home stays short. "View all agents"
+  // reaches the rest.
   const HOME_AGENTS = 5;
   const agentRank = (m: Member) => {
     const dm = dmWith(m.id);
     return dm && badgeFor(dm.id, true).unread > 0 ? 0 : dm ? 1 : 2;
   };
   const homeAgents = [...shownAgents].sort((a, b) => agentRank(a) - agentRank(b) || a.displayName.localeCompare(b.displayName)).slice(0, HOME_AGENTS);
+  // Others' agents after yours, filling the five (2026-11-13, Gagan: "I only see
+  // my agents"): the ones in spaces you share, as the desktop Agents page finds
+  // them. Harbor refuses a DM with an agent you don't own (the reach rule,
+  // 2026-11-09), so they open their read-only page instead, under their owner's name.
+  const othersAgents = useMemo(() => {
+    const seen = new Map<string, Member>();
+    for (const list of members.values()) for (const m of list) if (m.kind === 'agent' && !seen.has(m.id) && !isDeparted(m) && !canMessageDirect(m, org.memberId)) seen.set(m.id, m);
+    for (const id of blockedIds) seen.delete(id);
+    return [...seen.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+  }, [members, org.memberId, blockedKey]);
+  const ownerName = (m: Member) => {
+    if (!m.ownerId) return 'Built in';
+    for (const list of members.values()) {
+      const owner = list.find((x) => x.id === m.ownerId);
+      if (owner) return `${owner.displayName}’s`;
+    }
+    return 'Someone else’s';
+  };
+  const homeOthers = othersAgents.slice(0, Math.max(0, HOME_AGENTS - homeAgents.length));
   const agentsLink = { org: org.address, me: org.memberId };
 
   const memberRow = (m: Member, i: number) => {
@@ -536,6 +556,15 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
       </CardRow>
     );
   };
+
+  const otherAgentRow = (m: Member, i: number) => (
+    <CardRow key={m.id} first={i === 0} onPress={() => router.push({ pathname: '/spaces/agent', params: { ...agentsLink, agent: m.id, title: m.displayName } })}>
+      <Avatar id={m.id} name={m.displayName} size={28} url={m.avatarUrl} />
+      <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{m.displayName}</Text>
+      <Text numberOfLines={1} style={{ ...type.caption, color: colors.tertiaryLabel, maxWidth: '40%' }}>{ownerName(m)}</Text>
+      <Chevron />
+    </CardRow>
+  );
 
   // People, then your agents: every member is one tap from a DM (a DM is a
   // `direct` space — openDirect is get-or-create, idempotent). Your own row
@@ -573,29 +602,6 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
       <StatusBanner error={error} />
       {spaces === null && !error ? <ActivityIndicator style={{ alignSelf: 'center', marginVertical: 16 }} /> : null}
 
-      {/* Agents lead on Home (2026-11-13, as the desktop sidebar): your agents,
-          then Add agent and View all agents. Shown even with none yet, so Add
-          agent is always one tap away. */}
-      {mode === 'home' && spaces !== null ? (
-        <View style={{ gap: 8 }}>
-          <SectionLabel text="Agents" collapsed={agentsClosed} onToggle={() => toggle('agents')} waiting={waitingIn(shownAgents)} />
-          {agentsClosed ? null : (
-          <Card>
-            {homeAgents.map(memberRow)}
-            <CardRow first={homeAgents.length === 0} onPress={() => router.push({ pathname: '/spaces/new-agent', params: agentsLink })}>
-              <Glyph icon="sf:plus" />
-              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>Add agent</Text>
-            </CardRow>
-            <CardRow onPress={() => router.push({ pathname: '/spaces/agents', params: agentsLink })}>
-              <Glyph icon="sf:cpu" />
-              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>View all agents</Text>
-              <Chevron />
-            </CardRow>
-          </Card>
-          )}
-        </View>
-      ) : null}
-
       {/* Spaces */}
       {shownSpaces !== null && (mode !== 'search' || shownSpaces.length > 0) ? (
         <View style={{ gap: 8 }}>
@@ -631,11 +637,36 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
         </View>
       ) : null}
 
-      {/* On Home the agents sit above, in their own section; elsewhere they follow People. */}
+      {/* On Home the agents get their own section below; elsewhere they follow People. */}
       {memberSections([
         { key: 'dms', text: 'People', list: shownPeople, closed: dmsClosed },
         ...(mode === 'home' ? [] : [{ key: 'agents' as const, text: 'Agents', list: shownAgents, closed: agentsClosed }]),
       ])}
+
+      {/* Agents last on Home (2026-11-13, Gagan: Spaces, People, then Agents on
+          the phone, not the desktop sidebar's Agents first): yours, then
+          others', then Add agent and View all agents. Shown even with none
+          yet, so Add agent is always one tap away. */}
+      {mode === 'home' && spaces !== null ? (
+        <View style={{ gap: 8 }}>
+          <SectionLabel text="Agents" collapsed={agentsClosed} onToggle={() => toggle('agents')} waiting={waitingIn(shownAgents)} />
+          {agentsClosed ? null : (
+          <Card>
+            {homeAgents.map(memberRow)}
+            {homeOthers.map((m, i) => otherAgentRow(m, homeAgents.length + i))}
+            <CardRow first={homeAgents.length + homeOthers.length === 0} onPress={() => router.push({ pathname: '/spaces/new-agent', params: agentsLink })}>
+              <Glyph icon="sf:plus" />
+              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>Add agent</Text>
+            </CardRow>
+            <CardRow onPress={() => router.push({ pathname: '/spaces/agents', params: agentsLink })}>
+              <Glyph icon="sf:cpu" />
+              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>View all agents</Text>
+              <Chevron />
+            </CardRow>
+          </Card>
+          )}
+        </View>
+      ) : null}
       {mode === 'search' && q ? (
         <>
           {searchError ? <StatusBanner error={searchError} /> : null}
