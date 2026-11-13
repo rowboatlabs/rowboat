@@ -6,6 +6,7 @@ import type { Space } from '@rowboat/spaces-protocol';
 
 import { Field, PersonalityFields } from '@/components/agent-form';
 import { Chevron, Glyph, Group, PrimaryButton, Row, Tick } from '@/components/grouped';
+import { RowboatMark } from '@/components/rowboat-mark';
 import { Image } from '@/components/sf-image';
 import { MANAGED_KINDS, kindLabel } from '@/lib/spaces/agents';
 import { friendlyError } from '@/lib/spaces/errors';
@@ -58,7 +59,7 @@ function ChoosePath() {
         <Group label="Where should it run?" footer="To run one on this computer with your own Claude Code or Codex login, use the desktop app.">
           {creates ? (
             <Row first onPress={() => go('/spaces/new-agent', { path: 'create' })}>
-              <Glyph icon="sf:cloud" />
+              <RowboatMark />
               <Text style={{ flex: 1, paddingVertical: 10 }}>
                 <Text style={{ ...type.body, color: colors.label }}>Rowboat runs it</Text>
                 {'\n'}
