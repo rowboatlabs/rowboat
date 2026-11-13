@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text } from '
 import type { Member, Message, TopicListing, UnreadSnapshot } from '@rowboat/spaces-protocol';
 import { spaces } from '@x/shared';
 
-import { ThreadFilterBar, ThreadRows, ThreadsEmpty } from '@/components/thread-list';
+import { ThreadFilters, ThreadRows, ThreadsEmpty, clearedFilters, filterSummary, isFiltered } from '@/components/thread-list';
 import { ThreadOptionsSheet } from '@/components/thread-options';
 import { StatusBanner } from '@/components/status-banner';
 import { loadRoster, peekRoster, saveRoster, seedThreadRoot } from '@/lib/spaces/cache';
@@ -25,8 +25,8 @@ import { type } from '@/theme/type';
 
 // One space's threads (2026-11-13, the web's Threads tab,
 // space-threads-view.tsx): every conversation in the space, not only the
-// named ones. All / Named / Sessions / By me, Active / Archived, and people,
-// kept for this space on this phone. Unnamed threads come from the stream's
+// named ones. Active / Archived on screen; All / Named / Sessions / By me and
+// people behind the header's filter button; kept for this space on this phone. Unnamed threads come from the stream's
 // loaded window, so "Load older threads" pages the stream; the archived list
 // loads whole. Opened from the space's header.
 export default function SpaceThreadsScreen() {
@@ -160,6 +160,7 @@ export default function SpaceThreadsScreen() {
 
   const pagesStream = filters.kind !== 'named' && !filters.archived;
   const chosenNames = filters.people.map(nameOf).join(' or ');
+  const clearAction = { label: 'Clear filters', onPress: () => setFilters(clearedFilters(filters)) };
 
   return (
     <ScrollView
@@ -177,26 +178,28 @@ export default function SpaceThreadsScreen() {
       }
     >
       <Stack.Screen options={{ title: 'Threads' }} />
-      <ThreadFilterBar filters={filters} onChange={setFilters} archivedCount={archivedCount} people={people} nameOf={nameOf} />
+      <ThreadFilters filters={filters} onChange={setFilters} archivedCount={archivedCount} people={people} nameOf={nameOf} />
       <StatusBanner error={error} offlineText="You're offline. Threads will load when you're back online." onRetry={() => void load()} />
       {!loaded && !error ? <ActivityIndicator style={{ marginTop: 32 }} /> : null}
       <ThreadRows items={items} nameOf={nameOf} onOpen={open} onLongPress={setOptions} />
       {loaded && rows.length === 0 ? (
-        filters.archived ? (
+        filters.archived && isFiltered(filters) ? (
+          <ThreadsEmpty icon="sf:archivebox" title="No archived threads match" detail={`Nothing archived for ${filterSummary(filters, nameOf, () => '')}.`} action={clearAction} />
+        ) : filters.archived ? (
           <ThreadsEmpty icon="sf:archivebox" title="No archived threads" detail="Archived threads stay readable here. A new reply brings one back." />
         ) : filters.people.length ? (
           <ThreadsEmpty
             icon="sf:person.2"
             title={`No threads with ${chosenNames}`}
-            detail={`Threads ${chosenNames} started or replied to show up here.`}
-            action={{ label: 'Show everyone', onPress: () => setFilters({ ...filters, people: [] }) }}
+            detail={filters.kind === 'all' ? `Threads ${chosenNames} started or replied to show up here.` : `Nothing for ${filterSummary(filters, nameOf, () => '')}.`}
+            action={clearAction}
           />
         ) : filters.kind === 'sessions' ? (
-          <ThreadsEmpty icon="sf:timer" title="No sessions" detail="Make a thread a session from its ⋯ menu. End it there when the work is done." />
+          <ThreadsEmpty icon="sf:timer" title="No sessions" detail="Make a thread a session from its ⋯ menu. End it there when the work is done." action={clearAction} />
         ) : filters.kind === 'named' ? (
-          <ThreadsEmpty icon="sf:bubble.left.and.bubble.right" title="No named threads yet" detail="Make a thread a discussion from its ⋯ menu, and it shows up here." />
+          <ThreadsEmpty icon="sf:bubble.left.and.bubble.right" title="No named threads yet" detail="Make a thread a discussion from its ⋯ menu, and it shows up here." action={clearAction} />
         ) : filters.kind === 'mine' ? (
-          <ThreadsEmpty icon="sf:bubble.left" title="No threads started by you" detail="Threads whose first message you posted show up here." />
+          <ThreadsEmpty icon="sf:bubble.left" title="No threads started by you" detail="Threads whose first message you posted show up here." action={clearAction} />
         ) : (
           <ThreadsEmpty icon="sf:bubble.left" title="No threads yet" detail="Reply to a message to start a thread." />
         )
