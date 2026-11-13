@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MARITIME_ENV, RUNTIMES } from '../src/connectors/maritime/runtimes.js';
@@ -92,8 +92,10 @@ describe('a turn that stops without a word', () => {
 
 describe('Maritime’s environment file', () => {
   // Maritime writes /etc/maritime-env from bash (`export -p`: `declare -x NAME="value"` lines) and the turn runs
-  // under sh. Sourcing it as is killed every turn with exit 127 from 2026-11-11 to 11-13.
-  it('is loaded under sh with its bash syntax turned into exports, skipping a line it cannot parse', () => {
+  // under sh, dash on every box. Sourcing it as is killed every turn with exit 127 from 2026-11-11 to 11-13, and
+  // in dash a syntax error inside `eval` ends the shell outright, so each line is checked before it is evaluated.
+  const shells = ['sh', ...(['/bin/dash', '/usr/bin/dash'].filter((p) => existsSync(p)))];
+  it.each(shells)('is loaded by %s with its bash syntax turned into exports, skipping what cannot be taken', (shell) => {
     const dir = mkdtempSync(join(tmpdir(), 'maritime-env-'));
     const file = join(dir, 'maritime-env');
     writeFileSync(file, [
@@ -102,12 +104,14 @@ describe('Maritime’s environment file', () => {
       'declare -x EMPTY=""',
       'declare -x BARE',
       'declare -x BROKEN="unterminated',
+      'declare -x 1BAD="x"',
+      "declare -x WEIRD=$'line\\nbreak'",
       'export PLAIN="old style"',
       '',
     ].join('\n'));
-    const script = `set -e; ${MARITIME_ENV.replaceAll('/etc/maritime-env', file)}; printf '%s|%s|%s|%s|%s' "$CC" "$QUOTED" "$EMPTY" "$PLAIN" "\${BROKEN:-unset}"`;
-    const out = execFileSync('sh', ['-c', script], { encoding: 'utf8' });
-    expect(out).toBe('gcc|a "b" $c||old style|unset');
+    const script = `set -e; ${MARITIME_ENV.replaceAll('/etc/maritime-env', file)}; printf '%s|%s|%s|%s|%s' "$CC" "$QUOTED" "$EMPTY" "$PLAIN" "\${BROKEN:-unset}"; env | grep -c '^1BAD=' || true`;
+    const out = execFileSync(shell, ['-c', script], { encoding: 'utf8' });
+    expect(out).toBe('gcc|a "b" $c||old style|unset0\n');
   });
 
   it('is what every runtime’s turn runs first', () => {

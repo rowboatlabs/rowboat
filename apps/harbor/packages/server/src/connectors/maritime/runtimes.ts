@@ -105,10 +105,11 @@ const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 // box and has no `declare`: sourced as is, the first line failed with 127 and,
 // under `set -e`, took every turn on every Maritime agent with it for two and a
 // half days (2026-11-11 10:04Z to 11-13; the thread said "Finished on Maritime.").
-// So the file is read line by line, each `declare -x` turned into `export`, and a
-// line dash cannot parse (bash's $'…' quoting) is skipped rather than fatal.
+// So the file is read line by line, each `declare -x` turned into `export`, and a line
+// is evaluated only after `sh -n` accepts it and its name is a valid one: in dash a syntax
+// error inside `eval` ends the shell (eval and export are special built-ins), `|| true` or not.
 export const MARITIME_ENV =
-  'if [ -r /etc/maritime-env ]; then while IFS= read -r l; do case "$l" in "declare -x "*) l="export ${l#declare -x }";; esac; case "$l" in "export "*) eval "$l" 2>/dev/null || true;; esac; done < /etc/maritime-env; fi';
+  'if [ -r /etc/maritime-env ]; then while IFS= read -r l; do case "$l" in "declare -x "*) l="export ${l#declare -x }";; esac; case "$l" in "export "*) n="${l#export }"; n="${n%%=*}"; case "$n" in ""|*[!A-Za-z0-9_]*|[0-9]*) continue;; esac; if printf "%s\\n" "$l" | sh -n 2>/dev/null; then eval "$l" 2>/dev/null || true; fi;; esac; done < /etc/maritime-env; fi';
 
 /** Reasoning effort, the harness's own three levels (Codex's and Hermes's flag). */
 const EFFORTS = ['low', 'medium', 'high'].map((id) => ({ id, label: id[0]!.toUpperCase() + id.slice(1) }));
