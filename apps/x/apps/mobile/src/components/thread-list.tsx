@@ -8,8 +8,7 @@ import type { ThreadStatus } from '@rowboat/spaces-protocol';
 
 import { Avatar } from '@/components/avatar';
 import { BottomSheet } from '@/components/bottom-sheet';
-import { Tick } from '@/components/grouped';
-import { HeaderMenu, HeaderMenuButton, type HeaderMenuAnchor } from '@/components/header-menu';
+import { Chevron, Glyph, Group, Row, Tick } from '@/components/grouped';
 import { THREAD_KINDS, threadStatusLabel, type ThreadItem, type ThreadsFilters, type ThreadsKind } from '@/lib/spaces/threads';
 import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
@@ -47,10 +46,9 @@ const FILTER_ICON = 'line.3.horizontal.decrease.circle';
  * Active / Archived as a segmented control, everything else behind one filter
  * button in the header (2026-11-13). Two rows of look-alike chips hid which
  * groups were single-pick and which were toggles, and took two rows; now the
- * one choice everybody makes sits on screen, and the rest is a header menu
- * (our HeaderMenu on both platforms: the native iOS menu let its dismiss tap
- * open a thread underneath), with a one-line summary that clears in a tap
- * while anything is on.
+ * one choice everybody makes sits on screen, and the rest is a native menu
+ * (iOS) or a sheet (Android: the toolbar menu drops SF icons there), with a
+ * one-line summary that clears in a tap while anything is on.
  */
 export function ThreadFilters({ filters, onChange, archivedCount, people, nameOf, spaces }: {
   filters: ThreadsFilters;
@@ -64,8 +62,7 @@ export function ThreadFilters({ filters, onChange, archivedCount, people, nameOf
   spaces?: { id: string; name: string }[];
 }) {
   const colors = useColors();
-  const [sheet, setSheet] = useState<'people' | 'spaces' | null>(null);
-  const [menu, setMenu] = useState<HeaderMenuAnchor | null>(null);
+  const [sheet, setSheet] = useState<'filters' | 'people' | 'spaces' | null>(null);
   const spaceName = (id: string) => spaces?.find((s) => s.id === id)?.name ?? 'Space';
   const filtered = isFiltered(filters);
   const summary = filterSummary(filters, nameOf, spaceName);
@@ -74,32 +71,44 @@ export function ThreadFilters({ filters, onChange, archivedCount, people, nameOf
   const pickKind = (kind: ThreadsKind) => onChange({ ...filters, kind });
   return (
     <View style={{ gap: 10 }}>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <HeaderMenuButton icon={filtered ? `${FILTER_ICON}.fill` : FILTER_ICON} accessibilityLabel="Filter threads" size={22} onOpen={setMenu} />
-          ),
-        }}
-      />
-      <HeaderMenu
-        anchor={menu}
-        onClose={() => setMenu(null)}
-        sections={[
-          {
-            key: 'kind',
-            title: 'Show',
-            items: THREAD_KINDS.map((k) => ({ key: k.key, label: k.label, selected: filters.kind === k.key, onPress: () => pickKind(k.key) })),
-          },
-          {
-            key: 'pickers',
-            items: [
-              { key: 'people', label: 'People…', icon: 'person.2', subtitle: peopleSummary ?? undefined, onPress: () => setSheet('people') },
-              ...(spaces ? [{ key: 'spaces', label: 'Spaces…', icon: 'number', subtitle: spacesSummary ?? undefined, onPress: () => setSheet('spaces') }] : []),
-            ],
-          },
-          { key: 'clear', items: filtered ? [{ key: 'clear', label: 'Clear filters', icon: 'xmark.circle', onPress: () => onChange(clearedFilters(filters)) }] : [] },
-        ]}
-      />
+      {process.env.EXPO_OS === 'ios' ? (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Menu icon={filtered ? `${FILTER_ICON}.fill` : FILTER_ICON} accessibilityLabel="Filter threads">
+            <Stack.Toolbar.Menu inline title="Show">
+              {THREAD_KINDS.map((k) => (
+                <Stack.Toolbar.MenuAction key={k.key} isOn={filters.kind === k.key} onPress={() => pickKind(k.key)}>
+                  {k.label}
+                </Stack.Toolbar.MenuAction>
+              ))}
+            </Stack.Toolbar.Menu>
+            <Stack.Toolbar.Menu inline>
+              <Stack.Toolbar.MenuAction icon="person.2" subtitle={peopleSummary ?? undefined} onPress={() => setSheet('people')}>
+                People…
+              </Stack.Toolbar.MenuAction>
+              {spaces ? (
+                <Stack.Toolbar.MenuAction icon="number" subtitle={spacesSummary ?? undefined} onPress={() => setSheet('spaces')}>
+                  Spaces…
+                </Stack.Toolbar.MenuAction>
+              ) : null}
+            </Stack.Toolbar.Menu>
+            {filtered ? (
+              <Stack.Toolbar.MenuAction icon="xmark.circle" onPress={() => onChange(clearedFilters(filters))}>
+                Clear filters
+              </Stack.Toolbar.MenuAction>
+            ) : null}
+          </Stack.Toolbar.Menu>
+        </Stack.Toolbar>
+      ) : (
+        <Stack.Screen
+          options={{
+            headerRight: () => (
+              <Pressable hitSlop={10} accessibilityLabel="Filter threads" onPress={() => setSheet('filters')}>
+                <Image source={`sf:${FILTER_ICON}${filtered ? '.fill' : ''}`} style={{ width: 22, height: 22 }} tintColor={colors.label} />
+              </Pressable>
+            ),
+          }}
+        />
+      )}
       <SegmentedControl
         values={['Active', archivedCount ? `Archived (${archivedCount})` : 'Archived']}
         selectedIndex={filters.archived ? 1 : 0}
@@ -122,6 +131,17 @@ export function ThreadFilters({ filters, onChange, archivedCount, people, nameOf
           </Pressable>
         </View>
       ) : null}
+      {process.env.EXPO_OS === 'ios' ? null : (
+        <FilterSheet
+          visible={sheet === 'filters'}
+          onClose={() => setSheet(null)}
+          kind={filters.kind}
+          onKind={pickKind}
+          peopleSummary={peopleSummary}
+          spacesSummary={spaces ? spacesSummary : undefined}
+          onPick={(which) => setSheet(which)}
+        />
+      )}
       <PickSheet
         visible={sheet === 'people'}
         title="Threads with"
@@ -141,6 +161,48 @@ export function ThreadFilters({ filters, onChange, archivedCount, people, nameOf
         />
       ) : null}
     </View>
+  );
+}
+
+/** Android's filter menu: the kinds to pick one of, then the people (and spaces) pickers. */
+function FilterSheet({ visible, onClose, kind, onKind, peopleSummary, spacesSummary, onPick }: {
+  visible: boolean;
+  onClose: () => void;
+  kind: ThreadsKind;
+  onKind: (kind: ThreadsKind) => void;
+  peopleSummary: string | null;
+  /** Undefined when the list has no Spaces filter. */
+  spacesSummary?: string | null;
+  onPick: (which: 'people' | 'spaces') => void;
+}) {
+  const colors = useColors();
+  const picker = (which: 'people' | 'spaces', icon: string, label: string, value: string | null, first: boolean) => (
+    <Row first={first} onPress={() => onPick(which)}>
+      <Glyph icon={icon} />
+      <Text style={{ flex: 1, ...type.body, color: colors.label }}>{label}</Text>
+      <Text numberOfLines={1} style={{ ...type.body, color: colors.tertiaryLabel, maxWidth: 150 }}>{value ?? 'Anyone'}</Text>
+      <Chevron />
+    </Row>
+  );
+  return (
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      style={{ marginHorizontal: 12, marginBottom: 40, padding: 12, gap: 16, borderRadius: 20, borderCurve: 'continuous', backgroundColor: colors.groupedBackground }}
+    >
+      <Group label="Show">
+        {THREAD_KINDS.map((k, i) => (
+          <Row key={k.key} first={i === 0} onPress={() => onKind(k.key)}>
+            <Text style={{ flex: 1, ...type.body, color: colors.label }}>{k.label}</Text>
+            {kind === k.key ? <Image source="sf:checkmark" style={{ width: 16, height: 16 }} tintColor={colors.accent} /> : null}
+          </Row>
+        ))}
+      </Group>
+      <Group>
+        {picker('people', 'sf:person.2', 'People', peopleSummary, true)}
+        {spacesSummary !== undefined ? picker('spaces', 'sf:number', 'Spaces', spacesSummary ?? 'All', false) : null}
+      </Group>
+    </BottomSheet>
   );
 }
 
