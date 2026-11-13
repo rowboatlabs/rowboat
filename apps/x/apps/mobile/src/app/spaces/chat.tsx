@@ -537,6 +537,10 @@ export default function SpaceChatScreen() {
                   <Image source="sf:person.2" style={{ width: 24, height: 20 }} contentFit="contain" tintColor={colors.label} />
                 </Pressable>
               )}
+              {/* Every thread in this space (2026-11-13, the web's Threads tab). */}
+              <Pressable hitSlop={10} accessibilityLabel="Threads" onPress={() => router.push({ pathname: '/spaces/threads', params: { org, space, title, me } })}>
+                <Image source="sf:bubble.left.and.bubble.right" style={{ width: 24, height: 20 }} contentFit="contain" tintColor={colors.label} />
+              </Pressable>
               <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/search', params: { org, space, title, me } })}>
                 <Image source="sf:magnifyingglass" style={{ width: 20, height: 20 }} tintColor={colors.label} />
               </Pressable>
