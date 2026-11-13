@@ -212,7 +212,15 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
                     <Chevron />
                   </CardRow>
                 ) : null}
-                <CardRow first={!who} onPress={() => router.push('/spaces/settings')}>
+                {/* Your threads across every space (2026-11-13, the web's /threads page). */}
+                {current ? (
+                  <CardRow first={!who} onPress={() => router.push({ pathname: '/spaces/my-threads', params: { org: current.address, me: current.memberId } })}>
+                    <Glyph icon="sf:bubble.left.and.bubble.right" />
+                    <Text style={{ flex: 1, ...type.body, color: colors.label }}>Your threads</Text>
+                    <Chevron />
+                  </CardRow>
+                ) : null}
+                <CardRow first={!who && !current} onPress={() => router.push('/spaces/settings')}>
                   <Glyph icon="sf:gearshape" />
                   <Text style={{ flex: 1, ...type.body, color: colors.label }}>Settings</Text>
                   <Chevron />

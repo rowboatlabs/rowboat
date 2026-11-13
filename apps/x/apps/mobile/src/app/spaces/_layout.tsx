@@ -65,6 +65,8 @@ export default function SpacesLayout() {
       <Stack.Screen name="new-agent" options={{ title: 'New agent', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="connect-agent" options={{ title: 'Connect an agent', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="agent" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="threads" options={{ title: 'Threads', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="my-threads" options={{ title: 'Your threads', headerBackButtonDisplayMode: 'minimal' }} />
     </Stack>
   );
 }

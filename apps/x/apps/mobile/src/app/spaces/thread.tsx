@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useHomeBackButton } from '@/components/home-back';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
-import { onServer, type Approval, type Invocation, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
+import { onServer, type Approval, type Invocation, type Member, type Message, type Space, type Topic } from '@rowboat/spaces-protocol';
 
 import { spaces } from '@x/shared';
 
@@ -34,6 +34,8 @@ import { SpacesClient } from '@/lib/spaces/client';
 import { isDeparted, answersOwnerOnly, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
 import { SpacesLive } from '@x/spaces-client';
+import { ThreadOptionsSheet, type ThreadChange } from '@/components/thread-options';
+import { withArchived, withSession } from '@/lib/spaces/threads';
 import { useColors } from '@/theme/colors';
 
 // One flat thread: root pinned on top, replies below, composer posts with
@@ -83,6 +85,14 @@ export default function SpaceThreadScreen() {
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
   const [following, setFollowing] = useState<boolean | null>(initial?.following ?? null);
+  // The thread's discussion row (2026-11-13): null = a plain thread or a
+  // session, undefined = not loaded yet. Its options sheet changes both.
+  const [topic, setTopic] = useState<Topic | null | undefined>(undefined);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const applyChange = useCallback((change: ThreadChange) => {
+    if (change.root) setRootMessage(change.root);
+    if (change.topic !== undefined) setTopic(change.topic);
+  }, []);
   // Thread follow-ups (Harbor spec §8, 2026-10-27): a reply that mentions
   // nobody goes to the agent you last invoked here. The line over the composer
   // names it; its × sends the next reply to people only.
@@ -178,6 +188,7 @@ export default function SpaceThreadScreen() {
         }
         const freshLast = thread.messages.at(-1)?.offset ?? thread.root.offset;
         setRootMessage(thread.root);
+        setTopic(thread.topic);
         // Keep anything live delivered after the server's snapshot.
         setReplies((prev) => [...thread.messages, ...(prev ?? []).filter((m) => m.offset > freshLast && !thread.messages.some((f) => f.id === m.id))]);
         setFollowing(thread.following);
@@ -250,6 +261,15 @@ export default function SpaceThreadScreen() {
           const patch = (m: Message) => (m.id === event.end.messageId && m.poll ? { ...m, poll: { ...m.poll, endedAt: event.end.at } } : m);
           setRootMessage((prev) => (prev ? patch(prev) : prev));
           setReplies((prev) => prev?.map(patch) ?? null);
+        } else if (event.type === 'thread_archive' && event.rootMessageId === root) {
+          // Archived, ended or revived from anywhere (2026-11-13): the header and menu follow.
+          setRootMessage((prev) => (prev ? withArchived(prev, event.action === 'archived') : prev));
+        } else if (event.type === 'thread_session' && event.rootMessageId === root) {
+          setRootMessage((prev) => (prev ? withSession(prev, event.session) : prev));
+        } else if (event.type === 'topic' && event.topic.rootMessageId === root) {
+          setTopic(event.topic);
+        } else if (event.type === 'topic_removed' && event.removal.rootMessageId === root) {
+          setTopic(null);
         }
       },
       lastOffset.current,
@@ -490,31 +510,51 @@ export default function SpaceThreadScreen() {
       <Stack.Screen
         options={{
           headerLeft: homeBack,
-          headerTitle: () => (
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>Thread</Text>
-              {spaceName ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>#{spaceName}</Text> : null}
+          // A discussion's or session's title leads the header, its kind and space
+          // under it (2026-11-13): a title line above the root message repeated the
+          // root's own text, since a session is usually named after it.
+          headerTitle: () => {
+            const kind = topic ? 'Discussion' : rootMessage?.session ? 'Session' : 'Thread';
+            const named = topic?.title ?? rootMessage?.session?.title;
+            return (
+              <View style={{ alignItems: 'center', maxWidth: 220 }}>
+                <Text numberOfLines={1} style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{named ?? kind}</Text>
+                {named || spaceName ? (
+                  <Text numberOfLines={1} style={{ fontSize: 12, color: colors.tertiaryLabel }}>
+                    {[named ? kind : null, spaceName ? `#${spaceName}` : null].filter(Boolean).join(' · ')}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          },
+          // Follow = replies land in Activity + notifications (Slack's bell).
+          // The ⋯ beside it is the thread's options (2026-11-13), once the thread has loaded.
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+              {following === null ? null : (
+                <Pressable
+                  hitSlop={10}
+                  onPress={() => {
+                    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+                    const next = !following;
+                    setFollowing(next);
+                    flashNote(next ? 'Following — you’ll be notified of new replies' : 'Unfollowed — no notifications for this thread');
+                    client.followThread(space, root, next).catch(() => {
+                      setFollowing(!next);
+                      flashNote('Couldn’t change that. Try again.');
+                    });
+                  }}
+                >
+                  <Image source={following ? 'sf:bell.fill' : 'sf:bell.slash'} style={{ width: 20, height: 20 }} contentFit="contain" tintColor={following ? colors.label : colors.tertiaryLabel} />
+                </Pressable>
+              )}
+              {topic === undefined || !rootMessage || rootMessage.deletedAt ? null : (
+                <Pressable hitSlop={10} accessibilityLabel="Thread options" onPress={() => setOptionsOpen(true)}>
+                  <Image source="sf:ellipsis.circle" style={{ width: 21, height: 21 }} contentFit="contain" tintColor={colors.label} />
+                </Pressable>
+              )}
             </View>
           ),
-          // Follow = replies land in Activity + notifications (Slack's bell).
-          headerRight: () =>
-            following === null ? null : (
-              <Pressable
-                hitSlop={10}
-                onPress={() => {
-                  if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-                  const next = !following;
-                  setFollowing(next);
-                  flashNote(next ? 'Following — you’ll be notified of new replies' : 'Unfollowed — no notifications for this thread');
-                  client.followThread(space, root, next).catch(() => {
-                    setFollowing(!next);
-                    flashNote('Couldn’t change that. Try again.');
-                  });
-                }}
-              >
-                <Image source={following ? 'sf:bell.fill' : 'sf:bell.slash'} style={{ width: 20, height: 20 }} contentFit="contain" tintColor={following ? colors.label : colors.tertiaryLabel} />
-              </Pressable>
-            ),
         }}
       />
       {rootMessage === null && !error ? (
@@ -534,6 +574,14 @@ export default function SpaceThreadScreen() {
           contentContainerStyle={{ paddingVertical: 12 }}
         >
           <StatusBanner error={error} offlineText={replies ? "You're offline. Showing saved replies." : "You're offline. Replies will load when you're back online."} />
+          {rootMessage ? (
+            <ThreadHeading
+              topic={topic ?? null}
+              root={rootMessage}
+              fileName={topic?.documentAssetId ? fileNames.get(topic.documentAssetId) : undefined}
+              onOpenFile={(assetId) => router.push({ pathname: '/spaces/file', params: { org, space, assetId, path: '', title: 'File', mime: '' } })}
+            />
+          ) : null}
           {rootMessage?.deletedAt ? (
             <MessageRow message={rootMessage} me={me} onToggleReaction={toggleReaction} onLongPress={() => {}} />
           ) : rootMessage ? (
@@ -646,6 +694,16 @@ export default function SpaceThreadScreen() {
         onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
         onBlock={(m) => blockMember({ org, spaceId: space, member: { id: m.author.memberId, name: profiles.get(m.author.memberId)?.displayName ?? 'this person' }, getAccessToken: () => account.getAccessToken() })}
         linkFor={linkFor}
+      />
+      <ThreadOptionsSheet
+        visible={optionsOpen}
+        onClose={() => setOptionsOpen(false)}
+        client={client}
+        org={org}
+        space={space}
+        root={rootMessage}
+        topic={topic ?? null}
+        onChange={applyChange}
       />
     </KeyboardAvoidingView>
   );
@@ -768,5 +826,42 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
         </Pressable>
       </View>
     </Pressable>
+  );
+}
+
+// What this thread is (2026-11-13, the web pane's title line), minus the
+// title, which the header carries: whether it is archived or ended, and a
+// discussion's linked file. A plain, active thread shows nothing here.
+function ThreadHeading({ topic, root, fileName, onOpenFile }: {
+  topic: Topic | null;
+  root: Message;
+  fileName?: string;
+  onOpenFile: (assetId: string) => void;
+}) {
+  const colors = useColors();
+  const archived = topic ? topic.archived : !!root.archived;
+  if (!archived && !topic?.documentAssetId) return null;
+  const state = archived ? (!topic && root.session ? 'Ended' : 'Archived') : null;
+  return (
+    <View style={{ paddingHorizontal: 16, paddingBottom: 12, gap: 8, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' }}>
+      {state ? (
+        <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: colors.secondaryBackground }}>
+          <Text style={{ fontSize: 12, fontWeight: '600', color: colors.secondaryLabel }}>{state}</Text>
+        </View>
+      ) : null}
+      {topic?.documentAssetId ? (
+        <Pressable
+          onPress={() => onOpenFile(topic.documentAssetId!)}
+          style={({ pressed }) => ({
+            flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
+            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderCurve: 'continuous',
+            backgroundColor: colors.secondaryBackground, opacity: pressed ? 0.6 : 1,
+          })}
+        >
+          <Image source="sf:paperclip" style={{ width: 14, height: 14 }} tintColor={colors.secondaryLabel} />
+          <Text numberOfLines={1} style={{ fontSize: 14, color: colors.label, maxWidth: 260 }}>{fileName ?? 'Linked file'}</Text>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
