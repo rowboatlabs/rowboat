@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Bot, Hash, KeyRound, MoreHorizontal, Pencil, Plus } from 'lucide-react'
+import { Bot, Hash, KeyRound, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DeleteAgentDialog } from '@/components/spaces/delete-agent-dialog'
 import { AgentsDialog, type AgentsDialogStart } from '@/components/spaces/agents-dialog'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { isAgentOffline, refreshOrgRoster, useAgentsOnline, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
@@ -220,6 +221,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, onOpenSettings }: {
         setRenamingState(on)
     }
     const [draft, setDraft] = useState('')
+    const [deleting, setDeleting] = useState(false)
     const [pendingName, setPendingName] = useState<string | null>(null)
 
     const startRename = () => {
@@ -280,8 +282,20 @@ function AgentCard({ orgId, agent, owner, spaceNames, onOpenSettings }: {
                                     <KeyRound className="size-3.5" /> {yours ? 'Keys and setup' : 'Keys'}
                                 </DropdownMenuItem>
                             )}
+                            {/* Deleting sits in the menu too (2026-11-13), not only on the agent's Danger zone. */}
+                            {canOpen && (
+                                <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(true)}>
+                                        <Trash2 className="size-3.5" /> Delete agent
+                                    </DropdownMenuItem>
+                                </>
+                            )}
                         </DropdownMenuContent>
                     </DropdownMenu>
+                )}
+                {canOpen && (
+                    <DeleteAgentDialog orgId={orgId} agent={agent} open={deleting} onOpenChange={setDeleting} />
                 )}
                 </div>
             </div>

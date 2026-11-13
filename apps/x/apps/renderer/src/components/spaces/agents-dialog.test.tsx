@@ -912,7 +912,7 @@ describe('AgentsDialog', () => {
         render(<AgentsDialog org={org} open onOpenChange={vi.fn()} />)
         fireEvent.click(await screen.findByRole('button', { name: /Hermes/ }))
         fireEvent.click(await screen.findByRole('tab', { name: 'Danger zone' }))
-        expect(screen.getByText(/Revokes every key, removes the agent from all spaces/)).toBeInTheDocument()
+        expect(screen.getByText(/Revokes every key and removes it from all spaces/)).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Delete agent' }))
         fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Hermes' } })
         fireEvent.click(screen.getByRole('button', { name: 'Delete Hermes' }))

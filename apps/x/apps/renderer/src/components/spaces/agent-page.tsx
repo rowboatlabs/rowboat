@@ -10,13 +10,13 @@ import { SeatChoice, type Seat } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
 import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
-import { refreshMembers, refreshOrgRoster, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
+import { refreshMembers, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
+import { DeleteAgentDialog } from '@/components/spaces/delete-agent-dialog'
 import { PersonalitySection } from '@/components/spaces/agent-personality'
 import { SuperAgentSection } from '@/components/spaces/agent-super'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, LOCAL_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
-import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { toast } from '@/lib/toast'
 
 // One agent's page in the Agents dialog (2026-10-01; tabs 2026-10-27): a rail
@@ -638,67 +638,24 @@ function SignOutRow({ orgId, agent, onChanged }: { orgId: string; agent: spaces.
     )
 }
 
-/** Delete the agent, on the Danger zone: the person types its name first. A managed one leaves Maritime too. */
+/** Delete the agent, on the Danger zone: the button opens the same dialog as the Agents page's ⋯ menu (2026-11-13). */
 function DeleteAgentRow({ orgId, agent, hosted, local, onChanged }: { orgId: string; agent: spaces.Member; hosted: boolean; local: boolean; onChanged: () => Promise<void> }) {
-    const [confirming, setConfirming] = useState(false)
-    const [name, setName] = useState('')
-    const [busy, setBusy] = useState(false)
-    const matches = name.trim() === agent.displayName
-    const remove = async () => {
-        if (busy || !matches) return
-        setBusy(true)
-        try {
-            await window.ipc.invoke('spaces:deleteAgent', { orgId, agentId: agent.id })
-            // A local agent's key and folder live on this computer: they go with it.
-            if (local && LOCAL_RUNTIME) await window.ipc.invoke('spaces:forgetLocalAgent', { orgId, agentId: agent.id }).catch(() => {})
-            refreshOrgRoster(orgId)
-            await onChanged()
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not delete the agent', 'error')
-        } finally {
-            setBusy(false)
-            setConfirming(false)
-        }
-    }
+    const [open, setOpen] = useState(false)
     return (
         <DangerRow
-            title={hosted ? `Delete ${agent.displayName} from Maritime` : `Delete ${agent.displayName}`}
+            title={`Delete ${agent.displayName}`}
             note={
                 hosted
-                    ? 'Deletes the Maritime VM and its volume, revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages stay.'
+                    ? 'Deletes its Maritime VM, revokes every key and removes it from all spaces.'
                     : local
-                      ? 'Stops it on this computer, revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages and your folder stay.'
-                      : 'Revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages stay.'
-            }
-            below={
-                confirming && (
-                    <form
-                        className="flex flex-wrap items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 p-2"
-                        onSubmit={(e) => {
-                            e.preventDefault()
-                            void remove()
-                        }}
-                    >
-                        <span className="text-[11px] text-muted-foreground">
-                            Type <b className="font-semibold text-foreground">{agent.displayName}</b> to confirm.
-                        </span>
-                        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={agent.displayName} aria-label="Agent name" className="h-8 w-44 text-xs" autoComplete="off" autoFocus />
-                        <Button type="submit" size="sm" variant="destructive" disabled={!matches || busy}>
-                            {busy && <Loader2 className="size-3.5 animate-spin" />}
-                            Delete {agent.displayName}
-                        </Button>
-                        <Button type="button" size="sm" variant="ghost" onClick={() => (setConfirming(false), setName(''))}>
-                            Cancel
-                        </Button>
-                    </form>
-                )
+                      ? 'Stops it on this computer, revokes every key and removes it from all spaces.'
+                      : 'Revokes every key and removes it from all spaces.'
             }
         >
-            {!confirming && (
-                <Button size="sm" variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setConfirming(true)}>
-                    <Trash2 className="size-3.5" /> Delete agent
-                </Button>
-            )}
+            <Button size="sm" variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setOpen(true)}>
+                <Trash2 className="size-3.5" /> Delete agent
+            </Button>
+            <DeleteAgentDialog orgId={orgId} agent={agent} hosted={hosted} open={open} onOpenChange={setOpen} onDeleted={onChanged} />
         </DangerRow>
     )
 }
