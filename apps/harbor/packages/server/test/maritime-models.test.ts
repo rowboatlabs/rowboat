@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { RUNTIMES } from '../src/connectors/maritime/runtimes.js';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { MARITIME_ENV, RUNTIMES } from '../src/connectors/maritime/runtimes.js';
 
 // Model lists come from the harness (2026-11-01), in a separate execution after the turn is settled.
 // The runtime reads them into the composer's choices, and nothing is listed in Harbor itself.
@@ -83,6 +87,35 @@ describe('a turn that stops without a word', () => {
       expect(reading.failure).toMatch(/exit code 1/);
     }
     expect(runtime.read('', undefined, 'boom: no such file', 2).failure).toBe('boom: no such file');
+  });
+});
+
+describe('Maritime’s environment file', () => {
+  // Maritime writes /etc/maritime-env from bash (`export -p`: `declare -x NAME="value"` lines) and the turn runs
+  // under sh. Sourcing it as is killed every turn with exit 127 from 2026-11-11 to 11-13.
+  it('is loaded under sh with its bash syntax turned into exports, skipping a line it cannot parse', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'maritime-env-'));
+    const file = join(dir, 'maritime-env');
+    writeFileSync(file, [
+      'declare -x CC="gcc"',
+      'declare -x QUOTED="a \\"b\\" \\$c"',
+      'declare -x EMPTY=""',
+      'declare -x BARE',
+      'declare -x BROKEN="unterminated',
+      'export PLAIN="old style"',
+      '',
+    ].join('\n'));
+    const script = `set -e; ${MARITIME_ENV.replaceAll('/etc/maritime-env', file)}; printf '%s|%s|%s|%s|%s' "$CC" "$QUOTED" "$EMPTY" "$PLAIN" "\${BROKEN:-unset}"`;
+    const out = execFileSync('sh', ['-c', script], { encoding: 'utf8' });
+    expect(out).toBe('gcc|a "b" $c||old style|unset');
+  });
+
+  it('is what every runtime’s turn runs first', () => {
+    for (const runtime of Object.values(RUNTIMES)) {
+      const script = runtime.command({ serverUrl: 'https://h.test', agentKey: 'rbk_x', promptPath: '/data/rowboat/p', outPath: '/data/rowboat/o', errPath: '/data/rowboat/e', lastPath: '/data/rowboat/l' });
+      expect(script).toContain(MARITIME_ENV);
+      expect(script).not.toContain('then . /etc/maritime-env');
+    }
   });
 });
 

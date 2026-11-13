@@ -99,7 +99,16 @@ const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 // 2026-11-11: Maritime's reload writes this root-readable shell environment;
 // exec retains the container's boot env (observed on the custom Hermes image).
 // Load it before dropping privileges or configuring MCP and model access.
-const MARITIME_ENV = 'if [ -r /etc/maritime-env ]; then . /etc/maritime-env; fi';
+//
+// Maritime writes the file from bash with `export -p`, so its lines read
+// `declare -x NAME="value"`, and the turn runs under `sh`, which is dash on every
+// box and has no `declare`: sourced as is, the first line failed with 127 and,
+// under `set -e`, took every turn on every Maritime agent with it for two and a
+// half days (2026-11-11 10:04Z to 11-13; the thread said "Finished on Maritime.").
+// So the file is read line by line, each `declare -x` turned into `export`, and a
+// line dash cannot parse (bash's $'…' quoting) is skipped rather than fatal.
+export const MARITIME_ENV =
+  'if [ -r /etc/maritime-env ]; then while IFS= read -r l; do case "$l" in "declare -x "*) l="export ${l#declare -x }";; esac; case "$l" in "export "*) eval "$l" 2>/dev/null || true;; esac; done < /etc/maritime-env; fi';
 
 /** Reasoning effort, the harness's own three levels (Codex's and Hermes's flag). */
 const EFFORTS = ['low', 'medium', 'high'].map((id) => ({ id, label: id[0]!.toUpperCase() + id.slice(1) }));
