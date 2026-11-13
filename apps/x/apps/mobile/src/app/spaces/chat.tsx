@@ -409,7 +409,7 @@ export default function SpaceChatScreen() {
   const linesFor = (message: Message) => {
     const list = linesByMessage.get(message.id);
     if (!list?.some((i) => i.state !== 'done')) return undefined;
-    return <InvocationLines invocations={list} memberNames={memberNames} me={me} isAdmin={isAdmin} canStop={canStop} client={client} onUpdated={foldInvocation} />;
+    return <InvocationLines compact onOpen={() => openThread(message)} invocations={list} memberNames={memberNames} me={me} isAdmin={isAdmin} canStop={canStop} client={client} onUpdated={foldInvocation} />;
   };
   // An approval event carries the whole approval; keep whichever copy is newer.
   const patchApproval = useCallback((approval: Approval) => {
