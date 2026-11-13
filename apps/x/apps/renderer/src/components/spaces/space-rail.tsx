@@ -29,7 +29,7 @@ export function SpaceRail({ org, spaceId, onOpenSpace, onOpenSettings, onOpenThr
 }) {
     const unread = useSpacesUnreadCounts()
     const hasUnread = [...unread].some(([key, badge]) => key.startsWith(`${org.id}/`) && badge.unread > 0)
-    return <SecondaryRail edgeDot={hasUnread} edgeless={edgeless} open={open} onTogglePin={onTogglePin} peekRef={peekRef} widthStorageKey="spaces:railWidth">
+    return <SecondaryRail floating edgeDot={hasUnread} edgeless={edgeless} open={open} onTogglePin={onTogglePin} peekRef={peekRef} widthStorageKey="spaces:railWidth">
         {({ togglePin }) => <SpaceRailSections>
             <div className="flex shrink-0 items-center gap-1.5 px-2 py-1.5">
                 {/* One server (2026-11-09): the rail's header is the product, not a server name. The
