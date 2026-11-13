@@ -416,15 +416,15 @@ export const MessageRow = memo(function MessageRow({
         {/* The agent status closes the message (2026-11-13): in the stream a small
             icon beside the replies link (InvocationLines compact), in the thread the full line. */}
         {onOpenThread && message.replyCount > 0 ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Pressable onPress={() => onOpenThread(message)} hitSlop={6} style={{ marginTop: 4, alignSelf: 'flex-start' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <Pressable onPress={() => onOpenThread(message)} hitSlop={6}>
               <Text style={{ fontSize: 13, fontWeight: '600', color: '#0a84ff' }}>
                 {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'} ›
               </Text>
             </Pressable>
             {invocationLines}
           </View>
-        ) : invocationLines}
+        ) : invocationLines ? <View style={{ marginTop: 4 }}>{invocationLines}</View> : null}
       </View>
     </Pressable>
     {reactorsFor !== null ? (
