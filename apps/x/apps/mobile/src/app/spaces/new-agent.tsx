@@ -5,7 +5,7 @@ import { ActivityIndicator, Alert, ScrollView, Text } from 'react-native';
 import type { Space } from '@rowboat/spaces-protocol';
 
 import { Field, PersonalityFields } from '@/components/agent-form';
-import { Glyph, Group, PrimaryButton, Row, Tick } from '@/components/grouped';
+import { Chevron, Glyph, Group, PrimaryButton, Row, Tick } from '@/components/grouped';
 import { Image } from '@/components/sf-image';
 import { MANAGED_KINDS, kindLabel } from '@/lib/spaces/agents';
 import { friendlyError } from '@/lib/spaces/errors';
@@ -21,7 +21,68 @@ import { type } from '@/theme/type';
 // agent's machine and nowhere else. The desktop's environment variables are
 // left out here: they belong to the machine and are set on the desktop.
 // Creating opens the agent's page, which shows it deploying, then ready.
+//
+// It starts where the desktop's New agent does (2026-11-13, agents-dialog.tsx
+// "Where should it run?"): Rowboat runs it, or connect one you already run
+// (connect-agent.tsx). The desktop's third way, "On this computer", is an
+// agent the desktop app itself runs, so the phone doesn't offer it.
 export default function NewAgentScreen() {
+  const params = useLocalSearchParams<{ org: string; me: string; path?: string }>();
+  return params.path === 'create' ? <CreateAgent /> : <ChoosePath />;
+}
+
+function ChoosePath() {
+  const colors = useColors();
+  const params = useLocalSearchParams<{ org: string; me: string }>();
+  const client = useOrgClient(params.org);
+  // A server with no managed hosting has no "Rowboat runs it" (desktop does the same).
+  const [creates, setCreates] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .managedAgentKinds()
+      .then(({ kinds }) => !cancelled && setCreates(kinds.some((k) => MANAGED_KINDS.some((m) => m.kind === k))))
+      .catch(() => !cancelled && setCreates(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const go = (pathname: '/spaces/new-agent' | '/spaces/connect-agent', extra: Record<string, string> = {}) =>
+    router.push({ pathname, params: { org: params.org, me: params.me, ...extra } });
+
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: colors.groupedBackground }} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 24 }}>
+      <Stack.Screen options={{ title: 'New agent' }} />
+      {creates === null ? <ActivityIndicator /> : (
+        <Group label="Where should it run?" footer="To run one on this computer with your own Claude Code or Codex login, use the desktop app.">
+          {creates ? (
+            <Row first onPress={() => go('/spaces/new-agent', { path: 'create' })}>
+              <Glyph icon="sf:cloud" />
+              <Text style={{ flex: 1, paddingVertical: 10 }}>
+                <Text style={{ ...type.body, color: colors.label }}>Rowboat runs it</Text>
+                {'\n'}
+                <Text style={{ ...type.caption, color: colors.secondaryLabel }}>Set up once, use it anytime from any device. Runs in the cloud.</Text>
+              </Text>
+              <Chevron />
+            </Row>
+          ) : null}
+          <Row first={!creates} onPress={() => go('/spaces/connect-agent')}>
+            <Glyph icon="sf:link" />
+            <Text style={{ flex: 1, paddingVertical: 10 }}>
+              <Text style={{ ...type.body, color: colors.label }}>Connect one you already run</Text>
+              {'\n'}
+              <Text style={{ ...type.caption, color: colors.secondaryLabel }}>Hermes, Replicas, Conductor, Agent37, Maritime, or a custom agent.</Text>
+            </Text>
+            <Chevron />
+          </Row>
+        </Group>
+      )}
+    </ScrollView>
+  );
+}
+
+function CreateAgent() {
   const colors = useColors();
   const params = useLocalSearchParams<{ org: string; me: string }>();
   const client = useOrgClient(params.org);
@@ -113,7 +174,9 @@ export default function NewAgentScreen() {
     if (into.length > 0 || withDirect) markSpacesChanged(params.org);
     if (missed.length > 0) Alert.alert(`${displayName} was created`, `But it couldn't be added to ${missed.join(', ')}. You can try again from its page.`);
 
-    router.replace({ pathname: '/spaces/agent', params: { org: params.org, me: params.me, agent: agentId, title: displayName } });
+    // Past the chooser and the form to the list, then its page: Back from it lands on Agents (2026-11-13).
+    router.dismissTo({ pathname: '/spaces/agents', params: { org: params.org, me: params.me } });
+    router.push({ pathname: '/spaces/agent', params: { org: params.org, me: params.me, agent: agentId, title: displayName } });
   };
 
   if (kinds === null) {
@@ -130,7 +193,7 @@ export default function NewAgentScreen() {
       <ScrollView style={{ flex: 1, backgroundColor: colors.groupedBackground }} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 24, gap: 12 }}>
         <Stack.Screen options={{ title: 'New agent' }} />
         <Text style={{ ...type.body, textAlign: 'center', color: colors.secondaryLabel }}>
-          {loadError ?? 'This server doesn’t run agents for you. Add one from the desktop app.'}
+          {loadError ?? 'This server doesn’t run agents for you. Go back and connect one you already run.'}
         </Text>
       </ScrollView>
     );
