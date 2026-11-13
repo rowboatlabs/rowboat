@@ -265,6 +265,8 @@ const HISTORICAL_KEY_ORDER = [
     "restore_asset",
     "asset_history",
     "diff",
+    "set_space_graph",
+    "read_graph",
     "spaces-upload-blob",
     "spaces-download-blob",
     "schedule_message",
@@ -367,6 +369,8 @@ describe("BuiltinTools permission audit", () => {
             create_space: "prompt",
             rename_space: "prompt",
             archive_space: "prompt",
+            // Turning a space's graph on sends its messages to Jev (2026-11-12): the person is asked.
+            set_space_graph: "prompt",
             unarchive_space: "prompt",
             delete_space: "prompt",
             add_members: "prompt",

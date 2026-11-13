@@ -1524,6 +1524,44 @@ export const MIGRATIONS: Migration[] = [
       `alter table members drop column personal`,
     ],
   },
+  {
+    // The space graph (spec §8 Space graph, 2026-11-12): an admin's switch on
+    // the space, and what Harbor derives while it is on. A thread's row is
+    // Jev's judgment of it and its edges with their events; no weight is
+    // stored, and no message text. Topics are the space's vocabulary, with
+    // the candidates Jev refused kept so they are not asked about twice.
+    id: '066-space-graph',
+    statements: [
+      `alter table spaces add column graph boolean not null default false`,
+      `create table graph_threads (
+        space_id text not null,
+        root_message_id text not null,
+        fingerprint text not null,
+        last_offset bigint not null,
+        judged_at text not null,
+        judgment jsonb not null,
+        primary key (space_id, root_message_id),
+        constraint graph_threads_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create table graph_topics (
+        space_id text not null,
+        key text not null,
+        label text not null,
+        category text not null,
+        real double precision not null,
+        threads integer not null,
+        alias_of text,
+        primary key (space_id, key),
+        constraint graph_topics_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create table graph_vocabulary (
+        space_id text primary key,
+        messages integer not null,
+        judged_at text not null,
+        constraint graph_vocabulary_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+    ],
+  },
 ];
 
 /**
