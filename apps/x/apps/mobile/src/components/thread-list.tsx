@@ -1,4 +1,6 @@
 import { SegmentedControl } from '@expo/ui/community/segmented-control';
+import { Button, Host, Image as SwiftImage, Menu, Section, Text as SwiftText, Toggle } from '@expo/ui/swift-ui';
+import { accessibilityLabel } from '@expo/ui/swift-ui/modifiers';
 import * as Haptics from 'expo-haptics';
 import { Stack } from 'expo-router';
 import { Image } from '@/components/sf-image';
@@ -42,6 +44,18 @@ export function filterSummary(filters: ThreadsFilters, nameOf: (id: string) => s
 
 const FILTER_ICON = 'line.3.horizontal.decrease.circle';
 
+/** A menu row with an icon and, when set, a grey second line (SwiftUI reads the second Text as the subtitle). */
+function MenuLink({ title, icon, subtitle, onPress }: { title: string; icon: 'person.2' | 'number'; subtitle: string | null; onPress: () => void }) {
+  if (!subtitle) return <Button label={title} systemImage={icon} onPress={onPress} />;
+  return (
+    <Button onPress={onPress}>
+      <SwiftText>{title}</SwiftText>
+      <SwiftText>{subtitle}</SwiftText>
+      <SwiftImage systemName={icon} />
+    </Button>
+  );
+}
+
 /**
  * Active / Archived as a segmented control, everything else behind one filter
  * button in the header (2026-11-13). Two rows of look-alike chips hid which
@@ -72,32 +86,33 @@ export function ThreadFilters({ filters, onChange, archivedCount, people, nameOf
   return (
     <View style={{ gap: 10 }}>
       {process.env.EXPO_OS === 'ios' ? (
-        <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Menu icon={filtered ? `${FILTER_ICON}.fill` : FILTER_ICON} accessibilityLabel="Filter threads">
-            <Stack.Toolbar.Menu inline title="Show">
-              {THREAD_KINDS.map((k) => (
-                <Stack.Toolbar.MenuAction key={k.key} isOn={filters.kind === k.key} onPress={() => pickKind(k.key)}>
-                  {k.label}
-                </Stack.Toolbar.MenuAction>
-              ))}
-            </Stack.Toolbar.Menu>
-            <Stack.Toolbar.Menu inline>
-              <Stack.Toolbar.MenuAction icon="person.2" subtitle={peopleSummary ?? undefined} onPress={() => setSheet('people')}>
-                People…
-              </Stack.Toolbar.MenuAction>
-              {spaces ? (
-                <Stack.Toolbar.MenuAction icon="number" subtitle={spacesSummary ?? undefined} onPress={() => setSheet('spaces')}>
-                  Spaces…
-                </Stack.Toolbar.MenuAction>
-              ) : null}
-            </Stack.Toolbar.Menu>
-            {filtered ? (
-              <Stack.Toolbar.MenuAction icon="xmark.circle" onPress={() => onChange(clearedFilters(filters))}>
-                Clear filters
-              </Stack.Toolbar.MenuAction>
-            ) : null}
-          </Stack.Toolbar.Menu>
-        </Stack.Toolbar>
+        // A SwiftUI Menu in a Host instead of Stack.Toolbar.Menu (2026-11-13):
+        // still a real iOS menu, so the native look stays, and this tests
+        // whether the tap that dismisses it still opens a thread underneath.
+        // @expo/ui gives no open/close state, so no blocker while it's open.
+        <Stack.Screen
+          options={{
+            headerRight: () => (
+              <Host matchContents>
+                <Menu
+                  label={<SwiftImage systemName={filtered ? `${FILTER_ICON}.fill` : FILTER_ICON} size={22} color={colors.label} />}
+                  modifiers={[accessibilityLabel('Filter threads')]}
+                >
+                  <Section title="Show">
+                    {THREAD_KINDS.map((k) => (
+                      <Toggle key={k.key} label={k.label} isOn={filters.kind === k.key} onIsOnChange={() => pickKind(k.key)} />
+                    ))}
+                  </Section>
+                  <Section>
+                    <MenuLink title="People…" icon="person.2" subtitle={peopleSummary} onPress={() => setSheet('people')} />
+                    {spaces ? <MenuLink title="Spaces…" icon="number" subtitle={spacesSummary} onPress={() => setSheet('spaces')} /> : null}
+                  </Section>
+                  {filtered ? <Button label="Clear filters" systemImage="xmark.circle" onPress={() => onChange(clearedFilters(filters))} /> : null}
+                </Menu>
+              </Host>
+            ),
+          }}
+        />
       ) : (
         <Stack.Screen
           options={{

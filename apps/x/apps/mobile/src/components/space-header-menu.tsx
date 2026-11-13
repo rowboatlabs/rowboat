@@ -1,3 +1,5 @@
+import { Button, Host, Image as SwiftImage, Menu } from '@expo/ui/swift-ui';
+import { accessibilityLabel } from '@expo/ui/swift-ui/modifiers';
 import { Stack } from 'expo-router';
 import { Image } from '@/components/sf-image';
 import { useState, type ComponentProps } from 'react';
@@ -12,7 +14,7 @@ export type SpaceHeaderItem = {
   key: string;
   label: string;
   /** An SF Symbol name; Android maps it in `lib/symbols.ts`. */
-  icon: NonNullable<ComponentProps<typeof Stack.Toolbar.MenuAction>['icon']> & string;
+  icon: NonNullable<ComponentProps<typeof Button>['systemImage']>;
   onPress: () => void;
 };
 
@@ -27,17 +29,33 @@ export function SpaceHeaderMenu({ onSearch, items }: { onSearch: () => void; ite
   const colors = useColors();
   const [open, setOpen] = useState(false);
   if (process.env.EXPO_OS === 'ios') {
+    // A SwiftUI Menu in a Host instead of Stack.Toolbar.Menu (2026-11-13):
+    // still a real iOS menu, so the native look stays (the JS drop-down was
+    // rejected), and this tests whether the tap that dismisses it still
+    // reaches the chat underneath. @expo/ui gives no open/close state, so
+    // there's no blocker to put up while it's open.
     return (
-      <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button icon="magnifyingglass" accessibilityLabel="Search" onPress={onSearch} />
-        <Stack.Toolbar.Menu icon="ellipsis.circle" accessibilityLabel="More">
-          {items.map((item) => (
-            <Stack.Toolbar.MenuAction key={item.key} icon={item.icon} onPress={item.onPress}>
-              {item.label}
-            </Stack.Toolbar.MenuAction>
-          ))}
-        </Stack.Toolbar.Menu>
-      </Stack.Toolbar>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+              <Pressable hitSlop={10} accessibilityLabel="Search" onPress={onSearch}>
+                <Image source="sf:magnifyingglass" style={{ width: 20, height: 20 }} tintColor={colors.label} />
+              </Pressable>
+              <Host matchContents>
+                <Menu
+                  label={<SwiftImage systemName="ellipsis.circle" size={20} color={colors.label} />}
+                  modifiers={[accessibilityLabel('More')]}
+                >
+                  {items.map((item) => (
+                    <Button key={item.key} label={item.label} systemImage={item.icon} onPress={item.onPress} />
+                  ))}
+                </Menu>
+              </Host>
+            </View>
+          ),
+        }}
+      />
     );
   }
   return (
