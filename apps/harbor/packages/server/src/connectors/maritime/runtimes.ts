@@ -148,6 +148,13 @@ const stderrTail = (err: string | undefined) =>
     .slice(-3)
     .join(' ')
     .slice(0, 600);
+/**
+ * A failed turn that left no reason: the command's exit code is all there is. `stderrTail` is a
+ * string, so it must be joined with `||`, never `??`: an empty tail once read as success and the
+ * thread got "Finished on Maritime." for a turn that never ran (2026-11-13, five times in two days).
+ */
+const stoppedSilently = (who: string, code: number | null | undefined) =>
+  `${who} did not run: its command stopped with exit code ${code ?? 'unknown'} and wrote nothing. Mention me again to retry.`;
 /** The turn script's own line on a sign-in, first in the stderr file (Codex, 2026-10-30). */
 const SIGN_IN_MARK = 'rowboat-sign-in: ';
 const signInOf = (err: string | undefined): 'chatgpt' | 'none' | undefined => {
@@ -241,7 +248,10 @@ const hermes: Runtime = {
     const result = [...all].reverse().find((e) => e.type === 'result');
     const text = str(result?.text)?.trim();
     const failed = (typeof result?.exit_code === 'number' && result.exit_code !== 0) || (exitCode !== undefined && exitCode !== null && exitCode !== 0);
-    if (failed) return { ...(text ? { answer: text } : {}), failure: str(result?.error) ?? stderrTail(err) ?? 'Hermes stopped with an error' };
+    if (failed) {
+      const code = typeof result?.exit_code === 'number' ? result.exit_code : exitCode;
+      return { ...(text ? { answer: text } : {}), failure: str(result?.error) || stderrTail(err) || stoppedSilently('Hermes', code) };
+    }
     if (!result) return { failure: stderrTail(err) || 'Hermes ended without a result' };
     return text ? { answer: text } : {};
   },
@@ -311,7 +321,7 @@ const codex: Runtime = {
     const signIn = signInOf(err);
     const seen = { ...(session ? { session } : {}), ...(signIn ? { signIn } : {}) };
     if (failed || (exitCode !== undefined && exitCode !== null && exitCode !== 0)) {
-      const reason = str(obj(failed?.error)?.message) ?? str(failed?.message) ?? stderrTail(err) ?? 'Codex stopped with an error';
+      const reason = str(obj(failed?.error)?.message) || str(failed?.message) || stderrTail(err) || stoppedSilently('Codex', exitCode);
       return { ...(answer ? { answer } : {}), failure: reason, ...seen };
     }
     return { ...(answer ? { answer } : {}), ...seen };
@@ -396,7 +406,7 @@ const claudeCode: Runtime = {
     const asEvents: AgentEvent[] = all.map((e) => ({ type: `claude-${str(e.type) ?? 'unknown'}`, payload: e }));
     const result = [...all].reverse().find((e) => e.type === 'result');
     const session = str(result?.session_id) ?? str(all.find((e) => str(e.session_id))?.session_id);
-    const failure = failureOf('claude-code', asEvents) ?? (exitCode !== undefined && exitCode !== null && exitCode !== 0 ? stderrTail(err) || 'Claude Code stopped with an error' : undefined);
+    const failure = failureOf('claude-code', asEvents) ?? (exitCode !== undefined && exitCode !== null && exitCode !== 0 ? stderrTail(err) || stoppedSilently('Claude Code', exitCode) : undefined);
     // A failed result's `result` is the error, now the failure's reason (2026-11-13): not an answer to post.
     const said = ((failure ? undefined : str(result?.result)) ?? answerOf('claude-code', asEvents) ?? '').trim();
     // Claude writes a failed call's error as its last message too: posting it would say the failure twice (2026-11-13).

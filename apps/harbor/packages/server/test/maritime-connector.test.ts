@@ -180,6 +180,16 @@ describe('the Maritime connector with Hermes', () => {
     expect(caps.options.map((o: { key: string }) => o.key)).toEqual(['effort']);
   });
 
+  it('fails the turn with the exit code when the command stops before Hermes writes anything, instead of saying it finished', async () => {
+    // 2026-11-13: an execution that ended with exit code 1 and no output file read as a success, and the thread got
+    // "Finished on Maritime." (Piper, super, c3po). The reason must survive even when stderr is empty.
+    fake.nextTurn = { lines: [], exitCode: 1 };
+    const { invocations } = await org.post(`${mention(scout)} are you there?`);
+    const ended = await org.ended(invocations[0]!.id);
+    expect(ended.state).toBe('failed');
+    expect(ended.error).toMatch(/Hermes did not run: its command stopped with exit code 1 and wrote nothing/);
+  });
+
   it('wakes the VM, writes the request to the volume, runs hermes chat on the thread’s session, and answers in the thread', async () => {
     fake.nextTurn = hermesTurn('The deploy is green.');
     const { message, invocations } = await org.post(`${mention(scout)} is the deploy green?`);

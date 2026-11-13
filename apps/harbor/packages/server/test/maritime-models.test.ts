@@ -72,3 +72,17 @@ describe('model lists from the harness', () => {
     expect(option.type === 'select' ? option.choices.length : 0).toBe(100);
   });
 });
+
+describe('a turn that stops without a word', () => {
+  // Seen 2026-11-13: a command that exits non-zero before its runtime writes anything (an exec right after a wake)
+  // left an empty failure, which read as success, and the thread got "Finished on Maritime." five times in two days.
+  it.each(Object.entries(RUNTIMES))('%s names the exit code instead of passing as a success', (_kind, runtime) => {
+    for (const err of [undefined, '', '\n']) {
+      const reading = runtime.read('', undefined, err, 1);
+      expect(reading.answer).toBeUndefined();
+      expect(reading.failure).toMatch(/exit code 1/);
+    }
+    expect(runtime.read('', undefined, 'boom: no such file', 2).failure).toBe('boom: no such file');
+  });
+});
+
