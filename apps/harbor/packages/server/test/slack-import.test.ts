@@ -106,6 +106,69 @@ describe('Slack ZIP preview', () => {
     for (let i = 0; i < duplicate.length; i++) if (duplicate.subarray(i, i + 13).toString() === 'xhannels.json') duplicate[i] = 'c'.charCodeAt(0);
     await expect(previewSlackExport(duplicate)).rejects.toMatchObject({ code: 'unsafe_archive' });
   });
+  it('supports ID folders and rejects aliases shared by two channels', async () => {
+    const files = basic([message()]);
+    const byId: Record<string, unknown> = { ...files };
+    delete byId['general/2026-01-01.json']; byId['C1/2026-01-01.json'] = [message()];
+    expect((await previewSlackExport(zip(byId))).channels[0]!.preview.messages).toBe(1);
+    await expect(previewSlackExport(zip({ ...files, 'C1/2026-01-01.json': [message()] }))).rejects.toMatchObject({ code: 'invalid_export' });
+    await expect(previewSlackExport(zip({ 'channels.json': [{ id: 'C1', name: 'general' }, { id: 'C2', name: 'C1' }], 'C1/2026-01-01.json': [message()] }))).rejects.toMatchObject({ code: 'invalid_export' });
+  });
+  it('keeps deletions with earlier or missing deletion timestamps in any order', async () => {
+    const edited = message({ edited: { ts: '1767225605.000001' }, text: 'must not survive' });
+    for (const deletion of [
+      { type: 'message', subtype: 'message_deleted', deleted_ts: edited.ts },
+      { type: 'message', subtype: 'message_deleted', deleted_ts: edited.ts, ts: '1767225602.000001' },
+    ]) for (const rows of [[edited, deletion], [deletion, edited]]) {
+      const r = await previewSlackExport(zip(basic(rows)));
+      expect(r.channels[0]!.messages[0]).toMatchObject({ deleted: true, text: '', authorId: 'U1' });
+      expect(r.records).toEqual({ read: 2, accepted: 1, superseded: 1, skipped: 0 });
+    }
+  });
+  it('recovers standalone tombstone metadata without retaining deleted text', async () => {
+    const r = await previewSlackExport(zip(basic([{ type: 'message', subtype: 'message_deleted', ts: '1767225602.000001',
+      previous_message: message({ thread_ts: '1767225500.000001' }) }])));
+    expect(r.channels[0]!.messages[0]).toMatchObject({ deleted: true, text: '', authorId: 'U1', parentId: '1767225500.000001' });
+    expect(r.warnings.map(w => w.code)).toContain('missing_parent');
+  });
+  it('preserves bot names and promotes roster placeholders to historical bots', async () => {
+    const input = basic([message({ user: 'U_BOT', bot_id: 'B1', subtype: 'bot_message', bot_profile: { name: 'Build bot' } }),
+      message({ user: undefined, bot_id: 'B2', subtype: 'bot_message', username: 'Legacy bot', ts: '1767225600.000002' })]);
+    const r = await previewSlackExport(zip({ ...input, 'channels.json': [{ id: 'C1', name: 'general', members: ['U_BOT'] }] }));
+    expect(r.identities).toEqual(expect.arrayContaining([
+      { id: 'U_BOT', name: 'Build bot', kind: 'bot', deleted: false },
+      { id: 'bot:B2', name: 'Legacy bot', kind: 'bot', deleted: false },
+    ]));
+  });
+  it('resolves nested edits in either order and accounts for every record', async () => {
+    const revision = { type: 'message', subtype: 'message_changed', ts: '1767225605.000001',
+      message: message({ text: 'Updated', edited: { user: 'EDITOR', ts: '1767225604.000001' } }) };
+    for (const rows of [[message(), revision], [revision, message()]]) {
+      const r = await previewSlackExport(zip(basic([...rows, {}, message({ subtype: 'channel_join' })])));
+      expect(r.channels[0]!.messages[0]).toMatchObject({ text: 'Updated', authorId: 'U1', editedAt: '1767225604.000001' });
+      expect(r.records.read).toBe(r.records.accepted + r.records.skipped + r.records.superseded);
+      expect(r.records).toEqual({ read: 4, accepted: 1, skipped: 2, superseded: 1 });
+    }
+  });
+  it('distinguishes missing roots from invalid parent chains or cycles', async () => {
+    const root = message(); const reply = message({ ts: '1767225600.000002', thread_ts: root.ts });
+    await expect(previewSlackExport(zip(basic([root, reply, message({ ts: '1767225600.000003', thread_ts: reply.ts })])))).rejects.toMatchObject({ code: 'invalid_export' });
+    await expect(previewSlackExport(zip(basic([message({ thread_ts: reply.ts }), reply])))).rejects.toMatchObject({ code: 'invalid_export' });
+    expect((await previewSlackExport(zip(basic([root, reply])))).warnings).toEqual([]);
+  });
+  it('reports unsupported Enterprise layouts without claiming complete coverage', async () => {
+    await expect(previewSlackExport(zip({ 'T1/channels.json': [], 'T1/org_users.json': [] }))).rejects.toMatchObject({ code: 'invalid_export' });
+    const r = await previewSlackExport(zip({ ...basic([]), 'T1/channels.json': [], 'T1/general/2026-01-01.json': [message()] }));
+    expect(r.records.read).toBe(0);
+    expect(r.warnings.filter(w => w.code === 'unsupported_file')).toHaveLength(2);
+  });
+  it('rejects unusable edit records instead of showing stale original text', async () => {
+    for (const edit of [
+      message({ subtype: 'message_changed', original_ts: message().ts, text: undefined }),
+      message({ subtype: 'message_changed', original_ts: message().ts, text: 'x'.repeat(65537) }),
+      message({ subtype: 'message_changed', ts: '1767225602.000001' }),
+    ]) await expect(previewSlackExport(zip(basic([message(), edit])))).rejects.toMatchObject({ code: 'invalid_export' });
+  });
   it.each([
     { zipBytes: 1 }, { entries: 1 }, { entryBytes: 1 }, { expandedBytes: 1 }, { records: 1 }, { warnings: 1 },
   ])('enforces bounded resources: %j', async limits => {

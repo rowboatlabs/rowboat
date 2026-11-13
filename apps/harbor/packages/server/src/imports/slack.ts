@@ -114,11 +114,18 @@ export async function previewSlackExport(bytes: Buffer, overrides: Partial<Slack
     const p = obj(u.profile);
     identities.set(id, { id, name: str(p.display_name) || str(p.real_name) || str(u.real_name) || str(u.name) || id, kind: u.is_bot === true ? 'bot' : 'person', deleted: u.deleted === true });
   }
-  const useIdentity = (id: string, path: string, bot = false) => {
-    if (!identities.has(id)) { identities.set(id, { id, name: id, kind: bot ? 'bot' : 'unknown', deleted: false }); warn('unknown_author', path, `No user record for ${id}.`); }
+  const useIdentity = (id: string, path: string, bot = false, name = '') => {
+    const existing = identities.get(id);
+    if (!existing) {
+      identities.set(id, { id, name: name || id, kind: bot ? 'bot' : 'unknown', deleted: false });
+      if (!bot) warn('unknown_author', path, `No user record for ${id}.`);
+    } else if (bot && existing.kind === 'unknown') {
+      existing.kind = 'bot'; existing.name = name || existing.name;
+    } else if (bot && existing.name === id && name) existing.name = name;
   };
   const consumed = new Set(['channels.json', 'groups.json', userPath]);
   const channelIds = new Set<string>(); const channelNames = new Set<string>();
+  const claimedFolders = new Set<string>();
   for (const metaPath of ['channels.json', 'groups.json']) {
     for (const rawChannel of json(metaPath)) {
       const c = obj(rawChannel); const id = str(c.id); const name = str(c.name);
@@ -130,7 +137,14 @@ export async function previewSlackExport(bytes: Buffer, overrides: Partial<Slack
         preview: { messages: 0, replies: 0, authors: 0 } };
       for (const member of channel.memberIds) useIdentity(member, metaPath);
       const records = new Map<string, { message: SlackMessage; version: string }>();
-      const paths = [...files.keys()].filter(path => path.startsWith(`${name}/`) && /^[^/]+\/\d{4}-\d{2}-\d{2}\.json$/.test(path)).sort();
+      // Slack exports may use channel names or conversation IDs as folder names (2026-11-13).
+      const folders = [...new Set([name, id])];
+      const candidates = folders.map(folder => ({ folder, paths: [...files.keys()].filter(path => path.startsWith(`${folder}/`) && /^[^/]+\/\d{4}-\d{2}-\d{2}\.json$/.test(path)).sort() })).filter(candidate => candidate.paths.length);
+      if (candidates.length > 1) fail('invalid_export', `Ambiguous history folders for channel ${id}.`);
+      const candidate = candidates[0];
+      if (candidate && claimedFolders.has(candidate.folder)) fail('invalid_export', 'A history folder belongs to multiple channels.');
+      if (candidate) claimedFolders.add(candidate.folder);
+      const paths = candidate?.paths ?? [];
       for (const path of paths) {
         consumed.add(path);
         const rows = json(path);
@@ -139,18 +153,22 @@ export async function previewSlackExport(bytes: Buffer, overrides: Partial<Slack
           const outer = obj(rows[index]); const subtype = str(outer.subtype);
           const row = subtype === 'message_changed' && outer.message ? obj(outer.message) : outer;
           const deleted = subtype === 'message_deleted';
-          const ts = deleted ? outer.deleted_ts ?? outer.original_ts : subtype === 'message_changed' ? outer.original_ts ?? row.ts : row.ts;
+          if (subtype === 'message_changed' && !outer.message && !timestamp(outer.original_ts)) fail('invalid_export', `Edit without an original message timestamp in ${path}.`);
+          const ts = deleted ? outer.deleted_ts ?? outer.original_ts ?? obj(outer.previous_message).ts : subtype === 'message_changed' ? outer.original_ts ?? row.ts : row.ts;
           if (outer.type !== 'message' || !timestamp(ts)) { result.records.skipped++; warn('invalid_message', path, 'Missing message type or valid timestamp.', index); continue; }
           const supported = ['', 'bot_message', 'me_message', 'file_share', 'thread_broadcast', 'message_changed', 'message_deleted'];
           if (!supported.includes(subtype)) { result.records.skipped++; warn('unsupported_subtype', path, `Skipped message subtype: ${subtype}.`, index); continue; }
+          if (subtype === 'message_changed' && (typeof row.text !== 'string' || row.text.length > 65_536)) fail('invalid_export', `Unusable edit in ${path}; refusing to restore an older message version.`);
           if (!deleted && typeof row.text !== 'string') { result.records.skipped++; warn('missing_text', path, 'No text fallback; record was skipped.', index); continue; }
           const text = deleted ? '' : str(row.text);
           if (text.length > 65_536) { result.records.skipped++; warn('oversized_message', path, 'Message exceeds Rowboat’s text limit; not truncated.', index); continue; }
-          const authorId = str(row.user) || (str(row.bot_id) ? `bot:${str(row.bot_id)}` : `unknown:${id}:${ts}`);
-          useIdentity(authorId, path, !!row.bot_id);
+          const previousSource = obj(outer.previous_message ?? outer.previous);
+          const authorId = (deleted ? str(previousSource.user) || str(row.user) : str(row.user)) || (str(row.bot_id) ? `bot:${str(row.bot_id)}` : `unknown:${id}:${ts}`);
+          useIdentity(authorId, path, !!row.bot_id || subtype === 'bot_message', str(row.username) || str(obj(row.bot_profile).name));
           let parentId: string | undefined;
-          if (row.thread_ts !== undefined && !timestamp(row.thread_ts)) warn('invalid_parent', path, 'Invalid thread timestamp; treated as a root.', index);
-          else if (timestamp(row.thread_ts) && row.thread_ts !== ts) parentId = row.thread_ts;
+          const threadTs = row.thread_ts ?? (deleted ? previousSource.thread_ts : undefined);
+          if (threadTs !== undefined && !timestamp(threadTs)) warn('invalid_parent', path, 'Invalid thread timestamp; treated as a root.', index);
+          else if (timestamp(threadTs) && threadTs !== ts) parentId = threadTs;
           const reactions: SlackReaction[] = [];
           for (const raw of deleted ? [] : Array.isArray(row.reactions) ? row.reactions : []) {
             const reaction = obj(raw); const users = strings(reaction.users);
@@ -178,15 +196,20 @@ export async function previewSlackExport(bytes: Buffer, overrides: Partial<Slack
               if (!previous.message.parentId && parentId) previous.message.parentId = parentId;
               continue;
             }
-            if (compareTs(version, previous.version) < 0) continue;
-            if (deleted) { message.authorId = previous.message.authorId; message.parentId = previous.message.parentId; }
+            if (!deleted && compareTs(version, previous.version) < 0) continue;
+            if (deleted) { message.authorId = previous.message.authorId; message.parentId ??= previous.message.parentId; }
             warn('duplicate_or_revision', path, 'Multiple records resolve to one message.', index);
           }
           records.set(ts, { message, version });
         }
       }
       channel.messages = [...records.values()].map(r => r.message).sort((a, b) => compareTs(a.timestamp, b.timestamp));
-      for (const message of channel.messages) if (message.parentId && !records.has(message.parentId)) warn('missing_parent', name, `Reply ${message.id} references unavailable parent ${message.parentId}; preserve a placeholder on import.`);
+      for (const message of channel.messages) {
+        if (!message.parentId) continue;
+        const parent = records.get(message.parentId)?.message;
+        if (!parent) warn('missing_parent', name, `Reply ${message.id} references unavailable parent ${message.parentId}; preserve a placeholder on import.`);
+        else if (parent.parentId) fail('invalid_export', `Thread parent ${parent.id} is itself a reply in channel ${id}.`);
+      }
       channel.preview = { messages: channel.messages.length, replies: channel.messages.filter(m => m.parentId).length,
         authors: new Set(channel.messages.map(m => m.authorId)).size,
         ...(channel.messages.length ? { firstTimestamp: channel.messages[0]!.timestamp, lastTimestamp: channel.messages.at(-1)!.timestamp } : {}) };
