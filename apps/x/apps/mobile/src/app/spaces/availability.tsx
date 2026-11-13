@@ -200,7 +200,7 @@ export default function AvailabilityScreen() {
           <Switch
             value={!!schedule}
             disabled={busy}
-            onValueChange={(on) => setSchedule(on ? { timeZone: zone, days: WEEKDAYS, start: '09:00', end: '17:00' } : null)}
+            onValueChange={(on) => { setCustomDays(false); setSchedule(on ? { timeZone: zone, days: WEEKDAYS, start: '09:00', end: '17:00' } : null); }}
           />
         </Row>
         {schedule ? (
