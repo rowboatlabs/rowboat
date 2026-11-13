@@ -1,3 +1,6 @@
+import { Graph, type GraphOptions, type SetSpaceGraphInput } from './core/graph.js';
+import type { JevApi } from './jev.js';
+import type { SpaceGraph } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
@@ -96,6 +99,7 @@ export class HarborService {
   private readonly presence: AgentPresence;
   private readonly humanPresence: HumanPresence;
   private readonly superAgents: SuperAgents;
+  private readonly graph: Graph;
 
   constructor(
     store: Store,
@@ -120,6 +124,7 @@ export class HarborService {
     this.humanPresence = new HumanPresence(this.k, undefined, options.presenceGraceMs);
     this.presence = new AgentPresence(this.k, options.presenceGraceMs);
     this.superAgents = new SuperAgents(this.k, this.hosting, this.spaces, this.feed, this.invocations);
+    this.graph = new Graph(this.k);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
@@ -142,6 +147,24 @@ export class HarborService {
   }
   stopHosting(): Promise<void> {
     return this.hosting.stop();
+  }
+
+  /** The space graph (spec §8 Space graph, 2026-11-12): the Jev it judges with, when the deployment has its key (runtime.ts). */
+  attachGraph(jev: JevApi, options: GraphOptions = {}): void {
+    this.graph.attach(jev, options);
+  }
+  /** The graph worker: keeps every graph space's judgments current. */
+  startGraph(): void {
+    this.graph.start();
+  }
+  stopGraph(): Promise<void> {
+    return this.graph.stop();
+  }
+  setSpaceGraph(ctx: ActorCtx, spaceId: string, input: SetSpaceGraphInput): Promise<Space> {
+    return this.graph.setEnabled(ctx, spaceId, input);
+  }
+  getSpaceGraph(ctx: ActorCtx, spaceId: string, opts: { about?: string; limit?: number } = {}): Promise<SpaceGraph> {
+    return this.graph.read(ctx, spaceId, opts);
   }
 
   /** The server — `address` is set once the listener knows its port (server.ts). */

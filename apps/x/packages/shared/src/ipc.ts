@@ -3905,6 +3905,16 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
+  // The space graph (2026-11-12, harbor spec §8 Space graph): an admin turns
+  // it on or off, any member reads it. `about` narrows the read to one thing.
+  'spaces:setSpaceGraph': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), enabled: z.boolean() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:getSpaceGraph': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), about: z.string().optional(), limit: z.number().optional() }),
+    res: z.custom<SpacesTypes.SpaceGraph>(),
+  },
   // Archive, unarchive and delete a shared space (2026-10-14, harbor #1186
   // and #1189): admin only. A delete's departure reaches every window as
   // the space_removed frame, the same as leaving.

@@ -19,6 +19,7 @@ export type HarborChannel =
   | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
   | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:renameSpace'
   | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
+  | 'spaces:setSpaceGraph' | 'spaces:getSpaceGraph'
   | 'spaces:removeMember' | 'spaces:setMemberRole' | 'spaces:setAgentAccess'
   | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listContacts'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
@@ -79,6 +80,13 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
     'spaces:renameSpace': async (args) => ({
       space: await getClient(args.orgId).renameSpace(args.spaceId, args.name),
     }),
+
+    'spaces:setSpaceGraph': async (args) => ({
+      space: await getClient(args.orgId).setSpaceGraph(args.spaceId, args.enabled),
+    }),
+
+    'spaces:getSpaceGraph': async (args) =>
+      getClient(args.orgId).getSpaceGraph(args.spaceId, { ...(args.about !== undefined ? { about: args.about } : {}), ...(args.limit !== undefined ? { limit: args.limit } : {}) }),
 
     'spaces:archiveSpace': async (args) => ({
       space: await getClient(args.orgId).archiveSpace(args.spaceId),
