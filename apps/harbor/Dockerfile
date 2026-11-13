@@ -17,6 +17,9 @@
 #     sealing platform agents' keys such as Replicas's, Agent37's and Conductor's — without it, such
 #     agents can't be added. Rotate with HARBOR_INTEGRATION_KEY_ID and
 #     HARBOR_INTEGRATION_PREVIOUS_KEYS, a JSON map of old ids to old keys)
+#   HARBOR_JEV_OPENROUTER_KEY (optional; Rowboat's OpenRouter key for Jev —
+#     with it a space's admin can turn on its graph, and that space's
+#     messages are sent to Jev to be judged; without it no graph is offered)
 #   HARBOR_MARITIME_API_KEY (optional; Rowboat's Maritime key — with it the
 #     app offers agents Rowboat runs) HARBOR_MARITIME_LLM_CAP_CENTS (the
 #     trial's monthly cap) HARBOR_MARITIME_IDLE_SECONDS (how long a VM stays awake)

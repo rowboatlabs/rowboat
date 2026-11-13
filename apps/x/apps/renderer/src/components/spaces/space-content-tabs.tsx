@@ -10,12 +10,14 @@ import { cn } from '@/lib/utils'
 // "recent" menus and their decorative ▾ are gone — they opened by surprise and
 // duplicated the full Discussions and Files views one click away.
 
-type Tab = 'messages' | 'discussions' | 'files'
+type Tab = 'messages' | 'discussions' | 'files' | 'graph'
 
-export function SpaceContentTabs({ orgId, spaceId, direct, entries, unreadAssetIds, selection, onSelect }: {
+export function SpaceContentTabs({ orgId, spaceId, direct, graph = false, entries, unreadAssetIds, selection, onSelect }: {
     orgId: string
     spaceId: string
     direct: boolean
+    /** The space's graph is on (2026-11-12): the fourth tab is offered only then. */
+    graph?: boolean
     entries: spaces.SpacesAssetEntry[]
     unreadAssetIds: ReadonlySet<string>
     selection: RailSelection
@@ -26,12 +28,14 @@ export function SpaceContentTabs({ orgId, spaceId, direct, entries, unreadAssetI
     const filesBadge = { unread: entries.filter((entry) => !entry.state && unreadAssetIds.has(entry.id)).length, forYou: 0 }
     const current: Tab = selection.kind === 'discussions' || selection.kind === 'thread' ? 'discussions'
         : ['files', 'file', 'whiteboard', 'attachment'].includes(selection.kind) ? 'files'
+            : selection.kind === 'graph' ? 'graph'
             : 'messages'
 
     const tabs: { id: Tab; label: string; badge: SpaceBadge; go: RailSelection }[] = [
         { id: 'messages', label: 'Messages', badge: streamBadge(orgId, spaceId, direct), go: { kind: 'general' } },
         { id: 'discussions', label: 'Threads', badge: discussionBadge, go: { kind: 'discussions' } },
         { id: 'files', label: 'Files', badge: filesBadge, go: { kind: 'files' } },
+        ...(graph ? [{ id: 'graph' as const, label: 'Graph', badge: { unread: 0, forYou: 0 }, go: { kind: 'graph' as const } }] : []),
     ]
 
     // The highlight is measured from the selected button, so badges that come
@@ -53,7 +57,7 @@ export function SpaceContentTabs({ orgId, spaceId, direct, entries, unreadAssetI
         const observer = new ResizeObserver(measure)
         for (const child of Array.from(list.children)) observer.observe(child)
         return () => { cancelAnimationFrame(frame); observer.disconnect() }
-    }, [current])
+    }, [current, graph])
 
     return <nav ref={listRef} aria-label="Space content" className="spaces-segmented">
         {indicator && <span aria-hidden="true" className={cn('spaces-segmented-indicator', animate && 'is-animated')}
