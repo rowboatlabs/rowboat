@@ -498,12 +498,23 @@ export default function SpaceThreadScreen() {
       <Stack.Screen
         options={{
           headerLeft: homeBack,
-          headerTitle: () => (
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{topic ? 'Discussion' : rootMessage?.session ? 'Session' : 'Thread'}</Text>
-              {spaceName ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>#{spaceName}</Text> : null}
-            </View>
-          ),
+          // A discussion's or session's title leads the header, its kind and space
+          // under it (2026-11-13): a title line above the root message repeated the
+          // root's own text, since a session is usually named after it.
+          headerTitle: () => {
+            const kind = topic ? 'Discussion' : rootMessage?.session ? 'Session' : 'Thread';
+            const named = topic?.title ?? rootMessage?.session?.title;
+            return (
+              <View style={{ alignItems: 'center', maxWidth: 220 }}>
+                <Text numberOfLines={1} style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{named ?? kind}</Text>
+                {named || spaceName ? (
+                  <Text numberOfLines={1} style={{ fontSize: 12, color: colors.tertiaryLabel }}>
+                    {[named ? kind : null, spaceName ? `#${spaceName}` : null].filter(Boolean).join(' · ')}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          },
           // Follow = replies land in Activity + notifications (Slack's bell).
           // The ⋯ beside it is the thread's options (2026-11-13), once the thread has loaded.
           headerRight: () => (
@@ -806,9 +817,9 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
   );
 }
 
-// What this thread is (2026-11-13, the web pane's title line): a discussion's
-// goal and its linked file, a session's title, and whether it is archived or
-// ended. A plain, active thread shows nothing here.
+// What this thread is (2026-11-13, the web pane's title line), minus the
+// title, which the header carries: whether it is archived or ended, and a
+// discussion's linked file. A plain, active thread shows nothing here.
 function ThreadHeading({ topic, root, fileName, onOpenFile }: {
   topic: Topic | null;
   root: Message;
@@ -816,20 +827,16 @@ function ThreadHeading({ topic, root, fileName, onOpenFile }: {
   onOpenFile: (assetId: string) => void;
 }) {
   const colors = useColors();
-  const title = topic?.title ?? root.session?.title;
   const archived = topic ? topic.archived : !!root.archived;
-  if (!title && !archived) return null;
+  if (!archived && !topic?.documentAssetId) return null;
   const state = archived ? (!topic && root.session ? 'Ended' : 'Archived') : null;
   return (
-    <View style={{ paddingHorizontal: 16, paddingBottom: 12, gap: 8 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        {title ? <Text style={{ flex: 1, fontSize: 18, fontWeight: '700', color: colors.label }}>{title}</Text> : <View style={{ flex: 1 }} />}
-        {state ? (
-          <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: colors.secondaryBackground }}>
-            <Text style={{ fontSize: 12, fontWeight: '600', color: colors.secondaryLabel }}>{state}</Text>
-          </View>
-        ) : null}
-      </View>
+    <View style={{ paddingHorizontal: 16, paddingBottom: 12, gap: 8, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' }}>
+      {state ? (
+        <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: colors.secondaryBackground }}>
+          <Text style={{ fontSize: 12, fontWeight: '600', color: colors.secondaryLabel }}>{state}</Text>
+        </View>
+      ) : null}
       {topic?.documentAssetId ? (
         <Pressable
           onPress={() => onOpenFile(topic.documentAssetId!)}
