@@ -38,6 +38,10 @@ import { StreamEvent } from './events.js';
 import { Approval, ApprovalClose, ApprovalDecision, ApprovalId, ApprovalRequest } from './approval.js';
 import { ConnectorCapabilities, Invocation, InvocationId, InvocationOptionValues, InvocationUpdate } from './invocation.js';
 import { SearchKind, SearchResults } from './search.js';
+import { SpaceGraph } from './graph.js';
+
+/** The most threads one graph read returns. */
+export const GRAPH_THREAD_LIMIT_MAX = 2000;
 
 // The render face (spec §9): REST + the live stream in events.ts. Member token
 // auth on every route. Shapes here are v0 — Latitude items (pagination, ETags,
@@ -433,6 +437,38 @@ export const routes = {
     params: z.object({ spaceId: SpaceId }),
     request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     response: z.object({ space: Space }),
+  },
+  /**
+   * Turn the space graph on or off (spec §8 Space graph, 2026-11-12): an
+   * admin act, refused on a DM, and `invalid_request` to turn on where the
+   * server has no Jev key. On: Harbor starts judging the space's threads
+   * with Jev. Off: it stops and the derived rows are deleted. An unchanged
+   * value is a no-op with no event; a change is `space_graph_changed`.
+   */
+  setSpaceGraph: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/graph',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ enabled: z.boolean(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
+   * Read the space graph: any member. Without `about`, the threads that
+   * weigh most (all of them up to `limit`), with their edges and the
+   * entities those name. With `about`, an entity's id or a topic, member or
+   * reference by name: only its threads, strongest edge first. Nothing
+   * matching, or a graph that is off, answers with empty lists and the
+   * status that says why.
+   */
+  getSpaceGraph: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/graph',
+    params: z.object({ spaceId: SpaceId }),
+    query: z.object({
+      about: z.string().min(1).max(400).optional(),
+      limit: z.coerce.number().int().positive().max(GRAPH_THREAD_LIMIT_MAX).optional(),
+    }),
+    response: SpaceGraph,
   },
   /**
    * Delete a shared space (spec §6, 2026-10-14): an admin act, refused on a
