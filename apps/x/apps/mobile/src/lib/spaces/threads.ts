@@ -106,7 +106,7 @@ export function spaceThreadRows(
   if (kind !== 'named' && !archived) {
     for (const root of roots) {
       // A session is a thread from its first message, replies or not.
-      if (root.threadRoot !== undefined || root.deletedAt || (root.replyCount === 0 && !root.session) || archivedRoots.has(root.id) || root.archived) continue;
+      if (root.threadRoot !== undefined || (root.replyCount === 0 && !root.session) || archivedRoots.has(root.id) || root.archived) continue;
       if (kind === 'sessions' && !root.session) continue;
       const row = rows.get(root.id);
       if (row) row.root = root;
