@@ -15,6 +15,7 @@ import { spaces } from '@x/shared';
 
 import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
+import { SpaceHeaderMenu } from '@/components/space-header-menu';
 import { applyPollVote } from '@/components/poll-card';
 import { ApprovalCard } from '@/components/approval-card';
 import { InvocationLines } from '@/components/invocation-lines';
@@ -572,26 +573,17 @@ export default function SpaceChatScreen() {
         options={{
           headerLeft: homeBack,
           title: title ?? 'Space',
-          headerRight: () => (
-            <View style={{ flexDirection: 'row', gap: 18 }}>
-              {direct ? null : (
-                <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/members', params: { org, space, title, me } })}>
-                  <Image source="sf:person.2" style={{ width: 24, height: 20 }} contentFit="contain" tintColor={colors.label} />
-                </Pressable>
-              )}
-              {/* Every thread in this space (2026-11-13, the web's Threads tab). */}
-              <Pressable hitSlop={10} accessibilityLabel="Threads" onPress={() => router.push({ pathname: '/spaces/threads', params: { org, space, title, me } })}>
-                <Image source="sf:bubble.left.and.bubble.right" style={{ width: 24, height: 20 }} contentFit="contain" tintColor={colors.label} />
-              </Pressable>
-              <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/search', params: { org, space, title, me } })}>
-                <Image source="sf:magnifyingglass" style={{ width: 20, height: 20 }} tintColor={colors.label} />
-              </Pressable>
-              <Pressable hitSlop={10} onPress={() => router.push({ pathname: '/spaces/files', params: { org, space, title } })}>
-                <Image source="sf:folder" style={{ width: 20, height: 20 }} tintColor={colors.label} />
-              </Pressable>
-            </View>
-          ),
         }}
+      />
+      {/* Search, then ⋯ with the rest, in every chat so the title stays centred (2026-11-13). */}
+      <SpaceHeaderMenu
+        onSearch={() => router.push({ pathname: '/spaces/search', params: { org, space, title, me } })}
+        items={[
+          ...(direct ? [] : [{ key: 'members', label: 'Members', icon: 'person.2' as const, onPress: () => router.push({ pathname: '/spaces/members', params: { org, space, title, me } }) }]),
+          // Every thread in this space (2026-11-13, the web's Threads tab).
+          { key: 'threads', label: 'Threads', icon: 'bubble.left.and.bubble.right', onPress: () => router.push({ pathname: '/spaces/threads', params: { org, space, title, me } }) },
+          { key: 'files', label: 'Files', icon: 'folder', onPress: () => router.push({ pathname: '/spaces/files', params: { org, space, title } }) },
+        ]}
       />
       <View pointerEvents="box-none" style={{ position: 'absolute', top: headerHeight, left: 0, right: 0, zIndex: 2 }}>
       <StatusBanner
