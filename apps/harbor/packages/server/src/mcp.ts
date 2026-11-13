@@ -180,6 +180,15 @@ async function dispatch(
       const a = args as { spaceId: string; name: string };
       return { space: await service.renameSpace(ctx, a.spaceId, { name: a.name, ...attribution }) };
     }
+    case 'set_space_graph': {
+      const a = args as { spaceId: string; enabled: boolean };
+      return { space: await service.setSpaceGraph(ctx, a.spaceId, { enabled: a.enabled, ...attribution }) };
+    }
+    case 'read_graph': {
+      const a = args as { spaceId: string; about?: string; limit?: number };
+      // An agent reads this into its context: thirty threads unless it asks for more.
+      return service.getSpaceGraph(ctx, a.spaceId, { ...(a.about !== undefined ? { about: a.about } : {}), limit: a.limit ?? 30 });
+    }
     case 'archive_space':
       return { space: await service.archiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
     case 'delete_space':

@@ -54,6 +54,7 @@ export default function SpacesLayout() {
       <Stack.Screen name="search" options={{ title: 'Search', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="settings" options={{ title: 'Settings', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="notifications" options={{ title: 'Notifications', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="availability" options={{ title: 'Status & availability', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="account" options={{ title: 'Account', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="blocked" options={{ title: 'Blocked users', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="join" options={{ title: 'Join a space', headerBackButtonDisplayMode: 'minimal' }} />
@@ -61,6 +62,12 @@ export default function SpacesLayout() {
       <Stack.Screen name="members" options={{ title: 'Members', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="add-people" options={{ title: 'Add people', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="new-space" options={{ title: 'New space', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="agents" options={{ title: 'Agents', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="new-agent" options={{ title: 'New agent', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="connect-agent" options={{ title: 'Connect an agent', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="agent" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="threads" options={{ title: 'Threads', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="my-threads" options={{ title: 'Your threads', headerBackButtonDisplayMode: 'minimal' }} />
     </Stack>
   );
 }

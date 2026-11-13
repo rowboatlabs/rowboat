@@ -291,6 +291,19 @@ export function buildHttpApp(deps: {
     return reply(c, routes.renameSpace.response, { space: await service.renameSpace(actor(c), spaceId, input) });
   });
 
+  app.post(routes.setSpaceGraph.path, async (c) => {
+    const { spaceId } = parseWith(routes.setSpaceGraph.params, c.req.param());
+    const input = await body(c, routes.setSpaceGraph.request);
+    return reply(c, routes.setSpaceGraph.response, { space: await service.setSpaceGraph(actor(c), spaceId, input) });
+  });
+  app.get(routes.getSpaceGraph.path, async (c) => {
+    const { spaceId } = parseWith(routes.getSpaceGraph.params, c.req.param());
+    const q = parseWith(routes.getSpaceGraph.query, {
+      ...(c.req.query('about') !== undefined ? { about: c.req.query('about') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.getSpaceGraph.response, await service.getSpaceGraph(actor(c), spaceId, q));
+  });
   app.post(routes.archiveSpace.path, async (c) => {
     const { spaceId } = parseWith(routes.archiveSpace.params, c.req.param());
     const input = await body(c, routes.archiveSpace.request);

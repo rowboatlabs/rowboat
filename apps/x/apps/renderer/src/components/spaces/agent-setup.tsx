@@ -103,8 +103,9 @@ function Step({ n, title, note, children }: { n: number; title: string; note?: s
         <li className="flex min-w-0 gap-3">
             <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">{n}</span>
             <div className="flex min-w-0 flex-1 flex-col gap-1.5 pb-1">
-                <div className="text-[13px] font-medium text-foreground">{title}</div>
-                {note && <div className="text-xs text-muted-foreground">{note}</div>}
+                {/* The same heading and note sizes as every agent-page section (ScreenHeader, 2026-11-13). */}
+                <div className="text-sm font-semibold text-foreground">{title}</div>
+                {note && <div className="text-xs leading-snug text-muted-foreground">{note}</div>}
                 {children}
             </div>
         </li>

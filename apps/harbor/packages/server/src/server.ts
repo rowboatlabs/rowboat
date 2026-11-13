@@ -63,6 +63,8 @@ export interface HarborOptions {
   internal?: { key?: string; log?: boolean };
   /** Managed hosting: a stand-in provider and tick for tests (runtime.ts). */
   hosting?: RuntimeInput['hosting'];
+  /** The space graph: a stand-in Jev and faster clocks for tests (runtime.ts). */
+  graph?: RuntimeInput['graph'];
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -103,6 +105,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     ...(options.webOrigins ? { webOrigins: options.webOrigins } : {}),
     ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
     ...(options.hosting ? { hosting: options.hosting } : {}),
+    ...(options.graph ? { graph: options.graph } : {}),
     ...(options.agentPresenceGraceMs !== undefined ? { agentPresenceGraceMs: options.agentPresenceGraceMs } : {}),
   });
   await seed(runtime.service, store, options);
