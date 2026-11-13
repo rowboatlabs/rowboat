@@ -46,6 +46,8 @@ A separate global app rail, huddles, workspace theming controls, a cross-space l
 
 Space settings (2026-11-12) opens from a space’s sidebar options/right-click menu or its header menu, keeping the sidebar visible. General, People, Agents, and Space actions organize name/link, live membership and role management, owner-controlled agent access, and the existing archive/delete confirmations. Back to space returns to its conversation.
 
+The Graph tab (2026-11-12) is a fourth segment after Files, present only in a space whose admin has turned its knowledge graph on. It is three columns under the header: options on the left, the picture, and details on the right. Squares are threads and circles are what they touch: people, agents, topics, pull requests. Clicking a node focuses it: its threads stay lit, what else those threads touch stays half lit, and the rest fades; a bar at the top left names the focus, steps back and shows all, and Esc clears it. Hovering a node or a line says what it is and what it weighs. The details column lists a node's threads with the part played, how many messages, and the weight, and a thread's panel carries Jev's judgments as meters, who opened it, and Open thread. The six node colours are the one place Spaces uses categorical colour; they are scoped to the graph (`.space-graph` in `spaces.css`) and used nowhere else. Labels are drawn heaviest first and one that would cover another is skipped. Options are native checkboxes and range inputs, since the product has no slider component.
+
 ## Component mapping
 
 | Reference pattern | Existing Spaces fit | Implemented adaptation |

@@ -525,6 +525,12 @@ export const Space = z.object({
    * payloads and every existing space are live. A DM is never archived.
    */
   archived: z.boolean().default(false),
+  /**
+   * The space graph is on (spec §8 Space graph, 2026-11-12): an admin's
+   * switch, off until set, never on for a DM. While on, Harbor sends the
+   * space's messages to Jev to be judged. Old payloads read as off.
+   */
+  graph: z.boolean().default(false),
 });
 export type Space = z.infer<typeof Space>;
 

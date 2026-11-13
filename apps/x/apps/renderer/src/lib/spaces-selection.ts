@@ -16,6 +16,8 @@ export type RailSelection =
     | { kind: 'settings' }
     | { kind: 'discussions'; rootMessageId?: string }
     | { kind: 'files' }
+    // The space graph (2026-11-12): what the space's threads are about.
+    | { kind: 'graph' }
     | { kind: 'thread'; rootMessageId: string }
     /** `fromThreadRootId` = opened from a thread (an artifact link) — the file view shows a crumb back to it. */
     | { kind: 'file'; assetId: string; fromThreadRootId?: string }
@@ -29,7 +31,7 @@ export function railKey(sel: RailSelection | undefined): string {
     if (!sel || sel.kind === 'general') return 'general'
     if (sel.kind === 'discussions') return sel.rootMessageId ? `discussions:${sel.rootMessageId}` : 'discussions'
     if (sel.kind === 'settings') return sel.kind
-    if (sel.kind === 'files') return sel.kind
+    if (sel.kind === 'files' || sel.kind === 'graph') return sel.kind
     if (sel.kind === 'thread') return `thread:${sel.rootMessageId}`
     if (sel.kind === 'attachment') return `attachment:${sel.src}`
     if (sel.kind === 'whiteboard') return `whiteboard:${sel.assetId}`
@@ -54,6 +56,8 @@ export function readRailSelection(raw: unknown): RailSelection {
             return { kind: 'settings' }
         case 'files':
             return { kind: 'files' }
+        case 'graph':
+            return { kind: 'graph' }
         case 'general':
             return { kind: 'general' }
         case 'thread':

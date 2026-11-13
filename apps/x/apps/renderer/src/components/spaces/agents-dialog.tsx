@@ -70,22 +70,26 @@ function billingNote(kind: string): string {
 }
 function Header({ title, description, icon, onBack, large = false }: { title: string; description: string; icon?: ReactNode; onBack?: () => void; large?: boolean }) {
     return (
-        <DialogHeader className={cn('gap-1 px-5 pt-5 text-left', large ? 'pb-1' : 'border-b border-border pb-4')}>
-            <div className="flex min-w-0 items-center gap-2 pr-8">
+        <DialogHeader className={cn('px-5 pt-5 text-left', large ? 'pb-1' : 'border-b border-border pb-4')}>
+            {/* Back, then the icon with the title and its line stacked beside it (2026-11-13):
+                the line sat under the back arrow, not under the name. */}
+            <div className="flex min-w-0 items-center gap-2.5 pr-8">
                 {onBack && (
                     <button
                         type="button"
                         aria-label="Back"
                         onClick={onBack}
-                        className="-ml-1 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="-ml-1.5 shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
                         <ArrowLeft className="size-4" />
                     </button>
                 )}
                 {icon}
-                <DialogTitle className={cn('truncate', large ? 'text-lg font-semibold tracking-[-0.01em]' : 'text-sm')}>{title}</DialogTitle>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                    <DialogTitle className={cn('truncate', large ? 'text-lg font-semibold tracking-[-0.01em]' : 'text-sm font-semibold')}>{title}</DialogTitle>
+                    <DialogDescription className={cn('truncate', large ? 'text-[13px]' : 'text-xs')}>{description}</DialogDescription>
+                </div>
             </div>
-            <DialogDescription className={large ? 'text-[13px]' : 'text-xs'}>{description}</DialogDescription>
         </DialogHeader>
     )
 }
@@ -981,7 +985,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             <Header
                                 title={agent.displayName}
                                 description={`${agentLabel(agent.agentKind, agent.agentConnection)} · ${owner}`}
-                                icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-5" />}
+                                icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-9 rounded-lg" />}
                                 onBack={back}
                             />
                             <Body>
