@@ -29,6 +29,7 @@ export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   doc: 'draft',
   'doc.on.doc': 'content_copy',
   'doc.text': 'description',
+  'ellipsis.circle': 'more_horiz',
   envelope: 'mail',
   'exclamationmark.circle': 'error',
   'exclamationmark.triangle': 'warning',
