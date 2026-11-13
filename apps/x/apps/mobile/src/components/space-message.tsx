@@ -17,6 +17,7 @@ import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
 import { memberLabel } from '@/lib/spaces/profiles';
 import { blobLinkName, isVideoName } from '@/lib/spaces/open-blob';
+import { PIN_EMOJI, pinnedByMe } from '@/lib/spaces/pins';
 import { isPending } from '@/lib/spaces/send';
 import { MessageVideo } from '@/components/blob-video';
 
@@ -357,6 +358,8 @@ export const MessageRow = memo(function MessageRow({
 
   // Long-press a reaction chip → who reacted (opens on that emoji's tab).
   const [reactorsFor, setReactorsFor] = useState<string | null>(null);
+  // The 📌 group is the pin's storage, not a reaction to show (lib/spaces/pins.ts).
+  const reactions = message.reactions.filter((g) => g.emoji !== PIN_EMOJI);
 
   const imageRule = useMemo(
     () => ({
@@ -463,9 +466,9 @@ export const MessageRow = memo(function MessageRow({
             <MessageLinkPreviews body={message.body} />
           </>
         )}
-        {!pending && (message.reactions.length > 0 || alwaysShowReactionBar) ? (
+        {!pending && (reactions.length > 0 || alwaysShowReactionBar) ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-            {message.reactions.map((g) => {
+            {reactions.map((g) => {
               const mine = g.memberIds.includes(me);
               return (
                 <Pressable
@@ -550,13 +553,14 @@ function ReactorsSheet({
   const dark = colors.isDark;
   const [tab, setTab] = useState<string>(initial);
   const nameOf = (id: string) => (id === me ? 'You' : memberNames?.get(id) ?? 'Unknown member');
-  const total = message.reactions.reduce((n, g) => n + g.memberIds.length, 0);
+  const reactions = message.reactions.filter((g) => g.emoji !== PIN_EMOJI);
+  const total = reactions.reduce((n, g) => n + g.memberIds.length, 0);
   const rows =
     tab === 'all'
-      ? message.reactions.flatMap((g) => g.memberIds.map((id) => ({ id, emoji: g.emoji })))
-      : (message.reactions.find((g) => g.emoji === tab)?.memberIds ?? []).map((id) => ({ id, emoji: tab }));
+      ? reactions.flatMap((g) => g.memberIds.map((id) => ({ id, emoji: g.emoji })))
+      : (reactions.find((g) => g.emoji === tab)?.memberIds ?? []).map((id) => ({ id, emoji: tab }));
 
-  const tabs = [{ key: 'all', label: `All ${total}` }, ...message.reactions.map((g) => ({ key: g.emoji, label: `${g.emoji} ${g.memberIds.length}` }))];
+  const tabs = [{ key: 'all', label: `All ${total}` }, ...reactions.map((g) => ({ key: g.emoji, label: `${g.emoji} ${g.memberIds.length}` }))];
 
   return (
     <BottomSheet visible={true} onClose={onClose} maxHeight={0.6}
@@ -612,6 +616,9 @@ export function MessageActionSheet({
   onToggleReaction,
   onReply,
   onQuote,
+  onForward,
+  onToggleSave,
+  isSaved,
   onEdit,
   onDelete,
   onReport,
@@ -626,6 +633,11 @@ export function MessageActionSheet({
   /** Omit on the thread screen — the composer is already the reply box. */
   onReply?: (message: Message) => void;
   onQuote?: (message: Message) => void;
+  /** Opens the forward screen (2026-11-13). */
+  onForward?: (message: Message) => void;
+  /** Saved for later, this phone only (lib/spaces/saved.ts). */
+  onToggleSave?: (message: Message) => void;
+  isSaved?: (message: Message) => boolean;
   /** Author-only (the content plane is role-flat). */
   onEdit?: (message: Message) => void;
   onDelete?: (message: Message) => void;
@@ -649,6 +661,14 @@ export function MessageActionSheet({
   if (onQuote) actions.push({ key: 'quote', icon: 'sf:quote.opening', label: 'Quote reply', run: () => onQuote(message) });
   actions.push({ key: 'copy', icon: 'sf:doc.on.doc', label: 'Copy message', run: () => void Clipboard.setStringAsync(message.body) });
   if (linkFor) actions.push({ key: 'link', icon: 'sf:link', label: 'Copy link', run: () => void Clipboard.setStringAsync(linkFor(message)) });
+  if (onForward) actions.push({ key: 'forward', icon: 'sf:arrowshape.turn.up.right', label: 'Forward message', run: () => onForward(message) });
+  // Pin = the 📌 reaction (lib/spaces/pins.ts); unpin takes back only yours.
+  const pinned = pinnedByMe(message, me);
+  actions.push({ key: 'pin', icon: pinned ? 'sf:pin.slash' : 'sf:pin', label: pinned ? 'Unpin message' : 'Pin message', run: () => onToggleReaction(message, PIN_EMOJI) });
+  if (onToggleSave) {
+    const saved = isSaved?.(message) ?? false;
+    actions.push({ key: 'save', icon: saved ? 'sf:bookmark.fill' : 'sf:bookmark', label: saved ? 'Remove from saved' : 'Save for later', run: () => onToggleSave(message) });
+  }
   if (isAuthor && onEdit && !message.poll) actions.push({ key: 'edit', icon: 'sf:pencil', label: 'Edit message', run: () => onEdit(message) });
   if (isAuthor && onDelete) actions.push({ key: 'delete', icon: 'sf:trash', label: 'Delete message', destructive: true, run: () => onDelete(message) });
   if (!isAuthor && onReport) actions.push({ key: 'report', icon: 'sf:flag', label: 'Report message', destructive: true, run: () => onReport(message) });

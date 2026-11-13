@@ -85,7 +85,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   onDraftChange?: (body: string) => void;
   /** The chat this box posts to: an unsent message is saved under it until the server confirms (lib/spaces/unsent.ts). */
   draftKey?: string;
-}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit, onDraftChange, draftKey }, ref) {
+  /** Opens poll creation from the "+" menu (absent = no Poll item). */
+  onCreatePoll?: () => void;
+}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit, onDraftChange, draftKey, onCreatePoll }, ref) {
   const colors = useColors();
   const inputRef = useRef<TextInput>(null);
   const [text, setText] = useState('');
@@ -100,19 +102,30 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean; file?: string }[]>([]);
 
   // "+" → photos and videos, any file, or an image on the clipboard
-  // (2026-10-07: a text field can't take an image paste, so the menu does).
+  // (2026-10-07: a text field can't take an image paste, so the menu does),
+  // and a poll (2026-11-13, the desktop composer's poll button).
   const openAttachMenu = async () => {
     if (!onPickMedia || uploading) return;
     if (process.env.EXPO_OS !== 'ios') {
-      void pickMedia();
+      if (!onCreatePoll) {
+        void pickMedia();
+        return;
+      }
+      Alert.alert('Add', undefined, [
+        { text: 'Photo or video', onPress: () => void pickMedia() },
+        { text: 'Poll', onPress: onCreatePoll },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
       return;
     }
     const clip = await Clipboard.hasImageAsync().catch(() => false);
-    const options = ['Photo or video', 'File', ...(clip ? ['Paste image'] : []), 'Cancel'];
+    const options = ['Photo or video', 'File', ...(clip ? ['Paste image'] : []), ...(onCreatePoll ? ['Poll'] : []), 'Cancel'];
     ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: options.length - 1 }, (i) => {
-      if (i === 0) void pickMedia();
-      else if (i === 1) void pickFile();
-      else if (clip && i === 2) void pasteImage();
+      const picked = options[i];
+      if (picked === 'Photo or video') void pickMedia();
+      else if (picked === 'File') void pickFile();
+      else if (picked === 'Paste image') void pasteImage();
+      else if (picked === 'Poll') onCreatePoll?.();
     });
   };
 

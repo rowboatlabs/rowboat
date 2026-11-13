@@ -27,6 +27,7 @@ import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
 import { foldLive, lastConfirmedOffset, pendingMessage, postMessageReliably, settlePending, withoutPending } from '@/lib/spaces/send';
+import { toggleSaved, useSaved } from '@/lib/spaces/saved';
 import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
 
 /** Rows whose link cards must be in before a channel is revealed, and how long we'll wait. */
@@ -530,6 +531,10 @@ export default function SpaceChatScreen() {
     [client, space, replaceMessage],
   );
   const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
+  // Forward, polls, saved (2026-11-13): each is its own screen.
+  const saved = useSaved(org, space);
+  const savedIds = useMemo(() => new Set(saved.map((s) => s.messageId)), [saved]);
+  const forward = useCallback((message: Message) => router.push({ pathname: '/spaces/forward', params: { org, space, message: message.id, me } }), [org, space, me]);
 
   // A tapped attachment: the server's videos play in the app; other files
   // download with the bearer and open in the share sheet (Quick Look, Save to
@@ -592,6 +597,7 @@ export default function SpaceChatScreen() {
           ...(direct ? [] : [{ key: 'members', label: 'Members', icon: 'person.2' as const, onPress: () => router.push({ pathname: '/spaces/members', params: { org, space, title, me } }) }]),
           // Every thread in this space (2026-11-13, the web's Threads tab).
           { key: 'threads', label: 'Threads', icon: 'bubble.left.and.bubble.right', onPress: () => router.push({ pathname: '/spaces/threads', params: { org, space, title, me } }) },
+          { key: 'saved', label: 'Pinned & saved', icon: 'bookmark', onPress: () => router.push({ pathname: '/spaces/saved', params: { org, space, title, me } }) },
           { key: 'files', label: 'Files', icon: 'folder', onPress: () => router.push({ pathname: '/spaces/files', params: { org, space, title } }) },
         ]}
       />
@@ -729,6 +735,7 @@ export default function SpaceChatScreen() {
           onPickMedia={uploadMedia}
           onEdit={saveEdit}
           draftKey={`${org}:${space}`}
+          onCreatePoll={() => router.push({ pathname: '/spaces/new-poll', params: { org, space, me } })}
         />
         )}
       </View>
@@ -741,6 +748,9 @@ export default function SpaceChatScreen() {
         onToggleReaction={toggleReaction}
         onReply={openThread}
         onQuote={quote}
+        onForward={forward}
+        onToggleSave={(m) => void toggleSaved(org, space, m)}
+        isSaved={(m) => savedIds.has(m.id)}
         onEdit={beginEdit}
         onDelete={confirmDelete}
         onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}

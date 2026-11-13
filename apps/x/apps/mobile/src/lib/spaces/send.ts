@@ -1,4 +1,5 @@
 import type { Message } from '@rowboat/spaces-protocol';
+import type { spaces } from '@x/shared';
 
 import type { SpacesClient } from '@/lib/spaces/client';
 import { isNetworkError } from '@/lib/spaces/errors';
@@ -18,7 +19,8 @@ type Posted = Awaited<ReturnType<SpacesClient['postMessage']>>;
 export async function postMessageReliably(
   client: SpacesClient,
   spaceId: string,
-  input: { body: string; threadRoot?: string; peopleOnly?: boolean },
+  // A poll rides the same post (2026-11-13); its body is the markdown fallback, so the landed check still matches on it.
+  input: { body: string; threadRoot?: string; peopleOnly?: boolean; poll?: spaces.SpacesNewPollInput },
   me: string,
 ): Promise<Posted> {
   const post = () => client.postMessage(spaceId, { ...input, actingMode: 'direct' });
