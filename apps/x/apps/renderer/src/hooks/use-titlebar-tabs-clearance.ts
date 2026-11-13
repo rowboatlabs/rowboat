@@ -22,12 +22,13 @@ export function useTitlebarTabsClearance(ref: RefObject<HTMLElement | null>) {
         }
         update()
         // The title moves when a sidebar opens or the window resizes; its parent's size tracks both.
-        const ro = new ResizeObserver(update)
-        if (el.parentElement) ro.observe(el.parentElement)
-        ro.observe(document.documentElement)
+        // Guarded: jsdom (the test environment) has no ResizeObserver.
+        const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+        if (el.parentElement) ro?.observe(el.parentElement)
+        ro?.observe(document.documentElement)
         window.addEventListener('resize', update)
         return () => {
-            ro.disconnect()
+            ro?.disconnect()
             window.removeEventListener('resize', update)
         }
     })
