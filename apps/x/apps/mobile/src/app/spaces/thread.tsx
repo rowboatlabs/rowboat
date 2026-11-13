@@ -26,6 +26,8 @@ import { StatusBanner } from '@/components/status-banner';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
 import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
 import { postMessageReliably } from '@/lib/spaces/send';
+import { PIN_EMOJI } from '@/lib/spaces/pins';
+import { toggleSaved, useSaved } from '@/lib/spaces/saved';
 import { loadRoster, loadThread, peekRoster, peekThread, peekValue, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
 import { isDeparted, answersOwnerOnly, memberLabel, useProfiles } from '@/lib/spaces/profiles';
@@ -355,6 +357,10 @@ export default function SpaceThreadScreen() {
     [client, space, patchBoth],
   );
   const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
+  // Forward, polls, saved (2026-11-13): each is its own screen.
+  const saved = useSaved(org, space);
+  const savedIds = useMemo(() => new Set(saved.map((s) => s.messageId)), [saved]);
+  const forward = useCallback((message: Message) => router.push({ pathname: '/spaces/forward', params: { org, space, message: message.id, me } }), [org, space, me]);
 
   // "+" media: upload the bytes to the space's blob store and hand the
   // composer the canonical wire link (space-blob-image.tsx renders it).
@@ -572,6 +578,7 @@ export default function SpaceThreadScreen() {
           onEdit={saveEdit}
           onDraftChange={(draft) => setDraftMentions(spaces.mentionsAnyone(draft))}
           draftKey={`${org}:${space}:${root}`}
+          onCreatePoll={() => router.push({ pathname: '/spaces/new-poll', params: { org, space, root, me } })}
         />
       </View>
 
@@ -582,6 +589,9 @@ export default function SpaceThreadScreen() {
         onClose={() => setActionMessage(null)}
         onToggleReaction={toggleReaction}
         onQuote={quote}
+        onForward={forward}
+        onToggleSave={(m) => void toggleSaved(org, space, m)}
+        isSaved={(m) => savedIds.has(m.id)}
         onEdit={beginEdit}
         onDelete={confirmDelete}
         onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
@@ -674,7 +684,8 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
         </>
       )}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
-        {message.reactions.map((g) => {
+        {/* The 📌 group is the pin's storage, not a reaction to show (lib/spaces/pins.ts). */}
+        {message.reactions.filter((g) => g.emoji !== PIN_EMOJI).map((g) => {
           const mine = g.memberIds.includes(me);
           return (
             <Pressable

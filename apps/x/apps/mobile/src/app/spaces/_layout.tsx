@@ -61,6 +61,9 @@ export default function SpacesLayout() {
       <Stack.Screen name="members" options={{ title: 'Members', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="add-people" options={{ title: 'Add people', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="new-space" options={{ title: 'New space', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="new-poll" options={{ title: 'New poll', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="forward" options={{ title: 'Forward', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="saved" options={{ title: 'Pinned and saved', headerBackButtonDisplayMode: 'minimal' }} />
     </Stack>
   );
 }
