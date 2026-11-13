@@ -50,6 +50,8 @@ export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   'laptopcomputer.and.iphone': 'devices',
   'key.fill': 'key',
   'line.3.horizontal': 'menu',
+  'line.3.horizontal.decrease.circle': 'filter_list',
+  'line.3.horizontal.decrease.circle.fill': 'filter_list',
   link: 'link',
   lock: 'lock',
   magnifyingglass: 'search',
@@ -85,4 +87,5 @@ export const MATERIAL_FOR_SF: Record<string, AndroidSymbol> = {
   trash: 'delete',
   'wifi.slash': 'wifi_off',
   xmark: 'close',
+  'xmark.circle.fill': 'cancel',
 };

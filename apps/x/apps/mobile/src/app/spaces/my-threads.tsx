@@ -4,7 +4,7 @@ import { ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
 import type { Member, ThreadListing } from '@rowboat/spaces-protocol';
 import { spaces } from '@x/shared';
 
-import { ThreadFilterBar, ThreadRows, ThreadsEmpty } from '@/components/thread-list';
+import { ThreadFilters, ThreadRows, ThreadsEmpty, clearedFilters, filterSummary, isFiltered } from '@/components/thread-list';
 import { ThreadOptionsSheet } from '@/components/thread-options';
 import { StatusBanner } from '@/components/status-banner';
 import { loadValue, peekValue, seedThreadRoot } from '@/lib/spaces/cache';
@@ -25,8 +25,9 @@ import { useColors } from '@/theme/colors';
 // Your threads across the server (2026-11-13, the web's /threads page,
 // my-threads-view.tsx): every thread you started or follow, in every space,
 // newest activity first, each with where it stands for you (Harbor's
-// status). The space Threads screen's filters plus a Spaces filter; the
-// archived list is fetched on open so its count rides the Archived chip.
+// status). The space Threads screen's filters plus a Spaces filter in the
+// same menu; the archived list is fetched on open so its count rides the
+// Archived segment.
 // Opened from the More tab.
 export default function MyThreadsScreen() {
   const colors = useColors();
@@ -122,6 +123,8 @@ export default function MyThreadsScreen() {
   const archivedCount = (ended ?? []).filter((t) => myThreadMatches(t, filters.kind, me)).length;
   const spaceOptions = [...new Map([...ofKind, ...all.filter((t) => filters.spaces.includes(t.spaceId))].map((t) => [t.spaceId, { id: t.spaceId, name: whereOf(t) }])).values()];
   const people = [...new Set(ofKind.flatMap((t) => participantsOf(t.root)))];
+  const summary = filterSummary(filters, nameOf, (id) => spaceOptions.find((s) => s.id === id)?.name ?? 'Space');
+  const clearAction = { label: 'Clear filters', onPress: () => setFilters(clearedFilters(filters)) };
 
   const items: ThreadItem[] = rows.map((t) => ({
     spaceId: t.spaceId,
@@ -162,26 +165,23 @@ export default function MyThreadsScreen() {
       }
     >
       <Stack.Screen options={{ title: 'Your threads' }} />
-      <ThreadFilterBar filters={filters} onChange={setFilters} archivedCount={archivedCount} people={people} nameOf={nameOf} spaces={spaceOptions} />
+      <ThreadFilters filters={filters} onChange={setFilters} archivedCount={archivedCount} people={people} nameOf={nameOf} spaces={spaceOptions} />
       <StatusBanner error={error} offlineText="You're offline. Your threads will load when you're back online." onRetry={() => void load()} />
       {!loaded && !error ? <ActivityIndicator style={{ marginTop: 32 }} /> : null}
       <ThreadRows items={items} nameOf={nameOf} onOpen={open} onLongPress={setOptions} />
       {loaded && rows.length === 0 ? (
-        filters.archived ? (
+        filters.archived && isFiltered(filters) ? (
+          <ThreadsEmpty icon="sf:archivebox" title="No archived threads match" detail={`Nothing archived for ${summary}.`} action={clearAction} />
+        ) : filters.archived ? (
           <ThreadsEmpty icon="sf:archivebox" title="Nothing archived" detail="Threads you archive and sessions you end stay readable here. A new reply brings one back." />
         ) : filters.people.length || filters.spaces.length ? (
-          <ThreadsEmpty
-            icon="sf:person.2"
-            title="No threads match"
-            detail="Try fewer people or spaces."
-            action={{ label: 'Show all', onPress: () => setFilters({ ...filters, people: [], spaces: [] }) }}
-          />
+          <ThreadsEmpty icon="sf:person.2" title="No threads match" detail={`Nothing for ${summary}.`} action={clearAction} />
         ) : filters.kind === 'sessions' ? (
-          <ThreadsEmpty icon="sf:timer" title="No sessions" detail="Make a thread a session from its ⋯ menu. End it there when the work is done." />
+          <ThreadsEmpty icon="sf:timer" title="No sessions" detail="Make a thread a session from its ⋯ menu. End it there when the work is done." action={clearAction} />
         ) : filters.kind === 'named' ? (
-          <ThreadsEmpty icon="sf:bubble.left.and.bubble.right" title="No named threads" detail="Discussions you started or follow show up here." />
+          <ThreadsEmpty icon="sf:bubble.left.and.bubble.right" title="No named threads" detail="Discussions you started or follow show up here." action={clearAction} />
         ) : filters.kind === 'mine' ? (
-          <ThreadsEmpty icon="sf:bubble.left" title="No threads started by you" detail="Threads whose first message you posted show up here." />
+          <ThreadsEmpty icon="sf:bubble.left" title="No threads started by you" detail="Threads whose first message you posted show up here." action={clearAction} />
         ) : (
           <ThreadsEmpty icon="sf:bubble.left" title="No threads yet" detail="Threads you start or reply to, in any space, show up here." />
         )
