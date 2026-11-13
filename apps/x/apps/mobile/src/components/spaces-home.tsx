@@ -516,6 +516,45 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
   // People and your agents in their own sections (2026-11-09, as the desktop's sidebar has them).
   const shownPeople = shownMembers.filter((m) => m.kind !== 'agent');
   const shownAgents = shownMembers.filter((m) => m.kind === 'agent');
+  // Home's Agents section (2026-11-13, the desktop sidebar's order: Agents, Spaces,
+  // People). The desktop lists the agents you have a DM with; the phone has no
+  // per-DM activity time, so unread first, then those DMs, then by name, capped
+  // at five so Home stays short. "View all agents" reaches the rest.
+  const HOME_AGENTS = 5;
+  const agentRank = (m: Member) => {
+    const dm = dmWith(m.id);
+    return dm && badgeFor(dm.id, true).unread > 0 ? 0 : dm ? 1 : 2;
+  };
+  const homeAgents = [...shownAgents].sort((a, b) => agentRank(a) - agentRank(b) || a.displayName.localeCompare(b.displayName)).slice(0, HOME_AGENTS);
+  const agentsLink = { org: org.address, me: org.memberId };
+
+  const memberRow = (m: Member, i: number) => {
+    const dm = dmWith(m.id);
+    const badge = dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 };
+    const self = m.id === org.memberId;
+    return (
+      <CardRow key={m.id} first={i === 0} disabled={openingDm !== null} dimmed={openingDm !== null && openingDm !== m.id} onPress={() => void openDm(m)}>
+        <Avatar id={m.id} name={m.displayName} size={28} url={m.avatarUrl} />
+        <Text numberOfLines={1} style={{ flex: 1, ...type.body, fontWeight: badge.unread > 0 ? '600' : '400', color: colors.label }}>
+          {m.displayName}
+          {self ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (you)</Text> : null}
+          {m.deactivatedAt ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (deactivated)</Text> : null}
+        </Text>
+        {openingDm === m.id ? <ActivityIndicator size="small" /> : badge.unread > 0 ? <UnreadBadge badge={badge} /> : null}
+      </CardRow>
+    );
+  };
+
+  // People, then your agents: every member is one tap from a DM (a DM is a
+  // `direct` space — openDirect is get-or-create, idempotent). Your own row
+  // opens the self-DM: notes to self, on the server, for every device and your agent.
+  const memberSections = (sections: { key: 'dms' | 'agents'; text: string; list: Member[]; closed: boolean }[]) =>
+    sections.map(({ key, text, list, closed }) => list.length > 0 ? (
+      <View key={key} style={{ gap: 8 }}>
+        <SectionLabel text={text} collapsed={closed} onToggle={canCollapse ? () => toggle(key) : undefined} waiting={waitingIn(list)} />
+        {closed ? null : <Card>{list.map(memberRow)}</Card>}
+      </View>
+    ) : null);
 
   return (
     <View style={{ gap: 24 }}>
@@ -541,6 +580,29 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
 
       <StatusBanner error={error} />
       {spaces === null && !error ? <ActivityIndicator style={{ alignSelf: 'center', marginVertical: 16 }} /> : null}
+
+      {/* Agents lead on Home (2026-11-13, as the desktop sidebar): your agents,
+          then Add agent and View all agents. Shown even with none yet, so Add
+          agent is always one tap away. */}
+      {mode === 'home' && spaces !== null ? (
+        <View style={{ gap: 8 }}>
+          <SectionLabel text="Agents" collapsed={agentsClosed} onToggle={() => toggle('agents')} waiting={waitingIn(shownAgents)} />
+          {agentsClosed ? null : (
+          <Card>
+            {homeAgents.map(memberRow)}
+            <CardRow first={homeAgents.length === 0} onPress={() => router.push({ pathname: '/spaces/new-agent', params: agentsLink })}>
+              <Glyph icon="sf:plus" />
+              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>Add agent</Text>
+            </CardRow>
+            <CardRow onPress={() => router.push({ pathname: '/spaces/agents', params: agentsLink })}>
+              <Glyph icon="sf:cpu" />
+              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>View all agents</Text>
+              <Chevron />
+            </CardRow>
+          </Card>
+          )}
+        </View>
+      ) : null}
 
       {/* Spaces */}
       {shownSpaces !== null && (mode !== 'search' || shownSpaces.length > 0) ? (
@@ -577,38 +639,11 @@ function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'h
         </View>
       ) : null}
 
-      {/* People, then your agents: every member is one tap from a DM (a DM is a
-          `direct` space — openDirect is get-or-create, idempotent). Your own
-          row opens the self-DM: notes to self, on the server, for every device
-          and your agent. */}
-      {[
-        { key: 'dms' as const, text: 'People', list: shownPeople, closed: dmsClosed },
-        { key: 'agents' as const, text: 'Agents', list: shownAgents, closed: agentsClosed },
-      ].map(({ key, text, list, closed }) => list.length > 0 ? (
-        <View key={key} style={{ gap: 8 }}>
-          <SectionLabel text={text} collapsed={closed} onToggle={canCollapse ? () => toggle(key) : undefined} waiting={waitingIn(list)} />
-          {closed ? null : (
-          <Card>
-            {list.map((m, i) => {
-              const dm = dmWith(m.id);
-              const badge = dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 };
-              const self = m.id === org.memberId;
-              return (
-                <CardRow key={m.id} first={i === 0} disabled={openingDm !== null} dimmed={openingDm !== null && openingDm !== m.id} onPress={() => void openDm(m)}>
-                  <Avatar id={m.id} name={m.displayName} size={28} url={m.avatarUrl} />
-                  <Text numberOfLines={1} style={{ flex: 1, ...type.body, fontWeight: badge.unread > 0 ? '600' : '400', color: colors.label }}>
-                    {m.displayName}
-                    {self ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (you)</Text> : null}
-                    {m.deactivatedAt ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (deactivated)</Text> : null}
-                  </Text>
-                  {openingDm === m.id ? <ActivityIndicator size="small" /> : badge.unread > 0 ? <UnreadBadge badge={badge} /> : null}
-                </CardRow>
-              );
-            })}
-          </Card>
-          )}
-        </View>
-      ) : null)}
+      {/* On Home the agents sit above, in their own section; elsewhere they follow People. */}
+      {memberSections([
+        { key: 'dms', text: 'People', list: shownPeople, closed: dmsClosed },
+        ...(mode === 'home' ? [] : [{ key: 'agents' as const, text: 'Agents', list: shownAgents, closed: agentsClosed }]),
+      ])}
       {mode === 'search' && q ? (
         <>
           {searchError ? <StatusBanner error={searchError} /> : null}
