@@ -309,6 +309,8 @@ export const MessageRow = memo(function MessageRow({
   onEndPoll,
   onOpenAsset,
   onOpenBlob,
+  approvalCard,
+  invocationLines,
 }: {
   message: Message;
   member?: Member;
@@ -335,6 +337,10 @@ export const MessageRow = memo(function MessageRow({
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
   /** A tapped attachment (https://<org>/s/<spaceId>/b/<hash>?name=…) — the screen downloads and opens it. */
   onOpenBlob?: (link: { host: string; spaceId: string; hash: string; url: string }) => void;
+  /** An agent's approval card (2026-11-13): replaces the body, which is its text fallback. Pass only for a message with `approval`. */
+  approvalCard?: ReactNode;
+  /** What the agents this message invoked are doing (InvocationLines). Pass only when there is something to say, so other rows stay memoized. */
+  invocationLines?: ReactNode;
 }) {
   const colors = useColors();
   const dark = colors.isDark;
@@ -428,7 +434,9 @@ export const MessageRow = memo(function MessageRow({
           <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{time}</Text>
           {message.editedAt ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>(edited)</Text> : null}
         </View>
-        {message.poll ? (
+        {message.approval && approvalCard ? (
+          approvalCard
+        ) : message.poll ? (
           <PollCard
             message={message}
             poll={message.poll}
@@ -503,9 +511,11 @@ export const MessageRow = memo(function MessageRow({
             </Pressable>
           </View>
         ) : null}
+        {/* The agent status closes the message (2026-11-13): in the stream a small
+            icon beside the replies link (InvocationLines compact), in the thread the full line. */}
         {onOpenThread && message.replyCount > 0 ? (
-          <ReplyRow message={message} members={members} memberNames={memberNames} onPress={() => onOpenThread(message)} />
-        ) : null}
+          <ReplyRow message={message} members={members} memberNames={memberNames} onPress={() => onOpenThread(message)} trailing={invocationLines} />
+        ) : invocationLines ? <View style={{ marginTop: 4 }}>{invocationLines}</View> : null}
       </View>
     </Pressable>
     {reactorsFor !== null ? (

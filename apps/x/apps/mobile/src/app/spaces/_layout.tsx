@@ -65,6 +65,12 @@ export default function SpacesLayout() {
       <Stack.Screen name="new-poll" options={{ title: 'New poll', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="forward" options={{ title: 'Forward', headerBackButtonDisplayMode: 'minimal' }} />
       <Stack.Screen name="saved" options={{ title: 'Pinned and saved', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="agents" options={{ title: 'Agents', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="new-agent" options={{ title: 'New agent', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="connect-agent" options={{ title: 'Connect an agent', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="agent" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="threads" options={{ title: 'Threads', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="my-threads" options={{ title: 'Your threads', headerBackButtonDisplayMode: 'minimal' }} />
     </Stack>
   );
 }
