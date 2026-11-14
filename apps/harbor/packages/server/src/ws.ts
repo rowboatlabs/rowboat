@@ -127,6 +127,10 @@ function handleConnection(
   maxBufferedBytes: number,
   stats: LiveStats | undefined,
 ): void {
+  // 2026-11-07: ws closes a peer on receiver errors, but also emits 'error'.
+  // Handle that event so malformed frames cannot escape as process-fatal
+  // exceptions; the normal close handler below releases subscriptions.
+  ws.on('error', () => {});
   const subscriptions = new Map<string, () => void>();
   /** The one way a subscription ends, so the count (stats.ts) cannot drift from the map. */
   const drop = (spaceId: string): void => {
