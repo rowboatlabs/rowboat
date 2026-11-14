@@ -1,3 +1,4 @@
+import { moveToTrash } from './trash.js';
 import fs from 'node:fs/promises';
 import { createReadStream, type Stats } from 'node:fs';
 import os from 'node:os';
@@ -578,22 +579,7 @@ export async function remove(inputPath: string, opts?: RemoveOptions): Promise<{
   const trash = opts?.trash !== false;
 
   if (trash) {
-    const trashDir = path.join(WorkDir, '.trash');
-    await fs.mkdir(trashDir, { recursive: true });
-    const timestamp = Date.now();
-    const basename = path.basename(resolved.resolvedPath);
-    let finalTrashPath = path.join(trashDir, `${timestamp}-${basename}`);
-    let counter = 1;
-    while (true) {
-      try {
-        await fs.access(finalTrashPath);
-        finalTrashPath = path.join(trashDir, `${timestamp}-${counter}-${basename}`);
-        counter++;
-      } catch {
-        break;
-      }
-    }
-    await fs.rename(resolved.resolvedPath, finalTrashPath);
+    const finalTrashPath = await moveToTrash(resolved.resolvedPath);
     return { ok: true, path: resolved.originalPath, resolvedPath: resolved.resolvedPath, trashed: finalTrashPath };
   }
 
