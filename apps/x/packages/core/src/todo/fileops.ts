@@ -587,7 +587,6 @@ export async function restoreItem(month: string, blockIndex: number, key: string
         const block = blocks[blockIndex];
         if (!block || block.kind !== 'item' || block.item.key !== norm) return false;
         blocks.splice(blockIndex, 1);
-        await fs.writeFile(target, serializeTodoFile({ blocks }), 'utf-8');
 
         const list = parseTodoFile(await readRaw());
         const fromIdx = block.item.receipts.findIndex(r => FROM_RE.test(r.text));
@@ -609,7 +608,10 @@ export async function restoreItem(month: string, blockIndex: number, key: string
             restored.key = normalizeKey(restored.text);
             list.blocks.push({ kind: 'item', item: restored });
         }
+        // 2026-11-13: preserve the archive until the active copy is saved.
+        // A cleanup failure can leave a duplicate; it must not lose the item.
         await writeRaw(serializeTodoFile(list));
+        await fs.writeFile(target, serializeTodoFile({ blocks }), 'utf-8');
         log.log(`restored "${norm}" from ${month}`);
         return true;
     });
