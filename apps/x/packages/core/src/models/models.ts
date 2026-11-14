@@ -18,7 +18,9 @@ import {
     makeOllamaThinkFetch,
     DEFAULT_OLLAMA_CONTEXT_LENGTH,
     DEFAULT_OLLAMA_REASONING_EFFORT,
+    gbnfPatternSanitizerMiddleware,
 } from "./local.js";
+import { wrapLanguageModel } from "ai";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
@@ -98,7 +100,16 @@ export function createLanguageModel(
     modelId: string,
 ): LanguageModel {
     const model = createProvider(providerConfig).languageModel(modelId);
-    return applyLocalModelSettings(model, providerConfig);
+    let wrapped = applyLocalModelSettings(model, providerConfig);
+    if (providerConfig.flavor === "openai-compatible") {
+        // The provider's languageModel() always returns a LanguageModelV4, not a string
+        const baseModel = wrapped as Parameters<typeof wrapLanguageModel>[0]["model"];
+        wrapped = wrapLanguageModel({
+            model: baseModel,
+            middleware: gbnfPatternSanitizerMiddleware,
+        });
+    }
+    return wrapped;
 }
 
 export interface ModelCapabilities {
