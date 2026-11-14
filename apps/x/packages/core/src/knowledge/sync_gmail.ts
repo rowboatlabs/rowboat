@@ -25,6 +25,7 @@ import {
     mirrorThreadDraft,
     listCachedThreadIds,
     stampClassificationFrontmatter,
+    writeEmailMarkdown,
     notifyNewEmailThreads,
     publishEmailSyncEvent,
     cleanFilename,
@@ -390,8 +391,8 @@ async function buildAndCacheSnapshot(
         cached.parserVersion === SNAPSHOT_PARSER_VERSION &&
         cached.snapshot.importance
     ) {
-        // processThread may have just rewritten the markdown mirror (which
-        // drops its frontmatter) — re-stamp from the cached verdict.
+        // Re-stamp from the cached verdict in case the mirror has none yet;
+        // a no-op when processThread kept the existing stamp (#1239).
         stampClassificationFrontmatter(threadId, cached.snapshot);
         return cached.snapshot;
     }
@@ -718,7 +719,7 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
             mdContent += "\n---\n\n";
         }
 
-        fs.writeFileSync(path.join(syncDir, `${threadId}.md`), mdContent);
+        writeEmailMarkdown(path.join(syncDir, `${threadId}.md`), mdContent);
         console.log(`Synced Thread: ${subject} (${threadId})`);
 
         // Also build + cache the rich snapshot for the inbox view.
