@@ -4,6 +4,7 @@ import { SpacesAccountMenu } from '@/components/spaces/account-menu'
 import { ACCOUNT_ROW } from '@/lib/spaces-account'
 import { Switch } from '@/components/ui/switch'
 import { sessionEmail, signOut } from './account'
+import { analyticsSignedOut } from './analytics'
 import { ACCOUNT_URL, DEV_HARBOR } from './config'
 import { notificationState, subscribeNotificationState, turnOffNotifications, turnOnNotifications } from './notifications'
 
@@ -51,7 +52,7 @@ export function WebAccount() {
                 </a>
                 {/* A dev Harbor has no session to end. */}
                 {!DEV_HARBOR && (
-                    <button type="button" onClick={signOut} className={ACCOUNT_ROW}>
+                    <button type="button" onClick={() => { analyticsSignedOut(); signOut() }} className={ACCOUNT_ROW}>
                         <LogOut className="size-4 text-muted-foreground" /> Sign out
                     </button>
                 )}

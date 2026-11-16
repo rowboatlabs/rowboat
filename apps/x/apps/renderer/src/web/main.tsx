@@ -6,6 +6,7 @@ import '../index.css'
 // desktop's App.tsx imports; the web app never loads App.tsx.
 import '../App.css'
 import { CALLBACK_PATH, completeSignIn } from './account'
+import { startAnalytics } from './analytics'
 import { webChannelHandlers } from './handlers'
 import { installBrowserHost } from './host'
 import { captureOpenLink, forgetJoinClick } from './links'
@@ -21,9 +22,11 @@ async function start() {
     host.serve(webChannelHandlers((event) => host.emit('spaces:events', event)) as Parameters<typeof host.serve>[0])
 
     let signInError: string | null = null
+    let signedInNow = false
     if (window.location.pathname === CALLBACK_PATH) {
         try {
             window.history.replaceState(null, '', await completeSignIn(new URL(window.location.href)))
+            signedInNow = true
         } catch (err) {
             window.history.replaceState(null, '', '/')
             forgetJoinClick()
@@ -31,6 +34,8 @@ async function start() {
         }
     }
     captureOpenLink()
+    // After the callback, so the first pageview is the page landed on, as the person.
+    startAnalytics({ signedInNow })
 
     const [{ createRoot }, { ThemeProvider }, { WebApp }] = await Promise.all([
         import('react-dom/client'),
