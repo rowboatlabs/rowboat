@@ -219,6 +219,7 @@ const HISTORICAL_KEY_ORDER = [
     "spreadsheet-create",
     "spreadsheet-edit",
     "generate-image",
+    "preview_slack_import",
     "whoami",
     "update_profile",
     "list_members",

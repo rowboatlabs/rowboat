@@ -79,6 +79,7 @@ describe('agent face (MCP)', () => {
       'move_asset',
       'open_direct',
       'post_message',
+      'preview_slack_import',
       'propose_change',
       'react',
       'read_activity',
