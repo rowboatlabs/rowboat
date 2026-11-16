@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/core'
 import { Bot, FileText, Hash, Megaphone } from 'lucide-react'
@@ -9,17 +10,20 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 import { caretContext, type CaretContext } from '@/components/spaces/composer-editor'
 import { useSpaceRefs } from '@/components/spaces/space-markdown'
 import { useOrgListings } from '@/hooks/use-space-boards'
-import { useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
+import { isAgentOffline, useAgentsOnline, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { assetWireUrl } from '@/lib/spaces-presentation'
+import { byRank, matchRank } from '@/lib/mention-rank'
+import { answersOwnerOnly, isDeparted } from '@/lib/spaces-direct'
 
 // The @ autocomplete behind every mention surface — the composer and the
 // inline message editor. The hook owns the popup's whole lifecycle off the
 // editor's own events; the host renders <MentionMenu> inside its relative
 // box and routes keydowns through onKeyDown ahead of its other bindings.
 // What it offers comes from the pane's refs alone (both hosts get the same
-// sources): the whole org's people, its shared spaces, and the files of
-// every shared space the reader is in — this space's ranking first.
+// sources): this space's people, then your contacts (2026-11-09), its shared
+// spaces, and the files of every shared space the reader is in — this
+// space's ranking first.
 
 export interface MentionCandidate {
     id: string
@@ -93,56 +97,71 @@ export function useMentionAutocomplete(editor: Editor | null) {
         return { query: query.toLowerCase(), from: context.from - query.length - 1, to: context.from }
     }, [context, open])
 
+    // A local agent whose owner's computer isn't running it says so (2026-10-28): the mention waits until it is.
+    const online = useAgentsOnline(orgId)
+    // An agent whose seat here is its owner's alone says so (2026-11-09): a mention of it is refused.
+    const agentHint = (m: spaces.Member & { invocableBy?: 'owner' | 'members' }) => `${agentLabel(m.agentKind, m.agentConnection)}${answersOwnerOnly(m, selfMemberId) ? ' · answers only its owner here' : ''}${isAgentOffline(m, online) ? ' · offline' : ''}`
     const candidates = useMemo<MentionCandidate[]>(() => {
         if (!match) return []
         const q = match.query
         const people: MentionCandidate[] = []
-        if ('rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
+        if (LOCAL_RUNTIME && 'rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
         if ('here'.startsWith(q)) people.push({ id: 'here', label: 'here', hint: 'notify everyone online', isBroadcast: true })
-        // This space's people first, then the rest of the org. Someone not in
-        // this space can be named but is not notified (the org drops their
+        // This space's people first, then the rest of your contacts. Someone not
+        // in this space can be named but is not notified (the server drops their
         // stamp) — the hint says so.
         const inSpace = new Set(spaceMembers.map((m) => m.id))
         // A name matches anywhere; an id only as a prefix — a one-letter query
         // is a substring of most ULIDs and would drown the files below.
-        const matches = (m: spaces.Member) => !q || m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().startsWith(q)
-        for (const m of spaceMembers) {
-            const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? agentLabel(m.agentKind, m.agentConnection) : undefined
-            if (matches(m)) people.push({ id: m.id, label: m.displayName, ...(hint ? { hint } : {}) })
-        }
-        for (const m of orgRoster) {
-            const hint = m.kind === 'agent' ? `${agentLabel(m.agentKind, m.agentConnection)} · not in this space` : 'not in this space'
-            if (!inSpace.has(m.id) && matches(m)) people.push({ id: m.id, label: m.displayName, hint })
-        }
+        // Ranking stays inside each group: this space's people still lead your contacts.
+        const rank = (m: spaces.Member) => (!q || m.id.toLowerCase().startsWith(q) ? 0 : matchRank(m.displayName, q))
+        // Nobody names a deleted account (2026-10-13); a DM keeps one as a member.
+        const pickable = (m: spaces.Member) => !isDeparted(m)
+        people.push(...byRank(spaceMembers.filter(pickable).map((m) => {
+            const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? agentHint(m) : undefined
+            return { row: { id: m.id, label: m.displayName, ...(hint ? { hint } : {}) }, rank: rank(m) }
+        })))
+        people.push(...byRank(orgRoster.filter((m) => !inSpace.has(m.id) && pickable(m)).map((m) => {
+            const hint = m.kind === 'agent' ? `${agentHint(m)} · not in this space` : 'not in this space'
+            return { row: { id: m.id, label: m.displayName, hint }, rank: rank(m) }
+        })))
         // Shared spaces, as #Name references (a DM is nobody's to point at).
-        const spaceRows: MentionCandidate[] = (org?.spaces ?? [])
-            .filter((s) => !q || s.name.toLowerCase().includes(q))
-            .map((s) => ({ id: `space:${s.id}`, label: s.name, space: { id: s.id, name: s.name } }))
+        const spaceRows = byRank<MentionCandidate>((org?.spaces ?? []).map((s) => ({
+            row: { id: `space:${s.id}`, label: s.name, space: { id: s.id, name: s.name } },
+            rank: q ? matchRank(s.name, q) : 0,
+        })))
         if (!q) return [...people, ...spaceRows].slice(0, MAX_ROWS)
         // Files join once a query exists (a bare "@" is a people gesture);
-        // picking one inserts a markdown link, not a mention. This space's
-        // files first, then every shared space's.
-        const files: MentionCandidate[] = []
+        // picking one inserts a markdown link, not a mention. Ranked by name;
+        // on a tie this space's files come before every shared space's.
+        const fileMatches: { row: MentionCandidate; rank: number }[] = []
         const fileRows = (fromSpaceId: string, spaceName?: string) => {
             for (const e of listings?.get(fromSpaceId) ?? []) {
-                if (!e.path.toLowerCase().includes(q)) continue
+                // The name ranks; the folder still finds it ("@design/sc…"), as a plain contains.
+                const name = e.path.split('/').pop() ?? e.path
+                const nameRank = matchRank(name, q)
+                const rank = nameRank >= 0 ? nameRank : e.path.toLowerCase().includes(q) ? 2 : -1
+                if (rank < 0) continue
                 const folder = e.path.includes('/')
                 const hint = spaceName ? (folder ? `${e.path} · in ${spaceName}` : `in ${spaceName}`) : folder ? e.path : undefined
-                files.push({
+                fileMatches.push({ rank, row: {
                     id: `file:${fromSpaceId}/${e.id}`,
-                    label: e.path.split('/').pop() ?? e.path,
+                    label: name,
                     ...(hint ? { hint } : {}),
                     file: { assetId: e.id, path: e.path, spaceId: fromSpaceId, ...(spaceName ? { spaceName } : {}) },
-                })
+                } })
             }
         }
         if (spaceId) fileRows(spaceId)
         for (const s of org?.spaces ?? []) if (s.id !== spaceId) fileRows(s.id, s.name)
+        const files = byRank(fileMatches)
         // Files keep a few rows of their own: a query heading for a file must
         // not be buried under every person whose name shares its letters.
         const fileQuota = Math.min(files.length, 4)
         return [...[...people, ...spaceRows].slice(0, MAX_ROWS - fileQuota), ...files].slice(0, MAX_ROWS)
-    }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId])
+    // agentHint reads `online`; it changes with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId, online])
 
     // Reset the highlighted row whenever the query changes (adjust-on-change, not an effect).
     const query = match?.query ?? null

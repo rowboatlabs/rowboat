@@ -37,3 +37,12 @@ export function mobileNoteOpened() {
 export function mobileVoiceUsed() {
   capture('mobile_voice_used');
 }
+
+// Same event names as desktop (renderer lib/analytics.ts), told apart by `platform`.
+export function spacesInviteLinkShared() {
+  capture('spaces_invite_link_copied', { via: 'share' });
+}
+
+export function spacesSpaceCreated() {
+  capture('spaces_space_created');
+}

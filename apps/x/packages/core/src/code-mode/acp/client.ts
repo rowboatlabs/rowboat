@@ -15,6 +15,7 @@ import {
     type ReadTextFileResponse,
     type WriteTextFileRequest,
     type WriteTextFileResponse,
+    type McpServer,
 } from '@agentclientprotocol/sdk';
 import type { CodingAgent, CodeRunEvent } from './types.js';
 import type { PermissionBroker } from './permission-broker.js';
@@ -25,6 +26,15 @@ export interface AcpClientOptions {
     cwd: string;
     broker: PermissionBroker;
     onEvent: (event: CodeRunEvent) => void;
+    /** MCP servers every session on this connection gets (a local Spaces agent's org tools, 2026-10-28). */
+    mcpServers?: McpServer[];
+    /**
+     * Text added to the engine's own system prompt for every session on this
+     * connection: a local Spaces agent's instructions from its owner
+     * (2026-10-29). Claude's adapter takes it as `_meta.systemPrompt.append`,
+     * keeping Claude Code's own prompt; Codex's takes none, so it is ignored there.
+     */
+    systemPromptAppend?: string;
 }
 
 // Deadline for the startup phases (initialize / session create+load). A healthy cold
@@ -157,6 +167,8 @@ export class AcpClient {
     readonly cwd: string;
     private broker: PermissionBroker;
     private onEvent: (event: CodeRunEvent) => void;
+    private readonly mcpServers: McpServer[];
+    private readonly sessionMeta: Record<string, unknown> | undefined;
     private child?: ChildProcess;
     private connection?: ClientSideConnection;
     private loadSession_ = false;
@@ -170,6 +182,8 @@ export class AcpClient {
         this.cwd = opts.cwd;
         this.broker = opts.broker;
         this.onEvent = opts.onEvent;
+        this.mcpServers = opts.mcpServers ?? [];
+        this.sessionMeta = opts.systemPromptAppend && opts.agent === 'claude' ? { systemPrompt: { append: opts.systemPromptAppend } } : undefined;
     }
 
     get loadSupported(): boolean {
@@ -243,7 +257,7 @@ export class AcpClient {
 
     async newSession(): Promise<string> {
         try {
-            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
+            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: this.mcpServers, ...(this.sessionMeta ? { _meta: this.sessionMeta } : {}) }));
             return res.sessionId;
         } catch (e) {
             throw this.enrich(e, 'newSession');
@@ -255,7 +269,7 @@ export class AcpClient {
     // model picker before any real session exists.
     async describeModelOptions(): Promise<CodeAgentModelOptions> {
         try {
-            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
+            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: this.mcpServers, ...(this.sessionMeta ? { _meta: this.sessionMeta } : {}) }));
             const r = res as { configOptions?: unknown; models?: unknown };
             const options = extractModelOptions(r.configOptions, r.models);
             return this.agent === 'claude' ? withClaudeAliases(options) : options;
@@ -266,7 +280,7 @@ export class AcpClient {
 
     async loadSession(sessionId: string): Promise<void> {
         try {
-            await this.withStartupTimeout(this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] }));
+            await this.withStartupTimeout(this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: this.mcpServers, ...(this.sessionMeta ? { _meta: this.sessionMeta } : {}) }));
         } catch (e) {
             throw this.enrich(e, 'loadSession');
         }

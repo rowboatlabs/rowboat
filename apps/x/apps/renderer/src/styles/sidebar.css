@@ -1,0 +1,484 @@
+/* Main sidebar — redesign (2026-10-21). One row height (32px) with a 2px
+   gap between rows, so a hovered row never touches the selected one. Labels
+   sit a step below full ink and icons a step below that; hover and the
+   selected row bring both up to full. Motion turns off under reduced motion.
+
+   2026-10-21, after studying the Kimi desktop app: hover feedback is instant
+   (no fade), folds take 160ms, menus only fade, and collapsing clips the
+   panel in place and nudges its contents 8px instead of sliding it away. */
+
+/* One curve and duration for everything that moves when the sidebar
+   collapses or expands: the panel's clip, the content beside it, the header.
+   An ease-in-out: a width that grows and shrinks reads calmest when it
+   starts and lands softly. */
+:root {
+  --sb-ease: cubic-bezier(.4, 0, .2, 1);
+  --sb-dur: 300ms;
+}
+
+/* The sidebar floats as a rounded panel (2026-10-21): below the 40px
+   titlebar band (where the traffic lights and toolbar line up with the
+   content's header), 8px in from the left and bottom, 16px corners, a hairline
+   ring and a soft shadow — one object beside the content, not a strip of the
+   window. */
+.rowboat-sidebar[data-slot="sidebar-container"] { padding-top: 40px; }
+.rowboat-sidebar [data-slot="sidebar-inner"] {
+  border: none;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 8%, transparent),
+    0 4px 16px rgb(0 0 0 / .08);
+}
+
+/* The panel's contents fade out early and drift 8px as it clips away; on
+   the way back they fade in over the opening. */
+[data-slot="sidebar-inner"] {
+  transition: opacity 180ms ease-out, translate var(--sb-dur) var(--sb-ease);
+}
+[data-collapsible="offcanvas"] [data-slot="sidebar-inner"] {
+  opacity: 0;
+  translate: -8px 0;
+}
+
+.rowboat-sidebar [data-sidebar="menu"] { gap: 2px; }
+
+.rowboat-sidebar [data-sidebar="menu-button"] {
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 80%, transparent);
+  transition: transform 120ms ease;
+}
+.rowboat-sidebar [data-sidebar="menu-button"] > svg,
+.rowboat-sidebar [data-sidebar="menu-button"] > .sb-icon {
+  width: 16px;
+  height: 16px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
+}
+.rowboat-sidebar [data-sidebar="menu-button"]:hover,
+.rowboat-sidebar [data-sidebar="menu-button"][data-state="open"] {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-foreground);
+}
+.rowboat-sidebar [data-sidebar="menu-button"][data-active="true"] {
+  background: color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
+  color: var(--sidebar-foreground);
+}
+.rowboat-sidebar [data-sidebar="menu-button"]:hover > svg,
+.rowboat-sidebar [data-sidebar="menu-button"][data-active="true"] > svg,
+.rowboat-sidebar [data-sidebar="menu-button"]:hover > .sb-icon,
+.rowboat-sidebar [data-sidebar="menu-button"][data-active="true"] > .sb-icon {
+  color: var(--sidebar-foreground);
+}
+.rowboat-sidebar [data-sidebar="menu-button"]:active { transform: scale(.985); }
+.rowboat-sidebar [data-sidebar="menu-button"]:focus-visible {
+  outline: 2px solid var(--sidebar-ring);
+  outline-offset: -2px;
+}
+
+/* "View all": a quieter row that ends the list. */
+.rowboat-sidebar [data-sidebar="menu-button"].sb-quiet {
+  color: color-mix(in srgb, var(--sidebar-foreground) 50%, transparent);
+  font-size: 13px;
+}
+
+/* New chat: the one row with a frame, so the primary action reads first. */
+.rowboat-sidebar [data-sidebar="menu-button"].sb-primary {
+  color: var(--sidebar-foreground);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
+  background: color-mix(in srgb, var(--sidebar-foreground) 3%, transparent);
+}
+.rowboat-sidebar [data-sidebar="menu-button"].sb-primary > svg { color: var(--sidebar-foreground); }
+.rowboat-sidebar [data-sidebar="menu-button"].sb-primary:hover {
+  background: color-mix(in srgb, var(--sidebar-foreground) 7%, transparent);
+}
+
+/* The search square beside New chat: same frame and height. */
+.sb-square {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 70%, transparent);
+  background: color-mix(in srgb, var(--sidebar-foreground) 3%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
+  transition: transform 120ms ease;
+}
+.sb-square:hover {
+  color: var(--sidebar-foreground);
+  background: color-mix(in srgb, var(--sidebar-foreground) 7%, transparent);
+}
+.sb-square:active { transform: scale(.94); }
+.sb-square:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
+.sb-square > svg { width: 16px; height: 16px; }
+
+/* Keyboard shortcuts as one small chip per key (⌘ · N). In a row they show
+   on hover, taking the place of its count or time; in a tooltip they sit
+   beside the label. */
+.keys { display: inline-flex; flex-shrink: 0; align-items: center; gap: 3px; }
+.key {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  background: color-mix(in srgb, var(--sidebar-foreground) 7%, transparent);
+  color: color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
+}
+.keys--dark .key {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  color: inherit;
+}
+.sb-row-keys { display: none; }
+[data-sidebar="menu-item"]:hover .sb-row-keys { display: inline-flex; }
+[data-sidebar="menu-item"]:has(.sb-row-keys):hover .sb-meta,
+[data-sidebar="menu-item"]:has(.sb-row-keys):hover .sb-count { display: none; }
+
+/* Right-hand bits of a row: keyboard hints show on hover, counts and times
+   always; a row's own buttons replace its meta on hover. */
+.sb-hint {
+  font-size: 11.5px;
+  letter-spacing: .02em;
+  color: color-mix(in srgb, var(--sidebar-foreground) 40%, transparent);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+[data-sidebar="menu-item"]:hover .sb-hint { opacity: 1; }
+.sb-meta {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--sidebar-foreground) 45%, transparent);
+  transition: opacity 120ms ease;
+}
+.sb-meta.is-alert { color: var(--destructive); }
+.sb-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
+  color: var(--sidebar-foreground);
+}
+.sb-row-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+[data-sidebar="menu-item"]:hover .sb-row-actions,
+[data-sidebar="menu-item"]:focus-within .sb-row-actions,
+.sb-row-actions:has([data-state="open"]) { opacity: 1; pointer-events: auto; }
+[data-sidebar="menu-item"]:has(.sb-row-actions):hover .sb-meta,
+[data-sidebar="menu-item"]:has(.sb-row-actions):focus-within .sb-meta { opacity: 0; }
+.sb-row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--sidebar-foreground) 60%, transparent);
+  transition: transform 120ms ease;
+}
+.sb-row-action:hover,
+.sb-row-action[data-state="open"] {
+  background: color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
+  color: var(--sidebar-foreground);
+}
+.sb-row-action:active { transform: scale(.92); }
+.sb-row-action > svg { width: 14px; height: 14px; }
+/* Leave room for the actions so a long title truncates before them. */
+[data-sidebar="menu-item"]:has(.sb-row-actions):hover > [data-sidebar="menu-button"],
+[data-sidebar="menu-item"]:has(.sb-row-actions):focus-within > [data-sidebar="menu-button"] { padding-right: 34px; }
+
+/* Sections (Spaces, Chats): a quiet heading that folds its rows away. */
+.sb-section { margin-top: 14px; }
+.sb-section-head {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 4px 0 10px;
+}
+.sb-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin-left: -4px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  color: color-mix(in srgb, var(--sidebar-foreground) 48%, transparent);
+  transition: color 120ms ease;
+}
+.sb-section-toggle:hover { color: color-mix(in srgb, var(--sidebar-foreground) 85%, transparent); }
+.sb-section-toggle:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
+.sb-chevron {
+  width: 12px;
+  height: 12px;
+  opacity: 0;
+  transition: transform 160ms cubic-bezier(.2, 0, 0, 1), opacity 120ms ease;
+}
+.sb-section-head:hover .sb-chevron,
+.sb-section-toggle:focus-visible .sb-chevron,
+.sb-section[data-open="false"] .sb-chevron { opacity: 1; }
+.sb-section[data-open="false"] .sb-chevron { transform: rotate(-90deg); }
+.sb-section-tools {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.sb-section-head:hover .sb-section-tools,
+.sb-section-tools:focus-within,
+.sb-section-tools:has([data-state="open"]) { opacity: 1; }
+.sb-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 160ms cubic-bezier(.2, 0, 0, 1), opacity 120ms ease-out;
+}
+.sb-section[data-open="false"] .sb-collapse { grid-template-rows: 0fr; opacity: 0; }
+.sb-collapse > * { min-height: 0; overflow: hidden; }
+/* A nav row with children (Spaces): sits in the row rhythm, not as a heading.
+   Its chevron points down when open and right when folded. */
+.sb-section.sb-nav-section { margin-top: 2px; }
+.sb-nav-section .sb-chevron { opacity: 1; width: 14px; height: 14px; }
+.sb-nav-section[data-open="false"] .sb-chevron { transform: rotate(-90deg); }
+.sb-nav-section .sb-tree { margin-left: 17px; margin-top: 2px; }
+/* Two buttons on hover (+ and the chevron): leave room for both. */
+.sb-nav-section [data-sidebar="menu-item"]:has(.sb-row-actions):hover > [data-sidebar="menu-button"],
+.sb-nav-section [data-sidebar="menu-item"]:has(.sb-row-actions):focus-within > [data-sidebar="menu-button"] { padding-right: 58px; }
+
+/* A nested list: indented under its heading with a faint guide line, the
+   line centred under the heading's first letter. */
+.sb-tree {
+  position: relative;
+  margin-left: 14px;
+  padding-left: 8px;
+}
+.sb-tree::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--sidebar-foreground) 10%, transparent);
+}
+.sb-tree .sb-subhead { padding-left: 10px; }
+.sb-subhead {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 4px 10px 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--sidebar-foreground) 38%, transparent);
+}
+
+/* A chat that just arrived slides into place. */
+@keyframes sb-row-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.sb-row-in { animation: sb-row-in 180ms cubic-bezier(.2, .8, .2, 1); }
+
+/* Footer: your name with a round avatar, the plan pill beside it, and the
+   sync mark at the far right (2026-10-21). */
+.sb-account-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 48px;
+  padding: 0 2px;
+}
+/* One rounded surface around the avatar, name and pill: hovering any part
+   lights the whole group. */
+.sb-account-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 8px 0 0;
+  border-radius: 14px;
+}
+.sb-account-group:hover,
+.sb-account-group:has([data-state="open"]),
+.sb-account-group:has(:focus-visible) { background: var(--sidebar-accent); }
+.sb-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 8px 0 7px;
+  border-radius: 14px;
+  text-align: left;
+}
+.sb-account:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
+.sb-account:active .sb-avatar { transform: scale(.96); }
+.sb-avatar { transition: transform 120ms ease; }
+.sb-account-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sidebar-foreground);
+}
+.sb-avatar {
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: #fff;
+  background: linear-gradient(150deg, #7c86f7, #4f5bd5);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .14), 0 1px 2px rgb(0 0 0 / .2);
+}
+.sb-avatar-flag {
+  position: absolute;
+  right: -1px;
+  top: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px var(--sidebar);
+}
+.sb-avatar-flag.is-alert { background: var(--destructive); }
+.sb-plan-pill {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--sidebar-foreground) 88%, transparent);
+  background: color-mix(in srgb, var(--sidebar-foreground) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-foreground) 10%, transparent);
+  transition: transform 120ms ease;
+}
+.sb-plan-pill:hover {
+  color: var(--sidebar-foreground);
+  background: color-mix(in srgb, var(--sidebar-foreground) 10%, transparent);
+}
+.sb-plan-pill:active { transform: scale(.96); }
+.sb-plan-pill:disabled { opacity: .5; }
+.sb-plan-pill:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: 1px; }
+.sb-plan-pill.is-alert {
+  color: #fff;
+  background: var(--destructive);
+  box-shadow: none;
+}
+.sb-plan-pill.is-alert:hover { background: color-mix(in srgb, var(--destructive) 88%, black); }
+/* The avatar at the collapsed rail's foot: a round button around it. */
+.sb-avatar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+}
+.sb-avatar-button:hover,
+.sb-avatar-button[data-state="open"] { background: var(--sidebar-accent); }
+.sb-avatar-button:active .sb-avatar { transform: scale(.94); }
+.sb-avatar-button:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
+/* Syncing: a thin ring turns around the avatar. */
+.sb-avatar-button { position: relative; }
+.sb-avatar-button.is-syncing::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+  border-top-color: color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
+  animation: sb-spin 900ms linear infinite;
+  pointer-events: none;
+}
+@keyframes sb-spin { to { transform: rotate(360deg); } }
+
+.sb-sync {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 999px !important;
+}
+
+/* Menus opened from the sidebar only fade: no rise, no scale. */
+@keyframes sb-menu-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.sb-menu[data-state="open"] { animation: sb-menu-in 150ms ease; }
+
+/* The collapsed rail hands off to the panel and back with a short fade,
+   instead of swapping in a single frame. */
+@keyframes rowboat-dock-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
+}
+/* It arrives as the panel finishes clipping away. */
+.rowboat-dock { animation: rowboat-dock-in 180ms ease-out 140ms both; }
+@keyframes rowboat-dock-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(-6px); }
+}
+.rowboat-dock[data-leaving="true"] {
+  animation: rowboat-dock-out 120ms ease-out both;
+  pointer-events: none;
+}
+.rowboat-dock-tile { transition: transform 120ms ease !important; }
+.rowboat-dock-tile:active { transform: scale(.94); }
+.rowboat-dock-tile[data-active="true"] {
+  background: color-mix(in srgb, var(--sidebar-foreground) 9%, transparent);
+  color: var(--sidebar-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --sb-dur: 0ms; }
+  .rowboat-sidebar [data-sidebar="menu-button"],
+  [data-slot="sidebar-inner"],
+  .sb-collapse,
+  .sb-chevron { transition: none; }
+  .sb-row-in,
+  .sb-menu[data-state="open"],
+  .rowboat-dock,
+  .rowboat-dock[data-leaving="true"] { animation: none; }
+}

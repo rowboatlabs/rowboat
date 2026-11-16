@@ -15,13 +15,14 @@ let gagan: ReturnType<typeof restClient>;
 
 async function start(): Promise<void> {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },
       { id: 'gagan', displayName: 'Gagan' },
     ],
-    seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
+    // Two spaces: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Main', creator: 'ramnique' }, { name: 'Ops', creator: 'ramnique' }],
   });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');
@@ -156,8 +157,10 @@ describe('direct messages', () => {
   it('never addresses the opener or bystanders with space_added', async () => {
     const ramLive = await liveClient(harbor, 'dev-ramnique');
     const harshLive = await liveClient(harbor, 'dev-harsh');
-    // A brand-new pair so the open actually creates.
-    await harbor.store.putMember({ id: 'prakhar', displayName: 'Prakhar', role: 'member', kind: 'human' });
+    // A brand-new pair so the open actually creates; they share Ops, so the reach rule passes (2026-11-09).
+    await harbor.store.putMember({ id: 'prakhar', displayName: 'Prakhar', kind: 'human' });
+    const ops = ((await ramnique.get('/v1/spaces')).body.spaces as Space[]).find((s) => s.name === 'Ops')!;
+    await ramnique.post(`/v1/spaces/${ops.id}/members`, { memberIds: ['prakhar'], actingMode: 'direct' });
     const prakhar = restClient(harbor, 'dev-prakhar');
     const prakharLive = await liveClient(harbor, 'dev-prakhar');
     await ramnique.post('/v1/direct', { memberId: 'prakhar' });

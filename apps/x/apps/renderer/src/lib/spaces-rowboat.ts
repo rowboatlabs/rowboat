@@ -1,3 +1,5 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import type { spaces } from '@x/shared'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -27,9 +29,9 @@ export function maybeInvokeRowboat(
     body: string,
     options?: RowboatTurnOptions,
 ): void {
-    if (!containsRowboatAddress(body)) return
-    void window.ipc
-        .invoke('spaces:invokeRowboat', {
+    // Your Rowboat runs on your machine; a browser has none to invoke.
+    if (!LOCAL_RUNTIME || !containsRowboatAddress(body)) return
+    void invokeSpace('spaces:invokeRowboat', {
             orgId: org.id,
             spaceId: space.id,
             threadRootId: thread.rootMessageId,

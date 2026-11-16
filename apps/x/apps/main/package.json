@@ -13,12 +13,13 @@
         "make": "electron-forge make"
     },
     "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "^0.75.1",
-        "@agentclientprotocol/codex-acp": "^1.10.0",
+        "@agentclientprotocol/claude-agent-acp": "^0.86.0",
+        "@agentclientprotocol/codex-acp": "^2.1.1",
         "@x/client": "workspace:*",
         "@x/core": "workspace:*",
         "@x/server": "workspace:*",
         "@x/shared": "workspace:*",
+        "@x/spaces-client": "workspace:*",
         "agent-slack": "0.9.3",
         "chokidar": "^4.0.3",
         "electron-chrome-extensions": "^4.9.0",

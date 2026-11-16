@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Rowboat
+GenericName=AI Coworker
+Comment=AI coworker with memory and multi-agent workspace
+Exec=rowboat %u
+Terminal=false
+Type=Application
+Icon=com.rowboatlabs.Rowboat
+StartupWMClass=Rowboat
+Categories=Office;Development;Utility;
+MimeType=x-scheme-handler/rowboat;
+Keywords=AI;Assistant;LLM;Productivity;

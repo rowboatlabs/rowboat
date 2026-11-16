@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { mcpTools, readOnlyMcpToolNames } from "@rowboat/spaces-protocol";
+import { agentOnlyMcpToolNames, mcpTools as allMcpTools, readOnlyMcpToolNames } from "@rowboat/spaces-protocol";
 import { SPACES_TOOL_NAMES, blobFilename, mimeForFilename, parseBlobLink, resolveOrgArg, spacesTools } from "./spaces.js";
+
+// What a person's assistant gets: every tool but the agent-only ones (super agents, 2026-11-02).
+const mcpTools = allMcpTools.filter((t) => !agentOnlyMcpToolNames.has(t.name));
 
 const orgsState: { orgs: Array<{ id: string; name: string; address: string }> } = { orgs: [] };
 vi.mock("../../../spaces/orgs.js", () => ({
@@ -81,6 +84,10 @@ describe("the projected agent face", () => {
             const original = z.toJSONSchema(def.input) as { properties: Record<string, unknown> };
             for (const key of Object.keys(original.properties)) expect(schema.properties).toHaveProperty(key);
         }
+    });
+
+    it("leaves out the tools only an agent member can use", () => {
+        for (const name of agentOnlyMcpToolNames) expect(spacesTools[name], name).toBeUndefined();
     });
 
     it("gates writes and leaves reads ungated", () => {

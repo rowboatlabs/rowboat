@@ -1,30 +1,38 @@
-import { Image } from 'expo-image';
+import { router } from 'expo-router';
+import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useState } from 'react';
 import { ScrollView, Pressable, Text, View } from 'react-native';
 
+import * as Clipboard from 'expo-clipboard';
+
 import { useConnection } from '@/lib/connection';
 import { useSpacesAccount } from '@/lib/spaces/account';
-import { PUSH_LEVELS, getPushLevel, registerWithHarbor, registerWithMac, setPushLevel, type PushLevel } from '@/lib/push';
+import { PUSH_LEVELS, getPushLevel, getPushToken, registerWithHarbor, registerWithMac, setPushLevel, type PushLevel } from '@/lib/push';
 import { useColors } from '@/theme/colors';
 
-// Notification preferences: one global level, enforced by the Mac's watcher.
+// Notification preferences: one level per member, sent with the device token
+// to the server (Harbor's push.ts gates on it). Pausing and working hours live
+// on the Status & availability screen (2026-11-13) — the member's
+// availability, which Harbor's notify.ts honours for push and desktop alike.
 export default function NotificationsScreen() {
   const colors = useColors();
   const { rpc } = useConnection();
   const account = useSpacesAccount();
   const [level, setLevel] = useState<PushLevel | null>(null);
   const [state, setState] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
     void getPushLevel().then(setLevel);
+    void getPushToken().then(setToken).catch(() => {});
   }, []);
 
   const pick = async (next: PushLevel) => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     setLevel(next);
     await setPushLevel(next);
-    // Harbor (the org servers) is the sender; a paired Mac is the fallback relay.
+    // Harbor is the sender; a paired Mac is the fallback relay.
     const result = account.orgs?.length
       ? await registerWithHarbor(account.orgs, account.getAccessToken).catch(() => 'error' as const)
       : 'no-orgs' as const;
@@ -33,7 +41,7 @@ export default function NotificationsScreen() {
       result === 'registered' ? null
       : result === 'no-permission' ? 'Notifications are off in iOS Settings — enable them for Rowboat to get pushes.'
       : result === 'unavailable' ? 'Simulators can’t receive pushes — try on a real device.'
-      : result === 'no-orgs' ? 'Sign in to Spaces first — notifications come from your orgs.'
+      : result === 'no-orgs' ? 'Sign in to Spaces first — notifications come from it.'
       : 'Could not save this right now — it will retry on the next launch.',
     );
   };
@@ -66,11 +74,42 @@ export default function NotificationsScreen() {
           ) : null}
         </Pressable>
       ))}
+      {account.orgs?.length ? (
+        <Pressable
+          onPress={() => router.push('/spaces/availability')}
+          style={({ pressed }) => ({
+            flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, marginTop: 12,
+            marginHorizontal: 8, paddingHorizontal: 8, borderRadius: 10, borderCurve: 'continuous',
+            backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+          })}
+        >
+          <View style={{ flex: 1, gap: 1 }}>
+            <Text style={{ fontSize: 16, color: colors.label }}>Pause and working hours</Text>
+            <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>Take a break, or only hear from people during work hours</Text>
+          </View>
+          <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />
+        </Pressable>
+      ) : null}
       {state ? (
         <Text style={{ fontSize: 13, lineHeight: 18, color: colors.secondaryLabel, paddingHorizontal: 16, paddingTop: 12 }}>
           {state}
         </Text>
       ) : null}
+      {/* Diagnostics: the device's push token — tap to copy. */}
+      {token ? (
+        <Pressable
+          onPress={() => void Clipboard.setStringAsync(token)}
+          style={{ paddingHorizontal: 16, paddingTop: 20 }}
+        >
+          <Text selectable style={{ fontSize: 11, color: colors.tertiaryLabel }}>
+            Device token (tap to copy): {token}
+          </Text>
+        </Pressable>
+      ) : (
+        <Text style={{ fontSize: 11, color: colors.tertiaryLabel, paddingHorizontal: 16, paddingTop: 20 }}>
+          No push token — permission denied or unsupported device.
+        </Text>
+      )}
     </ScrollView>
   );
 }

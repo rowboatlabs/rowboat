@@ -9,7 +9,7 @@ import tailwindcss from '@tailwindcss/vite'
 // CDN — broken offline and wrong for a desktop app. This plugin self-hosts:
 // dev serves the fonts straight out of node_modules, build copies them into
 // dist so the packaged app:// origin carries them.
-function excalidrawAssets(): Plugin {
+export function excalidrawAssets(outDir = 'dist'): Plugin {
   const fontsSrc = path.resolve(__dirname, 'node_modules/@excalidraw/excalidraw/dist/prod/fonts')
   const prefix = '/excalidraw-assets/'
   return {
@@ -26,8 +26,8 @@ function excalidrawAssets(): Plugin {
       })
     },
     closeBundle() {
-      const outDir = path.resolve(__dirname, 'dist/excalidraw-assets/fonts')
-      if (fs.existsSync(fontsSrc)) fs.cpSync(fontsSrc, outDir, { recursive: true })
+      const fontsOut = path.resolve(__dirname, outDir, 'excalidraw-assets/fonts')
+      if (fs.existsSync(fontsSrc)) fs.cpSync(fontsSrc, fontsOut, { recursive: true })
     },
   }
 }

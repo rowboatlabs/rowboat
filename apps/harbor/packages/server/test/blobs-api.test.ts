@@ -61,7 +61,7 @@ let gagan: ReturnType<typeof api>;
 describe('blob uploads over the render face', () => {
   beforeAll(async () => {
     harbor = await startTestHarbor({
-      orgName: 'Blob Test Org',
+      name: 'Blob Test Org',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'gagan', displayName: 'Gagan' },
@@ -145,6 +145,21 @@ describe('blob uploads over the render face', () => {
     expect(Buffer.from(r.body as Uint8Array)).toEqual(PNG_1PX);
   });
 
+  it('downloads a prose video label with its stored MIME extension', async () => {
+    const bytes = new TextEncoder().encode('video download fixture');
+    const hash = blobHash(bytes);
+    const uploaded = await ramnique.putBlob(`/v1/spaces/${spaceId}/blobs`, bytes, {
+      'x-blob-sha256': hash, 'content-type': 'video/webm',
+    });
+    expect(uploaded.status).toBe(200);
+    const r = await ramnique.get(
+      `/v1/spaces/${spaceId}/blobs/${hash}?download=1&name=${encodeURIComponent('Watch the 54-second demo')}`,
+    );
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-disposition')).toBe('attachment; filename="Watch the 54-second demo.webm"');
+    expect(Buffer.from(r.body as Uint8Array)).toEqual(Buffer.from(bytes));
+  });
+
   it('serves non-images as attachment, with the ?name= filename sanitized', async () => {
     const r = await ramnique.get(
       `/v1/spaces/${spaceId}/blobs/${blobHash(CSV_BYTES)}?name=${encodeURIComponent('../we"ird/signups.csv')}`,
@@ -152,6 +167,40 @@ describe('blob uploads over the render face', () => {
     expect(r.status).toBe(200);
     expect(r.headers.get('content-type')).toBe('text/csv');
     expect(r.headers.get('content-disposition')).toBe('attachment; filename="..-weird-signups.csv"');
+  });
+
+  it('serves one byte range as 206, past the end as 416, and several as the whole blob (2026-11-04)', async () => {
+    const path = `/v1/spaces/${spaceId}/blobs/${blobHash(PNG_1PX)}`;
+    const ranged = (range: string) => fetch(`${harbor.url}${path}`, { headers: { authorization: 'Bearer dev-ramnique', range } });
+    const whole = await ramnique.get(path);
+    expect(whole.headers.get('accept-ranges')).toBe('bytes');
+
+    const head = await ranged('bytes=0-7');
+    expect(head.status).toBe(206);
+    expect(head.headers.get('content-range')).toBe(`bytes 0-7/${PNG_1PX.length}`);
+    expect(head.headers.get('content-length')).toBe('8');
+    expect(Buffer.from(await head.arrayBuffer())).toEqual(Buffer.from(PNG_1PX.subarray(0, 8)));
+
+    const tail = await ranged('bytes=-4');
+    expect(Buffer.from(await tail.arrayBuffer())).toEqual(Buffer.from(PNG_1PX.subarray(PNG_1PX.length - 4)));
+
+    const past = await ranged(`bytes=${PNG_1PX.length}-`);
+    expect(past.status).toBe(416);
+    expect(past.headers.get('content-range')).toBe(`bytes */${PNG_1PX.length}`);
+
+    const several = await ranged('bytes=0-1,4-5');
+    expect(several.status).toBe(200);
+    expect((await several.arrayBuffer()).byteLength).toBe(PNG_1PX.length);
+  });
+
+  it('keeps a ?name= beyond Latin-1 whole in filename*, with a Latin-1 fallback', async () => {
+    const r = await ramnique.get(
+      `/v1/spaces/${spaceId}/blobs/${blobHash(CSV_BYTES)}?name=${encodeURIComponent('signups (é) ✓.csv')}`,
+    );
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-disposition')).toBe(
+      `attachment; filename="signups (é)??.csv"; filename*=UTF-8''signups%20%28%C3%A9%29%E2%80%AF%E2%9C%93.csv`,
+    );
   });
 
   it('unknown hashes are not_found; non-members are refused; other spaces cannot see the blob', async () => {
@@ -337,7 +386,7 @@ describe('blob uploads over the render face', () => {
 describe('upload size cap', () => {
   it('refuses a body over maxBlobBytes with payload_too_large', async () => {
     const small = await startTestHarbor({
-      orgName: 'Tiny Cap Org',
+      name: 'Tiny Cap Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       maxBlobBytes: 16,
     });

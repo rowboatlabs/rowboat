@@ -1,13 +1,14 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientFrame, type ServerFrame } from '@rowboat/spaces-protocol';
-import { authenticateRequest, type OrgAuth } from './auth.js';
+import { authenticateRequest, type ServerAuth } from './auth.js';
 import { HarborError } from './errors.js';
+import { sessionToken } from './session.js';
 import type { SpaceHub } from './hub.js';
 import type { HarborService } from './service.js';
 import type { LiveStats } from './stats.js';
 
-// The live face (CONTRACT.md decision 2): one WebSocket per org, per-space
+// The live face (CONTRACT.md decision 2): one WebSocket per member, per-space
 // subscriptions, offset-based resume. subscribe{afterOffset} replays durable
 // events after that offset then goes live; presence is ephemeral pass-through.
 //
@@ -29,7 +30,9 @@ import type { LiveStats } from './stats.js';
 export interface LiveDeps {
   service: HarborService;
   hub: SpaceHub;
-  auth: OrgAuth;
+  auth: ServerAuth;
+  /** Origins whose upgrades may authenticate with the session cookie (session.ts). */
+  webOrigins: ReadonlySet<string>;
 }
 
 const DEFAULT_HEARTBEAT_MS = 25_000;
@@ -40,12 +43,8 @@ interface LiveSocket extends WebSocket {
   sawLifeSinceLastBeat?: boolean;
 }
 
-/**
- * Resolves the org runtime for a connection — multi-org deployments route by
- * Host (spec §4 tenancy); the single-org server ignores the host. Undefined =
- * no org on that domain.
- */
-export type LiveDepsResolver = (host: string | undefined) => LiveDeps | undefined | Promise<LiveDeps | undefined>;
+/** What a connection needs, resolved when it opens (the server's runtime is built after the listener; server.ts). */
+export type LiveDepsResolver = () => LiveDeps | undefined | Promise<LiveDeps | undefined>;
 
 export function attachLive(
   server: Server,
@@ -86,13 +85,20 @@ export function attachLive(
       let memberId: string;
       try {
         const forwarded = req.headers['x-forwarded-host'];
-        deps = await resolve(typeof forwarded === 'string' ? forwarded : req.headers.host);
+        deps = await resolve();
         if (!deps) {
           socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
           socket.destroy();
           return;
         }
-        const credentials = { authorization: req.headers.authorization, queryToken: url.searchParams.get('token') };
+        // The web app opens the socket on its session cookie (session.ts):
+        // only from a listed origin, and a browser always sends Origin on
+        // an upgrade, so another site can't open a socket in someone's name.
+        const query = url.searchParams.get('token');
+        const cookie = req.headers.authorization || query
+          ? undefined
+          : sessionToken({ cookie: req.headers.cookie, origin: req.headers.origin }, deps.webOrigins);
+        const credentials = { authorization: req.headers.authorization, queryToken: query ?? cookie };
         memberId = (await authenticateRequest(deps.auth, credentials)).member.id;
       } catch (err) {
         const status = err instanceof HarborError && err.status === 403 ? '403 Forbidden' : '401 Unauthorized';
@@ -159,6 +165,9 @@ function handleConnection(
     if (frame.kind === 'space_removed') drop(frame.spaceId);
     send(frame);
   });
+  // An agent's presence follows its live connections (local agents, 2026-10-28).
+  void deps.service.liveOpened(memberId).catch(() => {});
+  // Unified online status (2026-11-11): only an explicit activity report starts a lease.
 
   ws.on('message', (data) => {
     ws.sawLifeSinceLastBeat = true;
@@ -231,6 +240,10 @@ function handleConnection(
             drop(frame.spaceId);
             break;
           }
+          case 'activity': {
+            await deps.service.reportActivity(memberId, ws, frame.active);
+            break;
+          }
           case 'presence': {
             await deps.service.publishPresence({ memberId }, frame.spaceId, frame.state, frame.threadRootId);
             break;
@@ -241,14 +254,15 @@ function handleConnection(
           }
         }
       } catch (err) {
-        if (err instanceof HarborError) sendError(err.code, err.message, frame.spaceId);
-        else sendError('internal', 'unexpected error', frame.spaceId);
+        if (err instanceof HarborError) sendError(err.code, err.message, 'spaceId' in frame ? frame.spaceId : undefined);
+        else sendError('internal', 'unexpected error', 'spaceId' in frame ? frame.spaceId : undefined);
       }
     })();
   });
 
   ws.on('close', () => {
     unsubscribeMember();
+    deps.service.liveClosed(memberId, ws);
     for (const spaceId of [...subscriptions.keys()]) drop(spaceId);
     stats?.connectionClosed();
   });

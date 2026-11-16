@@ -10,13 +10,24 @@ export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
  * of the location too, so re-entering the section restores the whole thing
  * rather than dropping the reader back on the stream.
  */
+/**
+ * The server-level surfaces that replace a space in the pane: Activity, Agents
+ * (2026-10-21, every agent you own), and Threads (2026-11-05, every thread you
+ * are in, sessions among them). Browse spaces went with open spaces (2026-11-09).
+ */
+export type OrgView = 'activity' | 'agents' | 'threads'
+
+export function isOrgView(value: unknown): value is OrgView {
+    return value === 'activity' || value === 'agents' || value === 'threads'
+}
+
 export type SpaceLocation = {
     orgId: string
     spaceId: string
     /** What was open inside the space (a discussion, a file, a board). */
     rail?: RailSelection
-    /** An org-level surface instead of a space (spaceId is '' then): Activity. */
-    view?: 'activity'
+    /** An org-level surface instead of a space (spaceId is '' then). */
+    view?: OrgView
 }
 
 /**
@@ -32,15 +43,14 @@ export function serverLandingSpaceId(org: Pick<OrgWithSpaces, 'id' | 'spaces' | 
     return lastVisitedSpaceId(org.id, rooms.map((room) => room.id)) ?? rooms[0]?.id ?? ''
 }
 
-/** Restore a valid location, preferring another space on the same server if it was deleted. */
+/** Restore the destination; the view resolves membership asynchronously (spec §5, 2026-09-28). */
 export function resolveSpacesLocation(orgs: OrgWithSpaces[], previous: unknown): SpaceLocation | null {
     const saved = readLocation(previous)
     const previousOrg = saved ? orgs.find((org) => org.id === saved.orgId) : undefined
     // An org-level surface has no space to validate against — the server being
     // there is the whole of it.
-    if (previousOrg && saved?.view === 'activity') return { orgId: previousOrg.id, spaceId: '', view: 'activity' }
-    if (previousOrg && saved && [...previousOrg.spaces, ...previousOrg.directs].some((space) => space.id === saved.spaceId)) {
-        // The space survived, so what was open inside it comes back with it.
+    if (previousOrg && saved?.view) return { orgId: previousOrg.id, spaceId: '', view: saved.view }
+    if (previousOrg && saved && saved.spaceId) {
         return { orgId: previousOrg.id, spaceId: saved.spaceId, ...(saved.rail ? { rail: saved.rail } : {}) }
     }
     // Landing on a different space than the saved one: its rail selection named
@@ -60,7 +70,7 @@ function readLocation(previous: unknown): SpaceLocation | null {
     const { orgId, spaceId, rail, view } = previous as Partial<SpaceLocation>
     if (typeof orgId !== 'string' || typeof spaceId !== 'string') return null
     const checked = rail ? readRailSelection(rail) : undefined
-    return { orgId, spaceId, ...(checked && checked.kind !== 'general' ? { rail: checked } : {}), ...(view === 'activity' ? { view } : {}) }
+    return { orgId, spaceId, ...(checked && checked.kind !== 'general' ? { rail: checked } : {}), ...(isOrgView(view) ? { view } : {}) }
 }
 
 /**
@@ -74,14 +84,24 @@ export function readLastSpace(): unknown {
 }
 
 /**
- * The org link landings (Harbor http.ts) hand a browser-opened link into the
- * app as rowboat://open?type=spaces&org=<address>&…: a space, a file in it, a
- * message in it (root or reply), or a person. What they name is resolved
- * before navigating — the org by address from the signed-in list, a reply's
- * thread from the org, a person's DM created on first use.
+ * The last space opened, shape-checked but not yet checked against the
+ * servers: what the app opens on its first frame (2026-11-09), before the
+ * org list has loaded. resolveSpacesLocation confirms it once it has.
+ */
+export function lastSpaceLocation(): SpaceLocation | null {
+    return readLocation(readLastSpace())
+}
+
+/**
+ * The link landings (Harbor http.ts) hand a browser-opened link into the
+ * app as rowboat://open?type=spaces&server=<address>&… (`org=` until
+ * 2026-11-09), and into the web app as its /open with the same query
+ * (2026-10-13): a space, a file in it, a message in it (root or reply), a
+ * person, or an invite. What they name is resolved before navigating
+ * (spaces-link-open.ts).
  */
 export interface SpacesLinkTarget {
-  orgAddress: string
+  address: string
   spaceId?: string
   assetId?: string
   messageId?: string
@@ -96,10 +116,10 @@ export function parseSpacesLink(input: string): SpacesLinkTarget | null {
   const m = /^rowboat:\/\/open\/?\?(.*)$/.exec(input)
   if (!m) return null
   const params = new URLSearchParams(m[1]!)
-  const orgAddress = params.get('org')
-  if (params.get('type') !== 'spaces' || !orgAddress) return null
+  const address = params.get('server')
+  if (params.get('type') !== 'spaces' || !address) return null
   const pick = (k: string) => params.get(k) || undefined
-  const target: SpacesLinkTarget = { orgAddress }
+  const target: SpacesLinkTarget = { address }
   const spaceId = pick('spaceId'), assetId = pick('assetId'), messageId = pick('messageId'), memberId = pick('memberId')
   const inviteToken = pick('invite')
   if (spaceId) target.spaceId = spaceId

@@ -24,6 +24,8 @@ import {
   stopWorkspaceWatcher
 } from "./ipc.js";
 import { disposeAllTerminals } from "@x/core/dist/terminal/terminal.js";
+import { stopLocalAgents } from "@x/core/dist/spaces/local-agents.js";
+import { rangedResponse } from "@x/core/dist/spaces/byte-range.js";
 import * as spaceBlobCache from "./spaces/blob-cache.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
@@ -50,7 +52,7 @@ import { promisify } from "node:util";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import { forwardRpc } from "./rpc-forwarder.js";
 import { bounceAllLive, getClient as getSpaceClient, listOrgs as listSpaceOrgs } from "@x/core/dist/spaces/orgs.js";
-import { parseOrgUrl } from "@x/shared/dist/spaces.js";
+import { parseSpacesUrl } from "@x/shared/dist/spaces.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
@@ -148,6 +150,7 @@ app.on("open-url", (event, url) => {
 
 // Subsequent launches on Windows/Linux land here via the single-instance lock.
 app.on("second-instance", (_event, argv) => {
+  showApp();
   const url = extractDeepLinkFromArgv(argv);
   if (url) dispatchUrl(url);
 });
@@ -321,7 +324,8 @@ function registerAppProtocol() {
           // Not an image — fall through to the full blob.
         }
         const blob = await spaceBlobCache.getBlob(orgId, spaceId, hash);
-        return new Response(new Uint8Array(blob.bytes), { headers: { ...headers, "content-type": blob.mime } });
+        // Byte ranges, so a video in a message seeks (2026-11-04).
+        return rangedResponse(blob.bytes, request.headers.get("range"), { ...headers, "content-type": blob.mime });
       } catch (err) {
         console.error("[space-blob] failed to serve", request.url, err);
         return new Response("Not Found", { status: 404 });
@@ -432,8 +436,15 @@ function configureAppDisplayMediaHandler(targetSession: Session): void {
 // running from the tray. showApp() is the single "bring the app up" path
 // used by the tray, the Dock, and pending tray commands.
 let mainWindow: BrowserWindow | null = null;
+let isStartingUp = true;
+let pendingShowOnStartup = false;
 
 function showApp(): void {
+  if (isStartingUp) {
+    pendingShowOnStartup = true;
+    app.focus({ steal: true });
+    return;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     if (!mainWindow.isVisible()) mainWindow.maximize();
@@ -470,6 +481,16 @@ function wasLaunchedAtLogin(): boolean {
 }
 
 function createWindow(options: { startHidden?: boolean } = {}) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!options.startHidden) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.maximize();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    return mainWindow;
+  }
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -512,16 +533,20 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     if (options.startHidden) return;
     win.maximize();
     win.show();
+    if (pendingShowOnStartup) {
+      win.focus();
+      app.focus({ steal: true });
+    }
   });
 
-  // A link into a signed-in org (the contract's link grammar: a space, a
+  // A link into the signed-in server (the contract's link grammar: a space, a
   // file, a message, a person) opens in the app, not in a browser that would
-  // only hand it straight back through the org's landing page. Any other
+  // only hand it straight back through the server's landing page. Any other
   // URL is external.
   const openOrgLinkInApp = (url: string): boolean => {
-    const link = parseOrgUrl(url);
-    if (!link || !listSpaceOrgs().some((o) => o.address === link.orgAddress)) return false;
-    const target = new URLSearchParams({ type: "spaces", org: link.orgAddress });
+    const link = parseSpacesUrl(url);
+    if (!link || !listSpaceOrgs().some((o) => o.address === link.address)) return false;
+    const target = new URLSearchParams({ type: "spaces", server: link.address });
     if ('spaceId' in link) target.set("spaceId", link.spaceId);
     if (link.kind === "asset") target.set("assetId", link.assetId);
     if (link.kind === "message") target.set("messageId", link.messageId);
@@ -729,7 +754,8 @@ app.whenReady().then(async () => {
     toggleMeetingNotes: toggleMeetingNotesFromMenus,
   });
 
-  createWindow({ startHidden: wasLaunchedAtLogin() });
+  createWindow({ startHidden: pendingShowOnStartup ? false : wasLaunchedAtLogin() });
+  isStartingUp = false;
 
   // Menu bar icon: open the app / start-stop meeting notes without the window.
   createAppTray({
@@ -882,6 +908,8 @@ app.on("before-quit", () => {
   stopRunsWatcher();
   stopServicesWatcher();
 stopSkillsWatcher();
+  // Local agents stop answering: their sockets close, so Harbor shows them offline.
+  stopLocalAgents();
   // Tear down any live ACP coding-agent adapter processes so they don't outlive the app.
   try {
     container.resolve<CodeModeManager>('codeModeManager').disposeAll();

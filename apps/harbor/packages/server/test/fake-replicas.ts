@@ -36,6 +36,7 @@ interface Workspace {
   name: string;
   environmentId: string;
   codingAgent: string;
+  lifecyclePolicy: string;
   chat: Chat;
   streams: Set<ServerResponse>;
 }
@@ -112,6 +113,10 @@ export class FakeReplicas {
 
     const parts = url.pathname.split('/').filter(Boolean); // v1, replica, :id, …
     if (url.pathname === '/v1/environments') return json(200, { environments: this.environments });
+    if (parts[0] === 'v1' && parts[1] === 'agents' && parts[3] === 'models' && req.method === 'GET') {
+      const models = parts[2] === 'claude' ? [{ id: 'claude-opus-5-5', displayName: 'Opus 5.5' }, { id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5' }] : [];
+      return json(200, { source: 'static', models, defaultModel: models[0]?.id ?? null, page: 1, total: models.length, limit: 100, totalPages: 1 });
+    }
     if (url.pathname === '/v1/replica' && req.method === 'POST') {
       const id = `ws-${++this.sequence}`;
       const workspace: Workspace = {
@@ -119,6 +124,7 @@ export class FakeReplicas {
         name: String(body!.name),
         environmentId: String(body!.environment_id),
         codingAgent: String(body!.coding_agent),
+        lifecyclePolicy: String(body!.lifecycle_policy ?? 'delete_when_done'),
         chat: { id: `chat-${this.sequence}`, processing: false, history: [] },
         streams: new Set(),
       };
@@ -160,6 +166,7 @@ export class FakeReplicas {
       if (early) {
         this.early.delete(workspace.id);
         await this.run(workspace, early);
+        if (!this.workspaces.has(workspace.id)) return json(404, { error: 'Resource not found' });
       }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
       res.write(': connected\n\n');
@@ -200,6 +207,12 @@ export class FakeReplicas {
     if (turn.prUrls?.length) this.emit(workspace, 'repo.status.changed', { repos: [{ name: 'web', prUrls: turn.prUrls }] });
     workspace.chat.processing = false;
     this.emit(workspace, 'chat.turn.completed', { chatId, isComplete: turn.complete !== false, processing: false });
+    // Replicas's API defaults to deleting a completed workspace (2026-10-26 OpenAPI).
+    // Model that default so losing history before Harbor reads it is observable in tests.
+    if (workspace.lifecyclePolicy === 'delete_when_done') {
+      this.workspaces.delete(workspace.id);
+      for (const stream of workspace.streams) stream.end();
+    }
   }
 
   private emit(workspace: Workspace, type: string, payload: Record<string, unknown>): void {

@@ -40,6 +40,7 @@ const REPULSION = 5800
 const DAMPING = 0.83
 const MIN_DISTANCE = 34
 const CLUSTER_STRENGTH = 0.0018
+const MAX_SPEED = 60
 const CLUSTER_RADIUS_MIN = 120
 const CLUSTER_RADIUS_MAX = 240
 const CLUSTER_RADIUS_STEP = 45
@@ -47,6 +48,12 @@ const FLOAT_BASE = 3.5
 const FLOAT_VARIANCE = 2
 const FLOAT_SPEED_BASE = 0.0006
 const FLOAT_SPEED_VARIANCE = 0.00025
+
+/** A link between two notes, drawn as a shallow arc. */
+function arcPath(source: { x: number; y: number }, target: { x: number; y: number }) {
+  const dr = Math.hypot(target.x - source.x, target.y - source.y) * 1.5
+  return `M${source.x},${source.y}A${dr},${dr} 0 0,1 ${target.x},${target.y}`
+}
 
 export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -73,6 +80,14 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
   const [, forceRender] = useState(0)
+  // Each frame of the layout and the idle float moves the elements directly
+  // instead of re-rendering through React (2026-10-22): with ~550 notes and
+  // ~600 links a React pass took ~80ms, so the app dropped to ~12fps for as
+  // long as the Brain graph was open. React still renders on hover, search
+  // and data changes.
+  const nodeElsRef = useRef(new Map<string, SVGGElement>())
+  const edgeElsRef = useRef<(SVGPathElement | null)[]>([])
+  const paintEdgesRef = useRef<GraphEdge[]>([])
 
   const edgeList = useMemo(
     () => edges.filter((edge) => edge.source !== edge.target),
@@ -144,6 +159,29 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
     }
   }, [getMotionSeed])
 
+  const paint = useCallback(() => {
+    const positions = positionsRef.current
+    const draggingId = draggingRef.current?.id
+    const shown = new Map<string, { x: number; y: number }>()
+    nodeElsRef.current.forEach((el, id) => {
+      const pos = positions.get(id)
+      if (!pos) return
+      const point = getDisplayPosition(id, pos, draggingId === id)
+      shown.set(id, point)
+      el.setAttribute('transform', `translate(${point.x} ${point.y})`)
+    })
+    paintEdgesRef.current.forEach((edge, index) => {
+      const el = edgeElsRef.current[index]
+      const source = shown.get(edge.source)
+      const target = shown.get(edge.target)
+      if (el && source && target) el.setAttribute('d', arcPath(source, target))
+    })
+  }, [getDisplayPosition])
+
+  useEffect(() => {
+    paintEdgesRef.current = edgeList
+  }, [edgeList])
+
   const getGraphPoint = useCallback((event: React.PointerEvent) => {
     const container = containerRef.current
     if (!container) return { x: 0, y: 0 }
@@ -171,7 +209,18 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
     return () => observer.disconnect()
   }, [])
 
+  // The app rebuilds graph data whenever the notes tree refreshes, with new
+  // arrays but usually the same notes and links. Restart the layout only when
+  // the shape changes (2026-10-22: each restart re-ran 240 heavy frames).
+  const layoutKey = useMemo(
+    () => `${nodes.map((node) => `${node.id}:${node.group}`).join('\n')}|${edgeList.map((edge) => `${edge.source}>${edge.target}`).join('\n')}`,
+    [nodes, edgeList]
+  )
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const layoutInput = useMemo(() => ({ nodes, edgeList, groupCenters, nodeGroupMap }), [layoutKey])
+
   useEffect(() => {
+    const { nodes, edgeList, groupCenters, nodeGroupMap } = layoutInput
     if (nodes.length === 0) {
       positionsRef.current = new Map()
       return
@@ -183,7 +232,7 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
 
     nodes.forEach((node, index) => {
       const existing = positionsRef.current.get(node.id)
-      if (existing) {
+      if (existing && Number.isFinite(existing.x) && Number.isFinite(existing.y)) {
         nextPositions.set(node.id, { ...existing })
         return
       }
@@ -197,100 +246,95 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
     })
 
     positionsRef.current = nextPositions
+    forceRender((prev) => prev + 1)
 
     let step = 0
     let rafId = 0
     let active = true
 
+    // The layout runs on plain arrays (2026-10-22): the old per-pair Map
+    // lookups made each step of ~550 notes cost tens of milliseconds.
+    const ids = nodes.map((node) => node.id)
+    const list = ids.map((id) => nextPositions.get(id)!)
+    const indexOf = new Map(ids.map((id, index) => [id, index]))
+    const links = edgeList.flatMap((edge) => {
+      const a = indexOf.get(edge.source)
+      const b = indexOf.get(edge.target)
+      return a === undefined || b === undefined ? [] : [[a, b] as const]
+    })
+    const centers = ids.map((id) => groupCenters.get(nodeGroupMap.get(id) ?? 'root') ?? null)
+    const fx = new Float64Array(ids.length)
+    const fy = new Float64Array(ids.length)
+
     const simulate = () => {
       if (!active) return
       step += 1
+      fx.fill(0)
+      fy.fill(0)
 
-      const positions = positionsRef.current
-      const ids = nodes.map((node) => node.id)
-      const forces = new Map<string, { x: number; y: number }>()
-
-      ids.forEach((id) => forces.set(id, { x: 0, y: 0 }))
-
-      for (let i = 0; i < ids.length; i += 1) {
-        const idA = ids[i]
-        const posA = positions.get(idA)
-        if (!posA) continue
-        for (let j = i + 1; j < ids.length; j += 1) {
-          const idB = ids[j]
-          const posB = positions.get(idB)
-          if (!posB) continue
+      for (let i = 0; i < list.length; i += 1) {
+        const posA = list[i]
+        for (let j = i + 1; j < list.length; j += 1) {
+          const posB = list[j]
           const dx = posB.x - posA.x
           const dy = posB.y - posA.y
-          const distance = Math.max(MIN_DISTANCE, Math.hypot(dx, dy))
-          const force = REPULSION / (distance * distance)
-          const fx = (force * dx) / distance
-          const fy = (force * dy) / distance
-          const forceA = forces.get(idA)
-          const forceB = forces.get(idB)
-          if (forceA) {
-            forceA.x -= fx
-            forceA.y -= fy
-          }
-          if (forceB) {
-            forceB.x += fx
-            forceB.y += fy
-          }
+          const distance = Math.max(MIN_DISTANCE, Math.sqrt(dx * dx + dy * dy))
+          const force = REPULSION / (distance * distance * distance)
+          fx[i] -= force * dx
+          fy[i] -= force * dy
+          fx[j] += force * dx
+          fy[j] += force * dy
         }
       }
 
-      edgeList.forEach((edge) => {
-        const posA = positions.get(edge.source)
-        const posB = positions.get(edge.target)
-        if (!posA || !posB) return
+      for (const [a, b] of links) {
+        const posA = list[a]
+        const posB = list[b]
         const dx = posB.x - posA.x
         const dy = posB.y - posA.y
-        const distance = Math.max(20, Math.hypot(dx, dy))
-        const delta = distance - SPRING_LENGTH
-        const force = delta * SPRING_STRENGTH
-        const fx = (force * dx) / distance
-        const fy = (force * dy) / distance
-        const forceA = forces.get(edge.source)
-        const forceB = forces.get(edge.target)
-        if (forceA) {
-          forceA.x += fx
-          forceA.y += fy
-        }
-        if (forceB) {
-          forceB.x -= fx
-          forceB.y -= fy
-        }
-      })
+        const distance = Math.max(20, Math.sqrt(dx * dx + dy * dy))
+        const force = ((distance - SPRING_LENGTH) * SPRING_STRENGTH) / distance
+        fx[a] += force * dx
+        fy[a] += force * dy
+        fx[b] -= force * dx
+        fy[b] -= force * dy
+      }
 
-      ids.forEach((id) => {
-        const pos = positions.get(id)
-        const force = forces.get(id)
-        if (!pos || !force) return
-        const group = nodeGroupMap.get(id) ?? 'root'
-        const center = groupCenters.get(group)
-        if (!center) return
-        const dx = center.x - pos.x
-        const dy = center.y - pos.y
-        force.x += dx * CLUSTER_STRENGTH
-        force.y += dy * CLUSTER_STRENGTH
-      })
-
-      ids.forEach((id) => {
-        const pos = positions.get(id)
-        const force = forces.get(id)
-        if (!pos || !force) return
-        if (draggingRef.current?.id === id) {
+      const draggingId = draggingRef.current?.id
+      for (let i = 0; i < list.length; i += 1) {
+        const pos = list[i]
+        const center = centers[i]
+        if (center) {
+          fx[i] += (center.x - pos.x) * CLUSTER_STRENGTH
+          fy[i] += (center.y - pos.y) * CLUSTER_STRENGTH
+        }
+        if (draggingId === ids[i]) {
           pos.vx = 0
           pos.vy = 0
-          return
+          continue
         }
-        pos.vx = (pos.vx + force.x) * DAMPING
-        pos.vy = (pos.vy + force.y) * DAMPING
+        pos.vx = (pos.vx + fx[i]) * DAMPING
+        pos.vy = (pos.vy + fy[i]) * DAMPING
+        // Cap the speed and drop bad numbers (2026-10-22): one runaway or NaN
+        // node spreads to every node through repulsion, and the whole graph
+        // then draws as a single pile at the centre.
+        const speed = Math.sqrt(pos.vx * pos.vx + pos.vy * pos.vy)
+        if (!Number.isFinite(speed)) {
+          pos.vx = 0
+          pos.vy = 0
+        } else if (speed > MAX_SPEED) {
+          pos.vx = (pos.vx / speed) * MAX_SPEED
+          pos.vy = (pos.vy / speed) * MAX_SPEED
+        }
         pos.x += pos.vx
         pos.y += pos.vy
-      })
+        if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) {
+          pos.x = (Math.random() - 0.5) * radius * 2
+          pos.y = (Math.random() - 0.5) * radius * 2
+        }
+      }
 
-      forceRender((prev) => prev + 1)
+      paint()
 
       if (step < SIMULATION_STEPS) {
         rafId = requestAnimationFrame(simulate)
@@ -302,7 +346,7 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
       active = false
       if (rafId) cancelAnimationFrame(rafId)
     }
-  }, [nodes, edgeList, groupCenters, nodeGroupMap])
+  }, [layoutInput, paint])
 
   useEffect(() => {
     if (nodes.length === 0) return
@@ -314,7 +358,7 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
       if (delta >= 32) {
         motionTimeRef.current += delta
         lastTime = time
-        forceRender((prev) => prev + 1)
+        paint()
       }
       rafId = requestAnimationFrame(animate)
     }
@@ -323,7 +367,7 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
     return () => {
       if (rafId) cancelAnimationFrame(rafId)
     }
-  }, [nodes.length])
+  }, [nodes.length, paint])
 
   const handlePointerDown = (event: React.PointerEvent) => {
     if (event.button !== 0) return
@@ -342,11 +386,11 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
     if (dragging) {
       const point = getGraphPoint(event)
       const pos = positionsRef.current.get(dragging.id)
-      if (pos) {
+      if (pos && Number.isFinite(point.x) && Number.isFinite(point.y)) {
         pos.x = point.x - dragging.offsetX
         pos.y = point.y - dragging.offsetY
         dragging.moved = true
-        forceRender((prev) => prev + 1)
+        paint()
       }
       return
     }
@@ -382,7 +426,7 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
     const sensitivity = Math.abs(normalizedDelta) < 40 ? 0.004 : 0.0022
     const zoomFactor = Math.exp(-normalizedDelta * sensitivity)
     const nextZoom = Math.min(2.5, Math.max(0.4, zoom * zoomFactor))
-    if (nextZoom === zoom) return
+    if (nextZoom === zoom || !Number.isFinite(nextZoom)) return
 
     const container = containerRef.current
     if (!container) {
@@ -560,14 +604,11 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
             }
             const activeNode = activeNodeId ? nodes.find((n) => n.id === activeNodeId) : null
             const stroke = isActiveEdge && activeNode ? activeNode.color : '#333'
-            const dx = target.x - source.x
-            const dy = target.y - source.y
-            const dr = Math.sqrt(dx * dx + dy * dy) * 1.5
-            const pathD = `M${source.x},${source.y}A${dr},${dr} 0 0,1 ${target.x},${target.y}`
             return (
               <path
                 key={`${edge.source}-${edge.target}-${index}`}
-                d={pathD}
+                ref={(el) => { edgeElsRef.current[index] = el }}
+                d={arcPath(source, target)}
                 fill="none"
                 stroke={stroke}
                 strokeOpacity={strokeOpacity}
@@ -604,6 +645,10 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
             return (
               <g
                 key={node.id}
+                ref={(el) => {
+                  if (el) nodeElsRef.current.set(node.id, el)
+                  else nodeElsRef.current.delete(node.id)
+                }}
                 transform={`translate(${pos.x} ${pos.y})`}
                 className="cursor-pointer"
                 onPointerEnter={() => setHoveredNodeId(node.id)}

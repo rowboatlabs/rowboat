@@ -1,5 +1,6 @@
+import { Availability } from './availability.js';
 import { z } from 'zod';
-import { Approval } from './approval.js';
+import { Approval, type ApprovalAction } from './approval.js';
 import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
@@ -19,8 +20,9 @@ export const Attribution = z.object({
 export type Attribution = z.infer<typeof Attribution>;
 
 /**
- * The org-level admin bit (spec §4, amended 2026-08-19): admin powers are
- * membership and policy, never content — the content plane is role-flat.
+ * The admin bit (spec §4 Roles, rewritten 2026-11-09): on a MEMBERSHIP row,
+ * meaning admin of that space. Until 2026-11-09 it sat on the member and
+ * meant admin of the org.
  */
 export const MemberRole = z.enum(['admin', 'member']);
 export type MemberRole = z.infer<typeof MemberRole>;
@@ -34,12 +36,30 @@ export type MemberRole = z.infer<typeof MemberRole>;
 export const MemberKind = z.enum(['human', 'agent']);
 export type MemberKind = z.infer<typeof MemberKind>;
 
+/** How long an agent's instructions may be (2026-10-29): room for a page of guidance, not a manual. */
+export const AGENT_INSTRUCTIONS_MAX = 4000;
+
+/**
+ * How a super agent asks (spec §4 Agent members, 2026-11-02, the two switches
+ * renamed the same day): `askBeforeCreate` puts each agent Rowboat runs on its
+ * trial credit on a card for the owner to allow; `askBeforeDelete` does the
+ * same for deleting one it created. Both on by default; off, Harbor acts at
+ * once. An agent that needs its owner's details always waits for them.
+ */
+export const SuperAgent = z.object({
+  askBeforeCreate: z.boolean().default(true),
+  askBeforeDelete: z.boolean().default(true),
+});
+export type SuperAgent = z.infer<typeof SuperAgent>;
+
 export const Member = z.object({
+  availability: Availability.optional(),
   id: MemberId,
-  /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
+  /** Display-only, server-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
+  /** What they do, as the roster shows it (spec §4 Member profile; built 2026-10-19). Absent = none. */
+  title: z.string().min(1).max(128).optional(),
   avatarUrl: z.string().url().optional(),
-  role: MemberRole.default('member'),
   /** Absent from servers before 2026-09-29, whose members are all people. */
   kind: MemberKind.default('human'),
   /**
@@ -55,8 +75,67 @@ export const Member = z.object({
    */
   agentKind: z.string().min(1).max(32).optional(),
   agentConnection: z.string().min(1).max(32).optional(),
+  /**
+   * The platform instance the agent is, for a connection in
+   * INSTANCE_CONNECTIONS (2026-10-05): Agent37's instance id. Not a secret.
+   * Fixed at creation like the kind and connection: another instance is
+   * another agent. Absent for every other agent and for people.
+   */
+  agentInstance: z.string().min(1).max(128).optional(),
+  /**
+   * A super agent (spec §4 Agent members, 2026-11-02): an agent an admin let
+   * create agents, and delete the managed ones it created.
+   * Absent = an ordinary agent, which creates none. Set only by an admin.
+   */
+  superAgent: SuperAgent.optional(),
+  /**
+   * An agent's instructions from its owner (2026-10-29, agent personalities):
+   * how it should behave, in its owner's words, which its connector gives the
+   * agent with every invocation (Invocation.instructions). Optional, set only
+   * by the owner, read by every member like the rest of the profile.
+   * Absent for people and for agents without any.
+   */
+  instructions: z.string().min(1).max(AGENT_INSTRUCTIONS_MAX).optional(),
+  /**
+   * When the person deleted their account (2026-10-08, App Store 5.1.1(v)).
+   * The member stays, name and all, so their messages keep their author;
+   * clients mark them deactivated and leave them out of pickers. Harbor
+   * refuses them as a sign-in, a DM, or an addition. Absent = active.
+   */
+  deactivatedAt: z.string().optional(),
+  /**
+   * A row that departed: built 2026-10-19 for an org admin's removal; since
+   * 2026-11-09 a duplicate identity the one-server migration folded into
+   * another member, or the retired Jev. Like a deactivated account, the row
+   * stays so their messages keep their author, and clients mark them and
+   * leave them out of pickers. Absent = active.
+   */
+  removedAt: z.string().optional(),
 });
 export type Member = z.infer<typeof Member>;
+
+/**
+ * Edit your own profile (spec §4 Member profile; built 2026-10-19): a field
+ * left out is left alone. Both are trimmed; a name must keep a character, and
+ * an empty title clears it. The avatar has its own byte route.
+ */
+/**
+ * An agent's profile, set by its owner (2026-10-29): its description (the
+ * profile's title, shown wherever it is listed) and its instructions. A field
+ * left out is left alone; an empty one clears it.
+ */
+export const UpdateAgentProfile = z.object({
+  title: z.string().max(128).optional(),
+  instructions: z.string().max(AGENT_INSTRUCTIONS_MAX).optional(),
+});
+export type UpdateAgentProfile = z.infer<typeof UpdateAgentProfile>;
+
+export const UpdateProfile = z.object({
+  availability: Availability.optional(),
+  displayName: z.string().max(128).optional(),
+  title: z.string().max(128).optional(),
+});
+export type UpdateProfile = z.infer<typeof UpdateProfile>;
 
 /**
  * The (kind, connection) pairs Harbor accepts when an agent is added (spec §4
@@ -66,13 +145,73 @@ export type Member = z.infer<typeof Member>;
  * key. A new pair is a line here, never a migration.
  */
 export const REPLICAS_CODING_AGENTS = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'muse-code'] as const;
+/** Conductor runs Claude Code first; Codex and Cursor once their transcripts are read (2026-10-06). */
+export const CONDUCTOR_CODING_AGENTS = ['claude-code'] as const;
+/** The general agents Agent37 hosts that Harbor drives through its API (2026-10-01): coding harnesses wait. */
+export const AGENT37_AGENTS = ['hermes', 'openclaw'] as const;
+/** The runtimes Maritime hosts that Harbor drives through its exec API (2026-10-26): each turn is the runtime's own CLI, run in the agent's VM. */
+export const MARITIME_AGENTS = ['hermes', 'claude-code', 'codex'] as const;
+/**
+ * The agents Rowboat runs on its trial credit (spec §8 Maritime, 2026-10-27):
+ * what a super agent's request needs nothing more for, so Harbor creates it
+ * alone (2026-11-02). Every other agent needs its owner's details.
+ */
+export const TRIAL_KINDS = ['hermes', 'codex'] as const;
+/**
+ * The coding agents the desktop app runs on its owner's own computer
+ * (2026-10-28, local agents): the app holds the agent's key and drives the
+ * owner's own Claude Code or Codex, signed in as them. Harbor runs nothing.
+ */
+export const LOCAL_CODING_AGENTS = ['claude-code', 'codex'] as const;
+export const LOCAL_CONNECTION = 'local';
 export const AGENT_PAIRS: ReadonlyArray<{ kind: string; connection: string }> = [
   { kind: 'custom', connection: 'contract' },
   { kind: 'hermes', connection: 'plugin' },
   ...REPLICAS_CODING_AGENTS.map((kind) => ({ kind, connection: 'replicas' })),
+  ...AGENT37_AGENTS.map((kind) => ({ kind, connection: 'agent37' })),
+  ...CONDUCTOR_CODING_AGENTS.map((kind) => ({ kind, connection: 'conductor' })),
+  ...MARITIME_AGENTS.map((kind) => ({ kind, connection: 'maritime' })),
+  ...LOCAL_CODING_AGENTS.map((kind) => ({ kind, connection: LOCAL_CONNECTION })),
+  // Integrations (2026-10-03): the service's own API, called on a command, its kind and connection one name.
+  { kind: 'posthog', connection: 'posthog' },
+  { kind: 'cal', connection: 'cal' },
+  { kind: 'attio', connection: 'attio' },
 ];
 /** Connections whose connector Harbor runs, calling the platform with a credential it holds (spec §8 Connectors). */
-export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas'];
+export const HARBOR_RUN_CONNECTIONS: readonly string[] = ['replicas', 'agent37', 'conductor', 'maritime', 'posthog', 'cal', 'attio'];
+/**
+ * Connections whose agent is one instance on the platform (2026-10-05): the
+ * agent is added with it, and Harbor checks the instance runs the agent's kind.
+ * An Agent37 instance keeps its own memory and files, so it is the agent. A
+ * Maritime agent is a VM with a persistent volume (2026-10-26): the same.
+ */
+export const INSTANCE_CONNECTIONS: readonly string[] = ['agent37', 'maritime'];
+/**
+ * Connections whose agents answer their owner only, in every space (2026-10-28;
+ * seats since 2026-11-09): a local agent runs commands on its owner's
+ * computer, so its seats are locked to `owner` whatever is asked.
+ */
+export const OWNER_ONLY_CONNECTIONS: readonly string[] = [LOCAL_CONNECTION];
+/**
+ * What a super agent may ask for (spec §4 Agent members, 2026-11-02): an
+ * agent Rowboat runs (no connection, one of MARITIME_AGENTS), or any pair in
+ * AGENT_PAIRS but a local one, which answers its owner only and so can't be handed work.
+ */
+export function superAgentMayCreate(kind: string, connection?: string): boolean {
+  if (connection === undefined) return (MARITIME_AGENTS as readonly string[]).includes(kind);
+  return connection !== LOCAL_CONNECTION && isAgentPair(kind, connection);
+}
+
+/**
+ * A super agent's create its owner sets up (2026-11-02): every agent but one
+ * Rowboat runs on its trial credit needs the owner's details (a platform key,
+ * an instance, an Anthropic key, or setting it up where it runs). Its card is
+ * a setup card: the owner completes it by adding or creating the agent with
+ * the approval's id as `request`, or denies it; allowing it alone does nothing.
+ */
+export function ownerSetsUp(action: ApprovalAction): boolean {
+  return action.kind === 'create_agent' && (action.connection !== undefined || !(TRIAL_KINDS as readonly string[]).includes(action.agentKind));
+}
 
 export function isAgentPair(kind: string, connection: string): boolean {
   return AGENT_PAIRS.some((pair) => pair.kind === kind && pair.connection === connection);
@@ -80,7 +219,7 @@ export function isAgentPair(kind: string, connection: string): boolean {
 
 /**
  * A credential an agent member presents as itself (spec §4, 2026-09-29): a
- * bearer secret the org stores only as a hash. The secret is shown once, at
+ * bearer secret the server stores only as a hash. The secret is shown once, at
  * creation (AgentKeySecret); every other read is this metadata.
  */
 export const AgentKey = z.object({
@@ -112,12 +251,247 @@ export const AgentCredential = z.object({
 });
 export type AgentCredential = z.infer<typeof AgentCredential>;
 
-/** An agent with its keys, as the Agents screen lists them, and its platform credential when Harbor runs its connector. */
-export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional() });
+/**
+ * Where a platform agent's alerts land (spec §8 Alerts, 2026-10-03): the
+ * service posts to a secret address, and the agent posts what it says into
+ * this space. The address is shown once, when it is set; the server keeps its hash.
+ */
+export const AgentHook = z.object({
+  spaceId: SpaceId,
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+});
+export type AgentHook = z.infer<typeof AgentHook>;
+
+/**
+ * A managed agent's hosting (spec §8 Maritime, 2026-10-26): Rowboat's own
+ * account on the platform runs it, created from the app rather than connected
+ * to. `creating` until the platform has it, `deploying` while it boots,
+ * `checking` while Harbor proves it answers a command, then `ready`; `failed`
+ * says why; `deleting` until the platform confirms, then `deleted`.
+ */
+export const HostingStatus = z.enum(['creating', 'deploying', 'checking', 'ready', 'failed', 'deleting', 'deleted']);
+export type HostingStatus = z.infer<typeof HostingStatus>;
+/**
+ * Who pays for a managed agent's model calls (spec §8 Maritime, 2026-10-27):
+ * Rowboat's trial credit on the platform, there to try the agent, or the
+ * owner's own provider key, where every agent is meant to end up. The trial
+ * is one-shot: it closes when its cap is reached, when it expires, or the
+ * moment a key is added, and never reopens. `credits` (2026-11-04, billing
+ * for managed agents): on a deployment that bills, Hermes calls the model
+ * through Rowboat's LLM gateway on its owner's Rowboat credits, as the
+ * desktop app does; there is no trial there.
+ */
+export const HostingFunding = z.enum(['trial', 'own', 'credits']);
+export type HostingFunding = z.infer<typeof HostingFunding>;
+/** Where an agent's model access is from: a provider its owner holds a key for, or `chatgpt`, the ChatGPT plan its owner signed Codex in to from the Terminal (2026-10-30; no key, so `keyHint` is empty). */
+export const LlmProvider = z.enum(['openai', 'anthropic', 'openrouter', 'chatgpt']);
+export type LlmProvider = z.infer<typeof LlmProvider>;
+/** The providers each managed kind runs on with its owner's key; the first is the one offered first. */
+export const LLM_PROVIDERS: Readonly<Record<string, readonly LlmProvider[]>> = { hermes: ['openai', 'anthropic', 'openrouter'], codex: ['openai'], 'claude-code': ['anthropic'] };
+export const HostingTrial = z.object({
+  /** When the trial ends by time, whatever is left of its credit. */
+  endsAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().optional(),
+  closedReason: z.enum(['exhausted', 'expired', 'own_key', 'sign_in']).optional(),
+});
+export type HostingTrial = z.infer<typeof HostingTrial>;
+export const HostingLlm = z.object({
+  provider: LlmProvider,
+  /** The key's last characters: enough to recognise it, never to use it; empty for a sign-in. */
+  keyHint: z.string().max(16),
+  /** The runtime's default model from then on, when the owner named one. */
+  model: z.string().max(128).optional(),
+  setBy: MemberId,
+  setAt: z.iso.datetime(),
+});
+export type HostingLlm = z.infer<typeof HostingLlm>;
+/** What the platform says the agent has drawn on Rowboat's credit this period. */
+export const HostingSpend = z.object({
+  spentCents: z.number(),
+  limitCents: z.number().optional(),
+  limitReached: z.boolean(),
+  periodEnd: z.string().max(64).optional(),
+});
+export type HostingSpend = z.infer<typeof HostingSpend>;
+
+/**
+ * What a billed agent has cost this calendar month (UTC), as the platform
+ * counts it (2026-11-04): the machine, and any model calls the platform
+ * itself served. Model calls through Rowboat's gateway are on the owner's
+ * Rowboat usage instead.
+ */
+export const HostingUsage = z.object({
+  periodStart: z.iso.datetime(),
+  machineCents: z.number(),
+  llmCents: z.number(),
+});
+export type HostingUsage = z.infer<typeof HostingUsage>;
+
+export const AgentHosting = z.object({
+  provider: z.literal('maritime'),
+  status: HostingStatus,
+  /** The platform's own id for the agent, once it exists there. */
+  externalId: z.string().max(128).optional(),
+  error: z.string().max(1000).optional(),
+  funding: HostingFunding,
+  /** The trial, for an agent that started on one: when it ends, and once closed, why. */
+  trial: HostingTrial.optional(),
+  /** The owner's key, once the agent runs on one. */
+  llm: HostingLlm.optional(),
+  /**
+   * The agent bills to its owner's Rowboat plan (2026-11-04): its machine at
+   * the platform's own cost, and on `credits` its model calls too. Absent on a
+   * deployment that does not bill.
+   */
+  billed: z.literal(true).optional(),
+  createdBy: MemberId,
+  /** The super agent that asked for it (2026-11-02), when one did; `createdBy` is then that agent's owner. */
+  requestedBy: MemberId.optional(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+export type AgentHosting = z.infer<typeof AgentHosting>;
+
+/**
+ * Managing a managed agent's VM (spec §8 Maritime, the management area,
+ * 2026-10-27): what the platform says about the machine, its environment
+ * variables, a command run on it, its logs, files, skills and triggers. The
+ * owner or an admin, render face only, through Harbor with the deployment's
+ * own platform key. Shapes are Harbor's, not the platform's, kept small.
+ */
+/**
+ * A managed agent's machine size (2026-11-04, "billing" in Main): what it has,
+ * what the platform lets it have, and what each memory size is estimated to
+ * cost. Every number is the platform's own, read live: the range from its
+ * account limits, the estimate from its published rate. The estimate is only
+ * that; a billed agent pays the platform's exact cost for what it ran.
+ * `resizable` is false, with `reason`, when the owner may not change it (a
+ * plan without bigger machines, a deployment that does not bill).
+ */
+export const HostingSize = z.object({
+  memMb: z.number().int().optional(),
+  diskGb: z.number().optional(),
+  vcpus: z.number().optional(),
+  memOptions: z.array(z.object({ memMb: z.number().int(), centsPerMonth: z.number().optional() })).max(64),
+  maxDiskGb: z.number().optional(),
+  resizable: z.boolean(),
+  reason: z.string().max(300).optional(),
+  upgradeUrl: z.url().optional(),
+});
+export type HostingSize = z.infer<typeof HostingSize>;
+
+export const HostingMachine = z.object({
+  /** The platform's word: `sleeping`, `active`, `deploying`, `error`, `stopped`, … */
+  status: z.string().max(32),
+  /** The platform's billing tier, when it says one. */
+  tier: z.string().max(32).optional(),
+});
+export type HostingMachine = z.infer<typeof HostingMachine>;
+
+export const HostingEnvVar = z.object({
+  key: z.string().min(1).max(256),
+  /** Absent for a secret: the platform keeps it, nobody reads it back. */
+  value: z.string().max(4096).optional(),
+  secret: z.boolean(),
+  /** The platform's note on the variable, when it has one. */
+  warning: z.string().max(500).optional(),
+});
+export type HostingEnvVar = z.infer<typeof HostingEnvVar>;
+
+export const HostingPowerAction = z.enum(['restart', 'sleep', 'wake', 'reload']);
+export type HostingPowerAction = z.infer<typeof HostingPowerAction>;
+
+/** One command run on the VM: submitted at once, then read until it ends. */
+export const HostingExecution = z.object({
+  id: z.string().max(128),
+  /** `running`, `completed`, `cancelled`, `failed`. */
+  status: z.string().max(32),
+  exitCode: z.number().int().nullable().optional(),
+  stdout: z.string().optional(),
+  stderr: z.string().optional(),
+});
+export type HostingExecution = z.infer<typeof HostingExecution>;
+
+/** A console into the VM (2026-10-30): the platform's terminal socket and a token that opens it for a few minutes, as root. */
+export const HostingConsole = z.object({
+  /** The WebSocket to open (`wss://…/api/agents/{id}/terminal`); the token goes on it as `?token=`. */
+  url: z.string().max(1024),
+  token: z.string().max(4096),
+  expiresAt: z.string(),
+});
+export type HostingConsole = z.infer<typeof HostingConsole>;
+
+export const HostingLogLine = z.object({
+  id: z.string().max(128),
+  level: z.string().max(32),
+  message: z.string(),
+  timestamp: z.string().max(64),
+  source: z.string().max(64),
+});
+export type HostingLogLine = z.infer<typeof HostingLogLine>;
+
+export const HostingFileEntry = z.object({
+  name: z.string().max(512),
+  path: z.string().max(2048),
+  kind: z.enum(['file', 'dir', 'other']),
+  size: z.number().int().nonnegative().optional(),
+  modifiedAt: z.string().max(64).optional(),
+});
+export type HostingFileEntry = z.infer<typeof HostingFileEntry>;
+
+/** A skill on the VM, or one the platform's catalog offers (`installed` false). */
+export const HostingSkill = z.object({
+  name: z.string().max(256),
+  description: z.string().max(2000).optional(),
+  version: z.string().max(64).optional(),
+  installed: z.boolean(),
+});
+export type HostingSkill = z.infer<typeof HostingSkill>;
+
+/** A trigger the platform fires on the agent: a schedule (cron) with the prompt it sends. */
+export const HostingTrigger = z.object({
+  id: z.string().max(128),
+  type: z.string().max(32),
+  enabled: z.boolean(),
+  /** The platform's config for the trigger, passed through: `schedule`, `prompt`, … */
+  config: z.record(z.string(), z.unknown()),
+});
+export type HostingTrigger = z.infer<typeof HostingTrigger>;
+
+/** An agent with its keys, as the Agents screen lists them, its platform credential and alert hook when Harbor runs its connector, and its hosting when Rowboat runs it. */
+/**
+ * One instance a platform key reaches, for the Add flow (2026-11-02, setup
+ * through Harbor so it works on the web): an Agent37 instance or a Maritime
+ * agent. `kind` is the Rowboat kind it runs, absent when it runs none Rowboat
+ * drives or its record does not say; `template` says what it runs then.
+ */
+export const PlatformInstance = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string().max(256).nullable(),
+  status: z.string().max(64),
+  template: z.string().max(128),
+  kind: z.string().max(32).optional(),
+});
+export type PlatformInstance = z.infer<typeof PlatformInstance>;
+
+/** What a super agent's create or delete did: done now, or waiting on its owner's card. */
+export const SuperAgentResult = z.object({
+  status: z.enum(['done', 'pending']),
+  /** The agent created or deleted, when done. */
+  agent: Member.optional(),
+  hosting: AgentHosting.optional(),
+  /** The card its owner decides on, when pending. */
+  approval: Approval.optional(),
+});
+
+export type SuperAgentResult = z.infer<typeof SuperAgentResult>;
+
+export const AgentListing = z.object({ agent: Member, keys: z.array(AgentKey), credential: AgentCredential.optional(), hook: AgentHook.optional(), hosting: AgentHosting.optional() });
 export type AgentListing = z.infer<typeof AgentListing>;
 
 /**
- * What a space IS at the org level (direct messages, 2026-09-07). `shared` =
+ * What a space IS at the server level (direct messages, 2026-09-07). `shared` =
  * the ordinary space: invites, leave, files, feed. `direct` = a DM: the SAME
  * container on the same substrate (stream, threads, files, offsets, agent
  * sessions all unchanged), with a FIXED membership — exactly `participants`,
@@ -127,9 +501,6 @@ export type AgentListing = z.infer<typeof AgentListing>;
  */
 export const SpaceKind = z.enum(['shared', 'direct']);
 export type SpaceKind = z.infer<typeof SpaceKind>;
-
-export const SpaceVisibility = z.enum(['private', 'open']);
-export type SpaceVisibility = z.infer<typeof SpaceVisibility>;
 
 export const Space = z.object({
   id: SpaceId,
@@ -141,8 +512,6 @@ export const Space = z.object({
   name: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
   kind: SpaceKind.default('shared'),
-  /** Old payloads and existing spaces stay private (spec §5, 2026-09-22). */
-  visibility: SpaceVisibility.default('private'),
   /**
    * Direct spaces only: the fixed member set, sorted — the DM's identity.
    * Absent on shared spaces. ONE element = the member's self-DM (notes to
@@ -150,6 +519,18 @@ export const Space = z.object({
    * and by the member's own agent.
    */
   participants: z.array(MemberId).min(1).optional(),
+  /**
+   * Archived (spec §6, built 2026-10-13): refuses writes, stays readable.
+   * Listings still carry it — the client files it under Archived. Old
+   * payloads and every existing space are live. A DM is never archived.
+   */
+  archived: z.boolean().default(false),
+  /**
+   * The space graph is on (spec §8 Space graph, 2026-11-12): an admin's
+   * switch, off until set, never on for a DM. While on, Harbor sends the
+   * space's messages to Jev to be judged. Old payloads read as off.
+   */
+  graph: z.boolean().default(false),
 });
 export type Space = z.infer<typeof Space>;
 
@@ -157,8 +538,31 @@ export const Membership = z.object({
   spaceId: SpaceId,
   memberId: MemberId,
   joinedAt: z.iso.datetime(),
+  /**
+   * Admin of this space (spec §4 Roles, 2026-11-09): the creator at birth,
+   * given and taken by admins, inherited by the longest-standing human when
+   * the last admin goes. Never on an agent's row. Older payloads parse as
+   * members.
+   */
+  role: MemberRole.default('member'),
+  /**
+   * An agent's seat (spec §4 Agent members, 2026-11-09): who may ask it in
+   * this space — everyone here, or its owner only. Set by the owner when
+   * they add it, changed by the owner any time; locked to `owner` for an
+   * agent on its owner's own computer, and in a DM. Absent on a person's row.
+   */
+  invocableBy: z.enum(['owner', 'members']).optional(),
 });
 export type Membership = z.infer<typeof Membership>;
+
+/** A space's roster entry (listMembers, 2026-11-09): the member with their seat in this space. */
+export const SpaceMember = Member.extend({
+  role: MemberRole,
+  joinedAt: z.iso.datetime(),
+  /** An agent's seat here (Membership.invocableBy); absent on a person. */
+  invocableBy: z.enum(['owner', 'members']).optional(),
+});
+export type SpaceMember = z.infer<typeof SpaceMember>;
 
 /**
  * The deliberate conversation object (spec §7, annotation model 2026-09-01):
@@ -277,7 +681,7 @@ export type Poll = z.infer<typeof Poll>;
 
 /**
  * One member's vote toggle on one poll answer — the payload of `poll_vote`.
- * Per-(member, answer), reaction semantics; on single-select polls the org
+ * Per-(member, answer), reaction semantics; on single-select polls the server
  * moves a vote by emitting a `removed` then an `added` under one lock.
  */
 export const PollVote = z.object({
@@ -321,6 +725,8 @@ export const MessageEdit = z.object({
   messageId: MessageId,
   threadRoot: MessageId.optional(),
   body: z.string().min(1).max(65_536),
+  /** The message's summary after the edit (2026-10-25); absent = it has none. */
+  summary: z.string().min(1).max(1_000).optional(),
   by: Attribution,
   at: z.iso.datetime(),
   /** The re-stamped addresses (mentions.ts) — folding clients update them with the body. */
@@ -330,13 +736,32 @@ export const MessageEdit = z.object({
 });
 export type MessageEdit = z.infer<typeof MessageEdit>;
 
+/**
+ * The secrets a message hands to the members it mentions (2026-11-04,
+ * "secrets card" in Main): an API key a person shares in a thread without the
+ * rest of the space seeing it. The message carries the names and its readers,
+ * which every member sees as the card; the values are sealed apart from the
+ * log. The readers are the people and agents the message mentioned when it was
+ * posted (a DM's other members, mention or not), fixed then, so an edit adds
+ * no one; @here is not a reader. Each reads a value over REST
+ * (`readMessageSecret`), never through a tool (spec §4: a secret returned to
+ * a tool lands in a transcript).
+ */
+export const SecretName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/, 'a secret name is letters, digits and underscores, like an environment variable');
+export const MessageSecrets = z.object({ names: z.array(SecretName).min(1), readers: z.array(MemberId).min(1) });
+export type MessageSecrets = z.infer<typeof MessageSecrets>;
+
+/** A session's mark on its root (Message.session, 2026-11-05): the title it was started with. */
+export const SessionMark = z.object({ title: z.string().trim().min(1).max(200) });
+export type SessionMark = z.infer<typeof SessionMark>;
+
 export const Message = z.object({
   id: MessageId,
   spaceId: SpaceId,
   /**
    * The write-once reply pointer (annotation model): absent = a root message
    * in the space's one stream; present = a reply in the flat thread under
-   * that root. Always a ROOT's id — never a reply's (the org normalizes), so
+   * that root. Always a ROOT's id — never a reply's (the server normalizes), so
    * threads are flat by shape, not convention. Set at post time, immutable.
    */
   threadRoot: MessageId.optional(),
@@ -353,7 +778,7 @@ export const Message = z.object({
   /**
    * Reply denorm on ROOT messages: live (non-tombstoned) replies in this
    * message's thread, so every listing can render the reply chip without a
-   * reverse lookup. Maintained by the org; 0 on replies and on stored
+   * reverse lookup. Maintained by the server; 0 on replies and on stored
    * message events (reads carry the current truth, like reactions).
    */
   replyCount: z.number().int().nonnegative().default(0),
@@ -365,6 +790,19 @@ export const Message = z.object({
    * followed thread is unread when this exceeds the member's mark.
    */
   lastReplyOffset: StreamOffset.optional(),
+  /**
+   * Who has replied (2026-10-25, "managing sessions" in Main): the distinct
+   * authors of LIVE replies, in first-reply order, so the Threads view can
+   * show a thread's participants and filter by one without loading replies.
+   * Maintained by the same denorm refresh as replyCount; [] on replies.
+   */
+  replyAuthors: z.array(MemberId).default([]),
+  /**
+   * The author's short version of a long message (2026-10-25, the threads
+   * discussion in Main): clients show it first with "Show more" for the full
+   * body. Markdown; the body's mention stamps cover it. Redacted with the body.
+   */
+  summary: z.string().min(1).max(1_000).optional(),
   /** Provenance when this root was posted in reply to an activity row (a change-set). */
   anchorChangeSetId: ChangeSetId.optional(),
   /** Set when the author deleted the message (deleter == author, so no separate attribution). */
@@ -392,8 +830,26 @@ export const Message = z.object({
    * show the card.
    */
   approval: Approval.optional(),
+  /** The secrets this message hands over: names and who may read them, never values (2026-11-04). Written once; deletion removes them. */
+  secrets: MessageSecrets.optional(),
+  /** A thread reply its author sent to people only (NewMessage.peopleOnly, 2026-10-27). Written once. */
+  peopleOnly: z.literal(true).optional(),
   /**
-   * Who this message addresses — STAMPED by the org at post and edit from the
+   * A root whose thread is archived (archiveThread, 2026-11-03, "archive
+   * threads" in Main): a plain thread leaves the active lists without being
+   * named. A discussion's archive stays on its Topic, so a root with a topic
+   * never carries this. A reply revives it, as it revives a topic.
+   */
+  archived: z.literal(true).optional(),
+  /**
+   * A root its thread's people marked as a session (2026-11-05, "coding
+   * session: threads" in Main): short-lived work, usually with an agent,
+   * that someone ends when it is done. Ending one is archiving the thread.
+   * A person sets it; nothing infers it. A discussion is never a session.
+   */
+  session: SessionMark.optional(),
+  /**
+   * Who this message addresses — STAMPED by the server at post and edit from the
    * body's mention tokens (mentions.ts), never from names, and only ids that
    * are members of the space. Unread counts, Activity, and push read these;
    * nothing anywhere re-parses text. Defaults keep pre-stamp payloads parsing.

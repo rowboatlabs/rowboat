@@ -26,10 +26,10 @@ beforeAll(async () => {
   await store.init();
   service = new HarborService(store, new SpaceHub(), { name: 'Search Org', address: 'search.test' });
   await ensureMember(store, 'ramnique');
-  await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member', kind: 'human' });
+  await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', kind: 'human' });
   const space = await service.createSpace(ram, 'Search Space');
   spaceId = space.id;
-  const invite = await service.createInvite(ram, spaceId);
+  const invite = await service.createInvite(ram, { spaceId: spaceId });
   await service.acceptInvite(harsh, invite.token);
 });
 
@@ -72,10 +72,10 @@ describe('message search', () => {
 
     // Rename: the index never stored a name, so the new name works instantly
     // and the old one stops matching.
-    await store.putMember({ id: 'harshv01', displayName: 'Hrsvrn', role: 'member', kind: 'human' });
+    await store.putMember({ id: 'harshv01', displayName: 'Hrsvrn', kind: 'human' });
     expect((await service.search(ram, spaceId, 'hrsvrn review')).messages.length).toBe(1);
     expect((await service.search(ram, spaceId, 'verma')).messages.length).toBe(0);
-    await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', role: 'member', kind: 'human' });
+    await store.putMember({ id: 'harshv01', displayName: 'Harsh Verma', kind: 'human' });
   });
 
   it('tombstones and edits reindex via the generated column, no code involved', async () => {
@@ -107,6 +107,30 @@ describe('message search', () => {
     // Topic titles are their own category.
     const topicHits = await service.search(ram, spaceId, 'kickoff');
     expect(topicHits.topics.map((t) => t.topic.title)).toContain('Q3 Kickoff');
+  });
+
+  it('finds a pasted URL, domain or file name, which Postgres indexes whole', async () => {
+    const root = await service.postMessage(ram, spaceId, { body: 'Release notes thread', actingMode: 'direct' });
+    const reply = await service.postMessage(harsh, spaceId, {
+      threadRoot: root.message.id,
+      body: 'see https://github.com/rowboatlabs/rowboat/pull/1297 and search.ts',
+      actingMode: 'direct',
+    });
+    const ids = async (q: string) => (await service.search(ram, spaceId, q)).messages.map((m) => m.messageId);
+
+    expect(await ids('https://github.com/rowboatlabs/rowboat/pull/1297')).toEqual([reply.message.id]);
+    expect(await ids('github.com/rowboatlabs/rowboat/pull/1297')).toEqual([reply.message.id]);
+    expect(await ids('github.com')).toEqual([reply.message.id]);
+    expect(await ids('search.ts')).toEqual([reply.message.id]);
+    // Other words still AND with the whole chunk.
+    expect(await ids('see github.com')).toEqual([reply.message.id]);
+    expect(await ids('lunch github.com')).toEqual([]);
+    // A different URL on the same host doesn't match.
+    expect(await ids('https://github.com/rowboatlabs/rowboat/pull/1')).toEqual([]);
+    // A path fragment alone still can't reach the whole lexeme (needs an index-side change).
+    expect(await ids('rowboatlabs')).toEqual([]);
+    // Punctuation-only chunks and quotes stay inert.
+    expect(await ids("-- o'neil.com")).toEqual([]);
   });
 });
 
@@ -183,6 +207,21 @@ describe('asset search', () => {
   });
 });
 
+describe('across every space you are in (2026-11-09)', () => {
+  it('searches every space the caller is in when no space is given, each hit saying which; a stranger’s space is not searched', async () => {
+    const other = await service.createSpace(ram, 'Elsewhere');
+    await service.postMessage(ram, other.id, { body: 'shipping the elsewhere build', actingMode: 'direct' });
+    await service.postMessage(ram, spaceId, { body: 'shipping the main build', actingMode: 'direct' });
+    const everywhere = await service.search(ram, undefined, 'shipping', { kinds: ['messages'] });
+    expect(everywhere.messages.map((h) => h.spaceId).sort()).toEqual([other.id, spaceId].sort());
+    const one = await service.search(ram, spaceId, 'shipping', { kinds: ['messages'] });
+    expect(one.messages.map((h) => h.spaceId)).toEqual([spaceId]);
+    // Harsh is not in Elsewhere: his everywhere-search never reaches it.
+    const harshs = await service.search(harsh, undefined, 'shipping', { kinds: ['messages'] });
+    expect(harshs.messages.map((h) => h.spaceId)).toEqual([spaceId]);
+  });
+});
+
 describe('shape and scoping', () => {
   it('honors kinds and per-category limit with truncated flags', async () => {
     for (let i = 0; i < 4; i++) {
@@ -203,6 +242,75 @@ describe('shape and scoping', () => {
     const empty = await service.search(ram, spaceId, '  ~~ !! ');
     expect(empty.messages).toEqual([]);
     expect(empty.truncated.messages).toBe(false);
+  });
+});
+
+describe('filters and word prefixes (2026-11-06)', () => {
+  let filterSpace: string;
+  const post = (who: { memberId: string }, body: string, threadRoot?: string) =>
+    service.postMessage(who, filterSpace, { body, ...(threadRoot ? { threadRoot } : {}), actingMode: 'direct' });
+
+  beforeAll(async () => {
+    filterSpace = (await service.createSpace(ram, 'Filter Space')).id;
+    const invite = await service.createInvite(ram, { spaceId: filterSpace });
+    await service.acceptInvite(harsh, invite.token);
+  });
+
+  it('prefix-matches every word, not only the last', async () => {
+    await post(ram, 'The deployment failed overnight');
+    expect((await service.search(ram, filterSpace, 'deploy fail')).messages.length).toBe(1);
+    expect((await service.search(ram, filterSpace, 'ploy fail')).messages.length).toBe(0);
+  });
+
+  it('from: and mentions: narrow in the store, and work without a word', async () => {
+    await post(harsh, 'quarterly numbers from harsh, see https://example.com/q3');
+    await post(ram, 'quarterly numbers for [@Harsh Verma](#member:harshv01)');
+
+    const fromHarsh = await service.search(ram, filterSpace, 'quarterly from:harsh');
+    expect(fromHarsh.messages.map((m) => m.author.memberId)).toEqual(['harshv01']);
+    // `me` is the searcher; a filter alone is a search.
+    const mine = await service.search(ram, filterSpace, 'from:me');
+    expect(mine.messages.every((m) => m.author.memberId === 'ramnique')).toBe(true);
+    expect(mine.messages.length).toBe(2);
+    const mentionsHarsh = await service.search(ram, filterSpace, 'mentions:harsh');
+    expect(mentionsHarsh.messages.map((m) => m.snippet)).toEqual(['quarterly numbers for [@Harsh Verma](#member:harshv01)']);
+    // A name nobody has matches nothing, rather than being ignored.
+    expect((await service.search(ram, filterSpace, 'quarterly from:nobody')).messages).toEqual([]);
+  });
+
+  it('has: matches links, images and files anywhere in the body', async () => {
+    await post(ram, 'screenshot ![shot](https://x/s/a/b/abc) attached');
+    await post(ram, 'the spec is [spec.pdf](https://x/s/a/b/def)');
+    const links = await service.search(ram, filterSpace, 'has:link');
+    expect(links.messages.length).toBe(3);
+    expect((await service.search(ram, filterSpace, 'has:image')).messages.map((m) => m.snippet)).toEqual([
+      'screenshot ![shot](https://x/s/a/b/abc) attached',
+    ]);
+    expect((await service.search(ram, filterSpace, 'has:file')).messages.map((m) => m.snippet)).toEqual([
+      'the spec is [spec.pdf](https://x/s/a/b/def)',
+    ]);
+  });
+
+  it("in: matches the thread's discussion or session title", async () => {
+    const planning = await post(ram, 'planning root');
+    await service.createTopic(ram, filterSpace, { rootMessageId: planning.message.id, title: 'Launch plan', actingMode: 'direct' });
+    await post(harsh, 'budget is approved', planning.message.id);
+    const session = await post(ram, 'session root');
+    await service.setSession(ram, filterSpace, session.message.id, { session: { title: 'Fix search' }, actingMode: 'direct' });
+    await post(harsh, 'budget for the search work', session.message.id);
+
+    expect((await service.search(ram, filterSpace, 'budget in:launch')).messages.map((m) => m.snippet)).toEqual(['budget is approved']);
+    expect((await service.search(ram, filterSpace, 'budget in:search')).messages.map((m) => m.snippet)).toEqual([
+      'budget for the search work',
+    ]);
+  });
+
+  it('a filtered query searches messages alone', async () => {
+    await service.createAsset(ram, filterSpace, { path: 'quarterly.md', newContent: 'quarterly', reason: 'seed', actingMode: 'direct' });
+    expect((await service.search(ram, filterSpace, 'quarterly')).assets.length).toBe(1);
+    const filtered = await service.search(ram, filterSpace, 'quarterly from:me');
+    expect(filtered.assets).toEqual([]);
+    expect(filtered.topics).toEqual([]);
   });
 });
 

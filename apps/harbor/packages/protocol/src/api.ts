@@ -12,7 +12,19 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, Membership, Message, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic } from './core.js';
+import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, Member, MemberRole, Membership, SpaceMember, Message, SecretName, SessionMark, ReactionEmoji, Space, SpaceKind, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
+  AgentHosting,
+  HostingEnvVar,
+  HostingConsole,
+  HostingExecution,
+  HostingFileEntry,
+  HostingLogLine,
+  HostingMachine,
+  HostingPowerAction,
+  HostingSkill,
+  HostingTrigger,
+  HostingSize, HostingSpend, HostingUsage, LlmProvider,
+} from './core.js';
 import { AssetId, AssetPath, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -26,6 +38,10 @@ import { StreamEvent } from './events.js';
 import { Approval, ApprovalClose, ApprovalDecision, ApprovalId, ApprovalRequest } from './approval.js';
 import { ConnectorCapabilities, Invocation, InvocationId, InvocationOptionValues, InvocationUpdate } from './invocation.js';
 import { SearchKind, SearchResults } from './search.js';
+import { SpaceGraph } from './graph.js';
+
+/** The most threads one graph read returns. */
+export const GRAPH_THREAD_LIMIT_MAX = 2000;
 
 // The render face (spec §9): REST + the live stream in events.ts. Member token
 // auth on every route. Shapes here are v0 — Latitude items (pagination, ETags,
@@ -35,7 +51,7 @@ import { SearchKind, SearchResults } from './search.js';
 
 /**
  * Poll creation (the Discord create-request asymmetry: a duration in, an
- * expiry out — the org stamps `expiresAt` from its own clock). Answer ids are
+ * expiry out — the server stamps `expiresAt` from its own clock). Answer ids are
  * server-assigned. The message's `body` must carry a plain-markdown fallback
  * rendering of the poll (question + numbered options) so poll-blind clients
  * still show it; poll-aware clients render the card instead.
@@ -51,9 +67,17 @@ export const NewPoll = z.object({
   allowMultiselect: z.boolean().optional(),
 });
 
+/**
+ * A secret for the members the message mentions (2026-11-04): the value is
+ * sealed apart from the message and the log, and only they read it back
+ * (`readMessageSecret`). Neither the body nor the summary may contain it, so
+ * a value pasted into the text too is refused rather than shown.
+ */
+export const NewMessageSecret = z.object({ name: SecretName, value: z.string().min(1).max(8_192) });
+
 const NewMessage = z.object({
   /**
-   * Present = a reply into the flat thread under this root (the org
+   * Present = a reply into the flat thread under this root (the server
    * normalizes a reply's id to its root, Slack-style); absent = a new root
    * message in the space's one stream. Posting a message never creates a
    * container — a topic exists only via createTopic.
@@ -62,6 +86,8 @@ const NewMessage = z.object({
   /** Reply-to-activity-row provenance (root posts only): the change-set this message answers. */
   anchorChangeSetId: ChangeSetId.optional(),
   body: z.string().min(1).max(65_536),
+  /** A short version of a long body, shown first with "Show more" (2026-10-25). */
+  summary: z.string().min(1).max(1_000).optional(),
   /** Present = this message carries a poll (immutable once posted; editMessage refuses). */
   poll: NewPoll.optional(),
   actingMode: ActingMode,
@@ -74,6 +100,25 @@ const NewMessage = z.object({
    * an agent, that agent: spec §8, 2026-09-30).
    */
   agentOptions: z.record(MemberId, InvocationOptionValues).optional(),
+  /**
+   * A thread reply meant for the people in it (spec §8, 2026-10-27): it
+   * continues no agent's conversation, and Ro tags no agent for it. A reply
+   * that mentions nobody otherwise invokes the agent its author last invoked
+   * in that thread. Mentions still invoke. Ignored on a new root message.
+   */
+  peopleOnly: z.boolean().optional(),
+  /**
+   * Secrets for the members this message mentions (2026-11-04), who are its
+   * readers from then on (Message.secrets). A message that mentions no one
+   * (outside a DM) cannot carry one. Names are unique. Immutable once posted.
+   */
+  secrets: z.array(NewMessageSecret).max(10).optional(),
+  /**
+   * Start a session with this root (2026-11-05, Message.session): `/session
+   * fix thread nav` posts the title as the body and marks it in one step. A
+   * reply cannot carry one.
+   */
+  session: SessionMark.optional(),
 });
 
 /**
@@ -123,13 +168,41 @@ export const UnreadSpace = z.object({
 export type UnreadSpace = z.infer<typeof UnreadSpace>;
 
 export const UnreadSnapshot = z.object({ spaces: z.array(UnreadSpace) });
+
+/**
+ * Where a thread stands for the member asking (2026-11-05): `needs_you` when
+ * an agent in it waits on a person or it has replies they haven't read,
+ * `working` while an agent's turn is queued or running, else `idle`. A
+ * waiting agent wins over a working one; unread replies only show as
+ * `needs_you` once no agent is still working.
+ */
+export const ThreadStatus = z.enum(['needs_you', 'working', 'idle']);
+export type ThreadStatus = z.infer<typeof ThreadStatus>;
+
+/** One of the member's threads (myThreads): its root, its topic when named, where it lives, and where it stands. */
+export const ThreadListing = z.object({
+  spaceId: SpaceId,
+  spaceName: z.string(),
+  spaceKind: SpaceKind,
+  root: Message,
+  /** Present when the thread is a discussion. */
+  topic: Topic.optional(),
+  status: ThreadStatus,
+  /** Replies past the member's thread mark, not their own. */
+  unreadReplies: z.number().int().nonnegative(),
+  /** Of those, the ones addressed to the member. */
+  unreadMentions: z.number().int().nonnegative(),
+  /** The newest reply's time, else the root's. The list's order, newest first. */
+  lastActivityAt: z.iso.datetime(),
+});
+export type ThreadListing = z.infer<typeof ThreadListing>;
 export type UnreadSnapshot = z.infer<typeof UnreadSnapshot>;
 
 /**
  * Activity (2026-09-10, the unread arc's layer 3): everything that involves
  * the member, across every space and DM they are in, newest first. Not a
  * table fanned out on write (Slack, Discord, GitHub) but a query over facts
- * the org already keeps — the stamped mentions, the follow rows, the DM
+ * the server already keeps — the stamped mentions, the follow rows, the DM
  * kind, the reactions (Zulip's Mentions/Inbox views work this way) — so
  * edits, deletes and the backfill stay consistent for free and there is no
  * second source of truth beside the read marks. Kinds, in the priority a
@@ -171,18 +244,103 @@ export const ActivityPage = z.object({
   nextCursor: z.string().optional(),
   /** Your activity-seen mark (reactions before it are read); null = never marked. */
   seenAt: z.iso.datetime().nullable(),
-  /** Display names for every member on the page (actors and mention tokens), from the org roster the caller may see. */
+  /** Display names for every member on the page (actors and mention tokens), from the server roster the caller may see. */
   names: z.record(MemberId, z.string()),
 });
 export type ActivityPage = z.infer<typeof ActivityPage>;
 
 export const routes = {
   // --- identity ------------------------------------------------------------
-  /** Who am I on this org — the client's only source of its own memberId under OAuth. */
+  /** Who am I on this server — the client's only source of its own memberId under OAuth. */
+  // --- the web app's session (2026-10-12) ------------------------------------
+  /**
+   * Turn the caller's bearer into Harbor's session cookie, so a browser can
+   * call every face with credentials and no bearer, and load blobs with a
+   * plain <img> (CONTRACT.md). The cookie is HttpOnly, Secure, SameSite=Lax,
+   * scoped to Harbor's host, and
+   * expires with the token. The bearer must come in the header.
+   */
+  createSession: {
+    method: 'POST',
+    path: '/v1/session',
+    response: z.object({ ok: z.literal(true), expiresAt: z.iso.datetime().optional() }),
+  },
+  /** Clear the session cookie. Idempotent, and needs no credential. */
+  deleteSession: {
+    method: 'DELETE',
+    path: '/v1/session',
+    response: z.object({ ok: z.literal(true) }),
+  },
   me: {
     method: 'GET',
     path: '/v1/me',
     response: z.object({ member: Member }),
+  },
+  /**
+   * Become a member (2026-11-09, spec §4 Joining): a signed-in account with
+   * no member row yet gets one, seeded from its IdP claims — the cold start
+   * with no invite link. An existing member gets their row back (idempotent);
+   * a deactivated one is refused like any sign-in. With `acceptInvite`'s bind,
+   * one of the two routes a token with no mapping may call.
+   */
+  enroll: {
+    method: 'POST',
+    path: '/v1/me',
+    response: z.object({ member: Member, created: z.boolean() }),
+  },
+  /**
+   * Your own display name and title (spec §4 Member profile, 2026-10-19).
+   * Only you edit your profile; an agent member's name is its owner's choice
+   * at creation, so agents are refused. Unchanged fields are a no-op.
+   */
+  /**
+   * Account deletion (2026-10-08; on the server itself since 2026-11-09, there
+   * being no apex): the caller is deactivated — out of every space, refused at
+   * sign-in, kept under their name so their messages keep an author — and
+   * their agents with them, the managed ones deleted. The app calls this
+   * before the account API bans the login, while the token is still good.
+   * Idempotent.
+   */
+  deleteMe: {
+    method: 'DELETE',
+    path: '/v1/me',
+    response: z.object({ ok: z.literal(true) }),
+  },
+  updateMe: {
+    method: 'PUT',
+    path: '/v1/me',
+    request: UpdateProfile,
+    response: z.object({ member: Member }),
+  },
+  // --- profile images (2026-10-02) -------------------------------------------
+  /**
+   * Your own avatar. The body is the image itself (PNG, JPEG, WebP or GIF,
+   * at most 1 MiB; the server sniffs the bytes and ignores the content-type).
+   * The member comes back with `avatarUrl` set: an absolute URL on this server
+   * that any member may read with their bearer (getImage). Clients send a
+   * small square; the server never resizes.
+   */
+  setAvatar: {
+    method: 'PUT',
+    path: '/v1/me/avatar',
+    response: z.object({ member: Member }),
+  },
+  /** Back to the initial. Idempotent. */
+  clearAvatar: {
+    method: 'DELETE',
+    path: '/v1/me/avatar',
+    response: z.object({ member: Member }),
+  },
+  /**
+   * An avatar's or logo's bytes: a stream or a 302 to a short-lived presigned
+   * URL, exactly as getBlob. Readable by every member of the server; hash-keyed,
+   * so cacheable forever.
+   */
+  getImage: {
+    method: 'GET',
+    path: '/v1/images/:hash',
+    params: z.object({ hash: BlobHash }),
+    response: z.never(),
   },
   // --- spaces & membership -------------------------------------------------
   /**
@@ -195,14 +353,16 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces',
     query: z.object({ includeDirect: z.coerce.boolean().optional() }),
-    response: z.object({ spaces: z.array(Space) }),
+    response: z.object({
+      spaces: z.array(Space),
+    }),
   },
   /**
    * Direct messages (2026-09-07): a DM is a `direct` space between exactly
    * two members — same substrate, fixed membership (see SpaceKind). Get-or-
-   * create, idempotent: the org keys DMs on the sorted participant pair, so
+   * create, idempotent: the server keys DMs on the sorted participant pair, so
    * two members can only ever have one; `created` says whether this call
-   * made it. No invite and no acceptance — the org is the trust boundary,
+   * made it. No invite and no acceptance — the server is the trust boundary,
    * as inside one Slack workspace. The other participant learns of the space
    * by a `space_added` live frame (events.ts) and on their next listing.
    * Your own id opens your self-DM (2026-09-08: one participant, one
@@ -219,8 +379,7 @@ export const routes = {
    * registers its Expo push token and the member's notify level in one
    * idempotent call — the phone re-registers on every start and on every
    * preference change. Level is per MEMBER (all their devices); tokens are
-   * per device. Org-scoped like everything: each org pushes for its own
-   * spaces.
+   * per device.
    */
   registerPush: {
     method: 'POST',
@@ -238,21 +397,10 @@ export const routes = {
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
   },
-  browseSpaces: {
-    method: 'GET',
-    path: '/v1/spaces/browse',
-    response: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
-  },
-  joinSpace: {
-    method: 'POST',
-    path: '/v1/spaces/:spaceId/join',
-    params: z.object({ spaceId: SpaceId }),
-    response: z.object({ space: Space, membership: Membership }),
-  },
   createSpace: {
     method: 'POST',
     path: '/v1/spaces',
-    request: z.object({ name: z.string().min(1).max(128), visibility: SpaceVisibility.default('private') }),
+    request: z.object({ name: z.string().min(1).max(128) }),
     response: z.object({ space: Space }),
   },
   /**
@@ -268,11 +416,79 @@ export const routes = {
     request: z.object({ name: z.string().min(1).max(128), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     response: z.object({ space: Space }),
   },
+  /**
+   * Archive and unarchive a shared space (spec §6, 2026-10-13): an admin
+   * act, refused on a DM. An archived space refuses every write that would
+   * add to it — messages, reactions, topics, files, joins, invites — with
+   * `forbidden`; reads, read marks and leaving still work. Archiving an
+   * archived space (or unarchiving a live one) is a no-op with no event.
+   * Members learn by `space_archived` / `space_unarchived` on the log.
+   */
+  archiveSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/archive',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  unarchiveSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/unarchive',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
+   * Turn the space graph on or off (spec §8 Space graph, 2026-11-12): an
+   * admin act, refused on a DM, and `invalid_request` to turn on where the
+   * server has no Jev key. On: Harbor starts judging the space's threads
+   * with Jev. Off: it stops and the derived rows are deleted. An unchanged
+   * value is a no-op with no event; a change is `space_graph_changed`.
+   */
+  setSpaceGraph: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/graph',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ enabled: z.boolean(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
+  /**
+   * Read the space graph: any member. Without `about`, the threads that
+   * weigh most (all of them up to `limit`), with their edges and the
+   * entities those name. With `about`, an entity's id or a topic, member or
+   * reference by name: only its threads, strongest edge first. Nothing
+   * matching, or a graph that is off, answers with empty lists and the
+   * status that says why.
+   */
+  getSpaceGraph: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/graph',
+    params: z.object({ spaceId: SpaceId }),
+    query: z.object({
+      about: z.string().min(1).max(400).optional(),
+      limit: z.coerce.number().int().positive().max(GRAPH_THREAD_LIMIT_MAX).optional(),
+    }),
+    response: SpaceGraph,
+  },
+  /**
+   * Delete a shared space (spec §6, 2026-10-14): an admin act, refused on a
+   * DM, allowed on an archived space. The space and every row that hangs off
+   * it go in one statement (the cascade, migration 039); blob bytes no other
+   * space or image of the server uses go after the commit. No body: no event
+   * survives to carry an attribution. Former members get `space_removed`. Deleting a deleted space is
+   * `not_found`. The client confirms by name; the server does not ask.
+   */
+  deleteSpace: {
+    method: 'DELETE',
+    path: '/v1/spaces/:spaceId',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ deleted: z.literal(true) }),
+  },
   listMembers: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/members',
     params: z.object({ spaceId: SpaceId }),
-    response: z.object({ members: z.array(Member) }),
+    response: z.object({ members: z.array(SpaceMember) }),
   },
   /**
    * Agent members and their keys (spec §4 Agent members, 2026-09-29). Render
@@ -301,8 +517,311 @@ export const routes = {
       kind: z.string().min(1).max(32).default('custom'),
       connection: z.string().min(1).max(32).default('contract'),
       credential: z.string().min(1).max(512).optional(),
+      /** The platform instance the agent is (INSTANCE_CONNECTIONS only, 2026-10-05). */
+      instance: z.string().min(1).max(128).optional(),
+      /** A super agent's setup card this completes (2026-11-02): its owner only; the agent joins the card's space. */
+      request: ApprovalId.optional(),
     }),
     response: z.object({ agent: Member, key: AgentKeySecret }),
+  },
+  /**
+   * The Add flow's platform setup (2026-11-02, through Harbor so it works on
+   * the web): the instances a pasted key reaches on a platform whose agent is
+   * an instance (INSTANCE_CONNECTIONS: Agent37 instances, Maritime agents), and
+   * making a new one where the platform allows (Agent37). A person only,
+   * render face only; the key is used for this call and kept nowhere.
+   */
+  listSetupInstances: {
+    method: 'POST',
+    path: '/v1/setup/:connection/instances',
+    params: z.object({ connection: z.string().min(1).max(32) }),
+    request: z.object({ key: z.string().min(1).max(512) }),
+    response: z.object({ instances: z.array(PlatformInstance) }),
+  },
+  createSetupInstance: {
+    method: 'POST',
+    path: '/v1/setup/:connection/instances/new',
+    params: z.object({ connection: z.string().min(1).max(32) }),
+    request: z.object({
+      key: z.string().min(1).max(512),
+      kind: z.string().min(1).max(32),
+      name: z.string().trim().min(1).max(128),
+      monthlyBudgetUsd: z.number().nonnegative().max(100_000),
+      autoSleep: z.boolean().default(true),
+    }),
+    response: z.object({ instance: PlatformInstance }),
+  },
+  /**
+   * The kinds of agent this Harbor creates on Rowboat's own platform account
+   * (spec §8 Maritime, 2026-10-26): MARITIME_AGENTS when the deployment has the
+   * platform key, none otherwise. What the app's Create button offers.
+   */
+  managedAgentKinds: {
+    method: 'GET',
+    path: '/v1/agents/managed',
+    /** `billed` (2026-11-04): what it creates bills to its creator's Rowboat plan; `upgradeUrl` is where that plan is changed. */
+    response: z.object({ kinds: z.array(z.string()), billed: z.literal(true).optional(), upgradeUrl: z.url().optional() }),
+  },
+  /**
+   * Create a managed agent (spec §8 Maritime, 2026-10-26): Rowboat's own
+   * account on the platform runs it. The caller becomes its owner and gets its
+   * first key as with createAgent; the agent's hosting starts `deploying` and
+   * the listing shows it move to `ready`. `kind` is one of MARITIME_AGENTS.
+   * Claude Code needs the person's `anthropicApiKey`, which goes straight to
+   * the agent's environment on the platform and is kept nowhere else; `env`
+   * adds variables the same way. Render face only. Refused with
+   * `invalid_request` when this Harbor runs no managed hosting, or when the
+   * platform refuses (its own sentence, such as a plan limit).
+   */
+  createManagedAgent: {
+    method: 'POST',
+    path: '/v1/agents/managed',
+    request: z.object({
+      displayName: z.string().trim().min(1).max(128),
+      kind: z.string().min(1).max(32),
+      anthropicApiKey: z.string().min(1).max(512).optional(),
+      env: z.array(z.object({ key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/), value: z.string().max(4096), secret: z.boolean().optional() })).max(20).optional(),
+      /** A super agent's setup card this completes, as on createAgent (2026-11-02). */
+      request: ApprovalId.optional(),
+    }),
+    response: z.object({ agent: Member, key: AgentKeySecret, hosting: AgentHosting }),
+  },
+  /**
+   * Delete a managed agent's hosting: the owner or an admin. Its keys are
+   * revoked at once and its hosting marked `deleting`; the platform's
+   * resources go in the background and the listing shows `deleted` once the
+   * platform confirms. The member stays, to be removed like any member.
+   */
+  deleteManagedAgent: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting }),
+  },
+  /**
+   * Delete an agent its owner made, whatever runs it (2026-11-13): retired as
+   * a managed agent is (deleteManagedAgent), and a managed one's hosting goes
+   * too. The owner only. Render face only, like keys.
+   */
+  deleteAgent: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ agent: Member, hosting: AgentHosting.optional() }),
+  },
+  /**
+   * Managing a managed agent's VM (spec §8 Maritime, the management area,
+   * 2026-10-27): the owner or an admin, on a hosting that is `ready`, through
+   * Harbor with the deployment's own platform key. Render face only. Each
+   * answers `not_found` for an agent Rowboat does not host and
+   * `invalid_request` with the platform's own sentence when it refuses.
+   * getHosting is the page's one read: the hosting, the machine as the
+   * platform sees it, and the environment with secrets' values withheld.
+   */
+  getHosting: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting, machine: HostingMachine.optional(), env: z.array(HostingEnvVar), spend: HostingSpend.optional(), usage: HostingUsage.optional() }),
+  },
+  /**
+   * The owner's own provider key for a managed agent (2026-10-27): the end of
+   * its trial. The key goes to the agent's environment on the platform and
+   * nowhere else; Harbor keeps the provider and the key's last characters.
+   * `provider` is one of `LLM_PROVIDERS[kind]`; `model` is the runtime's
+   * default from then on. Answers the hosting as it now stands: `own`, with
+   * the trial closed. Also how a key is replaced.
+   */
+  setHostingLlm: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/llm',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ provider: LlmProvider, apiKey: z.string().min(8).max(512), model: z.string().max(128).optional() }),
+    response: z.object({ hosting: AgentHosting }),
+  },
+  /** Set one environment variable, creating or replacing it; `secret` is kept by the platform and never read back. A restart or reload applies it. */
+  setHostingEnv: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/env/:key',
+    params: z.object({ agentId: MemberId, key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,255}$/) }),
+    request: z.object({ value: z.string().max(4096), secret: z.boolean().optional() }),
+    response: z.object({ env: z.array(HostingEnvVar) }),
+  },
+  deleteHostingEnv: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/env/:key',
+    params: z.object({ agentId: MemberId, key: z.string().regex(/^[A-Z_][A-Z0-9_]{0,255}$/) }),
+    response: z.object({ env: z.array(HostingEnvVar) }),
+  },
+  /** `restart` reboots the VM, `sleep` snapshots it, `wake` restores it, `reload` applies environment variables without a reboot. */
+  hostingPower: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/power',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ action: HostingPowerAction }),
+    response: z.object({ machine: HostingMachine }),
+  },
+  /**
+   * The machine's size (2026-11-04): what it has, the memory sizes the platform
+   * allows with each one's estimated monthly cost, and the disk ceiling, all
+   * read from the platform. Setting it (the owner or an admin, on an agent
+   * that bills to its owner's plan) resizes the machine and restarts it, since
+   * a new size applies on the next boot; `invalid_request` with the reason
+   * when the plan or the platform refuses.
+   */
+  getHostingSize: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/size',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ size: HostingSize }),
+  },
+  setHostingSize: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/size',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ memMb: z.number().int().positive(), diskGb: z.number().int().positive() }),
+    response: z.object({ size: HostingSize }),
+  },
+  /** Run one shell command on the VM, detached: the answer is the execution to read until it ends. Not a shell: nothing persists between commands. */
+  runHostingCommand: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/commands',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ command: z.string().min(1).max(8192), timeoutSeconds: z.number().int().min(1).max(3600).optional() }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  getHostingCommand: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/commands/:executionId',
+    params: z.object({ agentId: MemberId, executionId: z.string().min(1).max(128) }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  cancelHostingCommand: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/commands/:executionId',
+    params: z.object({ agentId: MemberId, executionId: z.string().min(1).max(128) }),
+    response: z.object({ execution: HostingExecution }),
+  },
+  /** A console into the VM (2026-10-30): the platform's terminal socket and a short-lived token that opens it, as root, for the owner or an admin. Each call mints a new token. */
+  openHostingConsole: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/console',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ console: HostingConsole }),
+  },
+  /** A sign-in to a plan made from the Terminal (2026-10-30), which Harbor cannot see happen: asked, Harbor has the runtime say whether one is there, and records what it finds. */
+  checkHostingSignIn: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/sign-in',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting, signedIn: z.boolean() }),
+  },
+  /** The sign-in removed from the VM: the agent has no model access until its owner signs in again or adds a key. */
+  revokeHostingSignIn: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/sign-in',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ hosting: AgentHosting }),
+  },
+  /** The VM's logs as the platform keeps them, newest first; `before` pages back by the platform's cursor. */
+  getHostingLogs: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/logs',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), before: z.string().max(128).optional(), level: z.string().max(32).optional() }),
+    response: z.object({ logs: z.array(HostingLogLine), nextBefore: z.string().max(128).optional() }),
+  },
+  /** The VM's files: a directory listing, a text file's content, writing a text file, a new directory, a move, a deletion. */
+  listHostingFiles: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/files',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().max(2048).optional() }),
+    response: z.object({ path: z.string(), entries: z.array(HostingFileEntry) }),
+  },
+  readHostingFile: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/files/content',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().min(1).max(2048) }),
+    /** Text only, up to 1 MB; `truncated` when the file was longer. */
+    response: z.object({ path: z.string(), content: z.string(), truncated: z.boolean() }),
+  },
+  writeHostingFile: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/files/content',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ path: z.string().min(1).max(2048), content: z.string().max(1_000_000) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  makeHostingDir: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/files/mkdir',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ path: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  moveHostingFile: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/files/move',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ from: z.string().min(1).max(2048), to: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  deleteHostingFile: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/files',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ path: z.string().min(1).max(2048) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  /** Skills on a Hermes agent: the VM's and, with `q`, the platform catalog's matches; install by name; remove. Other kinds answer `invalid_request`. */
+  listHostingSkills: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/skills',
+    params: z.object({ agentId: MemberId }),
+    query: z.object({ q: z.string().max(200).optional() }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  installHostingSkill: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/skills',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ name: z.string().min(1).max(256) }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  removeHostingSkill: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/skills/:name',
+    params: z.object({ agentId: MemberId, name: z.string().min(1).max(256) }),
+    response: z.object({ skills: z.array(HostingSkill) }),
+  },
+  /** Triggers the platform fires on a Hermes agent: a cron schedule and the prompt it sends; the agent's reply goes where the prompt tells it, through its Spaces tools. */
+  listHostingTriggers: {
+    method: 'GET',
+    path: '/v1/agents/:agentId/hosting/triggers',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  createHostingTrigger: {
+    method: 'POST',
+    path: '/v1/agents/:agentId/hosting/triggers',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ type: z.string().min(1).max(32), config: z.record(z.string(), z.unknown()), enabled: z.boolean().optional() }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  updateHostingTrigger: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hosting/triggers/:triggerId',
+    params: z.object({ agentId: MemberId, triggerId: z.string().min(1).max(128) }),
+    request: z.object({ config: z.record(z.string(), z.unknown()).optional(), enabled: z.boolean().optional() }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
+  },
+  deleteHostingTrigger: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hosting/triggers/:triggerId',
+    params: z.object({ agentId: MemberId, triggerId: z.string().min(1).max(128) }),
+    response: z.object({ triggers: z.array(HostingTrigger) }),
   },
   /**
    * Replace a platform agent's credential (spec §8 Connectors, 2026-09-30).
@@ -315,6 +834,44 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     request: z.object({ secret: z.string().min(1).max(512) }),
     response: z.object({ credential: AgentCredential }),
+  },
+  /**
+   * Rename an agent (spec §4 Agent members, amended 2026-10-21): its owner
+   * only, app only like the rest of an agent's settings. Folded to one line,
+   * at least one character; the same name is a no-op. No event: rosters carry
+   * it on the next read, as a person's rename does.
+   */
+  renameAgent: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/name',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ displayName: z.string().max(128) }),
+    response: z.object({ agent: Member }),
+  },
+  /**
+   * Set an agent's description and instructions (spec §4 Agent members,
+   * 2026-10-29): its owner only, like its name. A field left out is left
+   * alone; an empty one clears it. Render face only, like renameAgent.
+   */
+  setAgentProfile: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/profile',
+    params: z.object({ agentId: MemberId }),
+    request: UpdateAgentProfile,
+    response: z.object({ agent: Member }),
+  },
+  /**
+   * Make an agent a super agent, change what it may do, or make it an
+   * ordinary agent again with `null` (spec §4 Agent members, 2026-11-02):
+   * admins only, for an agent with an owner, app only. The same value is a
+   * no-op. No event, as with a rename: rosters carry it on the next read.
+   */
+  setAgentSuper: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/super',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ superAgent: SuperAgent.nullable() }),
+    response: z.object({ agent: Member }),
   },
   /** Another key for an agent (rotation: create, switch, revoke the old one). Owner only. */
   createAgentKey: {
@@ -392,7 +949,7 @@ export const routes = {
   /**
    * What an agent's connector declared — the composer's options, whether Stop
    * is offered — and the defaults its owner set for those options, which the
-   * composer shows preselected (spec §8, 2026-10-01). Any org member.
+   * composer shows preselected (spec §8, 2026-10-01). Any member.
    */
   getAgentCapabilities: {
     method: 'GET',
@@ -412,6 +969,38 @@ export const routes = {
     params: z.object({ agentId: MemberId }),
     request: z.object({ defaults: InvocationOptionValues }),
     response: z.object({ defaults: InvocationOptionValues }),
+  },
+  /**
+   * Point a platform agent's alerts at a space (spec §8 Alerts, 2026-10-03):
+   * its owner only, a space the agent is a member of. Mints a new secret
+   * address every time, shown this once (the old one stops working); pasted
+   * into the service's webhook settings. Render face only, like keys.
+   */
+  setAgentHook: {
+    method: 'PUT',
+    path: '/v1/agents/:agentId/hook',
+    params: z.object({ agentId: MemberId }),
+    request: z.object({ spaceId: SpaceId }),
+    response: z.object({ hook: AgentHook, url: z.string().url() }),
+  },
+  /** Turn a platform agent's alerts off: its address stops working. Owner only. Idempotent. */
+  clearAgentHook: {
+    method: 'DELETE',
+    path: '/v1/agents/:agentId/hook',
+    params: z.object({ agentId: MemberId }),
+    response: z.object({}),
+  },
+  /**
+   * The service's webhook delivery (spec §8 Alerts, 2026-10-03). Pre-auth:
+   * the secret in the address is the credential. Any JSON body; the agent's
+   * connector says what it means, and `posted` is false for an event it
+   * leaves unsaid.
+   */
+  receiveAgentHook: {
+    method: 'POST',
+    path: '/v1/hooks/:agentId/:token', // pre-auth allowed
+    params: z.object({ agentId: MemberId, token: z.string().min(1).max(128) }),
+    response: z.object({ posted: z.boolean() }),
   },
   /** A space's invocations, newest first (a thread's, with threadRootId): the working indicators and refused lines. */
   listInvocations: {
@@ -441,7 +1030,7 @@ export const routes = {
     response: z.object({ invocation: Invocation }),
   },
   /**
-   * Add existing org members, people or agents, to a shared space the caller
+   * Add existing members, people or agents, to a shared space the caller
    * is in (spec §4 Roles, 2026-09-29). Each one added gets a `joined` event
    * with `by`, and a `space_added` frame. Anyone already in is a no-op;
    * `memberships` answers for every id asked, in the order asked.
@@ -452,23 +1041,76 @@ export const routes = {
     params: z.object({ spaceId: SpaceId }),
     request: z.object({
       memberIds: z.array(MemberId).min(1).max(100),
+      /**
+       * The seat for any agent among them (spec §4 Agent members, 2026-11-09):
+       * who may ask it in this space. Default `members`; a local agent's is
+       * `owner` whatever is sent. Only an agent's owner adds it.
+       */
+      invocableBy: z.enum(['owner', 'members']).optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),
     response: z.object({ memberships: z.array(Membership) }),
   },
   /**
-   * The org roster: every member of the org, people and agents, sorted by
-   * display name (spec §5 answer 4, built 2026-09-29 — inside one org the org
-   * is the trust boundary, as inside one Slack workspace). Until then it was
-   * bounded to people sharing a space with the caller. Both faces use it: the
-   * app's pickers (New message, Add people, mentions) and the agent's
-   * `list_members` resolve a name to a memberId here.
+   * Remove a member from a shared space (spec §4 Roles, 2026-10-19): an
+   * admin act by a member of the space, refused on a DM, allowed on an
+   * archived one. Appends a `removed` membership event with `by`; the
+   * removed member's connections get `space_removed`. Someone not in the
+   * space is a no-op (`removed: false`); removing yourself is refused —
+   * leave instead.
    */
-  listOrgMembers: {
+  removeMember: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/members/:memberId/remove',
+    params: z.object({ spaceId: SpaceId, memberId: MemberId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ removed: z.boolean() }),
+  },
+  /**
+   * Your contacts (spec §3, §5; 2026-11-09, replacing the server roster): the
+   * people you share a space with now, DMs and archived spaces included, and
+   * the agents you own — sorted by display name, departed members left out.
+   * Nothing lists everyone on the server. `online` / `onlinePeople` are the
+   * presence lists the roster carried, over these members.
+   */
+  listContacts: {
     method: 'GET',
-    path: '/v1/members',
-    response: z.object({ members: z.array(Member) }),
+    path: '/v1/contacts',
+    response: z.object({
+      members: z.array(Member),
+      /** The agents holding a live connection now (local agents, 2026-10-28); `agent_presence` keeps this fresh. */
+      online: z.array(MemberId).optional(),
+      /** People with recent client activity and no manual away override (2026-11-05); member_presence keeps this fresh. */
+      onlinePeople: z.array(MemberId).optional(),
+    }),
+  },
+  /**
+   * Give or take the admin bit for one member of a space (spec §4 Roles,
+   * 2026-11-09): admins of the space only. An agent is refused
+   * (`invalid_request`); demoting the only admin is `forbidden`; the same
+   * role is a 200 no-op with no event; a change appends `role_changed`.
+   */
+  /**
+   * Change an agent's seat in a space (spec §4 Agent members, 2026-11-09):
+   * its owner only. A local agent cannot be opened to everyone
+   * (`invalid_request`); an agent not in the space is `invalid_request`; the
+   * same value is a 200 no-op with no event; a change appends
+   * `agent_access_changed`.
+   */
+  setAgentAccess: {
+    method: 'PUT',
+    path: '/v1/spaces/:spaceId/members/:agentId/access',
+    params: z.object({ spaceId: SpaceId, agentId: MemberId }),
+    request: z.object({ invocableBy: z.enum(['owner', 'members']), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ membership: Membership }),
+  },
+  setSpaceRole: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/members/:memberId/role',
+    params: z.object({ spaceId: SpaceId, memberId: MemberId }),
+    request: z.object({ role: MemberRole, actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ membership: Membership }),
   },
   leaveSpace: {
     method: 'POST',
@@ -478,6 +1120,14 @@ export const routes = {
   },
 
   // --- invites -------------------------------------------------------------
+  /**
+   * An invite to ONE space, or a person's link (`direct: true`) whose
+   * target is a DM with its maker (spec §4 Invites, amended 2026-11-09). Any
+   * member of the space may create one; a DM, an archived space, or a space
+   * the caller is not in is refused (`invalid_request` / `forbidden`).
+   * Accepting binds a newcomer to the server, then joins the space or opens
+   * the DM.
+   */
   createInvite: {
     method: 'POST',
     path: '/v1/invites',
@@ -611,9 +1261,9 @@ export const routes = {
   /**
    * Phase 1 of every upload (spec §6): put the bytes, get the address. Body is
    * the RAW BYTES, not JSON. Required header `x-blob-sha256`: the client-
-   * computed address — the org recomputes and refuses a mismatch, so a
+   * computed address — the server recomputes and refuses a mismatch, so a
    * truncated or corrupted body can never be stored under a healthy name.
-   * `content-type` is advisory; the org sniffs well-known types and stores its
+   * `content-type` is advisory; the server sniffs well-known types and stores its
    * own verdict. Idempotent by construction (same bytes → same hash → no-op).
    * Referencing the hash (a message's blob link, or proposeChange's blob
    * variant) is phase 2 — until then the blob is an orphan awaiting GC (§12).
@@ -625,9 +1275,9 @@ export const routes = {
     response: z.object({ blob: BlobInfo }),
   },
   /**
-   * The bytes back: a stream (disk-driver orgs) or a 302 to a short-lived
-   * presigned URL (S3-family orgs) — clients just follow the redirect; which
-   * driver an org runs is never observable in client code. Membership-gated;
+   * The bytes back: a stream (disk-driver servers) or a 302 to a short-lived
+   * presigned URL (S3-family servers) — clients just follow the redirect; which
+   * driver a server runs is never observable in client code. Membership-gated;
    * hash-keyed means immutable, so responses are cacheable forever. Sniffed
    * images serve inline; everything else is forced `attachment` + nosniff.
    * `name` only shapes the download filename — never storage.
@@ -636,7 +1286,8 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces/:spaceId/blobs/:hash',
     params: z.object({ spaceId: SpaceId, hash: BlobHash }),
-    query: z.object({ name: z.string().max(255).optional() }),
+    // download=1 serves as an attachment, so a link saves the file (2026-10-12, the web app).
+    query: z.object({ name: z.string().max(255).optional(), download: z.literal('1').optional() }),
     response: z.never(),
   },
 
@@ -679,12 +1330,24 @@ export const routes = {
       afterOffset: z.coerce.number().int().nonnegative().optional(),
       aroundOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
+      /**
+       * `true` = the inline view (2026-10-25): every reply lists with the
+       * roots at its own offset, so a page is the space's conversation in
+       * time order. Absent or `false` = roots only, as ever.
+       */
+      replies: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
     }),
     response: z.object({
       messages: z.array(Message),
       topics: z.array(Topic),
+      /**
+       * With `replies`: the roots this page's replies belong to that the page
+       * does not hold, so a client can name each reply's thread; `topics`
+       * covers them too. Empty otherwise, and absent from older servers.
+       */
+      threadRoots: z.array(Message).default([]),
       hasMore: z.boolean(),
-      /** Newer rows exist above this page. Optional on the wire so a client reading an older org treats absence as false. */
+      /** Newer rows exist above this page. Optional on the wire so a client reading an older server treats absence as false. */
       hasMoreAfter: z.boolean().optional(),
       /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
       readOffset: StreamOffset,
@@ -692,7 +1355,7 @@ export const routes = {
        * The log events the page shows as lines between its messages, oldest
        * first (2026-09-29): membership in v1. Each belongs to the page
        * holding the next message after it; the newest page also takes those
-       * after its newest message. Absent from older orgs.
+       * after its newest message. Absent from older servers.
        */
       events: z.array(StreamEvent).default([]),
     }),
@@ -746,8 +1409,20 @@ export const routes = {
     path: '/v1/spaces/:spaceId/messages',
     params: z.object({ spaceId: SpaceId }),
     request: NewMessage,
-    /** `invocations`: the agents this message invoked, or refused to (spec §8) — absent from older orgs. */
+    /** `invocations`: the agents this message invoked, or refused to (spec §8) — absent from older servers. */
     response: z.object({ message: Message, invocations: z.array(Invocation).default([]) }),
+  },
+  /**
+   * A secret a message handed the caller (2026-11-04): the value as
+   * `text/plain`, `cache-control: no-store`, only to its readers (anyone
+   * else, the author included, gets not_found). Gone once the message is
+   * deleted.
+   */
+  readMessageSecret: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/messages/:messageId/secrets/:name',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId, name: z.string() }),
+    response: z.never(),
   },
   /**
    * Author-only tombstone (the content plane is role-flat, so deleter ==
@@ -780,6 +1455,8 @@ export const routes = {
     params: z.object({ spaceId: SpaceId, messageId: MessageId }),
     request: z.object({
       body: z.string().min(1).max(65_536),
+      /** The summary (2026-10-25): absent = keep it, a string = replace it, null = remove it. */
+      summary: z.string().min(1).max(1_000).nullable().optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),
@@ -880,6 +1557,52 @@ export const routes = {
    * replacing any earlier link; `detach_document` clears it. Both are
    * idempotent (no event when nothing changes).
    */
+  /**
+   * Archive or unarchive a plain thread (2026-11-03, "archive threads" in
+   * Main): sets the root's `archived` without naming it. A thread with a
+   * topic archives through manageTopic instead (`invalid_request` here), so
+   * there is one flag per thread. Same-state calls are no-ops with no event.
+   */
+  archiveThread: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/threads/:rootMessageId/archive',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
+    request: z.object({ archived: z.boolean(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ root: Message }),
+  },
+  /** The space's archived plain threads: their roots, newest activity first. Archived topics are listTopics'. */
+  /**
+   * Mark a thread as a session, retitle it, or unmark it (`session: null`)
+   * (2026-11-05, Message.session). Any member who can write may. A reply's
+   * id, or a root that has a topic, is `invalid_request`: a discussion is
+   * never a session. Same-state calls are no-ops with no event. Ending a
+   * session is archiveThread.
+   */
+  setSession: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/threads/:rootMessageId/session',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
+    request: z.object({ session: SessionMark.nullable(), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ root: Message }),
+  },
+  /**
+   * The member's threads in every space they are in (2026-11-05, "coding
+   * session: threads" in Main): the ones they started (with replies, or a
+   * session) or follow, newest activity first, at most 200. Active by
+   * default; `archived=true` lists the archived and ended ones instead.
+   */
+  myThreads: {
+    method: 'GET',
+    path: '/v1/threads',
+    query: z.object({ archived: z.enum(['true', 'false']).transform((v) => v === 'true').optional() }),
+    response: z.object({ threads: z.array(ThreadListing) }),
+  },
+  listArchivedThreads: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/archived-threads',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ threads: z.array(Message) }),
+  },
   manageTopic: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/topics/:topicId',
@@ -897,7 +1620,7 @@ export const routes = {
 
   // --- read state ----------------------------------------------------------
   /**
-   * Read marks (2026-09-09): per-member cursors the org owns, so every device
+   * Read marks (2026-09-09): per-member cursors the server owns, so every device
    * agrees. Two scopes: the space's STREAM (no threadRootId) and one FOLLOWED
    * thread (threadRootId; a reply's id resolves to its root). The unit is the
    * space's event offset — the same integer that pages and replays — never a
@@ -926,7 +1649,7 @@ export const routes = {
   /**
    * Follow or unfollow a thread. Only followed threads count toward unread
    * and badge (v1 tracks followed threads only); a mark can sit on any thread. Which acts follow
-   * automatically is org behaviour, not client convention — provisional rules
+   * automatically is server behaviour, not client convention — provisional rules
    * today: replying follows, and a root's author follows from the first reply
    * on. Unfollowing keeps the mark, so re-following never floods.
    */
@@ -1008,8 +1731,9 @@ export const routes = {
   // --- search ---------------------------------------------------------------
   /**
    * Space search (search.ts): categorized top-N over messages, topics, and
-   * assets. `q` is free text (AND-ed words, last word prefix-matched, member
-   * names expand to their mentions); `kinds` narrows the categories searched
+   * assets. `q` is free text (AND-ed words, each prefix-matched, member
+   * names expand to their mentions) and filters (from:, mentions:, in:, has:,
+   * which narrow messages only); `kinds` narrows the categories searched
    * (default all); `limit` caps each category independently.
    */
   search: {
@@ -1027,9 +1751,29 @@ export const routes = {
     }),
     response: SearchResults,
   },
+  /**
+   * The same search over every space the caller is in (2026-11-09, spec §5):
+   * DMs and archived spaces included, every hit carrying its `spaceId`.
+   * `spaceId` narrows it to one space, the per-space route's answer.
+   */
+  searchAll: {
+    method: 'GET',
+    path: '/v1/search',
+    query: z.object({
+      q: z.string().min(1).max(512),
+      spaceId: SpaceId.optional(),
+      kinds: z
+        .string()
+        .transform((s) => s.split(','))
+        .pipe(z.array(SearchKind))
+        .optional(),
+      limit: z.coerce.number().int().positive().max(50).optional(),
+    }),
+    response: SearchResults,
+  },
 
   // --- live ----------------------------------------------------------------
-  /** WebSocket upgrade. Frames: events.ts ClientFrame / ServerFrame. One socket per org. */
+  /** WebSocket upgrade. Frames: events.ts ClientFrame / ServerFrame. One socket per server. */
   live: {
     method: 'GET',
     path: '/v1/live',

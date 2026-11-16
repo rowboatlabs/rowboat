@@ -18,13 +18,14 @@ let main: string;
 
 async function start(): Promise<void> {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },
       { id: 'arjun', displayName: 'Arjun' },
     ],
-    seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
+    // Two spaces: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Main', creator: 'ramnique' }, { name: 'Ops', creator: 'ramnique' }],
   });
   ramnique = restClient(harbor, 'dev-ramnique');
   harsh = restClient(harbor, 'dev-harsh');

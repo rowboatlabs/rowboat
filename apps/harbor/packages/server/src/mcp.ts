@@ -2,9 +2,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, NewPoll, type ActingMode, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
+import { agentOnlyMcpToolNames, mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
-import { authenticateRequest, wwwAuthenticate, type OrgAuth } from './auth.js';
+import { authenticateRequest, wwwAuthenticate, type ServerAuth } from './auth.js';
 import { HarborError } from './errors.js';
 import { publicOriginOf } from './origin.js';
 import type { ActorCtx, HarborService } from './service.js';
@@ -23,7 +23,7 @@ import type { ActorCtx, HarborService } from './service.js';
 
 interface Deps {
   service: HarborService;
-  auth: OrgAuth;
+  auth: ServerAuth;
 }
 
 interface McpActor {
@@ -57,7 +57,7 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  const server = buildMcpServer(deps.service, actor);
+  const server = buildMcpServer(deps.service, actor, publicOriginOf(req));
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
@@ -79,11 +79,12 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
   }
 }
 
-function buildMcpServer(service: HarborService, actor: McpActor): Server {
+function buildMcpServer(service: HarborService, actor: McpActor, origin: string): Server {
   const server = new Server({ name: 'harbor-stub', version: '0.0.1' }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: mcpTools.map((t) => ({
+    // A person's assistant never acts as a super agent (2026-11-02): it isn't shown those tools.
+    tools: mcpTools.filter((t) => actor.agent || !agentOnlyMcpToolNames.has(t.name)).map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: z.toJSONSchema(t.input) as { type: 'object' },
@@ -102,7 +103,7 @@ function buildMcpServer(service: HarborService, actor: McpActor): Server {
     try {
       const result = await dispatch(service, actor, request.params.name, parsed.data);
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }, ...binaryNote(origin, request.params.name, parsed.data, result)],
         structuredContent: result as Record<string, unknown>,
       };
     } catch (err) {
@@ -119,6 +120,22 @@ function buildMcpServer(service: HarborService, actor: McpActor): Server {
 
 function errorResult(text: string) {
   return { content: [{ type: 'text' as const, text }], isError: true };
+}
+
+// A binary file's bytes never pass through a tool (spec §8, Files); its read says where they are
+// (2026-10-08). Told only that the bytes were "not readable over this face", Hermes answered that it
+// could not read a PNG in its space (2026-10-06), when its own key could download it. The structured
+// result is unchanged, so both faces still return the same object.
+function binaryNote(origin: string, tool: string, args: unknown, result: unknown) {
+  if (tool !== 'read_asset') return [];
+  const { blob } = result as ReadAssetResult;
+  if (!blob) return [];
+  const { spaceId } = args as { spaceId: string };
+  return [{
+    type: 'text' as const,
+    text: `This file is binary, so read_asset carries no bytes. Download them with the bearer you call this ` +
+      `server with: GET ${origin}/v1/spaces/${spaceId}/blobs/${blob.hash}`,
+  }];
 }
 
 async function dispatch(
@@ -138,15 +155,14 @@ async function dispatch(
     // --- identity & people --------------------------------------------------
     case 'whoami': {
       // The same row /v1/me serves.
-      return { member: await service.me(ctx), org: { name: service.org.name, address: service.org.address } };
+      return { member: await service.me(ctx), server: { name: service.server.name, address: service.server.address } };
     }
-    case 'list_members': {
-      const a = args as { spaceId?: string };
-      const members = a.spaceId !== undefined
-        ? await service.listMembers(ctx, a.spaceId)
-        : await service.listOrgMembers(ctx);
-      return { members };
-    }
+    case 'update_profile':
+      return { member: await service.updateProfile(ctx, args as { displayName?: string; title?: string }) };
+    case 'list_members':
+      return { members: await service.listMembers(ctx, (args as { spaceId: string }).spaceId) };
+    case 'list_contacts':
+      return { members: await service.listContacts(ctx) };
     // --- spaces & membership --------------------------------------------------
     case 'open_direct': {
       const a = args as { memberId: string };
@@ -156,21 +172,45 @@ async function dispatch(
       const a = args as { spaceId: string; includeDeleted?: boolean };
       return { entries: await service.listAssets(ctx, a.spaceId, a.includeDeleted) };
     }
-    case 'browse_spaces':
-      return { spaces: await service.browseSpaces(ctx) };
-    case 'join_space':
-      return service.joinSpace(ctx, (args as { spaceId: string }).spaceId);
     case 'create_space': {
-      const a = args as { name: string; visibility?: 'private' | 'open' };
-      return { space: await service.createSpace(ctx, a.name, a.visibility) };
+      const a = args as { name: string };
+      return { space: await service.createSpace(ctx, a.name) };
     }
     case 'rename_space': {
       const a = args as { spaceId: string; name: string };
       return { space: await service.renameSpace(ctx, a.spaceId, { name: a.name, ...attribution }) };
     }
+    case 'set_space_graph': {
+      const a = args as { spaceId: string; enabled: boolean };
+      return { space: await service.setSpaceGraph(ctx, a.spaceId, { enabled: a.enabled, ...attribution }) };
+    }
+    case 'read_graph': {
+      const a = args as { spaceId: string; about?: string; limit?: number };
+      // An agent reads this into its context: thirty threads unless it asks for more.
+      return service.getSpaceGraph(ctx, a.spaceId, { ...(a.about !== undefined ? { about: a.about } : {}), limit: a.limit ?? 30 });
+    }
+    case 'archive_space':
+      return { space: await service.archiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'delete_space':
+      await service.deleteSpace(ctx, (args as { spaceId: string }).spaceId);
+      return { deleted: true };
+    case 'unarchive_space':
+      return { space: await service.unarchiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
+    case 'remove_member': {
+      const a = args as { spaceId: string; memberId: string };
+      return service.removeMember(ctx, a.spaceId, a.memberId, attribution);
+    }
+    case 'set_member_role': {
+      const a = args as { spaceId: string; memberId: string; role: 'admin' | 'member' };
+      return { membership: await service.setSpaceRole(ctx, a.spaceId, a.memberId, { role: a.role, ...attribution }) };
+    }
     case 'add_members': {
-      const a = args as { spaceId: string; memberIds: string[] };
-      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...attribution }) };
+      const a = args as { spaceId: string; memberIds: string[]; invocableBy?: 'owner' | 'members' };
+      return { memberships: await service.addMembers(ctx, a.spaceId, { memberIds: a.memberIds, ...(a.invocableBy ? { invocableBy: a.invocableBy } : {}), ...attribution }) };
+    }
+    case 'set_agent_access': {
+      const a = args as { spaceId: string; agentId: string; invocableBy: 'owner' | 'members' };
+      return { membership: await service.setAgentAccess(ctx, a.spaceId, a.agentId, { invocableBy: a.invocableBy, ...attribution }) };
     }
     case 'leave_space': {
       const a = args as { spaceId: string };
@@ -178,8 +218,8 @@ async function dispatch(
       return { left: true };
     }
     case 'create_invite': {
-      const a = args as { spaceId: string; expiresInHours?: number };
-      return service.createInvite(ctx, a.spaceId, a.expiresInHours);
+      const a = args as { spaceIds?: string[]; spaceId?: string; expiresInHours?: number };
+      return service.createInvite(ctx, a);
     }
     case 'list_spaces': {
       const a = args as { includeDirect?: boolean };
@@ -190,7 +230,6 @@ async function dispatch(
             id: space.id,
             name: space.name,
             kind: space.kind,
-            visibility: space.visibility,
             ...(space.participants ? { participants: space.participants, self: space.participants.length === 1 } : {}),
             memberCount: (await service.listMembers(ctx, space.id)).length,
             assets: await service.listAssets(ctx, space.id),
@@ -199,8 +238,9 @@ async function dispatch(
       };
     }
     case 'read_stream': {
-      const a = args as { spaceId: string; beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number };
+      const a = args as { spaceId: string; beforeOffset?: number; afterOffset?: number; aroundOffset?: number; limit?: number; includeReplies?: boolean };
       const { messages, topics, hasMore, hasMoreAfter } = await service.listStream(ctx, a.spaceId, {
+        ...(a.includeReplies ? { replies: true } : {}),
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
         ...(a.afterOffset !== undefined ? { afterOffset: a.afterOffset } : {}),
         ...(a.aroundOffset !== undefined ? { aroundOffset: a.aroundOffset } : {}),
@@ -317,14 +357,18 @@ async function dispatch(
         spaceId: string;
         threadRoot?: string;
         body: string;
+        summary?: string;
         poll?: z.infer<typeof NewPoll>;
         agentOptions?: Record<string, Record<string, string | boolean>>;
+        session?: { title: string };
       };
       const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
         body: a.body,
+        ...(a.summary ? { summary: a.summary } : {}),
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
         ...(a.agentOptions ? { agentOptions: a.agentOptions } : {}),
+        ...(a.session ? { session: a.session } : {}),
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
@@ -344,8 +388,14 @@ async function dispatch(
     case 'stop_invocation':
       return { invocation: await service.cancelInvocation(ctx, (args as { invocationId: string }).invocationId) };
     case 'edit_message': {
-      const a = args as { spaceId: string; messageId: string; body: string };
-      return { message: await service.editMessage(ctx, a.spaceId, a.messageId, { body: a.body, ...attribution }) };
+      const a = args as { spaceId: string; messageId: string; body: string; summary?: string | null };
+      return {
+        message: await service.editMessage(ctx, a.spaceId, a.messageId, {
+          body: a.body,
+          ...(a.summary !== undefined ? { summary: a.summary } : {}),
+          ...attribution,
+        }),
+      };
     }
     case 'delete_message': {
       const a = args as { spaceId: string; messageId: string };
@@ -440,8 +490,37 @@ async function dispatch(
       }
       return { topic: await service.manageTopic(ctx, a.spaceId, a.topicId, action) };
     }
+    case 'archive_thread': {
+      const a = args as { spaceId: string; rootMessageId: string; archived?: boolean };
+      const root = await service.archiveThread(ctx, a.spaceId, a.rootMessageId, {
+        archived: a.archived ?? true,
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
+      });
+      return { root };
+    }
+    case 'list_archived_threads': {
+      const a = args as { spaceId: string };
+      return { threads: await service.listArchivedThreads(ctx, a.spaceId) };
+    }
+    case 'set_session': {
+      const a = args as { spaceId: string; rootMessageId: string; title: string | null };
+      const root = await service.setSession(ctx, a.spaceId, a.rootMessageId, {
+        session: a.title === null ? null : { title: a.title },
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
+      });
+      return { root };
+    }
+    case 'list_my_threads':
+      return { threads: await service.myThreads(ctx, { archived: (args as { archived?: boolean }).archived === true }) };
+    // --- super agents (spec §4 Agent members, 2026-11-02) ----------------------
+    case 'create_agent':
+      return service.superAgentCreate(ctx, args as { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string });
+    case 'delete_agent':
+      return service.superAgentDelete(ctx, args as { spaceId: string; threadRootId: string; agentId: string; reason: string });
     case 'search_space': {
-      const a = args as { spaceId: string; query: string; kinds?: SearchKind[]; limit?: number };
+      const a = args as { spaceId?: string; query: string; kinds?: SearchKind[]; limit?: number };
       return service.search(ctx, a.spaceId, a.query, {
         ...(a.kinds !== undefined ? { kinds: a.kinds } : {}),
         ...(a.limit !== undefined ? { limit: a.limit } : {}),
@@ -469,5 +548,9 @@ async function spaceNamesFor(service: HarborService, ctx: ActorCtx): Promise<Map
 }
 
 function relabel(message: Message, names: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): Message {
-  return { ...message, body: relabelMentions(message.body, names, spaceNames) };
+  return {
+    ...message,
+    body: relabelMentions(message.body, names, spaceNames),
+    ...(message.summary ? { summary: relabelMentions(message.summary, names, spaceNames) } : {}),
+  };
 }

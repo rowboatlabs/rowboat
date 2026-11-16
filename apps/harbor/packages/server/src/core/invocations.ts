@@ -4,8 +4,10 @@ import {
   type Approval,
   type ApprovalClose,
   type ApprovalDecision,
+  type ApprovalAction,
   type ApprovalRequest,
   type Invocation,
+  type InvocationActivity,
   type InvocationOptionValues,
   type InvocationState,
   type InvocationUpdate,
@@ -14,7 +16,7 @@ import {
   type Space,
 } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
-import { canCancelQueuedInvocation, canDecideApproval, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
+import { canCancelQueuedInvocation, canDecideApproval, canDecideSuperAgentRequest, canStopInvocation, enforce, invocationRefusal, seatOf } from '../policy.js';
 import type { ActorCtx, Kernel } from './kernel.js';
 
 // Invoking agent members (spec §8, 2026-09-30). Harbor decides and a
@@ -62,23 +64,41 @@ export type InvocationOutbox = Array<
   { to: 'agent'; memberId: string; frame: ServerFrame } | { to: 'space'; spaceId: string; frame: ServerFrame }
 >;
 
+/**
+ * An invocation as people see it (2026-10-29): without its agent's
+ * instructions, which are for the agent's connector. Everyone can read them
+ * on the agent's profile; they need not ride every state change in a space.
+ */
+export function forPeople(invocation: Invocation): Invocation {
+  if (invocation.instructions === undefined) return invocation;
+  const { instructions: _forTheAgent, ...rest } = invocation;
+  return rest;
+}
+
 export class Invocations {
+  // Record only after commit, beside live delivery: rolled-back reports must never
+  // enter history, and terminal frames free it on every exit path (2026-11-01).
+  private readonly activityHistory = new Map<string, InvocationActivity[]>();
+
   constructor(private readonly k: Kernel) {}
 
   // --- the trigger: Feed.postMessage calls this inside its space lock ------------
 
   /**
-   * The agents a new message invokes (v1: mentions only). Each mentioned
-   * agent member other than the author gets an invocation: refused (no
-   * shared space, or past the hop limit), pending (its conversation is free,
-   * or its turn is waiting on a person, which this answers), or queued.
-   * Edits never invoke.
+   * The agents a new message invokes: the agents it mentions, the agent in a
+   * DM, and in a shared space's thread the agent a person's unaddressed reply
+   * follows up (followedUp). Each agent member other than the author gets an
+   * invocation: refused (no shared space, an owner-only seat, or past the hop limit),
+   * pending (its conversation is free, or its turn is waiting on a person,
+   * which this answers), or queued. Edits never invoke. `depth` is the
+   * message's hand-off depth (handOffDepth).
    */
   async onMessage(
     ctx: ActorCtx,
     space: Space,
     message: Message,
     agentOptions: Record<string, InvocationOptionValues> | undefined,
+    depth: number,
     out: InvocationOutbox,
   ): Promise<Invocation[]> {
     const created: Invocation[] = [];
@@ -87,26 +107,39 @@ export class Invocations {
     // and a self-DM out: only an agent that is not the author is invoked.
     const invoked = new Set(message.mentions);
     if (space.kind === 'direct') for (const id of space.participants ?? []) invoked.add(id);
+    else {
+      const followed = await this.followedUp(ctx, space.id, message);
+      if (followed) invoked.add(followed);
+    }
     for (const agentId of invoked) {
       if (agentId === message.author.memberId) continue;
       const agent = await this.k.store.getMember(agentId);
       if (agent?.kind !== 'agent') continue;
       const threadRootId = message.threadRoot ?? message.id;
-      // An agent's post hands work on: one hop deeper than the deepest turn it is running (spec §8).
-      const depth = ctx.agent ? 1 + (await this.deepestLive(ctx.memberId)) : 0;
       const shares = space.kind === 'shared' || (await this.k.store.sharesSharedSpace(message.author.memberId, agentId));
-      const refusal = invocationRefusal(shares, depth);
+      // The agent's seat here (spec §4 Agent members, 2026-11-09): everyone, or its owner only.
+      const seat = seatOf(await this.k.store.getMembership(space.id, agentId));
+      const refusal = invocationRefusal(shares, depth, { agent, authorId: message.author.memberId, seat });
       const now = this.k.now();
       // The owner's defaults fill what the invoker did not pick: a mention, a DM, an agent's hand-off alike.
       const options = { ...(await this.defaultsFor(agentId)), ...agentOptions?.[agentId] };
+      const secrets = message.secrets?.readers.includes(agentId) ? message.secrets.names : [];
       const invocation: Invocation = {
         id: this.k.ulid(),
         agentId,
         conversation: { spaceId: space.id, threadRootId },
-        trigger: { messageId: message.id, authorId: message.author.memberId, body: message.body },
+        trigger: {
+          messageId: message.id,
+          authorId: message.author.memberId,
+          body: message.body,
+          // Names only: the agent reads each value on its own key (2026-11-04).
+          ...(secrets.length > 0 ? { secrets } : {}),
+        },
         where: { spaceKind: space.kind, spaceName: space.name },
         depth,
         ...(options && Object.keys(options).length > 0 ? { options } : {}),
+        // What its connector gives the agent (2026-10-29); people never see it on an invocation (forPeople).
+        ...(agent.instructions && !refusal ? { instructions: agent.instructions } : {}),
         state: 'refused',
         ...(refusal ? { refusal } : {}),
         createdAt: now,
@@ -127,12 +160,90 @@ export class Invocations {
     return created;
   }
 
+  /**
+   * The agent a thread reply follows up without a mention (spec §8, amended
+   * 2026-10-27): a person's own reply, acting directly, that mentions nobody
+   * (no member or @here) and is not sent to people only continues the
+   * conversation with the agent its author most recently invoked in that
+   * thread. Only that one, so a reply never starts two agents. A refused
+   * invocation does not count, since it never reached the agent. Policy then applies as
+   * to a mention. Amended 2026-11-05 ("reply ux" in Main): only while that
+   * conversation is the thread's latest, so the message before the reply is
+   * the agent's own or the author's to it; otherwise the reply is to people.
+   */
+  private async followedUp(ctx: ActorCtx, spaceId: string, message: Message): Promise<string | undefined> {
+    if (!message.threadRoot || message.peopleOnly || ctx.agent || message.author.actingMode !== 'direct') return undefined;
+    if (message.mentions.length > 0 || message.mentionsHere || message.mentionsRowboat) return undefined;
+    const invocations = await this.k.store.listSpaceInvocations(spaceId, message.threadRoot, LIST_LIMIT);
+    let agentId: string | undefined;
+    for (const i of invocations) {
+      if (i.trigger.authorId !== message.author.memberId || i.state === 'refused') continue;
+      agentId = i.agentId;
+      break;
+    }
+    if (!agentId) return undefined;
+    const earlier = (await this.k.store.listThread(spaceId, message.threadRoot, { beforeOffset: message.offset, limit: 1 })).reverse();
+    const root = await this.k.store.getMessage(spaceId, message.threadRoot);
+    const previous: Message | undefined = earlier[0] ?? root;
+    if (!previous) return undefined;
+    if (previous.author.memberId === agentId) return agentId;
+    const toAgent = previous.author.memberId === message.author.memberId
+      && invocations.some((i) => i.agentId === agentId && i.trigger.messageId === previous.id);
+    return toAgent ? agentId : undefined;
+  }
+
   /** Send what the lock held back. */
   flush(out: InvocationOutbox): void {
     for (const item of out) {
       if (item.to === 'agent') this.k.hub.publishToMember(item.memberId, item.frame);
-      else this.k.hub.publish(item.spaceId, item.frame);
+      else {
+        if (item.frame.kind === 'invocation_state') {
+          const entry = this.recordActivity(item.frame.invocation);
+          this.k.hub.publish(item.spaceId, { ...item.frame, ...(entry ? { activityEntry: entry } : {}) });
+        } else this.k.hub.publish(item.spaceId, item.frame);
+      }
     }
+  }
+
+  private recordActivity(invocation: Invocation): InvocationActivity | undefined {
+    if (TERMINAL.has(invocation.state)) {
+      this.activityHistory.delete(invocation.id);
+      return;
+    }
+    if ((invocation.state !== 'working' && invocation.state !== 'waiting') || !invocation.activity) return;
+    const entries = this.activityHistory.get(invocation.id) ?? [];
+    const last = entries.at(-1);
+    // Connectors repeat their latest line as a heartbeat (2026-11-01).
+    if (last?.state === invocation.state && last.activity === invocation.activity) return;
+    const entry: InvocationActivity = {
+      id: this.k.ulid(), at: invocation.updatedAt, state: invocation.state, activity: invocation.activity,
+    };
+    entries.push(entry);
+    this.activityHistory.set(invocation.id, entries);
+    return entry;
+  }
+
+  private withActivityHistory(invocation: Invocation): Invocation {
+    const visible = forPeople(invocation);
+    if (invocation.state !== 'working' && invocation.state !== 'waiting') return visible;
+    return { ...visible, activityHistory: [...(this.activityHistory.get(invocation.id) ?? [])] };
+  }
+
+  /**
+   * The agent's instructions as they are now, on invocations its connector
+   * lists (Invocation.instructions, 2026-10-29). A delivered one already
+   * carries them from when it became pending; the listing brings an edit made
+   * since.
+   */
+  private async withInstructions(invocations: Invocation[]): Promise<Invocation[]> {
+    const found = new Map<string, string | undefined>();
+    const out: Invocation[] = [];
+    for (const invocation of invocations) {
+      if (!found.has(invocation.agentId)) found.set(invocation.agentId, (await this.k.store.getMember(invocation.agentId))?.instructions);
+      const instructions = found.get(invocation.agentId);
+      out.push(instructions ? { ...invocation, instructions } : invocation);
+    }
+    return out;
   }
 
   // --- the connector's operations: on an agent's own key, about its own invocations ---
@@ -140,7 +251,7 @@ export class Invocations {
   /** The agent's delivered, unfinished invocations: what a reconnecting connector picks up. */
   async listForAgent(ctx: ActorCtx): Promise<Invocation[]> {
     this.requireConnector(ctx);
-    return this.k.store.listInvocationsForAgent(ctx.memberId, LIVE);
+    return this.withInstructions(await this.k.store.listInvocationsForAgent(ctx.memberId, LIVE));
   }
 
   /** pending → working. Idempotent for one already acknowledged; a cancelled one must be dropped. */
@@ -238,12 +349,12 @@ export class Invocations {
     return applicableDefaults((await this.k.store.getAgentCapabilities(agentId)) ?? ConnectorCapabilities.parse({}), defaults);
   }
 
-  /** The defaults the agent's owner set, as set (the composer preselects those that fit). Any org member. */
+  /** The defaults the agent's owner set, as set (the composer preselects those that fit). Any member. */
   async optionDefaults(agentId: string): Promise<InvocationOptionValues> {
     return (await this.k.store.getAgentOptionDefaults(agentId)) ?? {};
   }
 
-  /** Any org member may read an agent's capabilities: the composer shows its options, the thread its Stop. */
+  /** Any member may read an agent's capabilities: the composer shows its options, the thread its Stop. */
   async capabilities(agentId: string): Promise<ConnectorCapabilities> {
     const agent = await this.k.store.getMember(agentId);
     if (agent?.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
@@ -251,8 +362,8 @@ export class Invocations {
   }
 
   async listForSpace(ctx: ActorCtx, spaceId: string, threadRootId?: string): Promise<Invocation[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
-    return this.k.store.listSpaceInvocations(spaceId, threadRootId ?? null, LIST_LIMIT);
+    await this.k.requireMember(ctx, spaceId);
+    return (await this.k.store.listSpaceInvocations(spaceId, threadRootId ?? null, LIST_LIMIT)).map((i) => this.withActivityHistory(i));
   }
 
   /**
@@ -263,11 +374,15 @@ export class Invocations {
    * A finished invocation is returned as it is.
    */
   async cancel(ctx: ActorCtx, id: string): Promise<Invocation> {
+    return this.withActivityHistory(await this.cancelInner(ctx, id));
+  }
+
+  private async cancelInner(ctx: ActorCtx, id: string): Promise<Invocation> {
     const found = await this.k.store.getInvocation(id);
     if (!found) throw new HarborError('not_found', 'no such invocation');
-    await this.k.requireReadableSpace(ctx, found.conversation.spaceId);
+    await this.k.requireMember(ctx, found.conversation.spaceId);
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     const { stop } = await this.capabilities(found.agentId);
     const out: InvocationOutbox = [];
     const result = await this.k.locked(found.conversation.spaceId, async () => {
@@ -282,7 +397,7 @@ export class Invocations {
         if (current.state === 'pending') await this.promote(next.agentId, next.conversation.spaceId, next.conversation.threadRootId, out);
         return next;
       }
-      enforce(canStopInvocation(actor, current, stop));
+      enforce(canStopInvocation(await this.k.store.getMembership(current.conversation.spaceId, ctx.memberId), current, stop));
       if (current.stopRequested) return current;
       const next: Invocation = { ...current, stopRequested: true, updatedAt: this.k.now() };
       await this.k.store.putInvocation(next);
@@ -313,7 +428,7 @@ export class Invocations {
   }
 
   /** The approval a card carries: open, for the invocation's agent and thread. */
-  approvalFor(current: Invocation, messageId: string, request: ApprovalRequest): Approval {
+  approvalFor(current: Invocation, messageId: string, request: ApprovalRequest, action?: ApprovalAction): Approval {
     const now = this.k.now();
     return {
       id: this.k.ulid(),
@@ -326,6 +441,7 @@ export class Invocations {
       detail: request.detail,
       ...(request.reason ? { reason: request.reason } : {}),
       choices: request.choices,
+      ...(action ? { action } : {}),
       state: 'open',
       createdAt: now,
       updatedAt: now,
@@ -335,6 +451,8 @@ export class Invocations {
   /** The other half: the approval is stored with its card, and the invocation waits on it. */
   async raiseWithin(current: Invocation, approval: Approval, out: InvocationOutbox): Promise<void> {
     await this.k.store.insertApproval(approval);
+    // A super agent's request holds no turn: the agent says it asked and goes on (2026-11-02).
+    if (approval.action) return;
     const held: Invocation = { ...current, state: 'waiting', activity: `Waiting for approval: ${approval.title}`.slice(0, 200), updatedAt: this.k.now() };
     await this.k.store.putInvocation(held);
     this.announce(held, out);
@@ -356,6 +474,11 @@ export class Invocations {
     if (!found || found.conversation.spaceId !== spaceId) throw new HarborError('not_found', 'no such approval');
     if (input.note && input.decision !== 'deny') throw new HarborError('invalid_request', 'a note goes with a deny');
     await this.k.requireMember(ctx, spaceId);
+    // A super agent's request is its owner's to decide (2026-11-02).
+    if (found.action) {
+      const actor = await this.k.store.getMember(ctx.memberId);
+      enforce(actor ? canDecideSuperAgentRequest(actor, await this.k.store.getMember(found.agentId)) : { code: 'not_a_member', message: 'not a member of this server' });
+    }
     const out: InvocationOutbox = [];
     const result = await this.k.lockedAs(ctx, spaceId, async () => {
       const current = (await this.k.store.getApproval(id))!;
@@ -372,7 +495,8 @@ export class Invocations {
         updatedAt: at,
       };
       await this.settleApproval(next, out);
-      out.push({ to: 'agent', memberId: next.agentId, frame: { kind: 'approval_decided', approval: next } });
+      // Harbor applies a super agent's request itself (SuperAgents.apply); its connector never sees it.
+      if (!next.action) out.push({ to: 'agent', memberId: next.agentId, frame: { kind: 'approval_decided', approval: next } });
       return next;
     });
     this.flush(out);
@@ -402,6 +526,43 @@ export class Invocations {
     const next: Approval = { ...found, appliedAt: this.k.now() };
     await this.k.store.putApproval(next);
     return next;
+  }
+
+  /**
+   * Harbor applied a super agent's request (2026-11-02): what it did goes on
+   * the card, and the approval counts as applied. The first outcome stands.
+   */
+  async recordOutcome(id: string, outcome: NonNullable<Approval['outcome']>): Promise<Approval> {
+    const found = await this.k.store.getApproval(id);
+    if (!found?.action) throw new HarborError('not_found', 'no such request');
+    return this.k.locked(found.conversation.spaceId, async () => {
+      const current = (await this.k.store.getApproval(id))!;
+      if (current.appliedAt) return current;
+      const at = this.k.now();
+      const next: Approval = { ...current, outcome, appliedAt: at, updatedAt: at };
+      await this.k.store.putApproval(next);
+      await this.k.appendNext(next.conversation.spaceId, at, { type: 'approval', approval: next });
+      return next;
+    });
+  }
+
+  /**
+   * A super agent's setup card its owner completed by adding the agent
+   * (2026-11-02): allowed by them and applied at once, with the agent as its
+   * outcome. Only an open card: the first completion stands.
+   */
+  async fulfilRequest(id: string, by: string, outcome: NonNullable<Approval['outcome']>): Promise<Approval> {
+    const found = await this.k.store.getApproval(id);
+    if (!found?.action) throw new HarborError('not_found', 'no such request');
+    return this.k.locked(found.conversation.spaceId, async () => {
+      const current = (await this.k.store.getApproval(id))!;
+      if (current.state !== 'open') throw new HarborError('invalid_request', `this request is already ${current.state}`);
+      const at = this.k.now();
+      const next: Approval = { ...current, state: 'allowed', decision: 'allow_once', decidedBy: by, decidedAt: at, outcome, appliedAt: at, updatedAt: at };
+      await this.k.store.putApproval(next);
+      await this.k.appendNext(next.conversation.spaceId, at, { type: 'approval', approval: next });
+      return next;
+    });
   }
 
   /** Decisions on the agent's approvals its connector has not confirmed applying: the guarantee behind `approval_decided`. */
@@ -465,7 +626,10 @@ export class Invocations {
     if (all.some((i) => LIVE.includes(i.state) && !i.answers)) return;
     const next = all.find((i) => i.state === 'queued');
     if (!next) return;
-    const pending: Invocation = { ...next, state: 'pending', updatedAt: this.k.now() };
+    // Delivered with its agent's instructions as they are now: an edit while it queued applies (2026-10-29).
+    const { instructions: _queued, ...rest } = next;
+    const instructions = (await this.k.store.getMember(agentId))?.instructions;
+    const pending: Invocation = { ...rest, ...(instructions ? { instructions } : {}), state: 'pending', updatedAt: this.k.now() };
     await this.k.store.putInvocation(pending);
     this.announce(pending, out);
   }
@@ -473,13 +637,19 @@ export class Invocations {
   /** Tell the space every change; tell the agent when one is ready for it. */
   private announce(invocation: Invocation, out: InvocationOutbox): void {
     const spaceId = invocation.conversation.spaceId;
-    out.push({ to: 'space', spaceId, frame: { kind: 'invocation_state', spaceId, invocation } });
+    out.push({ to: 'space', spaceId, frame: { kind: 'invocation_state', spaceId, invocation: forPeople(invocation) } });
     if (invocation.state === 'pending') out.push({ to: 'agent', memberId: invocation.agentId, frame: { kind: 'invocation', invocation } });
   }
 
-  private async deepestLive(agentId: string): Promise<number> {
-    const live = await this.k.store.listInvocationsForAgent(agentId, LIVE);
-    return live.reduce((max, i) => Math.max(max, i.depth), 0);
+  /**
+   * The depth an agent a new message mentions is invoked at (spec §8). A
+   * person's post is 0; an agent's hands work on, one hop deeper than the
+   * deepest turn it is running.
+   */
+  async handOffDepth(ctx: ActorCtx): Promise<number> {
+    if (!ctx.agent) return 0;
+    const live = await this.k.store.listInvocationsForAgent(ctx.memberId, LIVE);
+    return 1 + live.reduce((max, i) => Math.max(max, i.depth), 0);
   }
 
   /** One of the calling agent's own invocations, as it stands. */

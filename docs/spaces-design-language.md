@@ -12,7 +12,7 @@ The reference offers a default Clean layout with profile photos and a Compact la
 
 The published interface image shows a stable avatar gutter, a name and quiet timestamp above the body, small reactions under the text, and an inline reply summary. Message text has no surrounding speech bubble. The text column also anchors continuation messages and reply links. The result supports scanning a changing roster of senders without forcing each message into an isolated card. [2]
 
-Spaces already used 15 px text with 22 px leading in the main stream. The inconsistencies were around it: thread replies had smaller avatars, the thread root was a tinted card with smaller text, and stacked container padding obscured the true gutter. The implementation keeps the readable body size and normalizes the surrounding geometry. Thread roots use the same visual identity and text scale as replies.
+Spaces already used 15 px text with 22 px leading in the main stream. The inconsistencies were around it: thread replies had smaller avatars, the thread root was a tinted card with smaller text, and stacked container padding obscured the true gutter. The implementation keeps the 15 px body size, increases message leading to 24 px, and normalizes the surrounding geometry. Thread roots use the same visual identity and text scale as replies.
 
 ### Actions and reactions
 
@@ -36,40 +36,53 @@ The main stream remains mounted across these transitions. Its existing scroll re
 
 The reference's visual-language essay explicitly treats information density as a constraint while changing surfaces, borders, depth, and theme customization. That supports a restrained adaptation: improve region hierarchy while keeping Rowboat's existing light/dark theme and agent affordances. [2]
 
-Spaces uses a quiet navigation surface, compact discussion rows, and a blue-tinted selected destination. Section labels use sentence case instead of small tracked capitals. The space header establishes identity and search; aligned pane headers identify Messages and Thread/Discussion. Supporting detail can truncate while essential actions retain their target size.
+Spaces uses a quiet navigation surface, compact discussion rows, and a blue-tinted selected destination. Section labels use sentence case instead of small tracked capitals. Supporting detail can truncate while essential actions retain their target size.
 
-A separate global app rail, huddles, workspace theming controls, a new cross-space thread inbox, and reply broadcasting are not introduced. Those require broader product decisions or behavior beyond a visual redesign. Files, boards, named discussions, agent execution, and permissions retain their existing roles.
+The space header (2026-10-21) carries few controls: the space's name as one menu (details, Pinned & saved, Scheduled, Mark all as read, Show replies inline / in threads (2026-10-25: per space, kept on the device; inline has no threads, every reply sits in the stream under a quote of what it answers, and a Threads row lands on its message in the stream and opens the conversation beside it), links, and the admin actions), then Messages, Threads and Files as one segmented control, then search, a members face pile that also holds Invite, and the board. Each view is one click; nothing opens on hover. The rail leads with Activity, Agents and Browse spaces as plain rows, then collapsible Spaces and Direct messages sections whose `+` creates in place, with Invite people at its foot; Activity, Agents and Browse use the same collapsible rail. Activity, Threads and Files are pages in the Agents page's shape: a large title with its count, one line on what the page holds, a pill filter, and 14 px rows. Threads (2026-10-21, #1199) filters All, Named (the discussions, with Active and Archived), Sessions (2026-11-05) and By me. Each Threads row (2026-10-25, #1232) ends in its participants as overlapping round faces, the starter first and then repliers in first-reply order, up to four and then `+N`; people are round here because the request asked for circles. A participant menu beside the pills narrows to threads any of the chosen people started or replied in (2026-11-03: several can be picked, and the menu stays open while picking), and is remembered per space.
+
+Threads (2026-11-05, "coding session: threads" in Main) is a rail row beside Activity and Agents that opens your threads across the server's spaces: every thread you started or follow, newest first. It is the space's Threads tab drawn over your threads instead of a space's (one component, 2026-11-06): the same rows with participant faces, the same ⋯ and right-click menus, the same All, Named, Sessions and By me, Active or Archived with its count, and the same participant menu, plus a Space menu and each row's space. A row also says where it stands (needs you, working, idle; a dot beside the words). Search is the top bar's, not a box on the page. The row's number counts the threads that need you. The rail itself lists no threads: it is for places, and a list of work in progress would push them out. The space's Threads tab stays everyone's threads in that one space. Sessions are threads a person marks: `/session fix thread nav` in the message box posts a root with that title, marked, and opens its thread; the picker puts New first and selected, then your open sessions, this space's first, filtered by the words typed. In a thread, `/session` makes that thread one. A session's first message carries a small pill on its name line, never a line of its own (2026-11-06): "Session" with a dot (grey idle, amber needs you, green and gently pulsing while an agent works), or "Ended"; that message always shows its name line. Its thread header says Session with an End session button. Ending is archiving, so a reply reopens it. The list and each status are Harbor's (`myThreads`).
+
+A separate global app rail, huddles, workspace theming controls, a cross-space list of everyone's threads, and reply broadcasting are not introduced. Those require broader product decisions or behavior beyond a visual redesign. Files, boards, named discussions, agent execution, and permissions retain their existing roles.
+
+Space settings (2026-11-12) opens from a space’s sidebar options/right-click menu or its header menu, keeping the sidebar visible. General, People, Agents, and Space actions organize name/link, live membership and role management, owner-controlled agent access, and the existing archive/delete confirmations. Back to space returns to its conversation.
+
+The Graph tab (2026-11-12) is a fourth segment after Files, present only in a space whose admin has turned its knowledge graph on. It is three columns under the header: options on the left, the picture, and details on the right. Squares are threads and circles are what they touch: people, agents, topics, pull requests. Clicking a node focuses it: its threads stay lit, what else those threads touch stays half lit, and the rest fades; a bar at the top left names the focus, steps back and shows all, and Esc clears it. Hovering a node or a line says what it is and what it weighs. The details column lists a node's threads with the part played, how many messages, and the weight, and a thread's panel carries Jev's judgments as meters, who opened it, and Open thread. The six node colours are the one place Spaces uses categorical colour; they are scoped to the graph (`.space-graph` in `spaces.css`) and used nowhere else. Labels are drawn heaviest first and one that would cover another is skipped. Options are native checkboxes and range inputs, since the product has no slider component.
 
 ## Component mapping
 
 | Reference pattern | Existing Spaces fit | Implemented adaptation |
 | --- | --- | --- |
-| Avatar-based conversation | `MessageRow` and continuation grouping | One 36 px avatar/gutter size in both timelines; 15/22 px body text |
+| Avatar-based conversation | `MessageRow` and continuation grouping | One 36 px avatar/gutter size in both timelines; 15/24 px body text |
 | Quiet message metadata | Sender, timestamp, agent attribution | Bold sender, secondary timestamp, wrapping attribution |
 | Message action bar | Reaction, Reply/Open, Ask agent, More | 32 px controls, 18 px glyphs, keyboard reveal, persistent open state |
 | Emoji reaction pill | Reaction groups and self membership | 28 px pill, 16 px emoji, 12 px count, pressed semantics |
 | Inline thread summary | Root reply count and latest activity | Compact wrapping link, blue reply count, explicit last-reply label |
 | Context-preserving thread pane | `ThreadPane` | Right pane on wide layouts, full conversation region on narrow layouts |
 | Root followed by reply divider | Existing root card and reply list | Plain message-style root and quiet count divider |
-| Bounded composition area | Shared rich-text composer | 8 px corners, thin border, subtle formatting strip, rectangular send control |
-| Sectioned navigation | Chat/discussion and file rail | Consistent 32 px discussion rows and selected-state tint |
+| Bounded composition area | Shared rich-text composer | 14 px corners, thin border; formatting behind an Aa toggle; attach and poll under one + menu; an Ask Rowboat chip that tints the frame; a send control that fills once there is something to send |
+| Sectioned navigation | Space rail | Activity, Agents, Browse rows; collapsible Spaces and Direct messages sections; 32 px rows and selected-state tint |
 | Theme-aware surfaces | Existing application color variables | Scoped semantic styles reuse light and dark colors |
 
 The root message exposes reply counts and last-reply time, but the stream's summary does not provide a reliable roster of replying members. Participant avatars are therefore not fabricated or inferred from working agents. They can be added when the summary carries real participant data.
+
+## People and integrations
+
+As of 2026-10-19, the space header's member directory separates **People** from **Agents** in two tabs with independent counts (the second tab was "Bots & AI integrations" until 2026-11-09). People is the default and contains only human accounts; all agent accounts, including service bots, appear in Agents. Within each tab, members who are here sort first, followed by alphabetical name order. Profile actions, provider badges, and membership controls retain their existing behavior. A person's agent posting on their behalf does not move that human account into the Agents tab.
 
 ## Geometry and typography
 
 | Element | Spaces specification | Reason |
 | --- | --- | --- |
 | Base spacing | 4 px rhythm | Predictable spacing across repeated controls |
-| Space header | 56 px minimum height; 20 px horizontal inset | Clear identity and comfortable search/control alignment |
+| Space header | 56 px minimum height; 20 px horizontal inset; 32 px controls | Name menu, view tabs, search, people and board on one line |
 | Pane header | 48 px minimum height; 16 px inset | Messages and thread headings align |
 | Message avatar | 36 × 36 px, 6 px corners | Recognizable identity without dominating the message |
 | Avatar-to-content gap | 12 px | Stable reading column |
 | Message inset | 20 px desktop; 12 px narrow viewport | Full-width hover surface with a consistent text origin |
 | New author row | 8 px above, 4 px below | Separates speaking turns |
 | Continuation row | 2 px above and below | Groups consecutive messages without duplicate identity |
-| Message body | 15 px / 22 px | Comfortable long-form chat reading |
+| Message body | 15 px / 24 px; maximum 100ch reading width | Comfortable long-form chat reading |
+| Message Markdown | 0.75em between blocks; outside list markers, 1.75em indentation per level; inline code at 0.875em | Paragraph separation, visible nesting, and aligned wrapped text |
 | Sender | 15 px bold / 22 px | Primary scan anchor |
 | Timestamp and metadata | 12 px, secondary color | Supporting information stays subordinate |
 | Action target | 32 × 32 px; labeled reply at least 32 px high | Consistent pointer and keyboard target |
@@ -78,14 +91,15 @@ The root message exposes reply counts and last-reply time, but the stream's summ
 | Reaction emoji/count | 16 px / 12 px | Emoji first, count second |
 | Reaction gaps | 4 px | Compact grouped responses |
 | Reply link | At least 28 px high, 12 px text | Lightweight but explicit navigation |
-| Date separator | 13 px semibold pill, 16 px upper spacing | Strong time landmarks without boxing messages |
-| Composer | 8 px corner radius, 1 px border | A bounded writing area with restrained decoration |
+| Date separator | Hairlines either side of a small semibold label, 16 px upper spacing | Time landmarks without boxing messages |
+| Composer | 14 px corner radius, 1 px border, stronger on focus | A bounded writing area with restrained decoration |
 | Composer text | 15 px / 22 px, minimum 56 px body | Drafts resemble posted messages |
 | Composer dock | 12 px above, 16 px sides/below | Separation from the stream and window edge |
 | Discussion navigation | 32 px high; 13 px title | Dense, readable destinations |
 | Thread split | Resizable; 400 px default, 360 px minimum, 6 px divider at ≥840 px content width | Retains a usable 440 px timeline |
+| Motion | ≤320 ms; menus 200 ms, sections 240 ms, tab highlight 260 ms, thread pane 300 ms; none under reduced motion | Open and close read as movement, never as a jump |
 
-The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spaces.css`. Components retain utility classes for local flex layout and content-specific states. Theme colors come from existing application variables: foreground/background, secondary text, borders, raised surfaces, link blue, mention wash, and attention color. No reference-product identifiers are needed in feature code.
+The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spaces.css`; shared message Markdown typography lives in `apps/x/apps/renderer/src/styles/message-prose.css`. As of 2026-10-06, messages use a bounded reading width, explicit paragraph spacing, hanging list markers at every nesting level, and proportional inline code. Headings step down from 21 px to the 15 px body size. Code blocks, wide tables, and display mathematics scroll within the message; Streamdown retains syntax highlighting and copy/download controls. Task lists preserve checkbox alignment. Components retain utility classes for local flex layout and content-specific states. Theme colors come from existing application variables: foreground/background, secondary text, borders, raised surfaces, link blue, mention wash, and attention color. No reference-product identifiers are needed in feature code.
 
 ## Interaction rules
 
@@ -102,6 +116,22 @@ The implementation's semantic stylesheet is `apps/x/apps/renderer/src/styles/spa
 11. A wrong destination is corrected in the thread, not in a toast (2026-09-23). A staged reply (Preview, or Post's Undo) shows a banner above the thread composer that stays until the person acts: post it to the stream instead, try another thread (Jev again, with every rejected thread excluded; nothing fitting leaves the reply where it is), or keep it as a plain draft. Sending from that composer settles it. Taking the reply back leaves any draft that was there before.
 12. On a held stream verdict, the notice may offer people to tag (2026-09-24): up to three members judged from the space's recent messages, and @here for an announcement, never more than Jev is confident about. Chips are offers: a click adds the mention, a second click removes it, a chip's × declines it for this draft (an edit-and-resend does not bring it back), the notice's X or Esc hides them all, and sending with chips untouched sends nothing extra. Nothing is ever added on its own. A switch on the Decision Models card turns suggestions off, which also skips the questions. Direct spaces never suggest.
 13. `/find <what you remember>` in the stream composer (2026-09-24) lands on the message or thread the words describe, with Jev picking by meaning from the recent roots and the org's word-search hits. A reply, a discussion, or a root with replies opens as a thread; a lone root scrolls the stream. A banner above the composer of the pane landed in reads 'Match 2 of 5 for "…"' with "Next match" (the ranking, walked locally with no second call), "Open search" (the search bar, prefilled), and a close. Every text node in these banners is one size. When nothing matches, or without a TypeSafe key, the query goes to the search bar instead of landing somewhere plausible.
+
+### Open-space discovery and previews (2026-09-28)
+
+Each server's navigation includes **Browse spaces**, a full-page directory of its open
+spaces with name search and a Joined indicator. A row opens the normal space view;
+opening it never joins. An unjoined view identifies itself as a preview and offers
+**Join space** in its banner and in place of conversation composers. Reading includes
+threads, the roster, search, attachments, files, history, diffs, and whiteboards.
+Previews do not send presence, advance read marks, follow threads, or acquire unread
+badges. Member-only actions become available after an explicit successful join.
+
+Create space offers **Private** (the default) and **Open**, with copy explaining the
+team visibility boundary. Private spaces use a lock; open spaces use the channel
+icon. The directory and Open creation explain when a server needs an update; private
+creation remains available. Existing-space visibility changes belong to admin controls.
+The product and access rules remain owned by [Harbor spec §5](../apps/harbor/SPEC.md#5-the-space).
 
 ## Verification and limitations
 
@@ -120,3 +150,7 @@ The available automation environment has no connected browser for live applicati
 3. Hubert Florin, Slack Design. [Threads in Slack, a long design journey, part 2](https://slack.design/articles/threads-in-slack-a-long-design-journey-part-2-of-2/). Historical design retrospective. Used for explicit message actions and the rationale for flat sidebar conversations.
 4. Slack Help Center. [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions). Accessed September 9, 2026. Reaction entry, self-reaction highlight, toggle behavior, and reactor disclosure.
 5. Slack Help Center. [Use threads to organize discussions](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions). Accessed September 9, 2026. Rooted discussions and thread navigation.
+
+Space settings access (2026-11-12): only an admin of the selected space sees its settings menu entries or can open its settings page, including by direct URL. Archive and delete are in Settings → Space actions, removed from the space-name dropdown. Existing backend rules remain: rename/add are member operations, role/removal/archive/delete are admin operations, and agent access is owner-controlled.
+
+Space settings agents (2026-11-12): Add agents filters the existing membership picker to owned agents not already in the space; Add people filters to humans. Connect an agent and each Agent settings button reuse the main Agents dialog and its backend operations. Agent rows link to the existing agent settings screen without duplicating access or removal controls. The existing agent-management screen and backend permissions remain unchanged.

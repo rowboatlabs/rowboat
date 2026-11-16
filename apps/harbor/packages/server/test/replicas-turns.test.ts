@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseServerSentEvents } from '../src/connectors/replicas/api.js';
-import { attachmentLinks } from '../src/connectors/replicas/prompt.js';
-import { activityOf, answerOf, failureOf, readsAnswers } from '../src/connectors/replicas/turns.js';
+import { attachmentLinks } from '../src/connectors/common/prompt.js';
+import { activityOf, answerOf, failureOf, readsAnswers } from '../src/connectors/common/agent-events.js';
 
 // Reading Replicas's streams and its coding agents' events (spec §8
 // Connectors, 2026-09-30): the documented shapes, and nothing guessed.
@@ -31,6 +31,7 @@ describe('what a turn says', () => {
     expect(answerOf('claude-code', [tool, final, sub])).toBe('All fixed.');
     expect(failureOf('claude-code', [final, { type: 'claude-result', payload: { subtype: 'success', is_error: false } }])).toBeUndefined();
     expect(failureOf('claude-code', [{ type: 'claude-result', payload: { subtype: 'error_during_execution', is_error: false } }])).toBe('Claude Code stopped with an error');
+    expect(failureOf('claude-code', [{ type: 'claude-result', payload: { subtype: 'success', is_error: true, result: 'API Error: 401 invalid x-api-key' } }])).toBe('API Error: 401 invalid x-api-key');
   });
 
   it('reads Codex: a shell command given as argv, a patch, and its answer', () => {

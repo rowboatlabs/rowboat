@@ -1,5 +1,6 @@
 import * as os from 'os';
 import type { ApprovalPolicy, CodeRunEvent, CodingAgent, PermissionAsk, PermissionDecision, RunPromptResult } from './types.js';
+import type { McpServer } from '@agentclientprotocol/sdk';
 import { AcpClient, type CodeAgentModelOptions } from './client.js';
 import { PermissionBroker } from './permission-broker.js';
 import { readStoredSession, writeStoredSession, clearStoredSession } from './session-store.js';
@@ -21,6 +22,13 @@ export interface RunPromptArgs {
     onEvent: (event: CodeRunEvent) => void;
     /** Aborts the turn on stop; the manager cancels then force-kills the adapter. */
     signal?: AbortSignal;
+    /** MCP servers the session gets; fixed for a run's connection (a local Spaces agent's org tools, 2026-10-28). */
+    mcpServers?: McpServer[];
+    /**
+     * Added to the engine's system prompt (a local Spaces agent's instructions,
+     * 2026-10-29). A change reopens the session with the new text, history kept.
+     */
+    systemPromptAppend?: string;
 }
 
 interface ActiveRun {
@@ -28,6 +36,7 @@ interface ActiveRun {
     sessionId: string;
     agent: CodingAgent;
     cwd: string;
+    systemPromptAppend: string | undefined;
     // Prompts currently streaming on this connection. Disposal is deferred while
     // this is > 0 so we never tear down a connection mid-turn.
     inflight: number;
@@ -80,7 +89,7 @@ export class CodeModeManager {
     }
 
     async runPrompt(args: RunPromptArgs): Promise<RunPromptResult> {
-        const { runId, agent, cwd, prompt, policy, model, effort, ask, onEvent, signal } = args;
+        const { runId, agent, cwd, prompt, policy, model, effort, ask, onEvent, signal, mcpServers, systemPromptAppend } = args;
 
         const broker = new PermissionBroker({
             policy,
@@ -88,7 +97,7 @@ export class CodeModeManager {
             onResolved: (a, decision, auto) => onEvent({ type: 'permission', ask: a, decision, auto }),
         });
 
-        const run = await this.ensureRun(runId, agent, cwd, broker, onEvent);
+        const run = await this.ensureRun(runId, agent, cwd, broker, onEvent, mcpServers, systemPromptAppend);
         // Re-apply the session's model + effort each turn (idempotent): a warm
         // connection keeps the last selection, but a cold session/load resets it,
         // and the user may have changed it from the header since the last turn.
@@ -201,14 +210,17 @@ export class CodeModeManager {
         cwd: string,
         broker: PermissionBroker,
         onEvent: (event: CodeRunEvent) => void,
+        mcpServers?: McpServer[],
+        systemPromptAppend?: string,
     ): Promise<ActiveRun> {
         const existing = this.runs.get(runId);
-        if (existing && existing.agent === agent && existing.cwd === cwd) {
+        // A changed system prompt reopens the session (session/load keeps its history) so the new text applies now.
+        if (existing && existing.agent === agent && existing.cwd === cwd && existing.systemPromptAppend === systemPromptAppend) {
             this.cancelDispose(existing); // reused before its grace window elapsed
             existing.client.setHandlers(broker, onEvent);
             return existing;
         }
-        if (existing) this.dispose(runId); // agent/cwd changed — start over
+        if (existing) this.dispose(runId); // agent, cwd or system prompt changed — start over
 
         // The client starts with a muted event sink so a session/load replay of
         // the prior conversation goes nowhere — the chat's durable record is the
@@ -219,6 +231,8 @@ export class CodeModeManager {
             cwd,
             broker,
             onEvent: () => {},
+            ...(mcpServers ? { mcpServers } : {}),
+            ...(systemPromptAppend ? { systemPromptAppend } : {}),
         });
         // Dispose the client if startup fails (e.g. the startup-timeout fires) so the
         // spawned adapter process doesn't leak.
@@ -226,7 +240,7 @@ export class CodeModeManager {
             await client.start();
             const sessionId = await this.openSession(runId, agent, cwd, client);
             client.setHandlers(broker, onEvent);
-            const run: ActiveRun = { client, sessionId, agent, cwd, inflight: 0 };
+            const run: ActiveRun = { client, sessionId, agent, cwd, systemPromptAppend, inflight: 0 };
             this.runs.set(runId, run);
             return run;
         } catch (e) {

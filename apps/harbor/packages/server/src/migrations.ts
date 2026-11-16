@@ -859,9 +859,716 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // Profile images (2026-10-02): the hashes this org serves to all of its
+    // members (avatars, the logo) — the org-wide counterpart of space_blobs —
+    // and the one logo an org has. An avatar's URL rides members.avatar_url.
+    id: '031-profile-images',
+    statements: [
+      `create table org_images (
+        org_id text not null,
+        hash text not null,
+        size bigint not null,
+        mime text not null,
+        width integer,
+        height integer,
+        uploaded_by text not null,
+        uploaded_at text not null,
+        primary key (org_id, hash)
+      )`,
+      `create table org_logos (
+        org_id text primary key,
+        hash text not null,
+        set_by text not null,
+        set_at text not null
+      )`,
+    ],
+  },
+  {
+    // The platform instance an agent is (spec §8 Connectors, Agent37,
+    // 2026-10-05): set at creation for a connection in INSTANCE_CONNECTIONS,
+    // null for every other agent and for people.
+    id: '032-agent-instance',
+    statements: [
+      `alter table members add column agent_instance text`,
+      `alter table members add constraint members_agent_instance_check check (kind = 'agent' or agent_instance is null)`,
+    ],
+  },
+  {
+    // How many agent hand-offs led to a message (spec §8 Jev, 2026-10-07):
+    // the depth an agent it mentions is invoked at, recorded when an agent
+    // posts, because by the time Jev tags someone for the message the turn
+    // that posted it may have finished. A person's message is depth 0 and
+    // has no row.
+    id: '033-message-hops',
+    statements: [
+      `create table message_hops (
+        space_id text not null,
+        message_id text not null,
+        depth integer not null,
+        primary key (space_id, message_id)
+      )`,
+    ],
+  },
+  {
+    // The key a connector Harbor runs hands its agent's workspaces, so the
+    // coding agent there can call Spaces as its agent (spec §8 Connectors,
+    // 2026-10-06: Conductor passes it as a workspace variable). An ordinary
+    // agent key (its hash in agent_keys, revocable by the owner), whose secret
+    // Harbor must present again, so it is also kept sealed here. One per agent.
+    id: '034-agent-connector-keys',
+    statements: [
+      `create table agent_connector_keys (
+        org_id text not null,
+        agent_id text not null,
+        key_id text not null,
+        sealed text not null,
+        created_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Agent37's Effort option is keyed `effort` (2026-10-08), as the composer's
+    // model picker expects of every agent; it was `reasoning`. Owners' defaults
+    // move with it, or Harbor would skip them as an option no longer declared.
+    id: '035-agent37-effort-key',
+    statements: [
+      `update agent_option_defaults d
+         set data = (d.data - 'reasoning') || jsonb_build_object('effort', d.data -> 'reasoning')
+         from members m
+        where m.org_id = d.org_id and m.id = d.agent_id
+          and m.agent_connection = 'agent37' and d.data ? 'reasoning'`,
+    ],
+  },
+  {
+    // A platform agent's alert hook (spec §8 Alerts, 2026-10-03): the hash of
+    // the secret in its address, like agent_keys, and the space its alerts
+    // land in. One per agent; setting it again replaces the secret.
+    id: '036-agent-hooks',
+    statements: [
+      `create table agent_hooks (
+        org_id text not null,
+        agent_id text not null,
+        token_hash text not null,
+        space_id text not null,
+        set_by text not null,
+        set_at text not null,
+        primary key (org_id, agent_id),
+        foreign key (org_id, agent_id) references members(org_id, id)
+      )`,
+    ],
+  },
+  {
+    // Account deletion, minimal v1 (2026-10-08, App Store 5.1.1(v), revised
+    // 2026-10-13 after review): the member row stays — name and attribution
+    // intact — and this marks it. Null = an active member.
+    id: '037-member-deactivated-at',
+    statements: [`alter table members add column if not exists deactivated_at text`],
+  },
+  {
+    // Archive is a space state (spec §6, 2026-09-22; built 2026-10-13): a
+    // flag on the row, nothing else in storage. Every existing space is live.
+    id: '038-archive-spaces',
+    statements: [`alter table spaces add column if not exists archived boolean not null default false`],
+  },
+  {
+    // Every space-keyed table hangs off its space (spec §6, the deletion
+    // doctrine, decided 2026-09-22; built 2026-10-13): a foreign key with
+    // cascade, so deleting a space is one statement and a new table cannot
+    // silently escape it (test/space-cascade.test.ts holds every table with
+    // a space_id to this). Nothing has ever deleted a space, so orphans can
+    // only come from hand surgery; they are unreachable, and are dropped
+    // first so the constraint can be added. Plain constraints, not NOT VALID
+    // + VALIDATE: this entry runs in one transaction, where the two-step
+    // buys nothing. invites and agent_connection_threads get the space_id
+    // index the cascade's lookup needs; every other table already leads an
+    // index with it.
+    id: '039-space-cascade-fks',
+    statements: [
+      ...[
+        'memberships',
+        'assets',
+        'asset_versions',
+        'asset_search',
+        'change_sets',
+        'events',
+        'topics',
+        'messages',
+        'reactions',
+        'poll_votes',
+        'space_blobs',
+        'invites',
+        'space_read_marks',
+        'thread_read_marks',
+        'invocations',
+        'approvals',
+        'agent_connection_threads',
+        'message_hops',
+        'agent_hooks',
+      ].flatMap((table) => [
+        `delete from ${table} t where not exists (select 1 from spaces s where s.id = t.space_id)`,
+        `alter table ${table} add constraint ${table}_space_fk foreign key (space_id) references spaces(id) on delete cascade`,
+      ]),
+      `create index if not exists invites_space on invites (space_id)`,
+      `create index if not exists agent_connection_threads_space on agent_connection_threads (space_id)`,
+    ],
+  },
+  {
+    // A member's title (spec §4 Member profile, v1 = name, title, avatar;
+    // built 2026-10-19). Null = none.
+    id: '040-member-title',
+    statements: [`alter table members add column if not exists title text`],
+  },
+  {
+    // Default spaces (spec §5 answer 3, built 2026-10-19): a flag on the
+    // space row. The CHECK keeps the rule in the schema as 023 does for DMs:
+    // only a shared open space can be a default, so an invite to the org is
+    // never a back door into a private space. No backfill: every org's first
+    // space was created private, and turning a private space open is not a
+    // migration's call — an admin marks the defaults.
+    id: '041-default-spaces',
+    statements: [
+      `alter table spaces add column if not exists is_default boolean not null default false`,
+      `alter table spaces add constraint spaces_default_open_check check (not is_default or (kind = 'shared' and visibility = 'open'))`,
+      `create index if not exists spaces_default on spaces (org_id) where is_default`,
+    ],
+  },
+  {
+    // An invite is to the org with an optional list of spaces (spec §4
+    // Invites, amended 2026-09-22; built 2026-10-19). The list moves to its
+    // own table, cascading from both ends: deleting a listed space drops it
+    // from the list and the invite still admits to the org; deleting the
+    // invite drops its list. invites gains org_id, because an invite that
+    // lists nothing no longer reaches its org through a space. invites.space_id
+    // stays, null on every new invite and read by nothing: 039 names it, and
+    // an applied migration is never edited.
+    id: '042-org-invites',
+    statements: [
+      `alter table invites add column if not exists org_id text`,
+      `update invites i set org_id = s.org_id from spaces s where s.id = i.space_id`,
+      `delete from invites where org_id is null`,
+      `alter table invites alter column org_id set not null`,
+      `alter table invites alter column space_id drop not null`,
+      `create table invite_spaces (
+        token text not null,
+        space_id text not null,
+        position int not null,
+        primary key (token, space_id),
+        constraint invite_spaces_token_fk foreign key (token) references invites(token) on delete cascade,
+        constraint invite_spaces_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create index invite_spaces_space on invite_spaces (space_id)`,
+      `insert into invite_spaces (token, space_id, position) select token, space_id, 0 from invites where space_id is not null`,
+      `update invites set space_id = null`,
+    ],
+  },
+  {
+    // Admin controls (spec §4 Roles, built 2026-10-19). An admin removes a
+    // member from the org: the row stays, stamped, so attribution reads and
+    // an invite accepted by the same identity reactivates it. Null = active.
+    id: '043-member-removed-at',
+    statements: [`alter table members add column if not exists removed_at text`],
+  },
+  {
+    // The org's settings an admin sets (spec §4 Roles, 2026-10-19): who may
+    // invite. One row per org once set; no row = members may.
+    id: '044-org-settings',
+    statements: [
+      `create table org_settings (
+        org_id text primary key,
+        invite_policy text not null default 'members' check (invite_policy in ('members', 'admins')),
+        set_by text not null,
+        set_at text not null
+      )`,
+    ],
+  },
+  {
+    // A message's summary (2026-10-25): the author's short version of a long
+    // body, shown first with "Show more". Content, so deletion blanks it.
+    id: '045-message-summary',
+    statements: [`alter table messages add column if not exists summary text`],
+  },
+  {
+    // Who has replied, on roots (2026-10-25, "managing sessions" in Main):
+    // the Threads view shows and filters by a thread's participants. Same
+    // recompute as reply_count; the backfill is refreshReplyStats over all.
+    id: '046-reply-authors',
+    statements: [
+      `alter table messages add column if not exists reply_authors jsonb not null default '[]'::jsonb`,
+      `update messages r set reply_authors = s.authors
+        from (select thread_root, jsonb_agg(author_member_id order by first_offset) as authors
+              from (select thread_root, author_member_id, min(stream_offset) as first_offset
+                    from messages where thread_root is not null and deleted_at is null
+                    group by thread_root, author_member_id) a
+              group by thread_root) s
+        where r.id = s.thread_root`,
+    ],
+  },
+  {
+    // Managed agents (spec §8 Maritime, 2026-10-26): the hosting Rowboat's own account runs for an agent.
+    // One row per managed agent, written before the platform is asked (so an interrupted creation is found),
+    // bound to its member once the member exists. The platform's agent id and the end-user key Rowboat named it by.
+    id: '047-agent-hosting',
+    statements: [
+      `create table agent_hosting (
+        org_id text not null,
+        id text not null,
+        agent_id text,
+        provider text not null,
+        status text not null,
+        external_id text,
+        external_user_id text not null,
+        kind text not null,
+        display_name text not null,
+        error text,
+        created_by text not null,
+        created_at text not null,
+        updated_at text not null,
+        primary key (org_id, id)
+      )`,
+      `create unique index agent_hosting_agent on agent_hosting (org_id, agent_id) where agent_id is not null`,
+      `create index agent_hosting_status on agent_hosting (org_id, status)`,
+    ],
+  },
+  {
+    // Personal agents (spec §4 Agent members, 2026-10-26): only the owner may
+    // invoke one, add it to a space or DM it. Written once at creation, like
+    // the kind and connection; every existing agent is a channel agent.
+    id: '048-agent-personal',
+    statements: [
+      `alter table members add column if not exists personal boolean not null default false`,
+      `alter table members add constraint members_personal_check check (kind = 'agent' or not personal)`,
+    ],
+  },
+  {
+    // Trial credit, then the owner's key (spec §8 Maritime, 2026-10-27): who pays for a managed agent's model calls.
+    // Rows so far: Claude Code already runs on its owner's Anthropic key; the rest are on Rowboat's credit, with a
+    // trial that ends thirty days after creation unless something closes it first.
+    id: '049-agent-hosting-funding',
+    statements: [
+      `alter table agent_hosting add column funding text not null default 'trial'`,
+      `alter table agent_hosting add column trial_ends_at text`,
+      `alter table agent_hosting add column trial_closed_at text`,
+      `alter table agent_hosting add column trial_closed_reason text`,
+      `alter table agent_hosting add column llm_provider text`,
+      `alter table agent_hosting add column llm_key_hint text`,
+      `alter table agent_hosting add column llm_model text`,
+      `alter table agent_hosting add column llm_set_by text`,
+      `alter table agent_hosting add column llm_set_at text`,
+      `update agent_hosting set funding = 'own', llm_provider = 'anthropic', llm_key_hint = '', llm_set_by = created_by, llm_set_at = created_at where kind = 'claude-code'`,
+      `update agent_hosting set trial_ends_at = to_char((created_at::timestamptz + interval '30 days') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') where funding = 'trial'`,
+    ],
+  },
+  {
+    // The inline view (2026-10-25): the stream read with replies pages every
+    // message of a space by offset, which the roots-only index cannot serve.
+    id: '050-messages-space-offset',
+    statements: [`create index if not exists messages_space_offset on messages (space_id, stream_offset)`],
+  },
+  {
+    // Thread follow-ups (spec §8, 2026-10-27): a reply that mentions nobody
+    // invokes the agent its author last invoked there, unless its author sent
+    // it to people only. Kept so Ro, reading the message later, tags no agent.
+    id: '051-message-people-only',
+    statements: [`alter table messages add column if not exists people_only boolean not null default false`],
+  },
+  {
+    // Agent personalities (spec §4 Agent members, 2026-10-29): an agent's
+    // instructions from its owner, which its connector gives it with every
+    // invocation. Agents only; none until an owner writes some.
+    id: '052-agent-instructions',
+    statements: [
+      `alter table members add column if not exists instructions text`,
+      `alter table members add constraint members_instructions_check check (kind = 'agent' or instructions is null)`,
+    ],
+  },
+  {
+    // Ro's switch (spec §8 Jev, 2026-10-30): an admin turns it off for the
+    // org. On until then, as every org has had it.
+    id: '053-org-settings-jev-enabled',
+    statements: [`alter table org_settings add column if not exists jev_enabled boolean not null default true`],
+  },
+  {
+    // Super agents (spec §4 Agent members, 2026-11-02): what an admin lets an
+    // agent do about other agents; null = an ordinary agent.
+    id: '054-agent-super',
+    statements: [
+      `alter table members add column if not exists super_agent jsonb`,
+      `alter table members add constraint members_super_agent_check check (kind = 'agent' or super_agent is null)`,
+    ],
+  },
+  {
+    // The super agent that asked for a managed agent (2026-11-02): what lets it delete only its own.
+    id: '055-agent-hosting-requested-by',
+    statements: [`alter table agent_hosting add column if not exists requested_by text`],
+  },
+  {
+    // Ro off by default (spec §8 Jev, 2026-11-03, Arjun's call): every org
+    // starts without it, and an admin turns it on. Orgs that had it on from
+    // 053's default are switched off once, since the column cannot tell that
+    // default from an admin's choice.
+    id: '056-org-settings-jev-off',
+    statements: [
+      `alter table org_settings alter column jev_enabled set default false`,
+      `update org_settings set jev_enabled = false where jev_enabled`,
+    ],
+  },
+  {
+    // Archiving a plain thread (2026-11-03, "archive threads" in Main): the
+    // flag sits on its root, so every read of the root carries it and naming
+    // the thread is not needed to archive it. The partial index serves the
+    // Archived list.
+    id: '057-message-archived',
+    statements: [
+      `alter table messages add column if not exists archived boolean not null default false`,
+      `create index if not exists messages_archived_idx on messages (space_id) where archived`,
+    ],
+  },
+  {
+    // Billing for managed agents (2026-11-04): the Rowboat account (the
+    // owner's subject at the deployment's issuer) an agent bills to, kept on
+    // the row at creation so the worker and the connector never resolve it
+    // again; null on a deployment that does not bill, and on older rows.
+    id: '058-agent-hosting-billing',
+    statements: [`alter table agent_hosting add column if not exists billing_customer text`],
+  },
+  {
+    // Secrets in a thread (2026-11-04, "secrets card" in Main): the message
+    // keeps the names and its readers, the card everyone sees; the values are
+    // sealed (sealing.ts) in their own table, outside the message row and the
+    // log, so no read of either can carry one. Deleting the message deletes
+    // its rows.
+    id: '059-message-secrets',
+    statements: [
+      `alter table messages add column if not exists secrets jsonb`,
+      `create table if not exists message_secrets (
+        space_id text not null,
+        message_id text not null,
+        name text not null,
+        sealed text not null,
+        primary key (space_id, message_id, name),
+        constraint message_secrets_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+    ],
+  },
+  {
+    // Sessions (2026-11-05, "coding session: threads" in Main): the mark and
+    // its title sit on the root, like the archive flag, so every read of the
+    // root carries them. The partial index serves each member's open sessions.
+    id: '060-message-session',
+    statements: [
+      `alter table messages add column if not exists session_title text`,
+      `create index if not exists messages_session_idx on messages (space_id) where session_title is not null`,
+    ],
+  },
+  { id: '061-member-availability', statements: ["alter table members add column if not exists availability jsonb not null default '{}'::jsonb"] },
+  {
+    // One server (spec §4, 2026-11-09): orgs are dissolved. A person is one
+    // member row keyed by (iss, sub); nothing carries an org_id. Existing
+    // deployments carried many orgs, so first the data is folded — a person
+    // who was a member in several orgs keeps their most active row (most
+    // messages, then earliest joined, then the smaller id), their other rows'
+    // access-bearing state (memberships, agent ownership, read marks, push)
+    // is re-pointed to it, and those rows stay as departed members so every
+    // message they wrote keeps its author; no event in any log is touched.
+    // Then the org tables and columns go. org_settings stays until 063 drops
+    // the knobs it held; members.role until roles move to the membership row.
+    // Blob bytes were stored under a per-org prefix: scripts/flatten-blobs.ts
+    // moves them once, before the build that carries this entry starts.
+    id: '062-one-server',
+    statements: [
+      // People an admin had removed from an org are people again: there is no
+      // org to be removed from, and their memberships were already dropped.
+      `update members set removed_at = null where kind = 'human' and removed_at is not null and deactivated_at is null`,
+      // The merge map: every (iss, sub) with more than one member, its winner and its losers.
+      `create table no_orgs_merge as
+         with ranked as (
+           select mi.iss, mi.sub, mi.member_id,
+                  row_number() over (
+                    partition by mi.iss, mi.sub
+                    order by (select count(*) from messages x where x.author_member_id = mi.member_id) desc,
+                             (select min(ms.joined_at) from memberships ms where ms.member_id = mi.member_id) asc nulls last,
+                             mi.member_id asc) as rn
+           from member_identities mi)
+         select l.iss, l.sub, l.member_id as loser_id, w.member_id as winner_id
+         from ranked l join ranked w on w.iss = l.iss and w.sub = l.sub and w.rn = 1
+         where l.rn > 1`,
+      // Access-bearing rows follow the winner; a winner's own row wins a collision.
+      `delete from memberships ms using no_orgs_merge m where ms.member_id = m.loser_id
+         and exists (select 1 from memberships w where w.space_id = ms.space_id and w.member_id = m.winner_id)`,
+      `update memberships ms set member_id = m.winner_id from no_orgs_merge m where ms.member_id = m.loser_id`,
+      `update members mem set owner_id = m.winner_id from no_orgs_merge m where mem.owner_id = m.loser_id`,
+      `delete from space_read_marks r using no_orgs_merge m where r.member_id = m.loser_id
+         and exists (select 1 from space_read_marks w where w.space_id = r.space_id and w.member_id = m.winner_id)`,
+      `update space_read_marks r set member_id = m.winner_id from no_orgs_merge m where r.member_id = m.loser_id`,
+      `delete from thread_read_marks r using no_orgs_merge m where r.member_id = m.loser_id
+         and exists (select 1 from thread_read_marks w where w.space_id = r.space_id and w.root_message_id = r.root_message_id and w.member_id = m.winner_id)`,
+      `update thread_read_marks r set member_id = m.winner_id from no_orgs_merge m where r.member_id = m.loser_id`,
+      `update push_tokens p set member_id = m.winner_id from no_orgs_merge m where p.member_id = m.loser_id`,
+      `delete from push_prefs p using no_orgs_merge m where p.member_id = m.loser_id`,
+      `delete from activity_seen a using no_orgs_merge m where a.member_id = m.loser_id`,
+      // Rows from the single-org era name a member under an org it was never in (found in the
+      // 2026-11-09 rehearsal on a production copy): they would collide once the key is the member
+      // alone. A row is dropped when its member is not in that org; of what remains, the newest stays.
+      `delete from activity_seen a where not exists (select 1 from members m where m.id = a.member_id and m.org_id = a.org_id)`,
+      `delete from activity_seen a where exists (select 1 from activity_seen b where b.member_id = a.member_id
+         and (b.seen_at > a.seen_at or (b.seen_at = a.seen_at and b.org_id > a.org_id)))`,
+      `delete from push_prefs p where not exists (select 1 from members m where m.id = p.member_id and m.org_id = p.org_id)`,
+      `delete from push_prefs p where exists (select 1 from push_prefs q where q.member_id = p.member_id and q.org_id > p.org_id)`,
+      // The losers stay, departed; the identity now names the winner alone.
+      `update members mem set removed_at = coalesce(mem.removed_at, to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+         from no_orgs_merge m where mem.id = m.loser_id`,
+      `delete from member_identities mi using no_orgs_merge m where mi.member_id = m.loser_id`,
+      `drop table no_orgs_merge`,
+      // One row per device token (the same phone registered in two orgs twice): the latest wins.
+      `delete from push_tokens p where exists (select 1 from push_tokens q where q.token = p.token
+         and (q.updated_at > p.updated_at or (q.updated_at = p.updated_at and q.org_id > p.org_id)))`,
+      // The agent tables reference members(org_id, id): let go before members is re-keyed.
+      `alter table agent_keys drop constraint agent_keys_org_id_agent_id_fkey`,
+      `alter table agent_connection_credentials drop constraint agent_connection_credentials_org_id_agent_id_fkey`,
+      `alter table agent_connection_threads drop constraint agent_connection_threads_org_id_agent_id_fkey`,
+      `alter table agent_option_defaults drop constraint agent_option_defaults_org_id_agent_id_fkey`,
+      `alter table agent_connector_keys drop constraint agent_connector_keys_org_id_agent_id_fkey`,
+      `alter table agent_hooks drop constraint agent_hooks_org_id_agent_id_fkey`,
+      // Members: one row per id on the server (ids are ULIDs; a collision here is a loud stop).
+      `alter table members drop constraint members_pkey`,
+      `alter table members add primary key (id)`,
+      `alter table members drop column org_id`,
+      // Identity: (iss, sub) → one member.
+      `alter table member_identities drop constraint member_identities_pkey`,
+      `alter table member_identities drop column org_id`,
+      `alter table member_identities add primary key (iss, sub)`,
+      // Spaces: the DM key is a pair of server-wide ids now; where the same two people had a DM
+      // in two orgs, the older stays the DM and the newer becomes an ordinary two-person space —
+      // unless nothing was ever said in it (notes to self opened in several orgs, found in the
+      // 2026-11-09 rehearsal): an empty duplicate is deleted, its memberships and marks with it.
+      `drop index if exists spaces_org`,
+      `drop index if exists spaces_default`,
+      `drop index if exists spaces_direct_key`,
+      `update spaces s set direct_key = (select '[' || string_agg('"' || ms.member_id || '"', ',' order by ms.member_id) || ']' from memberships ms where ms.space_id = s.id)
+         where s.kind = 'direct'`,
+      `delete from spaces s where s.kind = 'direct' and not exists (select 1 from messages x where x.space_id = s.id)
+         and exists (select 1 from spaces o where o.kind = 'direct' and o.direct_key = s.direct_key
+           and (o.created_at < s.created_at or (o.created_at = s.created_at and o.id < s.id)))`,
+      `update spaces s set kind = 'shared', direct_key = null,
+         name = coalesce((select string_agg(m.display_name, ' & ' order by m.display_name) from memberships ms join members m on m.id = ms.member_id where ms.space_id = s.id), s.name)
+         where s.kind = 'direct' and exists (select 1 from spaces o where o.kind = 'direct' and o.direct_key = s.direct_key
+           and (o.created_at < s.created_at or (o.created_at = s.created_at and o.id < s.id)))`,
+      `create unique index spaces_direct_key on spaces (direct_key) where kind = 'direct'`,
+      `create index if not exists spaces_default on spaces (id) where is_default`,
+      `alter table spaces drop column org_id`,
+      // Invites: resolution goes token → space; the column was only ever the org's.
+      `alter table invites drop column org_id`,
+      // Per-member state, keyed by the member alone.
+      `alter table push_tokens drop constraint push_tokens_pkey`,
+      `drop index if exists push_tokens_member`,
+      `alter table push_tokens drop column org_id`,
+      `alter table push_tokens add primary key (token)`,
+      `create index push_tokens_member on push_tokens (member_id)`,
+      `alter table push_prefs drop constraint push_prefs_pkey`,
+      `alter table push_prefs drop column org_id`,
+      `alter table push_prefs add primary key (member_id)`,
+      `alter table activity_seen drop constraint activity_seen_pkey`,
+      `alter table activity_seen drop column org_id`,
+      `alter table activity_seen add primary key (member_id)`,
+      // Agent tables: re-keyed on the agent, referencing members(id) again.
+      `alter table agent_keys drop constraint agent_keys_pkey`,
+      `drop index if exists agent_keys_agent`,
+      `alter table agent_keys drop column org_id`,
+      `alter table agent_keys add primary key (id)`,
+      `create index agent_keys_agent on agent_keys (agent_id)`,
+      `alter table agent_keys add constraint agent_keys_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table invocations drop constraint invocations_pkey`,
+      `drop index if exists invocations_message_agent`,
+      `drop index if exists invocations_agent_state`,
+      `alter table invocations drop column org_id`,
+      `alter table invocations add primary key (id)`,
+      `create unique index invocations_message_agent on invocations (message_id, agent_id)`,
+      `create index invocations_agent_state on invocations (agent_id, state)`,
+      `alter table agent_capabilities drop constraint agent_capabilities_pkey`,
+      `alter table agent_capabilities drop column org_id`,
+      `alter table agent_capabilities add primary key (agent_id)`,
+      // Sealed values keep the scope they were sealed under (sealing.ts): the org's id for every row from before today.
+      `alter table agent_connection_credentials add column sealed_scope text not null default 'server'`,
+      `update agent_connection_credentials set sealed_scope = org_id`,
+      `alter table agent_connection_credentials drop constraint agent_connection_credentials_pkey`,
+      `alter table agent_connection_credentials drop column org_id`,
+      `alter table agent_connection_credentials add primary key (agent_id)`,
+      `alter table agent_connection_credentials add constraint agent_connection_credentials_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table agent_connection_threads drop constraint agent_connection_threads_pkey`,
+      `alter table agent_connection_threads drop column org_id`,
+      `alter table agent_connection_threads add primary key (agent_id, space_id, thread_root_id)`,
+      `alter table agent_connection_threads add constraint agent_connection_threads_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table approvals drop constraint approvals_pkey`,
+      `drop index if exists approvals_request`,
+      `drop index if exists approvals_agent_state`,
+      `alter table approvals drop column org_id`,
+      `alter table approvals add primary key (id)`,
+      `create unique index approvals_request on approvals (invocation_id, request_key)`,
+      `create index approvals_agent_state on approvals (agent_id, state)`,
+      `alter table agent_option_defaults drop constraint agent_option_defaults_pkey`,
+      `alter table agent_option_defaults drop column org_id`,
+      `alter table agent_option_defaults add primary key (agent_id)`,
+      `alter table agent_option_defaults add constraint agent_option_defaults_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table agent_connector_keys add column sealed_scope text not null default 'server'`,
+      `update agent_connector_keys set sealed_scope = org_id`,
+      `alter table agent_connector_keys drop constraint agent_connector_keys_pkey`,
+      `alter table agent_connector_keys drop column org_id`,
+      `alter table agent_connector_keys add primary key (agent_id)`,
+      `alter table agent_connector_keys add constraint agent_connector_keys_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table agent_hooks drop constraint agent_hooks_pkey`,
+      `alter table agent_hooks drop column org_id`,
+      `alter table agent_hooks add primary key (agent_id)`,
+      `alter table agent_hooks add constraint agent_hooks_agent_id_fkey foreign key (agent_id) references members(id)`,
+      `alter table agent_hosting drop constraint agent_hosting_pkey`,
+      `drop index if exists agent_hosting_agent`,
+      `drop index if exists agent_hosting_status`,
+      `alter table agent_hosting drop column org_id`,
+      `alter table agent_hosting add primary key (id)`,
+      `create unique index agent_hosting_agent on agent_hosting (agent_id) where agent_id is not null`,
+      `create index agent_hosting_status on agent_hosting (status)`,
+      // Profile images: the server's one registry. The org logo is gone (spec §4 Member profile, 2026-11-09).
+      `alter table org_images drop constraint org_images_pkey`,
+      `delete from org_images a where exists (select 1 from org_images b where b.hash = a.hash and b.uploaded_at < a.uploaded_at)`,
+      `delete from org_images a where exists (select 1 from org_images b where b.hash = a.hash and b.uploaded_at = a.uploaded_at and b.org_id < a.org_id)`,
+      `alter table org_images drop column org_id`,
+      `alter table org_images add primary key (hash)`,
+      `alter table org_images rename to images`,
+      `drop table org_logos`,
+      // The knobs org_settings held die in 062; until then one row, keyed by a constant.
+      `delete from org_settings where org_id <> (select min(org_id) from org_settings)`,
+      `update org_settings set org_id = 'server'`,
+      `alter table org_settings alter column org_id set default 'server'`,
+      // The backfill ledger was one row per org; one row now.
+      `insert into schema_migrations (id, applied_at)
+         select distinct on (regexp_replace(id, ':[^:]+$', '')) regexp_replace(id, ':[^:]+$', ''), applied_at
+         from schema_migrations where id like 'backfill:%' and id ~ ':[^:]+:[^:]+$'
+         order by regexp_replace(id, ':[^:]+$', ''), applied_at
+         on conflict (id) do nothing`,
+      // The tenancy itself.
+      `drop table org_domains`,
+      `drop table orgs`,
+    ],
+  },
+  {
+    // Roles on the space (spec §4 Roles, rewritten 2026-11-09): the admin bit
+    // moves from the member (admin of the org) to the membership row (admin
+    // of this space). Every existing shared space gets its earliest-joined
+    // active human as admin, and every former org admin who is in it. Open
+    // spaces, default spaces and the org's knobs (invite policy, Ro's switch)
+    // go with the org; Ro itself leaves every space and stays as a departed
+    // row so its old tag replies keep an author.
+    id: '063-space-roles',
+    statements: [
+      `alter table memberships add column role text not null default 'member'`,
+      `alter table memberships add constraint memberships_role_check check (role in ('admin', 'member'))`,
+      `update memberships ms set role = 'admin'
+         from members m, spaces s
+         where m.id = ms.member_id and s.id = ms.space_id and s.kind = 'shared'
+           and m.kind = 'human' and m.role = 'admin' and m.removed_at is null and m.deactivated_at is null`,
+      `update memberships ms set role = 'admin'
+         where (ms.space_id, ms.member_id) in (
+           select distinct on (x.space_id) x.space_id, x.member_id
+           from memberships x
+           join members m on m.id = x.member_id
+           join spaces s on s.id = x.space_id
+           where s.kind = 'shared' and m.kind = 'human' and m.removed_at is null and m.deactivated_at is null
+           order by x.space_id, x.joined_at, x.member_id)`,
+      `create index memberships_admins on memberships (space_id) where role = 'admin'`,
+      `alter table members drop constraint members_agent_not_admin_check`,
+      `alter table members drop constraint members_role_check`,
+      `alter table members drop column role`,
+      // Open spaces retired: nothing is found by anyone but its members.
+      `alter table spaces drop constraint spaces_direct_private_check`,
+      `alter table spaces drop constraint spaces_visibility_check`,
+      `alter table spaces drop constraint spaces_default_open_check`,
+      `drop index if exists spaces_default`,
+      `alter table spaces drop column visibility`,
+      `alter table spaces drop column is_default`,
+      // The org's knobs: anyone in a space invites to it; Ro has no switch because Ro is gone.
+      `drop table org_settings`,
+      `delete from memberships where member_id in (select id from members where agent_kind = 'jev')`,
+      `update members set removed_at = coalesce(removed_at, to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) where agent_kind = 'jev'`,
+    ],
+  },
+  {
+    // Invites are to one space, or they are a person's link (spec §4 Invites,
+    // 2026-11-09). The org-era list of spaces goes, and so does every invite
+    // made before today: their links lived on hosts that no longer resolve.
+    id: '064-invites-one-target',
+    statements: [
+      `delete from invite_spaces`,
+      `delete from invites`,
+      `drop table invite_spaces`,
+      `alter table invites add column direct boolean not null default false`,
+      `alter table invites add constraint invites_one_target_check check ((space_id is null) = direct)`,
+    ],
+  },
+  {
+    // An agent's seat (spec §4 Agent members, 2026-11-09): who may ask it in
+    // a space lives on its membership row — everyone there, or its owner
+    // only. It replaces the agent-wide personal flag: a personal agent was
+    // owner-only in every space, a local agent always is, and an agent in a
+    // DM answers the one person there.
+    id: '065-agent-seats',
+    statements: [
+      `alter table memberships add column invocable_by text`,
+      `alter table memberships add constraint memberships_invocable_by_check check (invocable_by is null or invocable_by in ('owner', 'members'))`,
+      `update memberships ms set invocable_by = case
+         when m.personal or m.agent_connection = 'local' or s.kind = 'direct' then 'owner' else 'members' end
+         from members m, spaces s
+         where m.id = ms.member_id and s.id = ms.space_id and m.kind = 'agent'`,
+      `alter table members drop constraint members_personal_check`,
+      `alter table members drop column personal`,
+    ],
+  },
+  {
+    // The space graph (spec §8 Space graph, 2026-11-12): an admin's switch on
+    // the space, and what Harbor derives while it is on. A thread's row is
+    // Jev's judgment of it and its edges with their events; no weight is
+    // stored, and no message text. Topics are the space's vocabulary, with
+    // the candidates Jev refused kept so they are not asked about twice.
+    id: '066-space-graph',
+    statements: [
+      `alter table spaces add column graph boolean not null default false`,
+      `create table graph_threads (
+        space_id text not null,
+        root_message_id text not null,
+        fingerprint text not null,
+        last_offset bigint not null,
+        judged_at text not null,
+        judgment jsonb not null,
+        primary key (space_id, root_message_id),
+        constraint graph_threads_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create table graph_topics (
+        space_id text not null,
+        key text not null,
+        label text not null,
+        category text not null,
+        real double precision not null,
+        threads integer not null,
+        alias_of text,
+        primary key (space_id, key),
+        constraint graph_topics_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create table graph_vocabulary (
+        space_id text primary key,
+        messages integer not null,
+        judged_at text not null,
+        constraint graph_vocabulary_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+    ],
+  },
 ];
 
-export async function migrate(db: SqlDb): Promise<void> {
+/**
+ * Apply the ladder. `upTo` (tests only) stops after the named entry, so a
+ * migration test can seed rows in the shape the next entry expects.
+ */
+export async function migrate(db: SqlDb, opts: { upTo?: string } = {}): Promise<void> {
   await db.exec(
     'create table if not exists schema_migrations (id text primary key, applied_at text not null)',
   );
@@ -876,5 +1583,6 @@ export async function migrate(db: SqlDb): Promise<void> {
         new Date().toISOString(),
       ]);
     });
+    if (m.id === opts.upTo) return;
   }
 }

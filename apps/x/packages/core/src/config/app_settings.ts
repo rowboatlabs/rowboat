@@ -27,6 +27,11 @@ export interface AppSettings {
      * falls back to the default.
      */
     quickAskShortcut?: string;
+    /**
+     * Set to true if the user has opted out of product analytics/telemetry.
+     * (2026-10-13, #415)
+     */
+    telemetryOptOut?: boolean;
 }
 
 export function loadAppSettings(): AppSettings {

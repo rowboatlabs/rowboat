@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.rowboatlabs.Rowboat</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>Rowboat</name>
+  <summary>AI coworker with memory and multi-agent workspace</summary>
+  <description>
+    <p>
+      Rowboat is an AI coworker application featuring persistent memory, workspace tools,
+      and multi-agent reasoning, packaged as a sandboxed Flatpak.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.rowboatlabs.Rowboat.desktop</launchable>
+  <url type="homepage">https://rowboatlabs.com</url>
+  <provides>
+    <binary>rowboat</binary>
+    <mediatype>x-scheme-handler/rowboat</mediatype>
+  </provides>
+  <developer_name>Rowboat Labs</developer_name>
+</component>

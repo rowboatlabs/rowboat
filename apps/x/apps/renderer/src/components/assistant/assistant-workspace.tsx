@@ -14,6 +14,8 @@ interface AssistantWorkspaceProps extends ChatServices {
   layout: AssistantLayout
   dispatch: Dispatch<LayoutAction>
   pageHost: HTMLElement | null
+  /** The Assistant page's top bar, where its chat puts its header. */
+  pageHeaderHost?: HTMLElement | null
   pageVisible: boolean
   legacyPane: boolean
   workspaceSessionId?: string | null
@@ -197,6 +199,7 @@ export function AssistantWorkspace(p: AssistantWorkspaceProps) {
         : undefined
       return [<MountedChat key={tab.chatId} host={host ?? null}>
         <Chat tab={tab} location={location} visible={visible} focused={layout.focused === tab.id} services={p} controls={controls}
+          headerHost={location === 'assistant' && p.pageVisible ? p.pageHeaderHost : null}
           onMove={(destination) => p.onMoveChat(tab.id, destination)} onNew={() => p.onNewChatAt(location, tab.id)}
           onSelect={(id) => p.onSelectChatAt(id, location, tab.id)} />
       </MountedChat>]

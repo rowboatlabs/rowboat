@@ -11,12 +11,13 @@ function key(orgId: string, spaceId: string): string {
     return `${orgId}/${spaceId}`
 }
 
-/** The org-wide roster lives in the same store, under a key no space id can take. */
+/** Your contacts (the server's roster until 2026-11-09) live in the same store, under a key no space id can take. */
 function orgKey(orgId: string): string {
     return `org:${orgId}`
 }
 
-const CACHE_VERSION = 1
+// 2 (2026-11-09): a space's rows carry `role`, `joinedAt` and an agent's seat; older caches lack them.
+const CACHE_VERSION = 2
 
 function cacheKey(k: string): string {
     return `spaces:members:${k}`
@@ -80,21 +81,24 @@ function hydrateMembers(k: string): void {
     }
 }
 
-async function loadMembers(orgId: string, spaceId: string): Promise<void> {
+const membersDirty = new Set<string>()
+
+async function loadMembers(orgId: string, spaceId: string, force = false): Promise<void> {
     // A composer mounted outside a space pane has no refs — nothing to ask for.
     if (!orgId || !spaceId) return
     const k = key(orgId, spaceId)
-    if (membersLoading.has(k)) return
+    if (membersLoading.has(k)) { if (force) membersDirty.add(k); return }
     membersLoading.add(k)
     try {
         const res = await window.ipc.invoke('spaces:listMembers', { orgId, spaceId })
         membersCacheOnly.delete(k)
         lastLoadedAt.set(k, Date.now())
-        setMembers(k, res.members)
+        if (!membersDirty.has(k)) setMembers(k, res.members)
     } catch {
         // org unreachable — cached names (or ids) stand until a retry.
     } finally {
         membersLoading.delete(k)
+        if (membersDirty.delete(k)) void loadMembers(orgId, spaceId)
     }
 }
 
@@ -118,12 +122,12 @@ export function prefetchMembers(orgId: string, spaceId: string): void {
 export function refreshMembers(orgId: string, spaceId: string, opts: { force?: boolean } = {}): void {
     const k = key(orgId, spaceId)
     const due = (at: number | undefined) => opts.force || Date.now() - (at ?? 0) >= REFRESH_MIN_MS
-    if (due(lastLoadedAt.get(k))) void loadMembers(orgId, spaceId)
-    // Membership changes in any space change who is in the org's directory too.
+    if (due(lastLoadedAt.get(k))) void loadMembers(orgId, spaceId, opts.force)
+    // Membership changes in any space change who your contacts are too.
     if (due(lastLoadedAt.get(orgKey(orgId)))) void loadOrgRoster(orgId, [])
 }
 
-/** Refetch the org roster now: a change this member just made (a new agent) must show in the pickers at once. */
+/** Refetch the contacts now: a change this member just made (a new agent) must show in the pickers at once. */
 export function refreshOrgRoster(orgId: string): void {
     void loadOrgRoster(orgId, [])
 }
@@ -141,16 +145,30 @@ async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promis
     if (membersLoading.has(k)) return
     membersLoading.add(k)
     try {
-        const res = await window.ipc.invoke('spaces:listOrgMembers', { orgId })
+        const res = await window.ipc.invoke('spaces:listContacts', { orgId })
         membersCacheOnly.delete(k)
         lastLoadedAt.set(k, Date.now())
-        setMembers(k, res.members)
+        if (!membersDirty.has(k)) setMembers(k, res.members)
+        if (res.online) setAgentsOnline(orgId, res.online)
+        if (!membersDirty.has(k)) setPeopleOnline(orgId, res.onlinePeople ?? [])
     } catch {
-        // Org unreachable, or an older org without the route: the per-space
-        // rosters the app has already fetched stand in for the directory.
+        // Server unreachable: the per-space rosters the app has already fetched stand in.
         if (!memberState.has(k) || membersCacheOnly.has(k)) setMembers(k, unionOfRosters(orgId, spaceIds))
     } finally {
         membersLoading.delete(k)
+        if (membersDirty.delete(k)) void loadOrgRoster(orgId, spaceIds)
+    }
+}
+
+// Update every loaded roster without adding someone to a space they never joined
+// (2026-10-22, profile_updated). In-flight reads are retried to avoid stale rollback.
+export function applyProfileUpdate(orgId: string, member: spaces.Member): void {
+    for (const k of membersLoading) {
+        if (k === orgKey(orgId) || k.startsWith(`${orgId}/`)) membersDirty.add(k)
+    }
+    for (const [k, members] of memberState) {
+        if (k !== orgKey(orgId) && !k.startsWith(`${orgId}/`)) continue
+        if (members.some(m => m.id === member.id)) setMembers(k, members.map(m => m.id === member.id ? member : m))
     }
 }
 
@@ -161,8 +179,8 @@ function subscribeMembers(l: () => void): () => void {
     }
 }
 
-/** The space's roster: cached names in the first frame, refreshed behind. */
-export function useSpaceMembers(orgId: string, spaceId: string): spaces.Member[] {
+/** The space's roster, each with their role and an agent's seat (2026-11-09): cached names in the first frame, refreshed behind. */
+export function useSpaceMembers(orgId: string, spaceId: string): spaces.SpaceMember[] {
     // Before the snapshot read, not in an effect: a revisited space must
     // resolve names in its FIRST frame, beside the stream's cached tail.
     hydrateMembers(key(orgId, spaceId))
@@ -170,11 +188,11 @@ export function useSpaceMembers(orgId: string, spaceId: string): spaces.Member[]
     useEffect(() => {
         void loadMembers(orgId, spaceId)
     }, [orgId, spaceId])
-    return state.get(key(orgId, spaceId)) ?? EMPTY_MEMBERS
+    return (state.get(key(orgId, spaceId)) ?? EMPTY_MEMBERS) as spaces.SpaceMember[]
 }
 
 /**
- * Your own display name on an org — the sidebar's self-DM row shows it the
+ * Your own display name on the server — the sidebar's self-DM row shows it the
  * way Slack does ("<name>  you"). Read from the org roster (cached, then
  * refreshed); null until it lands.
  */
@@ -205,6 +223,28 @@ export function useOrgRoster(orgId: string, spaceIds: readonly string[]): spaces
 }
 
 /**
+ * The rosters of several spaces of one org at once (the Agents page asks which
+ * of your spaces each agent is in, 2026-10-21). Same store and cache-then-
+ * refresh contract as useSpaceMembers; spaces not loaded yet map to [].
+ */
+export function useSpaceRosters(orgId: string, spaceIds: readonly string[]): ReadonlyMap<string, spaces.Member[]> {
+    const idsKey = spaceIds.join('|')
+    for (const id of spaceIds) hydrateMembers(key(orgId, id))
+    const state = useSyncExternalStore(subscribeMembers, () => memberState)
+    useEffect(() => {
+        for (const id of spaceIds) prefetchMembers(orgId, id)
+        // The joined key IS the dependency — the array identity changes every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orgId, idsKey])
+    return useMemo(() => {
+        const out = new Map<string, spaces.Member[]>()
+        for (const id of spaceIds) out.set(id, state.get(key(orgId, id)) ?? EMPTY_MEMBERS)
+        return out
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state, orgId, idsKey])
+}
+
+/**
  * The org roster for EVERY org at once (the assistant composer's @ menu lists
  * people across orgs). Same store, same cache-then-refresh contract as
  * useOrgRoster; one hook call for a variable number of orgs. Keyed on the
@@ -226,4 +266,71 @@ export function useOrgRosters(orgs: ReadonlyArray<{ id: string; spaceIds: readon
         return out
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state, orgsKey])
+}
+
+// --- which agents are connected (local agents, 2026-10-28) ---
+// The roster's `online` is the snapshot, `agent_presence` frames keep it
+// fresh. Only agents whose connector holds their own key have presence; an
+// org that predates it says nothing, and then nothing is shown as offline.
+
+let onlineState: ReadonlyMap<string, ReadonlySet<string>> = new Map()
+const onlineListeners = new Set<() => void>()
+
+function setAgentsOnline(orgId: string, ids: readonly string[]): void {
+    onlineState = new Map(onlineState).set(orgId, new Set(ids))
+    for (const l of onlineListeners) l()
+}
+
+/** An `agent_presence` frame: one agent connected or left. */
+export function applyAgentPresence(orgId: string, agentId: string, online: boolean): void {
+    const next = new Set(onlineState.get(orgId) ?? [])
+    if (online) next.add(agentId)
+    else next.delete(agentId)
+    setAgentsOnline(orgId, [...next])
+}
+
+/** The org's connected agents, or null when its server doesn't say. */
+export function useAgentsOnline(orgId: string): ReadonlySet<string> | null {
+    const state = useSyncExternalStore(
+        (l) => {
+            onlineListeners.add(l)
+            return () => onlineListeners.delete(l)
+        },
+        () => onlineState,
+    )
+    return state.get(orgId) ?? null
+}
+
+/** Whether a local agent is offline: its owner's computer isn't running it now. False when unknown. */
+export function isAgentOffline(member: Pick<spaces.Member, 'id' | 'kind' | 'agentConnection'>, online: ReadonlySet<string> | null): boolean {
+    return member.kind === 'agent' && member.agentConnection === 'local' && online !== null && !online.has(member.id)
+}
+
+// Human online dots use org connections, independent of the space being viewed (2026-11-04).
+let peopleOnlineState: ReadonlyMap<string, ReadonlySet<string>> = new Map()
+const peopleOnlineListeners = new Set<() => void>()
+const EMPTY_ONLINE: ReadonlySet<string> = new Set()
+
+function setPeopleOnline(orgId: string, ids: readonly string[]): void {
+    peopleOnlineState = new Map(peopleOnlineState).set(orgId, new Set(ids))
+    for (const listener of peopleOnlineListeners) listener()
+}
+
+export function applyMemberPresence(orgId: string, memberId: string, online: boolean): void {
+    if (membersLoading.has(orgKey(orgId))) membersDirty.add(orgKey(orgId))
+    const next = new Set(peopleOnlineState.get(orgId) ?? [])
+    if (online) next.add(memberId)
+    else next.delete(memberId)
+    setPeopleOnline(orgId, [...next])
+}
+
+export function usePeopleOnline(orgId: string): ReadonlySet<string> {
+    const state = useSyncExternalStore(
+        (listener) => {
+            peopleOnlineListeners.add(listener)
+            return () => peopleOnlineListeners.delete(listener)
+        },
+        () => peopleOnlineState,
+    )
+    return state.get(orgId) ?? EMPTY_ONLINE
 }

@@ -1,0 +1,1058 @@
+import type { ActivityKind, ActivityPage, ThreadListing } from '@rowboat/spaces-protocol';
+import {
+  routes,
+  type AcceptInviteResult,
+  type Asset,
+  type BlobInfo,
+  type ChangeSet,
+  type CreateAsset,
+  type CreateAssetResult,
+  type DeleteAssetResult,
+  type CreateInviteResult,
+  type AgentKey,
+  type AgentCredential,
+  type AgentHook,
+  type AgentHosting,
+  type HostingEnvVar,
+  HostingSpend,
+  HostingUsage,
+  HostingSize,
+  LlmProvider,
+  type HostingConsole,
+  type HostingExecution,
+  type HostingFileEntry,
+  type HostingLogLine,
+  type HostingMachine,
+  type HostingPowerAction,
+  type HostingSkill,
+  type HostingTrigger,
+  type AgentKeySecret,
+  type AgentListing,
+  type ConnectorCapabilities,
+  type Approval,
+  type Invocation,
+  type InvocationOptionValues,
+  type InvocationUpdate,
+  type ApprovalRequest,
+  type ApprovalClose,
+  type Member,
+  type SuperAgent,
+  type PlatformInstance,
+  type MemberRole,
+  type SpaceMember,
+  type Membership,
+  type StreamEvent,
+  type Message,
+  type MoveAssetResult,
+  type ProposeChange,
+  type ProposeChangeResult,
+  type ReadAssetResult,
+  type ResolveInviteResult,
+  type RestoreAssetResult,
+  type Routes,
+  type SearchKind,
+  type SearchResults,
+  type Space,
+  type SpaceGraph,
+  type Topic,
+  type TopicListing,
+  type UnreadSnapshot,
+  type UpdateProfile,
+} from '@rowboat/spaces-protocol';
+import type { z } from 'zod';
+
+// Typed client for the server's render face. Thin by design: every method is one
+// route from the protocol's api.ts, request/response validated with the
+// contract schemas — the same drift tripwire the stub server runs, from the
+// other side of the wire.
+//
+// One client for every app that speaks to Harbor: the desktop's core and the
+// phone, which kept its own copy until 2026-10-09, and a browser next (the
+// Spaces web-app plan). So it uses only what all of them have — fetch,
+// WebSocket, WebCrypto — and React Native, which lacks WebCrypto, passes its
+// own sha256Hex.
+
+export interface SpacesApiError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+/**
+ * The shortest honest description of why the socket never answered: the
+ * errno when there is one (undici nests it — sometimes an AggregateError over
+ * ::1 and 127.0.0.1 — under `cause`), else the deepest message we can find.
+ */
+function describeTransportFailure(err: unknown): string {
+  let cur: unknown = err;
+  for (let depth = 0; cur instanceof Error && depth < 4; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string' && code.length > 0) return code;
+    if (cur instanceof AggregateError && cur.errors.length > 0) {
+      cur = cur.errors[0];
+      continue;
+    }
+    if (cur.cause === undefined) break;
+    cur = cur.cause;
+  }
+  if (cur instanceof Error && cur.message) return cur.message;
+  return err instanceof Error ? err.message : String(err);
+}
+
+export class SpacesRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly retryable: boolean;
+
+  constructor(status: number, body: SpacesApiError) {
+    super(body.message);
+    this.name = 'SpacesRequestError';
+    this.status = status;
+    this.code = body.code;
+    this.retryable = body.retryable;
+  }
+}
+
+/**
+ * A live token source. `forceRefresh` is the 401 path: the token we just used
+ * was rejected, get a genuinely new one (orgs.ts refreshes + persists).
+ */
+export type SpacesTokenProvider = (opts?: { forceRefresh?: boolean }) => Promise<string>;
+
+/**
+ * The web app's credential (2026-10-12): Harbor's session cookie, which the
+ * host keeps holding a live token (CONTRACT.md: createSession). Requests go
+ * with credentials and no bearer; a 401 asks the host for a fresh cookie once.
+ */
+export interface SpacesSessionCookie {
+  readonly session: 'cookie';
+  ensure(opts?: { forceRefresh?: boolean }): Promise<void>;
+}
+
+export function isSessionCookie(credential: unknown): credential is SpacesSessionCookie {
+  return typeof credential === 'object' && credential !== null && (credential as { session?: unknown }).session === 'cookie';
+}
+
+export interface ActivityQueryInput {
+  kinds?: ActivityKind[];
+  spaceId?: string;
+  unread?: boolean;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface SpacesClientOptions {
+  /** e.g. http://localhost:4272 — scheme + host[:port], no trailing slash. */
+  baseUrl: string;
+  /** Static bearer (dev tokens, tests), a provider (OAuth orgs — always fresh), or the web app's session cookie. */
+  token: string | SpacesTokenProvider | SpacesSessionCookie;
+  fetchImpl?: typeof fetch;
+  /** Lowercase hex SHA-256 of a blob's bytes; WebCrypto unless given. */
+  sha256Hex?: (bytes: Uint8Array) => Promise<string>;
+}
+
+async function webCryptoSha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+type NewMessage = z.infer<Routes['postMessage']['request']>;
+type CreateTopicInput = z.infer<Routes['createTopic']['request']>;
+type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
+type ReactInput = z.infer<Routes['reactToMessage']['request']>;
+type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
+type EditMessageInput = z.infer<Routes['editMessage']['request']>;
+type VotePollInput = z.infer<Routes['votePoll']['request']>;
+type EndPollInput = z.infer<Routes['endPoll']['request']>;
+type DecideApprovalInput = z.infer<Routes['decideApproval']['request']>;
+
+/** One page of a message list (protocol listStream / listThread query): at most one of the three offsets. */
+export interface MessageWindowOpts {
+  beforeOffset?: number;
+  afterOffset?: number;
+  aroundOffset?: number;
+  limit?: number;
+}
+
+export class SpacesClient {
+  private readonly baseUrl: string;
+  private readonly token: string | SpacesTokenProvider | SpacesSessionCookie;
+  private readonly fetchImpl: typeof fetch;
+  private readonly sha256Hex: (bytes: Uint8Array) => Promise<string>;
+
+  constructor(options: SpacesClientOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/$/, '');
+    this.token = options.token;
+    // Wrapped, not stored bare: a browser's fetch called as this client's
+    // method throws "Illegal invocation".
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.sha256Hex = options.sha256Hex ?? webCryptoSha256Hex;
+  }
+
+  /**
+   * One authorized call: the bearer in the header, or the session cookie
+   * (credentials, no bearer). On a 401 with a live credential it asks for a
+   * fresh one once, because an access token can be revoked before its expiry
+   * says so.
+   */
+  private async authorizedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+    const attempt = async (refresh?: { forceRefresh: true }) => {
+      if (isSessionCookie(this.token)) {
+        await this.token.ensure(refresh);
+        return this.transport(url, { ...init, credentials: 'include' });
+      }
+      const token = typeof this.token === 'string' ? this.token : await this.token(refresh);
+      return this.transport(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${token}` } });
+    };
+    const res = await attempt();
+    return res.status === 401 && typeof this.token !== 'string' ? attempt({ forceRefresh: true }) : res;
+  }
+
+  /**
+   * Every request crosses here. A transport failure (nothing listening,
+   * DNS, reset — undici's bare `TypeError: fetch failed`) becomes a
+   * SpacesRequestError that names the org and the cause, so an org that is
+   * down reads as such all the way up to the app's logs instead of as an
+   * anonymous "fetch failed" with the errno dropped at the first serializer.
+   */
+  private async transport(url: string, init?: RequestInit): Promise<Response> {
+    try {
+      return await this.fetchImpl(url, init);
+    } catch (err) {
+      throw new SpacesRequestError(0, {
+        code: 'unreachable',
+        message: `Rowboat org at ${this.baseUrl} is unreachable (${describeTransportFailure(err)})`,
+        retryable: true,
+      });
+    }
+  }
+
+  private async request<S extends z.ZodType>(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    responseSchema: S,
+    body?: unknown,
+    auth = true,
+  ): Promise<z.infer<S>> {
+    const init: RequestInit = {
+      method,
+      headers: body !== undefined ? { 'content-type': 'application/json' } : {},
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    };
+    const url = `${this.baseUrl}${path}`;
+    const res = auth ? await this.authorizedFetch(url, init) : await this.transport(url, init);
+    return this.parse(res, responseSchema);
+  }
+
+  /** A PUT whose body is the bytes themselves (a blob, a profile image): `request` without the JSON. */
+  private async putBytes<S extends z.ZodType>(
+    path: string,
+    responseSchema: S,
+    bytes: Uint8Array,
+    headers: Record<string, string>,
+  ): Promise<z.infer<S>> {
+    const res = await this.authorizedFetch(`${this.baseUrl}${path}`, { method: 'PUT', headers, body: bytes as unknown as BodyInit });
+    return this.parse(res, responseSchema);
+  }
+
+  /** An error body becomes a SpacesRequestError; a success must match the route's schema. */
+  private async parse<S extends z.ZodType>(res: Response, responseSchema: S): Promise<z.infer<S>> {
+    const json = (await res.json().catch(() => undefined)) as unknown;
+    if (!res.ok) {
+      const parsed = (json ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? `request failed with ${res.status}`,
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    const result = responseSchema.safeParse(json);
+    if (!result.success) {
+      throw new SpacesRequestError(res.status, {
+        code: 'internal',
+        message: `response failed contract validation: ${result.error.message}`,
+        retryable: false,
+      });
+    }
+    return result.data;
+  }
+
+  private space(spaceId: string, rest: string): string {
+    return `/v1/spaces/${encodeURIComponent(spaceId)}${rest}`;
+  }
+
+  // --- health ---------------------------------------------------------------
+
+  /** Also the connectivity probe for "server unreachable" states. `server` since 2026-11-09 (`org` before). */
+  async health(): Promise<{ ok: boolean; server: { name: string; address: string } }> {
+    const res = await this.transport(`${this.baseUrl}/v1/health`);
+    if (!res.ok) throw new SpacesRequestError(res.status, { code: 'internal', message: 'health check failed', retryable: true });
+    return (await res.json()) as { ok: boolean; server: { name: string; address: string } };
+  }
+
+  // --- identity -------------------------------------------------------------
+
+  /** Who this token is on the server — the only client-side source of our memberId under OAuth. */
+  async me(): Promise<{ member: Member }> {
+    return this.request('GET', routes.me.path, routes.me.response);
+  }
+
+  /** Become a member on first contact (api.ts enroll, 2026-11-09): the row is made if the account has none, else returned. */
+  async enroll(): Promise<{ member: Member; created: boolean }> {
+    return this.request('POST', routes.enroll.path, routes.enroll.response, {});
+  }
+
+  /** Leave the server for good (api.ts deleteMe): out of every space, agents deactivated. Idempotent. */
+  async deleteMe(): Promise<void> {
+    await this.request('DELETE', routes.deleteMe.path, routes.deleteMe.response);
+  }
+
+  /** Your name and title on this org (CONTRACT.md, 2026-10-19). Leave a field out to keep it; an empty title removes it. */
+  async updateProfile(input: UpdateProfile): Promise<Member> {
+    return (await this.request('PUT', routes.updateMe.path, routes.updateMe.response, input)).member;
+  }
+
+  // --- profile images (CONTRACT.md, 2026-10-02) ------------------------------
+
+  /** Your avatar on this org; the body is the image itself. */
+  async setAvatar(image: { bytes: Uint8Array; mime: string }): Promise<Member> {
+    return (await this.putBytes(routes.setAvatar.path, routes.setAvatar.response, image.bytes, { 'content-type': image.mime })).member;
+  }
+
+  async fetchProfileImage(hash: string): Promise<{ bytes: Uint8Array; mime: string }> {
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Invalid profile image hash');
+    const res = await this.authorizedFetch(`${this.baseUrl}/v1/images/${hash}`);
+    if (!res.ok) throw new Error(`Profile image fetch failed with ${res.status}`);
+    const mime = res.headers.get('content-type')?.split(';')[0] ?? '';
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mime)) throw new Error('Invalid profile image type');
+    return { bytes: new Uint8Array(await res.arrayBuffer()), mime };
+  }
+
+  async clearAvatar(): Promise<Member> {
+    return (await this.request('DELETE', routes.clearAvatar.path, routes.clearAvatar.response)).member;
+  }
+
+  // --- push (CONTRACT.md, the push bullet) -----------------------------------
+
+  /** Register this device's push token and the member's level. */
+  async registerPush(input: { token: string; level: 'off' | 'mentions' | 'dms' | 'all' }): Promise<{ ok: true }> {
+    return this.request('POST', routes.registerPush.path, routes.registerPush.response, input);
+  }
+
+  async unregisterPush(token: string): Promise<{ ok: true }> {
+    return this.request('POST', routes.unregisterPush.path, routes.unregisterPush.response, { token });
+  }
+
+  // --- spaces & membership --------------------------------------------------
+
+  /** Shared spaces by default; `includeDirect` adds the member's DMs (api.ts listSpaces). */
+  async listSpaces(opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
+    return (await this.listing(opts)).spaces;
+  }
+
+  /** The listing whole (api.ts listSpaces). */
+  async listing(opts: { includeDirect?: boolean } = {}): Promise<{ spaces: Space[] }> {
+    const qs = opts.includeDirect ? '?includeDirect=true' : '';
+    return this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response);
+  }
+
+  /** Get-or-create the DM with another member — idempotent from either side (api.ts openDirect). */
+  async openDirect(memberId: string): Promise<{ space: Space; created: boolean }> {
+    return this.request('POST', routes.openDirect.path, routes.openDirect.response, { memberId });
+  }
+
+  /** A new group; its creator is its admin (api.ts createSpace; spec §4 Roles, 2026-11-09). */
+  async createSpace(name: string): Promise<Space> {
+    return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
+  }
+
+  /** Turn the space graph on or off (api.ts setSpaceGraph): an admin act. An unchanged value is a no-op. */
+  async setSpaceGraph(spaceId: string, enabled: boolean): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/graph'), routes.setSpaceGraph.response, { enabled, actingMode: 'direct' })).space;
+  }
+
+  /** The space graph (api.ts getSpaceGraph): whole, or only what is `about` one thing. */
+  async getSpaceGraph(spaceId: string, opts: { about?: string; limit?: number } = {}): Promise<SpaceGraph> {
+    const qs = new URLSearchParams();
+    if (opts.about !== undefined) qs.set('about', opts.about);
+    if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
+    const query = qs.toString();
+    return this.request('GET', this.space(spaceId, `/graph${query ? `?${query}` : ''}`), routes.getSpaceGraph.response);
+  }
+
+  /** Rename a shared space (api.ts renameSpace). Identical name = idempotent no-op. */
+  async renameSpace(spaceId: string, name: string): Promise<Space> {
+    return (
+      await this.request('POST', this.space(spaceId, '/rename'), routes.renameSpace.response, {
+        name,
+        actingMode: 'direct',
+      })
+    ).space;
+  }
+
+  /** Archive a shared space, admin only (api.ts archiveSpace, 2026-10-13). Already archived = no-op. */
+  async archiveSpace(spaceId: string): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/archive'), routes.archiveSpace.response, { actingMode: 'direct' })).space;
+  }
+
+  async unarchiveSpace(spaceId: string): Promise<Space> {
+    return (await this.request('POST', this.space(spaceId, '/unarchive'), routes.unarchiveSpace.response, { actingMode: 'direct' })).space;
+  }
+
+  /** Remove someone from a shared space, admin only (api.ts removeMember, 2026-10-19). Not in it = `false`. */
+  async removeMember(spaceId: string, memberId: string): Promise<boolean> {
+    return (await this.request('POST', this.space(spaceId, `/members/${encodeURIComponent(memberId)}/remove`), routes.removeMember.response, { actingMode: 'direct' })).removed;
+  }
+
+  /** Delete a shared space and everything in it, admin only (api.ts deleteSpace, 2026-10-14). No undo. */
+  async deleteSpace(spaceId: string): Promise<void> {
+    await this.request('DELETE', this.space(spaceId, ''), routes.deleteSpace.response);
+  }
+
+  /** The agents this member manages, with their keys' metadata (api.ts listAgents). */
+  async listAgents(): Promise<AgentListing[]> {
+    return (await this.request('GET', routes.listAgents.path, routes.listAgents.response)).agents;
+  }
+
+  /**
+   * Add an agent this member owns; the response carries its first key's
+   * secret, the only time it is shown. `kind`/`connection` say what it is and
+   * how Harbor reaches it (2026-09-30); a platform agent (Replicas) also
+   * brings the platform's `credential`, which Harbor checks and seals, and an
+   * Agent37 agent its `instance` (2026-10-05). Who may ask it is set per
+   * space when it is added there (addMembers, 2026-11-09).
+   */
+  async addAgent(input: { displayName: string; kind?: string; connection?: string; credential?: string; instance?: string; request?: string }): Promise<{ agent: Member; key: AgentKeySecret }> {
+    return this.request('POST', routes.createAgent.path, routes.createAgent.response, input);
+  }
+
+  /**
+   * The kinds of agent this server creates on Rowboat's own platform account (api.ts managedAgentKinds,
+   * 2026-10-26); none = no managed hosting. `billed` (2026-11-04): they bill to their creator's Rowboat plan.
+   */
+  async managedAgentKinds(): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
+    return this.request('GET', routes.managedAgentKinds.path, routes.managedAgentKinds.response);
+  }
+
+  /** Create a managed agent (api.ts createManagedAgent): the member, its first key, and its hosting, `deploying` at first. */
+  async createManagedAgent(input: {
+    displayName: string;
+    kind: string;
+    anthropicApiKey?: string;
+    env?: Array<{ key: string; value: string; secret?: boolean }>;
+    request?: string;
+  }): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
+    return this.request('POST', routes.createManagedAgent.path, routes.createManagedAgent.response, input);
+  }
+
+  /** Delete an agent its owner made, whatever runs it (api.ts deleteAgent, 2026-11-13); a managed one's hosting goes too. */
+  async deleteAgent(agentId: string): Promise<{ agent: Member; hosting?: AgentHosting }> {
+    return this.request('DELETE', `/v1/agents/${encodeURIComponent(agentId)}`, routes.deleteAgent.response);
+  }
+
+  /** Delete a managed agent's hosting (api.ts deleteManagedAgent): its keys go at once, the platform's resources in the background. */
+  async deleteManagedAgent(agentId: string): Promise<AgentHosting> {
+    return (await this.request('DELETE', `/v1/agents/${encodeURIComponent(agentId)}/hosting`, routes.deleteManagedAgent.response)).hosting;
+  }
+
+  // --- Managing a managed agent's VM (api.ts getHosting and the hosting routes, 2026-10-27) ---
+  private hostingPath(agentId: string, rest = ''): string {
+    return `/v1/agents/${encodeURIComponent(agentId)}/hosting${rest}`;
+  }
+  async getHosting(agentId: string): Promise<{ hosting: AgentHosting; machine?: HostingMachine; env: HostingEnvVar[]; spend?: HostingSpend; usage?: HostingUsage }> {
+    return this.request('GET', this.hostingPath(agentId), routes.getHosting.response);
+  }
+  /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */
+  async setHostingLlm(agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }): Promise<AgentHosting> {
+    return (await this.request('PUT', this.hostingPath(agentId, '/llm'), routes.setHostingLlm.response, input)).hosting;
+  }
+  async setHostingEnv(agentId: string, key: string, value: string, secret: boolean): Promise<HostingEnvVar[]> {
+    return (await this.request('PUT', this.hostingPath(agentId, `/env/${encodeURIComponent(key)}`), routes.setHostingEnv.response, { value, secret })).env;
+  }
+  async deleteHostingEnv(agentId: string, key: string): Promise<HostingEnvVar[]> {
+    return (await this.request('DELETE', this.hostingPath(agentId, `/env/${encodeURIComponent(key)}`), routes.deleteHostingEnv.response)).env;
+  }
+  /** The machine's size, the platform's range and estimate (api.ts getHostingSize, 2026-11-04). */
+  async getHostingSize(agentId: string): Promise<HostingSize> {
+    return (await this.request('GET', this.hostingPath(agentId, '/size'), routes.getHostingSize.response)).size;
+  }
+  /** Resize the machine; Harbor restarts it to apply (api.ts setHostingSize). */
+  async setHostingSize(agentId: string, input: { memMb: number; diskGb: number }): Promise<HostingSize> {
+    return (await this.request('PUT', this.hostingPath(agentId, '/size'), routes.setHostingSize.response, input)).size;
+  }
+  async hostingPower(agentId: string, action: HostingPowerAction): Promise<HostingMachine> {
+    return (await this.request('POST', this.hostingPath(agentId, '/power'), routes.hostingPower.response, { action })).machine;
+  }
+  async runHostingCommand(agentId: string, command: string, timeoutSeconds?: number): Promise<HostingExecution> {
+    return (await this.request('POST', this.hostingPath(agentId, '/commands'), routes.runHostingCommand.response, { command, ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}) })).execution;
+  }
+  async getHostingCommand(agentId: string, executionId: string): Promise<HostingExecution> {
+    return (await this.request('GET', this.hostingPath(agentId, `/commands/${encodeURIComponent(executionId)}`), routes.getHostingCommand.response)).execution;
+  }
+  async cancelHostingCommand(agentId: string, executionId: string): Promise<HostingExecution> {
+    return (await this.request('DELETE', this.hostingPath(agentId, `/commands/${encodeURIComponent(executionId)}`), routes.cancelHostingCommand.response)).execution;
+  }
+  /** A sign-in to a plan made from the Terminal (2026-10-30): asked, Harbor has the VM say whether one is there; the agent runs on it from then on. */
+  async checkHostingSignIn(agentId: string): Promise<{ hosting: AgentHosting; signedIn: boolean }> {
+    return this.request('POST', this.hostingPath(agentId, '/sign-in'), routes.checkHostingSignIn.response);
+  }
+  async revokeHostingSignIn(agentId: string): Promise<AgentHosting> {
+    return (await this.request('DELETE', this.hostingPath(agentId, '/sign-in'), routes.revokeHostingSignIn.response)).hosting;
+  }
+  /** A console into the VM: the platform's terminal socket and a short-lived token that opens it; each call mints a new one. */
+  async openHostingConsole(agentId: string): Promise<HostingConsole> {
+    return (await this.request('POST', this.hostingPath(agentId, '/console'), routes.openHostingConsole.response)).console;
+  }
+  async getHostingLogs(agentId: string, opts: { limit?: number; before?: string; level?: string } = {}): Promise<{ logs: HostingLogLine[]; nextBefore?: string }> {
+    const q = new URLSearchParams();
+    if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+    if (opts.before) q.set('before', opts.before);
+    if (opts.level) q.set('level', opts.level);
+    return this.request('GET', this.hostingPath(agentId, `/logs${q.size ? `?${q}` : ''}`), routes.getHostingLogs.response);
+  }
+  async listHostingFiles(agentId: string, path: string): Promise<{ path: string; entries: HostingFileEntry[] }> {
+    return this.request('GET', this.hostingPath(agentId, `/files?path=${encodeURIComponent(path)}`), routes.listHostingFiles.response);
+  }
+  async readHostingFile(agentId: string, path: string): Promise<{ path: string; content: string; truncated: boolean }> {
+    return this.request('GET', this.hostingPath(agentId, `/files/content?path=${encodeURIComponent(path)}`), routes.readHostingFile.response);
+  }
+  async writeHostingFile(agentId: string, path: string, content: string): Promise<void> {
+    await this.request('PUT', this.hostingPath(agentId, '/files/content'), routes.writeHostingFile.response, { path, content });
+  }
+  async makeHostingDir(agentId: string, path: string): Promise<void> {
+    await this.request('POST', this.hostingPath(agentId, '/files/mkdir'), routes.makeHostingDir.response, { path });
+  }
+  async moveHostingFile(agentId: string, from: string, to: string): Promise<void> {
+    await this.request('POST', this.hostingPath(agentId, '/files/move'), routes.moveHostingFile.response, { from, to });
+  }
+  async deleteHostingFile(agentId: string, path: string): Promise<void> {
+    await this.request('DELETE', this.hostingPath(agentId, `/files?path=${encodeURIComponent(path)}`), routes.deleteHostingFile.response);
+  }
+  async listHostingSkills(agentId: string, q?: string): Promise<HostingSkill[]> {
+    return (await this.request('GET', this.hostingPath(agentId, `/skills${q ? `?q=${encodeURIComponent(q)}` : ''}`), routes.listHostingSkills.response)).skills;
+  }
+  async installHostingSkill(agentId: string, name: string): Promise<HostingSkill[]> {
+    return (await this.request('POST', this.hostingPath(agentId, '/skills'), routes.installHostingSkill.response, { name })).skills;
+  }
+  async removeHostingSkill(agentId: string, name: string): Promise<HostingSkill[]> {
+    return (await this.request('DELETE', this.hostingPath(agentId, `/skills/${encodeURIComponent(name)}`), routes.removeHostingSkill.response)).skills;
+  }
+  async listHostingTriggers(agentId: string): Promise<HostingTrigger[]> {
+    return (await this.request('GET', this.hostingPath(agentId, '/triggers'), routes.listHostingTriggers.response)).triggers;
+  }
+  async createHostingTrigger(agentId: string, input: { type: string; config: Record<string, unknown>; enabled?: boolean }): Promise<HostingTrigger[]> {
+    return (await this.request('POST', this.hostingPath(agentId, '/triggers'), routes.createHostingTrigger.response, input)).triggers;
+  }
+  async updateHostingTrigger(agentId: string, triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }): Promise<HostingTrigger[]> {
+    return (await this.request('PUT', this.hostingPath(agentId, `/triggers/${encodeURIComponent(triggerId)}`), routes.updateHostingTrigger.response, input)).triggers;
+  }
+  async deleteHostingTrigger(agentId: string, triggerId: string): Promise<HostingTrigger[]> {
+    return (await this.request('DELETE', this.hostingPath(agentId, `/triggers/${encodeURIComponent(triggerId)}`), routes.deleteHostingTrigger.response)).triggers;
+  }
+
+  /** Replace a platform agent's credential (owner only); Harbor checks it with the platform first. */
+  async setAgentCredential(agentId: string, secret: string): Promise<AgentCredential> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/credential`, routes.setAgentCredential.response, { secret })).credential;
+  }
+
+  /** Point a platform agent's alerts at a space; the address is returned this once (api.ts setAgentHook). */
+  async setAgentHook(agentId: string, spaceId: string): Promise<{ hook: AgentHook; url: string }> {
+    return this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/hook`, routes.setAgentHook.response, { spaceId });
+  }
+
+  async clearAgentHook(agentId: string): Promise<void> {
+    await this.request('DELETE', `/v1/agents/${encodeURIComponent(agentId)}/hook`, routes.clearAgentHook.response);
+  }
+
+  async createAgentKey(agentId: string): Promise<AgentKeySecret> {
+    return (await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys`, routes.createAgentKey.response)).key;
+  }
+
+  /** Rename an agent this member owns (api.ts renameAgent, 2026-10-21). */
+  async renameAgent(agentId: string, displayName: string): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/name`, routes.renameAgent.response, { displayName })).agent;
+  }
+
+  /** Set an agent's description and instructions: its owner only; a field left out is left alone, an empty one clears it (api.ts setAgentProfile, 2026-10-29). */
+  async setAgentProfile(agentId: string, profile: { title?: string; instructions?: string }): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/profile`, routes.setAgentProfile.response, profile)).agent;
+  }
+
+  /** The Add flow's platform setup through Harbor (api.ts listSetupInstances / createSetupInstance, 2026-11-02): the key is not kept. */
+  async setupInstances(connection: string, key: string): Promise<PlatformInstance[]> {
+    return (await this.request('POST', `/v1/setup/${encodeURIComponent(connection)}/instances`, routes.listSetupInstances.response, { key })).instances;
+  }
+  async createSetupInstance(connection: string, input: { key: string; kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<PlatformInstance> {
+    return (await this.request('POST', `/v1/setup/${encodeURIComponent(connection)}/instances/new`, routes.createSetupInstance.response, input)).instance;
+  }
+
+  /** Make an agent a super agent, or ordinary again with null (api.ts setAgentSuper, 2026-11-02): admins only. */
+  async setAgentSuper(agentId: string, superAgent: SuperAgent | null): Promise<Member> {
+    return (await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/super`, routes.setAgentSuper.response, { superAgent })).agent;
+  }
+
+  async revokeAgentKey(agentId: string, keyId: string): Promise<AgentKey> {
+    return (
+      await this.request('POST', `/v1/agents/${encodeURIComponent(agentId)}/keys/${encodeURIComponent(keyId)}/revoke`, routes.revokeAgentKey.response)
+    ).key;
+  }
+
+  /**
+   * Add your contacts, people or your own agents, to a space the caller is in
+   * (api.ts addMembers). `invocableBy` is an agent's seat there — who may ask
+   * it, default everyone (2026-11-09).
+   */
+  async addMembers(spaceId: string, memberIds: string[], invocableBy?: 'owner' | 'members'): Promise<Membership[]> {
+    return (
+      await this.request('POST', this.space(spaceId, '/members'), routes.addMembers.response, {
+        memberIds,
+        ...(invocableBy ? { invocableBy } : {}),
+        actingMode: 'direct',
+      })
+    ).memberships;
+  }
+
+  /** A space's members with their role, join time and, for agents, their seat (api.ts listMembers, 2026-11-09). */
+  async listMembers(spaceId: string): Promise<SpaceMember[]> {
+    return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
+  }
+
+  /** Promote or demote an admin of a space, admins only (api.ts setSpaceRole, 2026-11-09). The space keeps at least one. */
+  async setSpaceRole(spaceId: string, memberId: string, role: MemberRole): Promise<Membership> {
+    return (await this.request('POST', this.space(spaceId, `/members/${encodeURIComponent(memberId)}/role`), routes.setSpaceRole.response, { role, actingMode: 'direct' })).membership;
+  }
+
+  /** Who may ask an agent in a space, its owner only (api.ts setAgentAccess, 2026-11-09). */
+  async setAgentAccess(spaceId: string, agentId: string, invocableBy: 'owner' | 'members'): Promise<Membership> {
+    return (await this.request('PUT', this.space(spaceId, `/members/${encodeURIComponent(agentId)}/access`), routes.setAgentAccess.response, { invocableBy, actingMode: 'direct' })).membership;
+  }
+
+  /** Your contacts: the people you share a space with and the agents you own, A–Z (api.ts listContacts, 2026-11-09). */
+  async listContacts(): Promise<{ members: Member[]; online?: string[]; onlinePeople?: string[] }> {
+    return this.request('GET', routes.listContacts.path, routes.listContacts.response);
+  }
+
+  // --- the connector's side (spec §8 Invoking agent members), on an agent's own key ---
+  // Used by the desktop's local agents (2026-10-28): the app is the connector
+  // for its owner's Claude Code or Codex.
+
+  /** This agent's open invocations, and approval decisions it has not confirmed applying. */
+  async listAgentInvocations(): Promise<{ invocations: Invocation[]; approvals: Approval[] }> {
+    return this.request('GET', routes.listAgentInvocations.path, routes.listAgentInvocations.response);
+  }
+
+  /** pending → working. Idempotent. */
+  async acknowledgeInvocation(invocationId: string): Promise<Invocation> {
+    return (await this.request('POST', `/v1/agent/invocations/${encodeURIComponent(invocationId)}/ack`, routes.acknowledgeInvocation.response)).invocation;
+  }
+
+  async updateInvocation(invocationId: string, update: InvocationUpdate): Promise<Invocation> {
+    return (await this.request('POST', `/v1/agent/invocations/${encodeURIComponent(invocationId)}/update`, routes.updateInvocation.response, update)).invocation;
+  }
+
+  async requestApproval(invocationId: string, request: ApprovalRequest): Promise<Approval> {
+    return (await this.request('POST', `/v1/agent/invocations/${encodeURIComponent(invocationId)}/approvals`, routes.requestApproval.response, request)).approval;
+  }
+
+  async applyApproval(approvalId: string): Promise<Approval> {
+    return (await this.request('POST', `/v1/agent/approvals/${encodeURIComponent(approvalId)}/applied`, routes.applyApproval.response)).approval;
+  }
+
+  async closeApproval(approvalId: string, state: ApprovalClose['state']): Promise<Approval> {
+    return (await this.request('POST', `/v1/agent/approvals/${encodeURIComponent(approvalId)}/close`, routes.closeApproval.response, { state })).approval;
+  }
+
+  async declareCapabilities(capabilities: ConnectorCapabilities): Promise<ConnectorCapabilities> {
+    return (await this.request('POST', routes.declareCapabilities.path, routes.declareCapabilities.response, capabilities)).capabilities;
+  }
+
+  async leaveSpace(spaceId: string): Promise<void> {
+    await this.request('POST', this.space(spaceId, '/leave'), routes.leaveSpace.response, {});
+  }
+
+  // --- invites --------------------------------------------------------------
+
+  /** An invite to one space, or your personal link (`direct`) whose target is a DM with you (api.ts createInvite, 2026-11-09). */
+  async createInvite(opts: { spaceId?: string; direct?: true; expiresInHours?: number }): Promise<CreateInviteResult> {
+    return this.request('POST', routes.createInvite.path, routes.createInvite.response, {
+      ...(opts.spaceId ? { spaceId: opts.spaceId } : {}),
+      ...(opts.direct ? { direct: true } : {}),
+      ...(opts.expiresInHours !== undefined ? { expiresInHours: opts.expiresInHours } : {}),
+    });
+  }
+
+  /** Pre-auth: works before this install has signed in to the server. */
+  async resolveInvite(token: string): Promise<ResolveInviteResult> {
+    return this.request('POST', routes.resolveInvite.path, routes.resolveInvite.response, { token }, false);
+  }
+
+  async acceptInvite(token: string): Promise<AcceptInviteResult> {
+    return this.request('POST', routes.acceptInvite.path, routes.acceptInvite.response, { token });
+  }
+
+  // --- assets ---------------------------------------------------------------
+
+  async listAssets(spaceId: string, opts: { includeDeleted?: boolean } = {}): Promise<Asset[]> {
+    const qs = opts.includeDeleted ? '?includeDeleted=true' : '';
+    return (await this.request('GET', this.space(spaceId, `/assets${qs}`), routes.listAssets.response)).entries;
+  }
+
+  /** Birth: the one call that names a file by path. The result carries the id every later call uses. */
+  async createAsset(spaceId: string, input: CreateAsset): Promise<CreateAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets'), routes.createAsset.response, input);
+  }
+
+  /** Move or rename. Conflict comes back as a value (the file changed meanwhile). */
+  async moveAsset(spaceId: string, input: z.infer<Routes['moveAsset']['request']>): Promise<MoveAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets/move'), routes.moveAsset.response, input);
+  }
+
+  /** Delete to trash — nothing is destroyed; restore undoes it. */
+  async deleteAsset(spaceId: string, input: z.infer<Routes['deleteAsset']['request']>): Promise<DeleteAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets/delete'), routes.deleteAsset.response, input);
+  }
+
+  async restoreAsset(spaceId: string, input: z.infer<Routes['restoreAsset']['request']>): Promise<RestoreAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets/restore'), routes.restoreAsset.response, input);
+  }
+
+  async readAsset(spaceId: string, assetId: string, version?: number): Promise<ReadAssetResult> {
+    const qs = version !== undefined ? `?version=${version}` : '';
+    return this.request('GET', this.space(spaceId, `/assets/${encodeURIComponent(assetId)}${qs}`), routes.readAsset.response);
+  }
+
+  /** All three outcomes come back as values — a conflict is a result, not an exception. */
+  async proposeChange(spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {
+    return this.request('POST', this.space(spaceId, '/changes'), routes.proposeChange.response, input);
+  }
+
+  async assetHistory(
+    spaceId: string,
+    opts: { assetId?: string; beforeOffset?: number; limit?: number } = {},
+  ): Promise<ChangeSet[]> {
+    const q = new URLSearchParams();
+    if (opts.assetId !== undefined) q.set('assetId', opts.assetId);
+    if (opts.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
+    if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.size > 0 ? `?${q}` : '';
+    return (await this.request('GET', this.space(spaceId, `/history${qs}`), routes.assetHistory.response)).changeSets;
+  }
+
+  async diff(spaceId: string, assetId: string, from: number, to: number): Promise<string> {
+    const q = new URLSearchParams({ assetId, from: String(from), to: String(to) });
+    return (await this.request('GET', this.space(spaceId, `/diff?${q}`), routes.diff.response)).unified;
+  }
+
+  // --- blobs ----------------------------------------------------------------
+
+  /**
+   * Upload phase 1 (spec §6): raw bytes → {hash, size, mime}. The client-side
+   * sha256 rides as x-blob-sha256 so a truncated body can never be stored
+   * under a healthy address. Idempotent — re-uploading the same bytes is a
+   * no-op with the same hash.
+   */
+  async uploadBlob(spaceId: string, bytes: Uint8Array, opts: { declaredMime?: string } = {}): Promise<BlobInfo> {
+    const hash = await this.sha256Hex(bytes);
+    const headers = { 'x-blob-sha256': hash, ...(opts.declaredMime ? { 'content-type': opts.declaredMime } : {}) };
+    return (await this.putBytes(this.space(spaceId, '/blobs'), routes.uploadBlob.response, bytes, headers)).blob;
+  }
+
+  /**
+   * The bytes back. The org either streams or 302s to a presigned URL; fetch
+   * follows the redirect, so this client never knows which driver served it.
+   */
+  async fetchBlob(spaceId: string, hash: string): Promise<{ bytes: Uint8Array; mime: string }> {
+    const res = await this.authorizedFetch(`${this.baseUrl}${this.space(spaceId, `/blobs/${hash}`)}`);
+    if (!res.ok) {
+      const parsed = ((await res.json().catch(() => undefined)) ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? `blob fetch failed with ${res.status}`,
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    return {
+      bytes: new Uint8Array(await res.arrayBuffer()),
+      mime: res.headers.get('content-type') ?? 'application/octet-stream',
+    };
+  }
+
+  /** A secret a message shared with the caller, as text (2026-11-04): Harbor answers its readers only. */
+  async readMessageSecret(spaceId: string, messageId: string, name: string): Promise<string> {
+    const res = await this.authorizedFetch(`${this.baseUrl}${this.space(spaceId, `/messages/${messageId}/secrets/${encodeURIComponent(name)}`)}`);
+    if (!res.ok) {
+      const parsed = ((await res.json().catch(() => undefined)) ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? `secret read failed with ${res.status}`,
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    return res.text();
+  }
+
+  // --- feed -----------------------------------------------------------------
+
+  async listTopics(spaceId: string, includeArchived = false): Promise<TopicListing[]> {
+    const qs = includeArchived ? '?includeArchived=true' : '';
+    return (await this.request('GET', this.space(spaceId, `/topics${qs}`), routes.listTopics.response)).topics;
+  }
+
+  /**
+   * Categorized search (protocol search.ts): messages / topics / assets, top-N
+   * each, in one space or — `spaceId` undefined — across every space the
+   * caller is in (api.ts searchAll, 2026-11-09).
+   */
+  async search(
+    spaceId: string | undefined,
+    opts: { q: string; kinds?: SearchKind[]; limit?: number },
+  ): Promise<SearchResults> {
+    const qs = new URLSearchParams({ q: opts.q });
+    if (opts.kinds !== undefined) qs.set('kinds', opts.kinds.join(','));
+    if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
+    if (spaceId === undefined) return this.request('GET', `${routes.searchAll.path}?${qs.toString()}`, routes.searchAll.response);
+    return this.request('GET', this.space(spaceId, `/search?${qs.toString()}`), routes.search.response);
+  }
+
+  /** A page request: newest by default, back from `beforeOffset`, forward from `afterOffset`, or landing around `aroundOffset` (at most one). */
+  private windowQuery(opts?: MessageWindowOpts): string {
+    const q = new URLSearchParams();
+    if (opts?.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
+    if (opts?.afterOffset !== undefined) q.set('afterOffset', String(opts.afterOffset));
+    if (opts?.aroundOffset !== undefined) q.set('aroundOffset', String(opts.aroundOffset));
+    if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
+    return q.size > 0 ? `?${q.toString()}` : '';
+  }
+
+  /**
+   * The stream, windowed newest-first: without beforeOffset the LATEST page —
+   * never the full history. Roots only, unless `replies` (the inline view,
+   * 2026-10-25) lists every reply too.
+   */
+  async listStream(
+    spaceId: string,
+    opts?: MessageWindowOpts & { replies?: boolean },
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter?: boolean; readOffset: number; events: StreamEvent[] }> {
+    const query = this.windowQuery(opts);
+    const replies = opts?.replies ? `${query ? '&' : '?'}replies=true` : '';
+    return this.request('GET', this.space(spaceId, `/stream${query}${replies}`), routes.listStream.response);
+  }
+
+  /** One flat thread: root + topic row (null = plain thread) + windowed replies. A reply id resolves to its root. */
+  /** One message by id, folded — a reply carries its threadRoot. */
+  async getMessage(spaceId: string, messageId: string): Promise<Message> {
+    return (
+      await this.request('GET', this.space(spaceId, `/messages/${encodeURIComponent(messageId)}`), routes.getMessage.response)
+    ).message;
+  }
+
+  async listThread(
+    spaceId: string,
+    rootMessageId: string,
+    opts?: MessageWindowOpts,
+  ): Promise<{
+    root: Message;
+    topic: Topic | null;
+    messages: Message[];
+    hasMore: boolean;
+    hasMoreAfter?: boolean;
+    readOffset: number | null;
+    following: boolean;
+  }> {
+    return this.request(
+      'GET',
+      this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}${this.windowQuery(opts)}`),
+      routes.listThread.response,
+    );
+  }
+
+  // --- read state -----------------------------------------------------------
+  // The org owns the cursors (offsets, per member); these are pass-throughs.
+
+  /** Advance the stream mark (no threadRootId) or a followed thread's. Monotone; null = not following. */
+  async markRead(spaceId: string, input: { threadRootId?: string; offset: number }): Promise<{ readOffset: number }> {
+    return this.request('POST', this.space(spaceId, '/read'), routes.markRead.response, input);
+  }
+
+  async followThread(
+    spaceId: string,
+    rootMessageId: string,
+    following: boolean,
+  ): Promise<{ following: boolean; readOffset: number }> {
+    return this.request(
+      'POST',
+      this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}/follow`),
+      routes.followThread.response,
+      { following },
+    );
+  }
+
+  /** The unread snapshot: every space with its cursor, unread roots, and unread followed threads. */
+  async unread(): Promise<UnreadSnapshot> {
+    return this.request('GET', routes.unread.path, routes.unread.response);
+  }
+
+  /** Activity: everything that involves the member, newest first, cursor paged (layer 3, 2026-09-10). */
+  async activity(query: ActivityQueryInput = {}): Promise<ActivityPage> {
+    const params = new URLSearchParams();
+    if (query.kinds && query.kinds.length > 0) params.set('kinds', query.kinds.join(','));
+    if (query.spaceId !== undefined) params.set('spaceId', query.spaceId);
+    if (query.unread !== undefined) params.set('unread', String(query.unread));
+    if (query.cursor !== undefined) params.set('cursor', query.cursor);
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    const qs = params.toString();
+    return this.request('GET', `${routes.activity.path}${qs ? `?${qs}` : ''}`, routes.activity.response);
+  }
+
+  /** Reactions through `at` read as seen in Activity. Monotone. */
+  async markActivitySeen(at: string): Promise<{ seenAt: string }> {
+    return this.request('POST', routes.markActivitySeen.path, routes.markActivitySeen.response, { at });
+  }
+
+  async readAll(input: { spaceId?: string } = {}): Promise<{ spaces: Array<{ spaceId: string; readOffset: number }>; threads: number; seenAt: string }> {
+    return this.request('POST', routes.readAll.path, routes.readAll.response, input);
+  }
+
+  /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */
+  async postMessage(spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
+    return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
+  }
+
+  /** A space's agent invocations, newest first (api.ts listInvocations; one thread's with threadRootId). */
+  async listInvocations(spaceId: string, threadRootId?: string): Promise<Invocation[]> {
+    const q = threadRootId ? `?threadRootId=${encodeURIComponent(threadRootId)}` : '';
+    return (await this.request('GET', this.space(spaceId, `/invocations${q}`), routes.listInvocations.response)).invocations;
+  }
+
+  /** Cancel a queued invocation, or stop a running one (api.ts cancelInvocation). */
+  async cancelInvocation(invocationId: string): Promise<Invocation> {
+    return (await this.request('POST', `/v1/invocations/${encodeURIComponent(invocationId)}/cancel`, routes.cancelInvocation.response)).invocation;
+  }
+
+  /** What an agent's connector declared, and the defaults its owner set for those options (api.ts getAgentCapabilities). */
+  async getAgentCapabilities(agentId: string): Promise<{ capabilities: ConnectorCapabilities; defaults: InvocationOptionValues }> {
+    return this.request('GET', `/v1/agents/${encodeURIComponent(agentId)}/capabilities`, routes.getAgentCapabilities.response);
+  }
+
+  /** Set an agent's option defaults: its owner only; `{}` clears them. */
+  async setAgentOptionDefaults(agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
+    return (
+      await this.request('PUT', `/v1/agents/${encodeURIComponent(agentId)}/option-defaults`, routes.setAgentOptionDefaults.response, { defaults })
+    ).defaults;
+  }
+
+  /** The deliberate ceremony: promote a thread (rootMessageId) or post + annotate (body). */
+  async createTopic(spaceId: string, input: CreateTopicInput): Promise<{ topic: Topic; rootMessage: Message }> {
+    return this.request('POST', this.space(spaceId, '/topics'), routes.createTopic.response, input);
+  }
+
+  /** Author-only tombstone (idempotent). Returns the deleted message (body '', deletedAt set). */
+  async deleteMessage(spaceId: string, messageId: string, input: DeleteMessageInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/delete`),
+        routes.deleteMessage.response,
+        input,
+      )
+    ).message;
+  }
+
+  /** Author-only body rewrite (identical body = no-op). Returns the edited message. */
+  async editMessage(spaceId: string, messageId: string, input: EditMessageInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/edit`),
+        routes.editMessage.response,
+        input,
+      )
+    ).message;
+  }
+
+  /** Toggle a reaction (idempotent). Returns the message with reactions folded. */
+  async reactToMessage(spaceId: string, messageId: string, input: ReactInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/reactions`),
+        routes.reactToMessage.response,
+        input,
+      )
+    ).message;
+  }
+
+  /** Decide an agent's approval (spec §8 part 4): a person acting directly; the first decision wins. */
+  async decideApproval(spaceId: string, approvalId: string, input: DecideApprovalInput): Promise<Approval> {
+    return (
+      await this.request('POST', this.space(spaceId, `/approvals/${encodeURIComponent(approvalId)}/decide`), routes.decideApproval.response, input)
+    ).approval;
+  }
+
+  /** Toggle a poll vote (idempotent; single-select add moves the vote). Returns the message with votes folded. */
+  async votePoll(spaceId: string, messageId: string, input: VotePollInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/poll/votes`),
+        routes.votePoll.response,
+        input,
+      )
+    ).message;
+  }
+
+  /** End a poll early (author-only; idempotent once closed). Returns the message with endedAt set. */
+  async endPoll(spaceId: string, messageId: string, input: EndPollInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/poll/end`),
+        routes.endPoll.response,
+        input,
+      )
+    ).message;
+  }
+
+  async archiveThread(spaceId: string, rootMessageId: string, archived: boolean): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}/archive`),
+        routes.archiveThread.response,
+        { archived, actingMode: 'direct' },
+      )
+    ).root;
+  }
+
+  /** Mark a thread as a session, retitle it, or unmark it with null (api.ts setSession, 2026-11-05). */
+  async setSession(spaceId: string, rootMessageId: string, session: { title: string } | null): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}/session`),
+        routes.setSession.response,
+        { session, actingMode: 'direct' },
+      )
+    ).root;
+  }
+
+  /** The member's threads in every space they are in, newest activity first; archived ones with `archived` (api.ts myThreads). */
+  async myThreads(archived = false): Promise<ThreadListing[]> {
+    return (await this.request('GET', `${routes.myThreads.path}${archived ? '?archived=true' : ''}`, routes.myThreads.response)).threads;
+  }
+
+  async listArchivedThreads(spaceId: string): Promise<Message[]> {
+    return (await this.request('GET', this.space(spaceId, '/archived-threads'), routes.listArchivedThreads.response)).threads;
+  }
+
+  async manageTopic(spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/topics/${encodeURIComponent(topicId)}`),
+        routes.manageTopic.response,
+        action,
+      )
+    ).topic;
+  }
+}

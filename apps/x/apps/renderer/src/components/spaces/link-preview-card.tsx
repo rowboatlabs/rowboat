@@ -3,11 +3,13 @@ import { Globe, X } from 'lucide-react'
 import { useLinkPreview } from '@/hooks/use-link-preview'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { previewUrls } from '@/lib/spaces-unfurl'
+import { cn } from '@/lib/utils'
 
-// conversation unfurls under a message: a gray accent bar, favicon + site
-// name, the title as a link, the description, the og:image below. Which
-// links qualify is lib/spaces-unfurl.ts; the × hides a card for this
-// install.
+// Conversation unfurls under a message: a compact horizontal card — favicon +
+// site name, the title as a link, a two-line description, and the og:image as
+// a small square thumbnail on the right (spaces redesign, 2026-10-21: the
+// full-width image dwarfed the messages around it). Which links qualify is
+// lib/spaces-unfurl.ts; the × hides a card for this install.
 
 // Hidden cards, per install (like the trust list): `${messageId}|${url}`.
 const HIDDEN_KEY = 'spaces:hiddenLinkPreviews'
@@ -66,18 +68,17 @@ function LinkPreviewCard({ url, onHide }: { url: string; onHide?: () => void }) 
     const [faviconFailed, setFaviconFailed] = useState(false)
     if (!preview) return null
     const open = () => window.open(preview.url)
+    const showImage = !!preview.imageUrl && !imageFailed
     return (
-        <div className="group/unfurl relative mt-1 max-w-md">
-            {/* the conversation anatomy: the rounded accent bar down the left, content beside it. */}
-            <span aria-hidden className="absolute bottom-0.5 left-0 top-0.5 w-1 rounded-full bg-border" />
-            <div className="min-w-0 py-0.5 pl-4 pr-6">
+        <div className="group/unfurl relative mt-2 flex max-w-[440px] items-center gap-3.5 rounded-xl border border-border bg-foreground/[0.03] p-3 transition-colors hover:border-foreground/15 hover:bg-foreground/[0.055]">
+            <div className={cn('min-w-0 flex-1', onHide && !showImage && 'pr-5')}>
                 <div className="flex items-center gap-1.5">
                     {preview.favicon && !faviconFailed ? (
-                        <img src={preview.favicon} alt="" onError={() => setFaviconFailed(true)} className="size-4 shrink-0 rounded-[3px]" />
+                        <img src={preview.favicon} alt="" onError={() => setFaviconFailed(true)} className="size-3.5 shrink-0 rounded-[3px]" />
                     ) : (
                         <Globe className="size-3.5 shrink-0 text-muted-foreground" />
                     )}
-                    <span className="truncate text-[13px] font-semibold text-foreground/90">
+                    <span className="truncate text-[11.5px] text-muted-foreground">
                         {preview.siteName ?? new URL(preview.url).hostname.replace(/^www\./, '')}
                     </span>
                 </div>
@@ -86,34 +87,34 @@ function LinkPreviewCard({ url, onHide }: { url: string; onHide?: () => void }) 
                         type="button"
                         onClick={open}
                         title={preview.url}
-                        className="mt-0.5 line-clamp-2 max-w-full text-left text-[15px] font-bold leading-snug text-[var(--stream-link)] hover:underline"
+                        className="mt-1 line-clamp-2 max-w-full text-left text-[13.5px] font-semibold leading-snug text-[var(--stream-link)] hover:underline"
                     >
                         {preview.title}
                     </button>
                 )}
                 {preview.description && (
-                    <div className="mt-0.5 line-clamp-3 text-[13px] leading-snug text-foreground/80">{preview.description}</div>
-                )}
-                {preview.imageUrl && !imageFailed && (
-                    <img
-                        src={preview.imageUrl}
-                        alt=""
-                        loading="lazy"
-                        onError={() => setImageFailed(true)}
-                        onClick={open}
-                        className="mt-1.5 max-h-56 max-w-full cursor-pointer rounded-lg border border-border object-cover"
-                    />
+                    <div className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted-foreground">{preview.description}</div>
                 )}
             </div>
+            {showImage && (
+                <img
+                    src={preview.imageUrl}
+                    alt=""
+                    loading="lazy"
+                    onError={() => setImageFailed(true)}
+                    onClick={open}
+                    className="size-16 shrink-0 cursor-pointer rounded-lg border border-border object-cover"
+                />
+            )}
             {onHide && (
                 <button
                     type="button"
                     onClick={onHide}
                     aria-label="Remove preview"
                     title="Remove preview"
-                    className="absolute right-0 top-0.5 hidden size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground group-hover/unfurl:flex"
+                    className="absolute right-1.5 top-1.5 hidden size-5 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-xs hover:text-foreground group-hover/unfurl:flex"
                 >
-                    <X className="size-3.5" />
+                    <X className="size-3" />
                 </button>
             )}
         </div>

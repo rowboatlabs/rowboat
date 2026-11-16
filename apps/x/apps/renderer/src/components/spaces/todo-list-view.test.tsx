@@ -1,0 +1,176 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { spaces } from '@x/shared'
+import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { FileColumn } from './files-tab'
+
+vi.mock('@/components/markdown-editor', () => ({ MarkdownEditor: () => null }))
+vi.mock('./document-viewer', () => ({ SpaceDocumentViewer: () => null }))
+vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
+vi.mock('react-tweet', () => ({ Tweet: () => null }))
+
+const org = { id: 'org', address: 'spaces.example.com' } as OrgWithSpaces
+const space = { id: 'space', name: 'Team' } as spaces.Space
+const invoke = vi.fn()
+const original = '## Backlog\n- [ ] Draft pricing\n- [ ] Fix replicas\n\n## Doing\n- [ ] Mobile files\n'
+let asset: spaces.ReadAssetResult
+
+beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    asset = { id: 'list', path: 'todos/launch.md', version: 3, content: original, recentHistory: [] }
+    invoke.mockImplementation(async (channel, args) => {
+        if (channel === 'spaces:readAsset') return { ...asset }
+        if (channel === 'spaces:listMembers') return { members: [] }
+        if (channel === 'spaces:proposeChange') {
+            asset = { ...asset, content: args.input.newContent, version: asset.version + 1 }
+            return { outcome: 'applied', version: asset.version }
+        }
+        throw new Error(`Unexpected channel ${channel}`)
+    })
+    window.ipc = { ...window.ipc, invoke } as typeof window.ipc
+})
+afterEach(cleanup)
+
+const column = () => <FileColumn org={org} space={space} assetId="list" memberNames={new Map()} refreshTick={0} onChanged={vi.fn()} />
+
+describe('todo list files', () => {
+    it('opens in the todo editor with its sections and items', async () => {
+        render(column())
+        expect(await screen.findByRole('heading', { name: 'Backlog' })).toBeInTheDocument()
+        expect(screen.getByRole('heading', { name: 'Doing' })).toBeInTheDocument()
+        expect(screen.getByText('Mobile files')).toBeInTheDocument()
+        expect(screen.getByRole('radio', { name: /Document/ })).toHaveAttribute('aria-checked', 'true')
+    })
+
+    it('ticks an item by rewriting only its line', async () => {
+        render(column())
+        fireEvent.click(await screen.findByRole('checkbox', { name: 'Mark "Fix replicas" done' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: 'org', spaceId: 'space',
+            input: { assetId: 'list', baseVersion: 3, newContent: original.replace('- [ ] Fix replicas', '- [x] Fix replicas') },
+        }))
+    })
+
+    it('adds an item to a section', async () => {
+        render(column())
+        await screen.findByRole('heading', { name: 'Doing' })
+        fireEvent.click(screen.getAllByRole('button', { name: /Add item/ })[1]!)
+        const input = screen.getByRole('textbox', { name: 'New item' })
+        fireEvent.change(input, { target: { value: 'Ship it' } })
+        fireEvent.keyDown(input, { key: 'Enter' })
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: 'org', spaceId: 'space',
+            input: { assetId: 'list', baseVersion: 3, newContent: `${original}- [ ] Ship it\n` },
+        }))
+    })
+
+    it('re-applies the action to the current text after a conflict', async () => {
+        const theirs = original.replace('## Doing\n', '## Doing\n- [ ] Their new item\n')
+        let first = true
+        invoke.mockImplementation(async (channel, args) => {
+            if (channel === 'spaces:readAsset') return { ...asset }
+            if (channel === 'spaces:listMembers') return { members: [] }
+            if (channel === 'spaces:proposeChange') {
+                if (first) {
+                    first = false
+                    return { outcome: 'conflict', currentVersion: 4, currentContent: theirs, regions: [], recentHistory: [] }
+                }
+                asset = { ...asset, content: args.input.newContent, version: 5 }
+                return { outcome: 'applied', version: 5 }
+            }
+            throw new Error(`Unexpected channel ${channel}`)
+        })
+        render(column())
+        fireEvent.click(await screen.findByRole('checkbox', { name: 'Mark "Mobile files" done' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: 'org', spaceId: 'space',
+            input: { assetId: 'list', baseVersion: 4, newContent: theirs.replace('- [ ] Mobile files', '- [x] Mobile files') },
+        }))
+        expect(await screen.findByText('Their new item')).toBeInTheDocument()
+    })
+
+    it('offers no agent whose seat here is someone else’s alone as an assignee, since assigning mentions it (2026-11-09)', async () => {
+        const roster = [
+            { id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' },
+            { id: 'theirs', displayName: 'Their Claude', role: 'member', kind: 'agent', invocableBy: 'owner', ownerId: 'harsh' },
+            { id: 'mine', displayName: 'My Claude', role: 'member', kind: 'agent', invocableBy: 'owner', ownerId: 'me' },
+        ]
+        invoke.mockImplementation(async (channel) => {
+            if (channel === 'spaces:readAsset') return { ...asset }
+            if (channel === 'spaces:listMembers') return { members: roster }
+            throw new Error(`Unexpected channel ${channel}`)
+        })
+        // The picker is cmdk, which measures its list.
+        vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} })
+        Element.prototype.scrollIntoView ??= () => {}
+        render(<FileColumn org={{ ...org, memberId: 'me' }} space={{ ...space, id: 'space-assign' }} assetId="list" memberNames={new Map()} refreshTick={0} onChanged={vi.fn()} />)
+        await screen.findByRole('heading', { name: 'Backlog' })
+        fireEvent.click(screen.getAllByRole('button', { name: 'Assign' })[0]!)
+        expect(await screen.findByText('My Claude')).toBeInTheDocument()
+        expect(screen.getByText('Harsh')).toBeInTheDocument()
+        expect(screen.queryByText('Their Claude')).not.toBeInTheDocument()
+    })
+
+    it('shows an item’s details collapsed, and saves an edit to them under the item (2026-11-03)', async () => {
+        asset = { ...asset, content: original.replace('- [ ] Fix replicas\n', '- [ ] Fix replicas\n  Repro: open the **pane**.\n') }
+        render(column())
+        const toggle = await screen.findByRole('button', { name: 'Show details' })
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByText('pane')).not.toBeInTheDocument()
+        // Only the item that has details gets the toggle.
+        expect(screen.getAllByRole('button', { name: 'Show details' })).toHaveLength(1)
+        fireEvent.click(toggle)
+        expect(screen.getByRole('button', { name: 'Hide details' })).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.doubleClick(await screen.findByText('pane'))
+        const box = screen.getByRole('textbox', { name: 'Item details' })
+        expect(box).toHaveValue('Repro: open the **pane**.')
+        fireEvent.change(box, { target: { value: 'Repro: open the pane.\n\nAcceptance: it opens.' } })
+        fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: 'org', spaceId: 'space',
+            input: { assetId: 'list', baseVersion: 3, newContent: original.replace('- [ ] Fix replicas\n', '- [ ] Fix replicas\n  Repro: open the pane.\n\n  Acceptance: it opens.\n') },
+        }))
+    })
+
+    it('previews folded details in the document, and opens a board card to read and edit them (2026-11-04)', async () => {
+        asset = { ...asset, content: original.replace('- [ ] Fix replicas\n', '- [ ] Fix replicas\n  Repro: open the **pane**.\n') }
+        render(column())
+        expect(await screen.findByRole('button', { name: 'Repro: open the pane.' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('radio', { name: /Board/ }))
+        expect(screen.getAllByRole('img', { name: 'Has details' })).toHaveLength(1)
+        fireEvent.click(screen.getByRole('button', { name: 'Fix replicas' }))
+        await screen.findByRole('dialog')
+        expect(screen.getByRole('button', { name: 'Section: Backlog' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+        const box = screen.getByRole('textbox', { name: 'Item details' })
+        fireEvent.change(box, { target: { value: 'Acceptance: it opens.' } })
+        fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: 'org', spaceId: 'space',
+            input: { assetId: 'list', baseVersion: 3, newContent: original.replace('- [ ] Fix replicas\n', '- [ ] Fix replicas\n  Acceptance: it opens.\n') },
+        }))
+    })
+
+    it('resizes a board column per reader, without touching the file (2026-11-04)', async () => {
+        localStorage.setItem('spaces:todo-view:org/space/list', 'board')
+        render(column())
+        const handle = await screen.findByRole('separator', { name: 'Resize Doing' })
+        expect(handle).toHaveAttribute('aria-valuenow', '272')
+        fireEvent.keyDown(handle, { key: 'ArrowRight', shiftKey: true })
+        expect(handle).toHaveAttribute('aria-valuenow', '312')
+        expect(handle.parentElement).toHaveStyle({ width: '312px' })
+        expect(JSON.parse(localStorage.getItem('spaces:todo-columns:org/space/list')!)).toEqual({ Doing: 312 })
+        fireEvent.doubleClick(handle)
+        expect(handle).toHaveAttribute('aria-valuenow', '272')
+        expect(invoke).not.toHaveBeenCalledWith('spaces:proposeChange', expect.anything())
+    })
+
+    it('remembers the board view per reader, without touching the file', async () => {
+        render(column())
+        fireEvent.click(await screen.findByRole('radio', { name: /Board/ }))
+        expect(screen.getByRole('radio', { name: /Board/ })).toHaveAttribute('aria-checked', 'true')
+        expect(localStorage.getItem('spaces:todo-view:org/space/list')).toBe('board')
+        expect(invoke).not.toHaveBeenCalledWith('spaces:proposeChange', expect.anything())
+    })
+})

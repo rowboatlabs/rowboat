@@ -1,15 +1,24 @@
+import { Graph, type GraphOptions, type SetSpaceGraphInput } from './core/graph.js';
+import type { JevApi } from './jev.js';
+import type { SpaceGraph } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
+import { HumanPresence } from './core/human-presence.js';
+import { AgentPresence } from './core/agent-presence.js';
+import { Hosting, type HostingHooks, type HostingProvider } from './core/hosting.js';
+import type { BillingAccounts } from './billing.js';
 import { Assets } from './core/assets.js';
+import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
 import { approvalCardBody } from './core/approval-card.js';
 import { Invocations } from './core/invocations.js';
-import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
+import { Kernel, type ActorCtx, type BindIdentity, type ServerInfo } from './core/kernel.js';
 import { ReadState } from './core/read-state.js';
 import { Spaces } from './core/spaces.js';
-import type { AddMembersInput, RenameSpaceInput } from './core/spaces.js';
-import type { CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
+import { SuperAgents } from './core/super-agents.js';
+import type { AddMembersInput, ArchiveSpaceInput, CreateInviteInput, RemoveMemberInput, RenameSpaceInput, SetAgentAccessInput, SetSpaceRoleInput } from './core/spaces.js';
+import type { ArchiveThreadInput, SetSessionInput, CreateTopicInput, DeleteMessageInput, EditMessageInput, EndPollInput, ManageTopicAction, NewMessage, PageOpts, ReactInput, VotePollInput } from './core/feed.js';
 import type { MarkReadInput, UnreadSnapshot } from './core/read-state.js';
 import type { SpaceHub } from './hub.js';
 import type { Notifier } from './notify.js';
@@ -27,8 +36,12 @@ import type {
   CreateInviteResult,
   DeleteAssetResult,
   Member,
+  UpdateProfile,
   AgentKey,
   AgentCredential,
+  AgentHosting,
+  HostingPowerAction, LlmProvider,
+  AgentHook,
   AgentKeySecret,
   AgentListing,
   ConnectorCapabilities,
@@ -52,7 +65,12 @@ import type {
   Routes,
   SearchKind,
   SearchResults,
+  ThreadListing,
   Space,
+  SpaceMember,
+  PlatformInstance,
+  SuperAgent,
+  SuperAgentResult,
   Topic,
   TopicListing,
 } from '@rowboat/spaces-protocol';
@@ -65,34 +83,48 @@ import type {
 // the faces and the tests see one object with one surface. Add a feature in
 // its aggregate; add its delegate here.
 
-export type { ActorCtx, BindIdentity, OrgInfo } from './core/kernel.js';
+export type { ActorCtx, BindIdentity, ServerInfo } from './core/kernel.js';
 export type { ActingMode };
 
 export class HarborService {
   private readonly k: Kernel;
   private readonly spaces: Spaces;
   private readonly assets: Assets;
+  private readonly images: Images;
   private readonly feed: Feed;
   private readonly readState: ReadState;
   private readonly agents: Agents;
+  private readonly hosting: Hosting;
   private readonly invocations: Invocations;
+  private readonly presence: AgentPresence;
+  private readonly humanPresence: HumanPresence;
+  private readonly superAgents: SuperAgents;
+  private readonly graph: Graph;
 
   constructor(
     store: Store,
     hub: SpaceHub,
-    org: OrgInfo,
-    /** Absent = uploads unconfigured on this org (routes refuse loudly, everything else works). */
+    server: ServerInfo,
+    /** Absent = uploads unconfigured (routes refuse loudly, everything else works). */
     blobs?: BlobStore,
-    /** Absent = no notifications on this org (notify.ts: frames + push). */
+    /** Absent = no notifications (notify.ts: frames + push). */
     notifier?: Notifier,
+    /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
+    options: { presenceGraceMs?: number } = {},
   ) {
-    this.k = new Kernel(store, hub, org);
-    this.spaces = new Spaces(this.k);
+    this.k = new Kernel(store, hub, server);
+    this.spaces = new Spaces(this.k, blobs);
     this.assets = new Assets(this.k, blobs);
+    this.images = new Images(this.k, blobs);
     this.invocations = new Invocations(this.k);
     this.feed = new Feed(this.k, this.assets, notifier, this.invocations);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
     this.agents = new Agents(this.k, this.spaces);
+    this.hosting = new Hosting(this.k, this.spaces, this.agents);
+    this.humanPresence = new HumanPresence(this.k, undefined, options.presenceGraceMs);
+    this.presence = new AgentPresence(this.k, options.presenceGraceMs);
+    this.superAgents = new SuperAgents(this.k, this.hosting, this.spaces, this.feed, this.invocations);
+    this.graph = new Graph(this.k);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
@@ -105,9 +137,39 @@ export class HarborService {
     this.agents.attachConnectors(hooks);
   }
 
-  /** The org this service serves — `address` is set once the listener knows its port (server.ts). */
-  get org(): OrgInfo {
-    return this.k.org;
+  /** Managed hosting (spec §8 Maritime, 2026-10-26): the platform Rowboat's own account creates agents on, when the deployment has its key (runtime.ts). */
+  attachHosting(provider: HostingProvider, hooks: HostingHooks, options: { trialMs?: number; billing?: BillingAccounts; settleEveryMs?: number } = {}): void {
+    this.hosting.attach(provider, hooks, options);
+  }
+  /** The hosting worker: follows each managed agent from creation to ready, and through deletion. */
+  startHosting(tickMs?: number): void {
+    this.hosting.start(tickMs);
+  }
+  stopHosting(): Promise<void> {
+    return this.hosting.stop();
+  }
+
+  /** The space graph (spec §8 Space graph, 2026-11-12): the Jev it judges with, when the deployment has its key (runtime.ts). */
+  attachGraph(jev: JevApi, options: GraphOptions = {}): void {
+    this.graph.attach(jev, options);
+  }
+  /** The graph worker: keeps every graph space's judgments current. */
+  startGraph(): void {
+    this.graph.start();
+  }
+  stopGraph(): Promise<void> {
+    return this.graph.stop();
+  }
+  setSpaceGraph(ctx: ActorCtx, spaceId: string, input: SetSpaceGraphInput): Promise<Space> {
+    return this.graph.setEnabled(ctx, spaceId, input);
+  }
+  getSpaceGraph(ctx: ActorCtx, spaceId: string, opts: { about?: string; limit?: number } = {}): Promise<SpaceGraph> {
+    return this.graph.read(ctx, spaceId, opts);
+  }
+
+  /** The server — `address` is set once the listener knows its port (server.ts). */
+  get server(): ServerInfo {
+    return this.k.server;
   }
 
   /** Over-limit means read-only, never lockout (spec §4). Flip via the control plane; here a knob for tests. */
@@ -126,6 +188,11 @@ export class HarborService {
   // --- spaces & membership (core/spaces.ts) ----------------------------------------
   me(ctx: ActorCtx): Promise<Member> {
     return this.spaces.me(ctx);
+  }
+  async updateProfile(ctx: ActorCtx, input: UpdateProfile): Promise<Member> {
+    const member = await this.spaces.updateProfile(ctx, input);
+    await this.humanPresence.refresh(ctx.memberId);
+    return member;
   }
   createAgent(input: { displayName: string; ownerId?: string }): Promise<Member> {
     return this.spaces.createAgent(input);
@@ -147,6 +214,26 @@ export class HarborService {
   getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues> {
     return this.invocations.optionDefaults(agentId);
   }
+  renameAgent(ctx: ActorCtx, agentId: string, input: { displayName: string }): Promise<Member> {
+    return this.agents.rename(ctx, agentId, input);
+  }
+  listSetupInstances(ctx: ActorCtx, connection: string, key: string): Promise<PlatformInstance[]> {
+    return this.agents.listSetupInstances(ctx, connection, key);
+  }
+  createSetupInstance(ctx: ActorCtx, connection: string, input: { key: string; kind: string; name: string; monthlyBudgetUsd: number; autoSleep: boolean }): Promise<PlatformInstance> {
+    return this.agents.createSetupInstance(ctx, connection, input);
+  }
+  setAgentSuper(ctx: ActorCtx, agentId: string, input: { superAgent: SuperAgent | null }): Promise<Member> {
+    return this.agents.setSuper(ctx, agentId, input);
+  }
+  /** A super agent's create_agent and delete_agent (spec §4 Agent members, 2026-11-02). */
+  superAgentCreate(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; displayName: string; kind: string; connection?: string; reason: string }): Promise<SuperAgentResult> {
+    return this.superAgents.create(ctx, input);
+  }
+  superAgentDelete(ctx: ActorCtx, input: { spaceId: string; threadRootId: string; agentId: string; reason: string }): Promise<SuperAgentResult> {
+    return this.superAgents.delete(ctx, input);
+  }
+
   setAgentOptionDefaults(ctx: ActorCtx, agentId: string, defaults: InvocationOptionValues): Promise<InvocationOptionValues> {
     return this.agents.setOptionDefaults(ctx, agentId, defaults);
   }
@@ -161,17 +248,163 @@ export class HarborService {
   }
 
   // --- agents and their keys (core/agents.ts) --------------------------------------
-  listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
-    return this.agents.list(ctx);
+  async listAgents(ctx: ActorCtx): Promise<AgentListing[]> {
+    const listing = await this.agents.list(ctx);
+    const hosting = await this.hosting.listFor(listing.map((l) => l.agent.id));
+    return listing.map((l) => (hosting.has(l.agent.id) ? { ...l, hosting: hosting.get(l.agent.id)! } : l));
   }
-  addAgent(
+  /** The kinds of agent this Harbor creates on Rowboat's own platform account: none without the deployment's key; and whether they bill (2026-11-04). */
+  managedAgentKinds(ctx: ActorCtx): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
+    return this.hosting.kinds(ctx);
+  }
+  /** Create a managed agent on the platform Rowboat's account runs (spec §8 Maritime, 2026-10-26). */
+  async createManagedAgent(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; connection: string; credential?: string },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean; request?: string },
+  ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
+    const { request: requestId, ...rest } = input;
+    const request = requestId ? await this.superAgents.assertSetup(ctx, requestId, undefined) : undefined;
+    const created = await this.hosting.createManaged(ctx, rest, request?.agentId);
+    if (request) await this.superAgents.completeSetup(ctx, request, created.agent);
+    return created;
+  }
+  /** Delete a managed agent's hosting: the owner or an admin; its keys go now, the platform's resources in the background. */
+  deleteManagedAgent(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
+    return this.hosting.deleteManaged(ctx, agentId);
+  }
+  deleteAgent(ctx: ActorCtx, agentId: string): Promise<{ agent: Member; hosting?: AgentHosting }> {
+    return this.hosting.deleteAgent(ctx, agentId);
+  }
+  /** Managing a managed agent's VM (the management area, 2026-10-27): the owner or an admin, through the deployment's key. */
+  getHosting(ctx: ActorCtx, agentId: string) {
+    return this.hosting.get(ctx, agentId);
+  }
+  /** The owner's own provider key for a managed agent, the end of its trial (2026-10-27). */
+  setHostingLlm(ctx: ActorCtx, agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }) {
+    return this.hosting.setLlm(ctx, agentId, input);
+  }
+  /** For a managed agent's connector before a turn: on Rowboat's trial credit, and whether that is over. */
+  hostingFundingOf(agentId: string) {
+    return this.hosting.fundingOf(agentId);
+  }
+  closeHostingTrial(agentId: string, reason: 'exhausted' | 'expired') {
+    return this.hosting.closeTrial(agentId, reason);
+  }
+  /** For a billed agent's connector before a turn (2026-11-04): its sentence when the owner has no credits left. */
+  hostingTurnRefusal(agentId: string) {
+    return this.hosting.turnRefusal(agentId);
+  }
+  /** For a billed agent's connector after a failed turn (2026-11-04): the reason said the owner's way. */
+  explainHostingFailure(agentId: string, failure: string, signIn?: 'chatgpt' | 'none') {
+    return this.hosting.explainFailure(agentId, failure, signIn);
+  }
+  /** A managed agent's machine size, and resizing it (2026-11-04). */
+  getHostingSize(ctx: ActorCtx, agentId: string) {
+    return this.hosting.size(ctx, agentId);
+  }
+  setHostingSize(ctx: ActorCtx, agentId: string, input: { memMb: number; diskGb: number }) {
+    return this.hosting.resize(ctx, agentId, input);
+  }
+  setHostingEnv(ctx: ActorCtx, agentId: string, key: string, value: string, secret: boolean) {
+    return this.hosting.setEnv(ctx, agentId, key, value, secret);
+  }
+  deleteHostingEnv(ctx: ActorCtx, agentId: string, key: string) {
+    return this.hosting.deleteEnv(ctx, agentId, key);
+  }
+  hostingPower(ctx: ActorCtx, agentId: string, action: HostingPowerAction) {
+    return this.hosting.power(ctx, agentId, action);
+  }
+  runHostingCommand(ctx: ActorCtx, agentId: string, command: string, timeoutSeconds?: number) {
+    return this.hosting.run(ctx, agentId, command, timeoutSeconds);
+  }
+  getHostingCommand(ctx: ActorCtx, agentId: string, executionId: string) {
+    return this.hosting.execution(ctx, agentId, executionId);
+  }
+  cancelHostingCommand(ctx: ActorCtx, agentId: string, executionId: string) {
+    return this.hosting.cancel(ctx, agentId, executionId);
+  }
+  openHostingConsole(ctx: ActorCtx, agentId: string) {
+    return this.hosting.console(ctx, agentId);
+  }
+  /** A sign-in to a plan made from the Terminal (2026-10-30): asked, Harbor has the VM say whether one is there, and the agent runs on it from then on. */
+  checkHostingSignIn(ctx: ActorCtx, agentId: string) {
+    return this.hosting.checkSignIn(ctx, agentId);
+  }
+  revokeHostingSignIn(ctx: ActorCtx, agentId: string) {
+    return this.hosting.revokeSignIn(ctx, agentId);
+  }
+  /** For a managed agent's connector after a turn: what the turn script said about the sign-in. */
+  noteHostingSignIn(agentId: string, state: 'chatgpt' | 'none') {
+    return this.hosting.observeSignIn(agentId, state);
+  }
+  getHostingLogs(ctx: ActorCtx, agentId: string, opts: { limit?: number; before?: string; level?: string }) {
+    return this.hosting.logs(ctx, agentId, opts);
+  }
+  listHostingFiles(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.files(ctx, agentId, path);
+  }
+  readHostingFile(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.readFile(ctx, agentId, path);
+  }
+  writeHostingFile(ctx: ActorCtx, agentId: string, path: string, content: string) {
+    return this.hosting.writeFile(ctx, agentId, path, content);
+  }
+  makeHostingDir(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.mkdir(ctx, agentId, path);
+  }
+  moveHostingFile(ctx: ActorCtx, agentId: string, from: string, to: string) {
+    return this.hosting.moveFile(ctx, agentId, from, to);
+  }
+  deleteHostingFile(ctx: ActorCtx, agentId: string, path: string) {
+    return this.hosting.deleteFile(ctx, agentId, path);
+  }
+  listHostingSkills(ctx: ActorCtx, agentId: string, q?: string) {
+    return this.hosting.skills(ctx, agentId, q);
+  }
+  installHostingSkill(ctx: ActorCtx, agentId: string, name: string) {
+    return this.hosting.installSkill(ctx, agentId, name);
+  }
+  removeHostingSkill(ctx: ActorCtx, agentId: string, name: string) {
+    return this.hosting.removeSkill(ctx, agentId, name);
+  }
+  listHostingTriggers(ctx: ActorCtx, agentId: string) {
+    return this.hosting.triggers(ctx, agentId);
+  }
+  createHostingTrigger(ctx: ActorCtx, agentId: string, input: { type: string; config: Record<string, unknown>; enabled?: boolean }) {
+    return this.hosting.createTrigger(ctx, agentId, input);
+  }
+  updateHostingTrigger(ctx: ActorCtx, agentId: string, triggerId: string, input: { config?: Record<string, unknown>; enabled?: boolean }) {
+    return this.hosting.updateTrigger(ctx, agentId, triggerId, input);
+  }
+  deleteHostingTrigger(ctx: ActorCtx, agentId: string, triggerId: string) {
+    return this.hosting.deleteTrigger(ctx, agentId, triggerId);
+  }
+  async addAgent(
+    ctx: ActorCtx,
+    input: { displayName: string; kind: string; connection: string; credential?: string; instance?: string; personal?: boolean; request?: string },
   ): Promise<{ agent: Member; key: AgentKeySecret }> {
-    return this.agents.add(ctx, input);
+    // Completing a super agent's setup card (2026-11-02): checked before the agent exists, recorded once it does.
+    const { request: requestId, ...rest } = input;
+    const request = requestId ? await this.superAgents.assertSetup(ctx, requestId, input.connection) : undefined;
+    const added = await this.agents.add(ctx, rest);
+    if (request) await this.superAgents.completeSetup(ctx, request, added.agent);
+    return added;
   }
   setAgentCredential(ctx: ActorCtx, agentId: string, secret: string): Promise<AgentCredential> {
     return this.agents.setCredential(ctx, agentId, secret);
+  }
+  setAgentHook(ctx: ActorCtx, agentId: string, spaceId: string): Promise<{ hook: AgentHook; token: string }> {
+    return this.agents.setHook(ctx, agentId, spaceId);
+  }
+  clearAgentHook(ctx: ActorCtx, agentId: string): Promise<void> {
+    return this.agents.clearHook(ctx, agentId);
+  }
+  /** An alert at an agent's address (spec §8 Alerts, 2026-10-03), posted by the agent in its space; false when it has nothing to say. */
+  async receiveAgentHook(agentId: string, token: string, payload: unknown): Promise<boolean> {
+    const alert = await this.agents.hookAlert(agentId, token, payload);
+    if (!alert) return false;
+    await this.feed.postMessage({ memberId: agentId, agent: true }, alert.spaceId, { body: alert.body, actingMode: 'direct' });
+    return true;
   }
   createAgentKey(ctx: ActorCtx, agentId: string): Promise<AgentKeySecret> {
     return this.agents.createKey(ctx, agentId);
@@ -182,26 +415,70 @@ export class HarborService {
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
   }
-  browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
-    return this.spaces.browseSpaces(ctx);
-  }
-  joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
-    return this.spaces.joinSpace(ctx, spaceId);
-  }
-  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private'): Promise<Space> {
-    return this.spaces.createSpace(ctx, name, visibility);
+  createSpace(ctx: ActorCtx, name: string): Promise<Space> {
+    return this.spaces.createSpace(ctx, name);
   }
   renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     return this.spaces.renameSpace(ctx, spaceId, input);
   }
+  archiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.spaces.archiveSpace(ctx, spaceId, input);
+  }
+  unarchiveSpace(ctx: ActorCtx, spaceId: string, input: ArchiveSpaceInput): Promise<Space> {
+    return this.spaces.unarchiveSpace(ctx, spaceId, input);
+  }
+  deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
+    return this.spaces.deleteSpace(ctx, spaceId);
+  }
+  removeMember(ctx: ActorCtx, spaceId: string, memberId: string, input: RemoveMemberInput): Promise<{ removed: boolean }> {
+    return this.spaces.removeMember(ctx, spaceId, memberId, input);
+  }
+  setSpaceRole(ctx: ActorCtx, spaceId: string, memberId: string, input: SetSpaceRoleInput): Promise<Membership> {
+    return this.spaces.setSpaceRole(ctx, spaceId, memberId, input);
+  }
+  setAgentAccess(ctx: ActorCtx, spaceId: string, agentId: string, input: SetAgentAccessInput): Promise<Membership> {
+    return this.spaces.setAgentAccess(ctx, spaceId, agentId, input);
+  }
   openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
     return this.spaces.openDirect(ctx, otherMemberId);
   }
-  listMembers(ctx: ActorCtx, spaceId: string): Promise<Member[]> {
+  listMembers(ctx: ActorCtx, spaceId: string): Promise<SpaceMember[]> {
     return this.spaces.listMembers(ctx, spaceId);
   }
-  listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
-    return this.spaces.listOrgMembers(ctx);
+  /** An agent's description and instructions, by its owner (2026-10-29). */
+  setAgentProfile(ctx: ActorCtx, agentId: string, input: { title?: string; instructions?: string }): Promise<Member> {
+    return this.agents.setProfile(ctx, agentId, input);
+  }
+  listContacts(ctx: ActorCtx): Promise<Member[]> {
+    return this.spaces.listContacts(ctx);
+  }
+  /** Display names for these member ids, departed included: what a page or a prompt needs to label authors (2026-11-09). */
+  async namesFor(ids: readonly string[]): Promise<Map<string, string>> {
+    return new Map((await this.k.store.listMembersByIds([...new Set(ids)])).map((m) => [m.id, m.displayName]));
+  }
+  /** Of these members, the agents whose connector is connected now (local agents, 2026-10-28). */
+  onlinePeople(members: readonly Member[]): string[] {
+    return this.humanPresence.online(members);
+  }
+
+  onlineAgents(members: readonly Member[]): string[] {
+    return this.presence.online(members);
+  }
+  /** A live connection opened or closed for a member (ws.ts): an agent's presence follows its connections. */
+  reportActivity(memberId: string, session: object, active: boolean): Promise<void> {
+    return this.humanPresence.activity(memberId, session, active);
+  }
+  liveOpened(memberId: string): Promise<void> {
+    return this.presence.opened(memberId);
+  }
+  liveClosed(memberId: string, session?: object): void {
+    if (session) void this.humanPresence.closed(memberId, session).catch(() => {});
+    this.presence.closed(memberId);
+  }
+  /** Drop the presence timers (runtime close). */
+  closePresence(): void {
+    this.presence.close();
+    this.humanPresence.close();
   }
   addMembers(ctx: ActorCtx, spaceId: string, input: AddMembersInput): Promise<Membership[]> {
     return this.spaces.addMembers(ctx, spaceId, input);
@@ -209,14 +486,17 @@ export class HarborService {
   leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     return this.spaces.leaveSpace(ctx, spaceId);
   }
-  createInvite(ctx: ActorCtx, spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
-    return this.spaces.createInvite(ctx, spaceId, expiresInHours);
+  createInvite(ctx: ActorCtx, input: CreateInviteInput): Promise<CreateInviteResult> {
+    return this.spaces.createInvite(ctx, input);
   }
   resolveInvite(token: string): Promise<ResolveInviteResult> {
     return this.spaces.resolveInvite(token);
   }
   bindInvite(identity: BindIdentity, token: string): Promise<AcceptInviteResult> {
     return this.spaces.bindInvite(identity, token);
+  }
+  enroll(identity: BindIdentity): Promise<{ member: Member; created: boolean }> {
+    return this.spaces.enroll(identity);
   }
   acceptInvite(ctx: ActorCtx, token: string): Promise<AcceptInviteResult> {
     return this.spaces.acceptInvite(ctx, token);
@@ -226,6 +506,17 @@ export class HarborService {
   }
   unregisterPush(ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
     return this.spaces.unregisterPush(ctx, input);
+  }
+  /**
+   * Account deletion (2026-10-08; 2026-11-09): the person leaves every space —
+   * their agents with them — then their agents are deactivated, the managed
+   * ones deleted so nothing keeps billing, and the person is marked.
+   */
+  async deactivateSelf(ctx: ActorCtx): Promise<void> {
+    await this.spaces.deactivateSelf(ctx);
+    await this.hosting.deleteOwnedBy(ctx.memberId);
+    const at = this.k.now();
+    for (const agent of await this.k.store.listAgents(ctx.memberId)) await this.k.store.deactivateMember(agent.id, at);
   }
   publishPresence(
     ctx: ActorCtx,
@@ -281,13 +572,22 @@ export class HarborService {
   ): Promise<BlobInfo> {
     return this.assets.uploadBlob(ctx, spaceId, bytes, opts);
   }
+  setAvatar(ctx: ActorCtx, bytes: Uint8Array, origin: string): Promise<Member> {
+    return this.images.setAvatar(ctx, bytes, origin);
+  }
+  clearAvatar(ctx: ActorCtx): Promise<Member> {
+    return this.images.clearAvatar(ctx);
+  }
+  getImage(ctx: ActorCtx, hash: string, opts?: { inline?: boolean }): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
+    return this.images.getImage(ctx, hash, opts);
+  }
   downloadBlob(
     ctx: ActorCtx,
     spaceId: string,
     hash: string,
     name?: string,
-    opts?: { expiresInSeconds?: number },
-  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
+    opts?: { expiresInSeconds?: number; inline?: boolean; attachment?: boolean },
+  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
     return this.assets.downloadBlob(ctx, spaceId, hash, name, opts);
   }
   proposeChange(ctx: ActorCtx, spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {
@@ -311,8 +611,8 @@ export class HarborService {
   listStream(
     ctx: ActorCtx,
     spaceId: string,
-    opts?: PageOpts,
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
+    opts?: PageOpts & { replies?: boolean },
+  ): Promise<{ messages: Message[]; topics: Topic[]; threadRoots: Message[]; hasMore: boolean; hasMoreAfter: boolean; readOffset: number; events: StreamEvent[] }> {
     return this.feed.listStream(ctx, spaceId, opts);
   }
   listThread(
@@ -336,6 +636,9 @@ export class HarborService {
   }
   postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
     return this.feed.postMessage(ctx, spaceId, input);
+  }
+  readMessageSecret(ctx: ActorCtx, spaceId: string, messageId: string, name: string): Promise<string> {
+    return this.feed.readMessageSecret(ctx, spaceId, messageId, name);
   }
   /**
    * A connector's answer to one of its agent's invocations: posted in its
@@ -373,8 +676,9 @@ export class HarborService {
       throw err;
     }
   }
-  decideApproval(ctx: ActorCtx, spaceId: string, approvalId: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
-    return this.invocations.decideApproval(ctx, spaceId, approvalId, input);
+  async decideApproval(ctx: ActorCtx, spaceId: string, approvalId: string, input: ApprovalDecision & { actingMode: ActingMode }): Promise<Approval> {
+    // A super agent's request is applied by Harbor once decided (2026-11-02); any other goes to its connector.
+    return this.superAgents.apply(await this.invocations.decideApproval(ctx, spaceId, approvalId, input));
   }
   closeApproval(ctx: ActorCtx, approvalId: string, close: ApprovalClose): Promise<Approval> {
     return this.invocations.closeApproval(ctx, approvalId, close);
@@ -423,9 +727,25 @@ export class HarborService {
   manageTopic(ctx: ActorCtx, spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {
     return this.feed.manageTopic(ctx, spaceId, topicId, action);
   }
+
+  archiveThread(ctx: ActorCtx, spaceId: string, rootMessageId: string, input: ArchiveThreadInput): Promise<Message> {
+    return this.feed.archiveThread(ctx, spaceId, rootMessageId, input);
+  }
+
+  listArchivedThreads(ctx: ActorCtx, spaceId: string): Promise<Message[]> {
+    return this.feed.listArchivedThreads(ctx, spaceId);
+  }
+
+  setSession(ctx: ActorCtx, spaceId: string, rootMessageId: string, input: SetSessionInput): Promise<Message> {
+    return this.feed.setSession(ctx, spaceId, rootMessageId, input);
+  }
+
+  myThreads(ctx: ActorCtx, opts: { archived?: boolean } = {}): Promise<ThreadListing[]> {
+    return this.readState.myThreads(ctx, opts);
+  }
   search(
     ctx: ActorCtx,
-    spaceId: string,
+    spaceId: string | undefined,
     rawQuery: string,
     opts?: { kinds?: SearchKind[]; limit?: number },
   ): Promise<SearchResults> {

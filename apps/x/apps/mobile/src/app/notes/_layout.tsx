@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
 import { DrawerActions } from 'expo-router/react-navigation';
 import { Pressable, useColorScheme } from 'react-native';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 
 // Notes are a stack inside the drawer: Brain (tree) → note pushes with a
 // native back button. The drawer's own header is hidden for this section —

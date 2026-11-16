@@ -16,7 +16,7 @@ import { assertBlobHash, blobHash, type BlobStore } from './blobs.js';
 
 export interface S3BlobStoreOptions {
   bucket: string;
-  /** Key prefix inside the bucket; default 'blobs/'. Per-org prefixes scope dedup when multi-org arrives. */
+  /** Key prefix inside the bucket; default 'blobs/'. */
   prefix?: string;
   region?: string;
   /** Non-AWS endpoints (MinIO, R2, B2). */
@@ -88,6 +88,16 @@ export class S3BlobStore implements BlobStore {
     }
   }
 
+  async stream(hash: string): Promise<ReadableStream<Uint8Array> | undefined> {
+    try {
+      const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.keyFor(hash) }));
+      return res.Body ? (res.Body.transformToWebStream() as ReadableStream<Uint8Array>) : undefined;
+    } catch (err) {
+      if (isMissing(err)) return undefined;
+      throw err;
+    }
+  }
+
   async delete(hash: string): Promise<void> {
     // S3 DeleteObject is idempotent — deleting a missing key succeeds.
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.keyFor(hash) }));
@@ -101,7 +111,7 @@ export class S3BlobStore implements BlobStore {
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: this.keyFor(hash),
-      // Objects are stored as octet-stream (put); the org's stored mime and
+      // Objects are stored as octet-stream (put); the server's stored mime and
       // disposition are re-asserted here, inside the signature.
       ...(opts.responseContentType ? { ResponseContentType: opts.responseContentType } : {}),
       ...(opts.responseContentDisposition

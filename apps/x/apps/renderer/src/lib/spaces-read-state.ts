@@ -134,6 +134,20 @@ export function threadBadge(orgId: string, spaceId: string, rootMessageId: strin
     return { unread, forYou: direct ? unread : Math.min(unread, t.unreadMentions) }
 }
 
+/** 2026-11-03: the Threads tab includes unnamed followed threads, just like the sidebar. */
+export function threadsBadge(orgId: string, spaceId: string, direct: boolean): SpaceBadge {
+    const s = space(orgId, spaceId)
+    if (!s) return NO_BADGE
+    let unread = 0
+    let forYou = 0
+    for (const root of s.threads.keys()) {
+        const badge = threadBadge(orgId, spaceId, root, direct)
+        unread += badge.unread
+        forYou += badge.forYou
+    }
+    return unread === 0 ? NO_BADGE : { unread, forYou }
+}
+
 /** The collapsed space row: the stream plus every followed discussion, summed. */
 export function spaceBadge(orgId: string, spaceId: string, direct: boolean): SpaceBadge {
     const s = space(orgId, spaceId)
@@ -490,4 +504,15 @@ function migrateLegacyMarks(orgId: string, spaceIds: string[]): void {
     } catch {
         // storage unavailable — nothing to clean
     }
+}
+
+export function dropSpaceReadState(orgId: string, spaceId: string): void {
+    orgs.get(orgId)?.delete(spaceId)
+    for (const [key, pending] of pendingMarks) {
+        if (key.startsWith(`${orgId}/${spaceId}/`)) {
+            clearTimeout(pending.timer)
+            pendingMarks.delete(key)
+        }
+    }
+    emit()
 }

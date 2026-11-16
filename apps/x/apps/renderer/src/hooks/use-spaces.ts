@@ -1,20 +1,26 @@
+import { startActivityReporter } from '@/lib/spaces-availability-activity'
+import { memberLabel } from '@/lib/spaces-direct'
+import { setSpaceArchived } from '@/lib/spaces-access'
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
+import { applyMemberPresence, applyAgentPresence, applyProfileUpdate, refreshMembers, refreshOrgRoster } from '@/hooks/use-space-members'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
-import { getSpaceReadState, loadUnread } from '@/lib/spaces-read-state'
+import { getSpaceReadState, loadUnread, dropSpaceReadState } from '@/lib/spaces-read-state'
 
 export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
     /** Shared spaces — what every "the spaces" surface renders. */
     spaces: spaces.Space[]
     /**
      * Direct messages (kind 'direct'), kept apart so no space consumer ever
-     * lists one by accident; the sidebar renders them as people.
+     * lists one by accident; the sidebar groups them by participant kind.
      */
     directs: spaces.Space[]
     /** DM space id → the other participant's current display name (resolved from the DM's own roster). */
     directLabels: Record<string, string>
-    /** Set when the org could not be reached — the sidebar's "org unreachable" state. */
+    /** DM participant kinds survive removal from active contacts (2026-11-12, inactive-agent sidebar fix). */
+    directKinds?: Record<string, spaces.Member['kind']>
+    /** Set when the server could not be reached — the sidebar's "unreachable" state. */
     error?: string
 }
 
@@ -25,8 +31,10 @@ export function findSpace(org: OrgWithSpaces, spaceId: string | undefined): spac
 }
 
 // ---------------------------------------------------------------------------
-// Orgs store — one fetch shared by the sidebar's SPACES section and the space
-// view (both render the same org/space list; one source keeps them in step).
+// The server store — one fetch shared by the sidebar and the space view (both
+// render the same space list; one source keeps them in step). One server
+// since 2026-11-09: the list has one entry or none, and `orgId` everywhere is
+// core's SPACES_SERVER_ID; the shape kept its many-org names.
 // ---------------------------------------------------------------------------
 
 interface OrgsState {
@@ -40,6 +48,7 @@ let orgsInflight: Promise<void> | null = null
 let orgsFetchedOnce = false
 /** A refresh asked for while one is in flight: run once more when it settles (the in-flight one may predate the reason). */
 let orgsDirty = false
+let membershipRevision = 0
 let orgsRefreshedAt = 0
 /** Spaces whose live subscription has been acknowledged once in this process — a later `subscribed` is a reconnect. */
 const subscribedOnce = new Set<string>()
@@ -53,6 +62,7 @@ export function refreshSpacesOrgs(): Promise<void> {
         orgsDirty = true
         return orgsInflight
     }
+    const revision = membershipRevision
     orgsInflight = (async () => {
         try {
             const { orgs: records } = await window.ipc.invoke('spaces:listOrgs', null)
@@ -68,25 +78,40 @@ export function refreshSpacesOrgs(): Promise<void> {
                         // roster is the lookup (one exact fetch per DM, no
                         // dependency on the org roster's cache state).
                         const directLabels: Record<string, string> = {}
+                        const directKinds: Record<string, spaces.Member['kind']> = {}
                         await Promise.all(directs.map(async (dm) => {
                             // One participant = your self-DM; its roster is you.
                             const self = (dm.participants ?? []).length === 1 && dm.participants![0] === org.memberId
                             const who = self ? org.memberId : (dm.participants ?? []).find((id) => id !== org.memberId)
                             if (!who) return
+                            const previousKind = previous?.directKinds?.[dm.id]
+                            if (previousKind) directKinds[dm.id] = previousKind
                             try {
                                 const { members } = await window.ipc.invoke('spaces:listMembers', { orgId: org.id, spaceId: dm.id })
-                                const name = members.find((m) => m.id === who)?.displayName ?? who
+                                const other = members.find((m) => m.id === who)
+                                if (other) directKinds[dm.id] = other.kind
+                                const name = other ? memberLabel(other) : who
                                 directLabels[dm.id] = self ? `${name} (you)` : name
                             } catch {
                                 directLabels[dm.id] = previous?.directLabels[dm.id] ?? (self ? 'You' : who)
                             }
                         }))
-                        return { ...org, spaces: shared, directs, directLabels }
+                        return { ...org, spaces: shared, directs, directLabels, directKinds }
                     } catch (err) {
                         return { ...org, spaces: [], directs: [], directLabels: {}, error: err instanceof Error ? err.message : String(err) }
                     }
                 }),
             )
+            if (revision !== membershipRevision) { orgsDirty = true; return }
+            for (const org of withSpaces) {
+                if (org.error) continue
+                const current = new Set([...org.spaces, ...org.directs].map(s => s.id))
+                const previous = orgsState.orgs.find(o => o.id === org.id)
+                for (const old of [...(previous?.spaces ?? []), ...(previous?.directs ?? [])]) {
+                    if (!current.has(old.id)) dropSpaceReadState(org.id, old.id)
+                }
+                for (const space of org.spaces) setSpaceArchived(org.id, space.id, space.archived === true)
+            }
             orgsState = { orgs: withSpaces, loading: false }
             orgsRefreshedAt = Date.now()
             // The org-owned read state rides the same moment: one snapshot per
@@ -125,6 +150,8 @@ function resyncListing(): void {
     listingResyncTimer = setTimeout(() => {
         listingResyncTimer = null
         void refreshSpacesOrgs()
+        // Profile frames are ephemeral too; focus/reconnect repairs missed changes (2026-10-22).
+        for (const org of orgsState.orgs) refreshOrgRoster(org.id)
     }, 300)
 }
 
@@ -168,13 +195,17 @@ export function useSpacesAccountState(): AccountState | null {
     return useSyncExternalStore(subscribe, () => accountState, () => accountState)
 }
 
+let stopActivity: (() => void) | undefined
+
 export function subscribeOrgs(listener: () => void): () => void {
     orgsListeners.add(listener)
+    if (SPACES_ENABLED && !stopActivity) stopActivity = startActivityReporter(() => orgsState.orgs.map(org => org.id), (orgId, active) => { void window.ipc.invoke('spaces:activity', { orgId, active }).catch(() => {}) })
     // With Spaces dark, passive subscribers (e.g. the App title crumb) must
     // not trigger the lazy fetch — the store just stays empty.
     if (SPACES_ENABLED && !orgsFetchedOnce && !orgsInflight) void refreshSpacesOrgs()
     return () => {
         orgsListeners.delete(listener)
+        if (!orgsListeners.size) { stopActivity?.(); stopActivity = undefined }
     }
 }
 
@@ -233,6 +264,7 @@ export function useSpaceNames(orgId: string): ReadonlyMap<string, string> {
 // ---------------------------------------------------------------------------
 
 const liveRefs = new Map<string, number>()
+const liveHeads = new Map<string, number>()
 
 function liveKey(orgId: string, spaceId: string): string {
     return `${orgId}/${spaceId}`
@@ -247,7 +279,7 @@ export function acquireSpaceLive(orgId: string, spaceId: string): () => void {
         // gap between our last read and going live is replayed rather than
         // lost; unknown = live-only, and the socket layer then learns its
         // resume point from the server's acknowledgement.
-        const head = getSpaceReadState(orgId, spaceId)?.head
+        const head = liveHeads.get(key) ?? getSpaceReadState(orgId, spaceId)?.head
         void window.ipc.invoke('spaces:subscribeSpace', { orgId, spaceId, ...(head ? { afterOffset: head } : {}) }).catch(() => {
             // org unreachable — REST fetches surface the error state
         })
@@ -394,7 +426,7 @@ function wireFeedBus(): void {
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') resyncListing()
         })
-        // A Rowboat sign-in or sign-out changes which managed orgs we hold
+        // A Rowboat sign-in or sign-out changes whether we hold Rowboat's server
         // (one session, two uses): refetch the listing outright — the
         // freshness window is for reconnects, not for this.
         window.ipc.on('oauth:didConnect', (event) => {
@@ -407,13 +439,43 @@ function wireFeedBus(): void {
     subscribeSpacesFeed((event) => {
         if (!('frame' in event)) return
         const frame = event.frame
+        if (frame.kind === 'event' || frame.kind === 'subscribed') {
+            const key = liveKey(event.orgId, frame.spaceId)
+            liveHeads.set(key, Math.max(liveHeads.get(key) ?? 0, frame.kind === 'event' ? frame.offset : frame.fromOffset))
+        }
         if (frame.kind === 'subscribed') {
             // A re-acknowledged subscription = the socket was down: anything
             // we were put in meanwhile was announced to nobody.
             if (isReconnect(event.orgId, frame.spaceId, frame)) resyncListing()
             return
         }
+        if (frame.kind === 'space_removed') {
+            membershipRevision += 1
+            dropSpaceReadState(event.orgId, frame.spaceId)
+            orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
+                ...o, spaces: o.spaces.filter(s => s.id !== frame.spaceId), directs: o.directs.filter(s => s.id !== frame.spaceId),
+            }) }
+            emitOrgs()
+            syncFeedSubscriptions()
+            void window.ipc.invoke('spaces:unsubscribeSpace', { orgId: event.orgId, spaceId: frame.spaceId }).catch(() => {})
+            void refreshSpacesOrgs()
+            return
+        }
+        if (frame.kind === 'member_presence') {
+            applyMemberPresence(event.orgId, frame.memberId, frame.online)
+            return
+        }
+        if (frame.kind === 'agent_presence') {
+            applyAgentPresence(event.orgId, frame.agentId, frame.online)
+            return
+        }
+        if (frame.kind === 'profile_updated') {
+            applyProfileUpdate(event.orgId, frame.member)
+            void refreshSpacesOrgs()
+            return
+        }
         if (frame.kind === 'space_added') {
+            membershipRevision += 1
             // Someone opened a DM with us. The listing is how we learn its
             // label and start watching it — no per-space subscription can
             // exist for a space we did not know about.
@@ -422,10 +484,33 @@ function wireFeedBus(): void {
         }
         if (frame.kind !== 'event') return
         // A rename lands as a durable event on the space's log — refresh the
-        // org listing so the sidebar label follows on every device.
+        // listing so the sidebar label follows on every device.
+        // Archived or back (harbor #1186, 2026-10-14): the event carries the
+        // row, so the sidebar and the space's write lock move before the refetch.
+        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived') {
+            const updated = frame.event.space
+            setSpaceArchived(event.orgId, updated.id, updated.archived === true)
+            orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
+                ...o, spaces: o.spaces.map(s => s.id === updated.id ? updated : s),
+            }) }
+            emitOrgs()
+            void refreshSpacesOrgs()
+        }
         if (frame.event.type === 'space_renamed') void refreshSpacesOrgs()
+        // The space graph was turned on or off (2026-11-12): the event carries
+        // the row, so the Graph tab appears or goes for every member at once.
+        if (frame.event.type === 'space_graph_changed') {
+            const updated = frame.event.space
+            orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
+                ...o, spaces: o.spaces.map(s => s.id === updated.id ? updated : s),
+            }) }
+            emitOrgs()
+        }
+        // A role or an agent's seat changed in this space (2026-11-09): the roster
+        // carries both, so the admin controls and the seat badges follow at once.
+        if (frame.event.type === 'role_changed' || frame.event.type === 'agent_access_changed') refreshMembers(event.orgId, frame.spaceId, { force: true })
         const key = liveKey(event.orgId, frame.spaceId)
-        if (!feedReleases.has(key) || feedRefreshTimers.has(key)) return
+        if (!liveRefs.has(key) || feedRefreshTimers.has(key)) return
         // Trailing debounce: a burst of events (an agent replying, a thread's
         // seed + reply, a reaction volley) lands as ONE topics+history
         // refetch, not one per event.

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { mcpTools } from '@rowboat/spaces-protocol';
+import { agentOnlyMcpToolNames, mcpTools } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { startTestHarbor } from './helpers.js';
 
@@ -50,22 +50,26 @@ describe('agent face (MCP)', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'add_members',
+      'archive_space',
+      'archive_thread',
       'asset_history',
-      'browse_spaces',
       'create_asset',
       'create_invite',
       'create_space',
       'create_topic',
       'delete_asset',
       'delete_message',
+      'delete_space',
       'diff',
       'edit_message',
       'end_poll',
       'get_invocations',
-      'join_space',
       'leave_space',
+      'list_archived_threads',
       'list_assets',
+      'list_contacts',
       'list_members',
+      'list_my_threads',
       'list_spaces',
       'list_topics',
       'manage_topic',
@@ -77,16 +81,25 @@ describe('agent face (MCP)', () => {
       'react',
       'read_activity',
       'read_asset',
+      'read_graph',
       'read_stream',
       'read_thread',
+      'remove_member',
       'rename_space',
       'restore_asset',
       'search_space',
+      'set_agent_access',
+      'set_member_role',
+      'set_session',
+      'set_space_graph',
       'stop_invocation',
+      'unarchive_space',
+      'update_profile',
       'vote_poll',
       'whoami',
     ]);
-    expect(tools.map((t) => t.name).sort()).toEqual([...mcpTools].map((t) => t.name).sort());
+    // A person's assistant is not shown the agent-only tools (super agents, 2026-11-02).
+    expect(tools.map((t) => t.name).sort()).toEqual([...mcpTools].map((t) => t.name).filter((n) => !agentOnlyMcpToolNames.has(n)).sort());
     const propose = tools.find((t) => t.name === 'propose_change')!;
     expect(propose.inputSchema.required).toContain('reason'); // required on this face only
     expect(propose.inputSchema.required).toContain('assetId'); // files are named by id, never by path
@@ -278,6 +291,33 @@ describe('agent face (MCP)', () => {
     });
     expect(occupied.isError).toBe(true);
     expect((occupied.content as Array<{ text: string }>)[0]!.text).toContain(created.asset.id);
+    await client.close();
+  });
+
+  it('read_asset of a binary file says where its bytes download, and they download there (2026-10-08)', async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    await fetch(`${harbor.url}/v1/spaces/${spaceId}/blobs`, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer dev-harsh', 'x-blob-sha256': hash },
+      body: bytes,
+    });
+    const client = await mcpClient('dev-harsh');
+    const filed = (await client.callTool({
+      name: 'create_asset',
+      arguments: { spaceId, path: 'images/mock.png', blob: hash, reason: 'a binary file to read' },
+    })).structuredContent as { asset: { id: string } };
+
+    const read = await client.callTool({ name: 'read_asset', arguments: { spaceId, assetId: filed.asset.id } });
+    expect((read.structuredContent as { content: string; blob: { hash: string } })).toMatchObject({ content: '', blob: { hash } });
+    const url = `${harbor.url}/v1/spaces/${spaceId}/blobs/${hash}`;
+    expect((read.content as Array<{ text: string }>)[1]!.text).toContain(`GET ${url}`);
+    const downloaded = await fetch(url, { headers: { authorization: 'Bearer dev-harsh' } });
+    expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(bytes);
+
+    // A text file's read carries its content, and no note.
+    const text = await client.callTool({ name: 'read_asset', arguments: { spaceId, assetId: roadmapId } });
+    expect(text.content as unknown[]).toHaveLength(1);
     await client.close();
   });
 

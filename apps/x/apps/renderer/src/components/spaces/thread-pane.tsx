@@ -1,9 +1,12 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
+import { useSpaceAccess, ArchivedNotice } from '@/lib/spaces-access'
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { Anchor, Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, CircleCheck, Timer, ArrowDown, ArrowLeft, ArrowUp, Bell, BellOff, Bot, FileText, Link as LinkIcon, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Paperclip, Pencil, ShieldAlert, Square, Tag, Unlink, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
-import { messageUrl } from '@x/shared/dist/spaces.js'
+import { mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Button } from '@/components/ui/button'
 import {
@@ -29,12 +32,16 @@ import {
 import { AUTO_TOAST, collectRouteCandidates, routeDraft, routeThreadLabel } from '@/lib/spaces-auto-route'
 import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
 import { noteInvocations } from '@/hooks/use-space-invocations'
+import { useFollowUpAgent } from '@/hooks/use-follow-up-agent'
+import { FollowUpLine } from '@/components/spaces/follow-up-line'
 import { getStreamState, jumpToLatest } from '@/hooks/use-space-chat'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { FindBanner } from '@/components/spaces/find-banner'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
 import { toast as notify } from 'sonner'
-import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
+import { applyReaction, artifactsForThread, isContinuation, mergeMessages, sessionArchiveLabel, threadLabelOf, withArchived } from '@/lib/spaces-conventions'
+import { sessionCommand } from '@/components/spaces/session-command'
+import { refreshMyThreads, sessionsOf, useMyThreads } from '@/lib/spaces-my-threads'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
@@ -61,7 +68,7 @@ const NEW_FADE_MS = 800
 
 export function ThreadPane({
     org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, memberNames, refreshTick,
-    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, onOpenThread, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
+    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, onOpenThread, onOpenThreadIn, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -86,6 +93,8 @@ export function ThreadPane({
     onOpenSession?: (sessionId: string) => void
     /** Opens another thread of this space (Auto's "try another thread" re-stages the reply there). */
     onOpenThread?: (rootMessageId: string) => void
+    /** Opens a thread in any space of this org: /session jumps to sessions elsewhere (2026-11-05). */
+    onOpenThreadIn?: (spaceId: string, rootMessageId: string) => void
     /** Whether the artifacts rail is showing; the summary line under the opener toggles it. */
     artifactsRailOpen: boolean
     onToggleArtifactsRail: () => void
@@ -94,6 +103,7 @@ export function ThreadPane({
     /** False while kept mounted but off screen (read mode, hidden Spaces view) — no presence, no read marks. */
     visible?: boolean
 }) {
+    const { writable } = useSpaceAccess()
     // The cached copy from the last open — plus any replies that streamed in
     // live while the pane was closed. Seeding paints the whole thread in the
     // first frame; the fetch below reconciles right behind it. A PARTIAL
@@ -291,8 +301,7 @@ export function ThreadPane({
         // pane this way (every event ticks); they stay out of the window.
         const detachedAt = hasMoreAfterRef.current ? newestOffset(messagesRef.current, 0) : null
         const gen = windowGenRef.current
-        void window.ipc
-            .invoke('spaces:listThread', {
+        void invokeSpace('spaces:listThread', {
                 orgId: org.id, spaceId: space.id, rootMessageId, ...(detachedAt !== null ? { afterOffset: detachedAt } : {}),
             })
             .then((res) => {
@@ -355,7 +364,7 @@ export function ThreadPane({
         setLoadingOlder(true)
         const gen = windowGenRef.current
         try {
-            const res = await window.ipc.invoke('spaces:listThread', {
+            const res = await invokeSpace('spaces:listThread', {
                 orgId: org.id, spaceId: space.id, rootMessageId, beforeOffset: oldest.offset,
             })
             if (gen !== windowGenRef.current) return
@@ -375,7 +384,7 @@ export function ThreadPane({
         loadingNewerRef.current = true
         const gen = windowGenRef.current
         try {
-            const res = await window.ipc.invoke('spaces:listThread', {
+            const res = await invokeSpace('spaces:listThread', {
                 orgId: org.id, spaceId: space.id, rootMessageId, afterOffset: newest,
             })
             if (gen !== windowGenRef.current) return
@@ -397,7 +406,7 @@ export function ThreadPane({
         if (!hasMoreAfterRef.current) return
         setSnapping(true)
         try {
-            const res = await window.ipc.invoke('spaces:listThread', { orgId: org.id, spaceId: space.id, rootMessageId })
+            const res = await invokeSpace('spaces:listThread', { orgId: org.id, spaceId: space.id, rootMessageId })
             windowGenRef.current += 1
             noteNewestPage(res)
             setMessages(res.messages)
@@ -468,7 +477,7 @@ export function ThreadPane({
         void (async () => {
             try {
                 const offset = await resolveJumpOffset(org.id, space.id, jump.anchor)
-                const res = await window.ipc.invoke('spaces:listThread', {
+                const res = await invokeSpace('spaces:listThread', {
                     orgId: org.id, spaceId: space.id, rootMessageId, aroundOffset: offset,
                 })
                 if (pendingJumpRef.current !== jump) return
@@ -608,12 +617,25 @@ export function ThreadPane({
             ...(root?.lastReplyOffset !== undefined ? { lastReplyOffset: root.lastReplyOffset } : {}),
         })
         try {
-            const res = await window.ipc.invoke('spaces:followThread', { orgId: org.id, spaceId: space.id, rootMessageId, following: next })
+            const res = await invokeSpace('spaces:followThread', { orgId: org.id, spaceId: space.id, rootMessageId, following: next })
             noteThread(org.id, space.id, rootMessageId, { following: res.following, readOffset: res.readOffset })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not update following', 'error')
         }
     }
+
+    // Thread follow-ups (Harbor spec §8, 2026-10-27): a reply that mentions
+    // nobody goes to the agent you last invoked here. The line above the
+    // composer names it; its × sends the next reply to people only.
+    // Only a conversation that is the thread's latest (2026-11-05): a detached
+    // window does not hold the latest, so it names no one.
+    const followUpThread = useMemo(
+        () => (hasMoreAfter || !root ? [] : [root, ...messages.filter((m) => !m.pending && !m.failed)]),
+        [hasMoreAfter, root, messages],
+    )
+    const followUp = useFollowUpAgent(org.id, space.id, rootMessageId, org.memberId, followUpThread)
+    const [peopleOnly, setPeopleOnly] = useState(false)
+    const [draftMentions, setDraftMentions] = useState(false)
 
     // Optimistic send, same shape as the stream's: render now (dimmed as
     // pending), confirm — or fail into a retry/discard row — in the
@@ -621,6 +643,9 @@ export function ThreadPane({
     const post = async (body: string, agent?: AgentOptions) => {
         // Sending settles a routed reply: whatever leaves this box is the person's own.
         clearStagedThreadDraft(draftKey)
+        // The × holds for one reply.
+        const toPeople = peopleOnly && followUp !== undefined && !mentionsAnyone(body)
+        setPeopleOnly(false)
         if (hasMoreAfterRef.current) {
             await snapToLatest()
             // The snap toasts its own failure; a reply must not land in an old window.
@@ -628,8 +653,7 @@ export function ThreadPane({
         }
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
-        void window.ipc
-            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
+        void invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent), ...(toPeople ? { peopleOnly: true } : {}) })
             .then((result) => {
                 noteInvocations(org.id, space.id, result.invocations)
                 setMessages((prev) => {
@@ -669,7 +693,7 @@ export function ThreadPane({
         onFolding?.(true)
         try {
             const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${file.path}\` (assetId ${file.assetId}) — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
-            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
+            const result = await invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             echo(result.message)
             noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
             analytics.spacesFoldRequested()
@@ -691,7 +715,7 @@ export function ThreadPane({
         if (message.id === root?.id) setRoot(fold_(root))
         else setMessages((prev) => prev.map((m) => (m.id === message.id ? fold_(m) : m)))
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
+            const { message: updated } = await invokeSpace('spaces:reactToMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
             })
             if (updated.id === root?.id) setRoot(updated)
@@ -755,7 +779,7 @@ export function ThreadPane({
         try {
             let updated: spaces.Message | undefined
             for (const answerId of answerIds) {
-                const res = await window.ipc.invoke('spaces:votePoll', {
+                const res = await invokeSpace('spaces:votePoll', {
                     orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'add',
                 })
                 updated = res.message
@@ -779,7 +803,7 @@ export function ThreadPane({
         try {
             let updated: spaces.Message | undefined
             for (const answerId of mine) {
-                const res = await window.ipc.invoke('spaces:votePoll', {
+                const res = await invokeSpace('spaces:votePoll', {
                     orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'remove',
                 })
                 updated = res.message
@@ -794,7 +818,7 @@ export function ThreadPane({
     const endPoll = async (message: spaces.Message) => {
         if (!window.confirm('End this poll now? Voting stops immediately.')) return
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:endPoll', {
+            const { message: updated } = await invokeSpace('spaces:endPoll', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
             reconcile(updated)
@@ -807,7 +831,7 @@ export function ThreadPane({
     const editMessage = async (message: spaces.Message, body: string) => {
         setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, body, editedAt: new Date().toISOString() } : m)))
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:editMessage', {
+            const { message: updated } = await invokeSpace('spaces:editMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, body,
             })
             setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
@@ -820,7 +844,7 @@ export function ThreadPane({
     const deleteMessage = async (message: spaces.Message) => {
         if (!window.confirm('Delete this message? This cannot be undone.')) return
         try {
-            const { message: deleted } = await window.ipc.invoke('spaces:deleteMessage', {
+            const { message: deleted } = await invokeSpace('spaces:deleteMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
             setMessages((prev) => prev.map((m) => (m.id === deleted.id ? deleted : m)))
@@ -835,7 +859,7 @@ export function ThreadPane({
     const manage = async (action: spaces.SpacesManageTopicAction) => {
         if (!topic) return
         try {
-            const res = await window.ipc.invoke('spaces:manageTopic', { orgId: org.id, spaceId: space.id, topicId: topic.id, action })
+            const res = await invokeSpace('spaces:manageTopic', { orgId: org.id, spaceId: space.id, topicId: topic.id, action })
             if (action.action === 'remove') {
                 setTopic(null)
                 removeTopicByRoot(org.id, space.id, rootMessageId)
@@ -853,14 +877,44 @@ export function ThreadPane({
         const trimmed = title.trim()
         if (!trimmed) return
         try {
-            const res = await window.ipc.invoke('spaces:createTopic', { orgId: org.id, spaceId: space.id, rootMessageId, title: trimmed })
+            const res = await invokeSpace('spaces:createTopic', { orgId: org.id, spaceId: space.id, rootMessageId, title: trimmed })
             setTopic(res.topic)
+            // Naming unarchives an archived root on the server (2026-11-03).
+            setRoot((prev) => (prev?.archived ? withArchived(prev, false) : prev))
             ingestTopic(org.id, space.id, res.topic)
             analytics.spacesTopicStarted()
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not create the discussion', 'error')
         }
     }
+
+    // An unnamed thread archives on its root (harbor archiveThread, 2026-11-03),
+    // so archiving never names it.
+    const archiveThread = async (archived: boolean) => {
+        try {
+            const res = await invokeSpace('spaces:archiveThread', { orgId: org.id, spaceId: space.id, rootMessageId, archived })
+            setRoot(res.root)
+            updateStreamMessage(org.id, space.id, res.root)
+            if (res.root.session) void refreshMyThreads(org.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not archive the thread', 'error')
+        }
+    }
+
+    // A thread marked as a session, retitled or unmarked (harbor setSession,
+    // 2026-11-05). Ending one is archiving it, above.
+    const setSession = async (session: { title: string } | null) => {
+        try {
+            const res = await invokeSpace('spaces:setSession', { orgId: org.id, spaceId: space.id, rootMessageId, session })
+            setRoot(res.root)
+            updateStreamMessage(org.id, space.id, res.root)
+            void refreshMyThreads(org.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not update the session', 'error')
+        }
+    }
+    const mySessions = sessionsOf(useMyThreads(org.id).threads)
+    const session = topic ? undefined : root?.session
 
     // The one file this discussion is about: picked from the space's live
     // files; the org keeps the link by asset id, so it survives renames.
@@ -869,9 +923,19 @@ export function ThreadPane({
     // Inline title editing (window.prompt is a no-op in Electron). null = not
     // editing; the same field serves rename AND first-time goal setting.
     const [editingTitle, setEditingTitle] = useState<string | null>(null)
+    // The same field names a discussion or a session (2026-11-05).
+    const [titleFor, setTitleFor] = useState<'discussion' | 'session'>('discussion')
+    const editTitle = (kind: 'discussion' | 'session', value: string) => {
+        setTitleFor(kind)
+        setEditingTitle(value)
+    }
     const commitTitle = async () => {
         const title = editingTitle?.trim()
         setEditingTitle(null)
+        if (titleFor === 'session') {
+            if (title && title !== root?.session?.title) await setSession({ title })
+            return
+        }
         if (!title || title === topic?.title) return
         if (topic) await manage({ action: 'retitle', title })
         else await createTopic(title)
@@ -886,7 +950,7 @@ export function ThreadPane({
             return
         }
         try {
-            const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            const { sessionId } = await invokeSpace('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (sessionId && onOpenSession) onOpenSession(sessionId)
             else if (!sessionId) toast('No agent session for this thread yet', 'info')
         } catch {
@@ -905,8 +969,7 @@ export function ThreadPane({
     const [hasSession, setHasSession] = useState(false)
     useEffect(() => {
         let cancelled = false
-        void window.ipc
-            .invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+        void invokeSpace('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             .then((res) => {
                 if (!cancelled) setHasSession(!!res.sessionId)
             })
@@ -924,7 +987,7 @@ export function ThreadPane({
     const stopRowboat = async () => {
         setStopping(true)
         try {
-            const { stopped } = await window.ipc.invoke('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            const { stopped } = await invokeSpace('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (!stopped) toast('Nothing to stop — the run already finished', 'info')
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not stop the run', 'error')
@@ -982,7 +1045,8 @@ export function ThreadPane({
     const replyCountLabel = Math.max(visibleReplies.length, root?.replyCount ?? 0)
 
     return (
-        <div className="flex h-full min-h-0 flex-col bg-background">
+        // Spaces redesign (2026-10-21): spaces-thread-pane slides the pane in from the right on mount.
+        <div className="spaces-thread-pane flex h-full min-h-0 flex-col bg-background">
             <div className="spaces-pane-header flex shrink-0 items-center gap-1.5 border-b border-border">
                 {showBack && (
                     <>
@@ -992,7 +1056,7 @@ export function ThreadPane({
                         <span className="h-4 w-px shrink-0 bg-border" />
                     </>
                 )}
-                <span className="pl-1 text-[15px] font-semibold">{topic ? 'Discussion' : 'Thread'}</span>
+                <span className="pl-1 text-[15px] font-semibold">{topic ? 'Discussion' : session ? 'Session' : 'Thread'}</span>
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                     {editingTitle !== null ? (
                         <input
@@ -1004,12 +1068,12 @@ export function ThreadPane({
                                 if (e.key === 'Escape') setEditingTitle(null)
                             }}
                             onBlur={() => setEditingTitle(null)}
-                            placeholder={topic ? 'Discussion goal' : 'What needs to get resolved?'}
+                            placeholder={titleFor === 'session' ? 'Session title' : topic ? 'Discussion goal' : 'What needs to get resolved?'}
                             className="w-full min-w-0 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-xs text-foreground outline-none"
                         />
                     ) : (
                         <>
-                            {topic ? <MemberText text={topic.title} /> : 'from a message'}
+                            {topic ? <MemberText text={topic.title} /> : session ? <MemberText text={session.title} /> : 'from a message'}
                             {groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? 'file' : 'files'} changed` : ''}
                         </>
                     )}
@@ -1051,7 +1115,13 @@ export function ThreadPane({
                         {following ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />} {following ? 'Following' : 'Follow'}
                     </Button>
                 )}
-                {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
+                {session && !root?.archived && (
+                    <Button variant="ghost" size="xs" className="gap-1 px-2 text-muted-foreground" disabled={!writable} onClick={() => void archiveThread(true)}
+                        title="End this session — it leaves your Sessions until a new reply reopens it">
+                        <CircleCheck className="size-3.5" /> End session
+                    </Button>
+                )}
+                {(topic ? topic.archived : root?.archived) && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">{session ? 'ended' : 'archived'}</span>}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" aria-label="Thread options" className="size-8 shrink-0 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
@@ -1063,30 +1133,49 @@ export function ThreadPane({
                         <DropdownMenuSeparator />
                         {topic ? (
                             <>
-                                <DropdownMenuItem onClick={() => setEditingTitle(topic.title)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => editTitle('discussion', topic.title)}>
                                     <Pencil className="size-3.5 mr-2" /> Rename
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setAttaching(true)}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => setAttaching(true)}>
                                     <Paperclip className="size-3.5 mr-2" /> {topic.documentAssetId ? 'Change linked file…' : 'Link a file…'}
                                 </DropdownMenuItem>
                                 {topic.documentAssetId && (
-                                    <DropdownMenuItem onClick={() => void manage({ action: 'detach_document' })}>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'detach_document' })}>
                                         <Unlink className="size-3.5 mr-2" /> Unlink file
                                     </DropdownMenuItem>
                                 )}
                                 {topic.archived ? (
-                                    <DropdownMenuItem onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>
                                 ) : (
-                                    <DropdownMenuItem onClick={() => void manage({ action: 'archive' })}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'archive' })}><Archive className="size-3.5 mr-2" /> Archive</DropdownMenuItem>
                                 )}
-                                <DropdownMenuItem onClick={() => void manage({ action: 'remove' })}>
+                                <DropdownMenuItem disabled={!writable} onClick={() => void manage({ action: 'remove' })}>
                                     <MessageSquareOff className="size-3.5 mr-2" /> Convert back to thread
                                 </DropdownMenuItem>
                             </>
                         ) : (
-                            <DropdownMenuItem onClick={() => setEditingTitle('')}>
-                                <Tag className="size-3.5 mr-2" /> Make this a discussion…
-                            </DropdownMenuItem>
+                            <>
+                                {session ? <>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => editTitle('session', session.title)}>
+                                        <Pencil className="size-3.5 mr-2" /> Rename session
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void setSession(null)}>
+                                        <MessageSquareOff className="size-3.5 mr-2" /> Make it a plain thread
+                                    </DropdownMenuItem>
+                                </> : <>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => editTitle('session', root ? threadLabelOf(root.body) : '')}>
+                                        <Timer className="size-3.5 mr-2" /> Make this a session…
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem disabled={!writable} onClick={() => editTitle('discussion', '')}>
+                                        <Tag className="size-3.5 mr-2" /> Make this a discussion…
+                                    </DropdownMenuItem>
+                                </>}
+                                {root?.archived ? (
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void archiveThread(false)}><ArchiveRestore className="size-3.5 mr-2" /> {root && sessionArchiveLabel(root)}</DropdownMenuItem>
+                                ) : (
+                                    <DropdownMenuItem disabled={!writable} onClick={() => void archiveThread(true)}>{session ? <CircleCheck className="size-3.5 mr-2" /> : <Archive className="size-3.5 mr-2" />} {root ? sessionArchiveLabel(root) : 'Archive'}</DropdownMenuItem>
+                                )}
+                            </>
                         )}
                         {!showBack && (
                             <>
@@ -1263,7 +1352,7 @@ export function ThreadPane({
                                     <button
                                         className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
                                         title="Stop your Rowboat"
-                                        disabled={stopping}
+                                        disabled={!writable || stopping}
                                         onClick={() => void stopRowboat()}
                                     >
                                         {stopping ? <Loader2 className="size-2.5 animate-spin" /> : <Square className="size-2.5 fill-current" />} Stop
@@ -1303,7 +1392,7 @@ export function ThreadPane({
             )}
             </div>
 
-            {attaching && topic && (
+            {writable && attaching && topic && (
                 <AttachDocumentDialog
                     entries={entries}
                     current={topic.documentAssetId}
@@ -1314,10 +1403,10 @@ export function ThreadPane({
                     }}
                 />
             )}
-            {forwarding && (
+            {writable && forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            {writable && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
             <FindBanner
                 orgId={org.id}
                 spaceId={space.id}
@@ -1336,13 +1425,18 @@ export function ThreadPane({
                     dismissTitle="Looks right: keep it here as a draft"
                 />
             )}
-            <Composer
+            {writable && followUp && !draftMentions && (
+                <FollowUpLine agentName={followUp.displayName} peopleOnly={peopleOnly} onPeopleOnly={setPeopleOnly} />
+            )}
+            {writable ? <Composer
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
-                onSchedule={async (body, at) => {
+                onDraftChange={(draft) => setDraftMentions(mentionsAnyone(draft))}
+                {...(followUp && !peopleOnly ? { followUpAgentId: followUp.id } : {})}
+                onSchedule={!LOCAL_RUNTIME ? undefined : async (body, at) => {
                     clearStagedThreadDraft(draftKey)
-                    await window.ipc.invoke('spaces:schedule', {
+                    await invokeSpace('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, threadRootId: rootMessageId, body, at: at.toISOString(), kind: 'message',
                     })
                     toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
@@ -1367,19 +1461,27 @@ export function ThreadPane({
                             void fold({ assetId: file.id, path: file.path })
                         },
                     },
-                    topic
+                    ...(topic ? [] : [sessionCommand({
+                        spaceId: space.id,
+                        sessions: mySessions.filter((s) => s.root.id !== rootMessageId),
+                        newLabel: (title) => session ? `Rename this session: ${title}` : `Make this thread a session: ${title}`,
+                        ...(session || !root ? {} : { fallbackTitle: threadLabelOf(root.body) }),
+                        onNew: (title) => setSession({ title }),
+                        onOpen: (s) => s.spaceId === space.id ? onOpenThread?.(s.root.id) : onOpenThreadIn?.(s.spaceId, s.root.id),
+                    })]),
+                    ...(session ? [] : [topic
                         ? {
                               name: 'rename',
                               args: '<goal>',
                               hint: 'Rename this discussion',
-                              run: (args) => void manage({ action: 'retitle', title: args }),
+                              run: (args: string) => void manage({ action: 'retitle', title: args }),
                           }
                         : {
                               name: 'discussion',
                               args: '<goal>',
                               hint: 'Make this thread a discussion with a stated goal',
-                              run: (args) => void createTopic(args),
-                          },
+                              run: (args: string) => void createTopic(args),
+                          }]),
                     {
                         name: 'poll',
                         hint: 'Create a poll — pick answers, votes tally live',
@@ -1391,19 +1493,26 @@ export function ThreadPane({
                                   ? { name: 'unarchive', hint: 'Unarchive this discussion', run: () => void manage({ action: 'unarchive' }) }
                                   : { name: 'archive', hint: 'Archive this discussion — it leaves the rail until a new reply revives it', run: () => void manage({ action: 'archive' }) },
                           ]
-                        : []),
-                    {
+                        : session
+                          ? [root?.archived
+                                ? { name: 'reopen', hint: 'Reopen this session', run: () => void archiveThread(false) }
+                                : { name: 'end', hint: 'End this session — it leaves your Sessions until a new reply reopens it', run: () => void archiveThread(true) }]
+                          : [root?.archived
+                                ? { name: 'unarchive', hint: 'Unarchive this thread', run: () => void archiveThread(false) }
+                                : { name: 'archive', hint: 'Archive this thread — it leaves the thread lists until a new reply revives it', run: () => void archiveThread(true) }]),
+                    // Scheduled sends live on the desktop (core's scheduler), so the browser has no /remind.
+                    ...(LOCAL_RUNTIME ? [{
                         name: 'remind',
                         args: '<when> <text>',
                         hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
-                        run: async (args) => {
+                        run: async (args: string) => {
                             const parsed = parseRemindArgs(args)
                             if (typeof parsed === 'string') {
                                 toast(parsed, 'info')
                                 return
                             }
                             try {
-                                await window.ipc.invoke('spaces:schedule', {
+                                await invokeSpace('spaces:schedule', {
                                     orgId: org.id, spaceId: space.id, threadRootId: rootMessageId, body: parsed.text, at: parsed.at.toISOString(), kind: 'reminder',
                                 })
                                 toast(`Reminder set for ${formatScheduleTime(parsed.at)}`, 'success')
@@ -1411,13 +1520,13 @@ export function ThreadPane({
                                 toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
                             }
                         },
-                    },
+                    }] : []),
                     {
                         name: 'invite',
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
@@ -1427,7 +1536,7 @@ export function ThreadPane({
                         },
                     },
                 ]}
-            />
+            /> : <ArchivedNotice />}
 
         </div>
     )

@@ -1,3 +1,4 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 
@@ -43,7 +44,7 @@ export function useSpaceFileSave(orgId: string, spaceId: string) {
         pending.current = resolve
         setConflict(value)
     })
-    const list = async () => (await window.ipc.invoke('spaces:listAssets', { orgId, spaceId })).entries.filter((entry) => entry.state !== 'deleted')
+    const list = async () => (await invokeSpace('spaces:listAssets', { orgId, spaceId })).entries.filter((entry) => entry.state !== 'deleted')
     const save = async ({ path, getBlob, reason }: { path: string; getBlob: () => Promise<string>; reason: string }): Promise<SavedSpaceFile | null> => {
         const entries = await list()
         const occupied = new Set(entries.map((entry) => entry.path))
@@ -69,7 +70,7 @@ export function useSpaceFileSave(orgId: string, spaceId: string) {
             }
             hash ??= await getBlob()
             if (replace) {
-                const result = await window.ipc.invoke('spaces:proposeChange', {
+                const result = await invokeSpace('spaces:proposeChange', {
                     orgId, spaceId,
                     input: { assetId: replace.assetId, baseVersion: replace.baseVersion, blob: hash, reason },
                 })
@@ -79,7 +80,7 @@ export function useSpaceFileSave(orgId: string, spaceId: string) {
                 continue
             }
             try {
-                const created = await window.ipc.invoke('spaces:createAsset', {
+                const created = await invokeSpace('spaces:createAsset', {
                     orgId, spaceId,
                     input: { path: destination, blob: hash, reason },
                 })

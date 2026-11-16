@@ -8,6 +8,12 @@ import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 
 const LIMIT = 45
 
+// The last page per org, for this app session (2026-10-21). The rail lives in
+// the space pane, which remounts on every channel switch; without this the
+// panel blanked to "Loading activity…" each time. Now it paints the last page
+// at once and refreshes behind it.
+const lastPage = new Map<string, spaces.SpacesActivityPage>()
+
 /** A preview of the org's Activity query. Reading the rail doesn't mark events seen. */
 export function RecentActivity({ orgId, active = true, onOpenMessage, onOpenActivity }: {
     orgId: string
@@ -15,10 +21,13 @@ export function RecentActivity({ orgId, active = true, onOpenMessage, onOpenActi
     onOpenMessage: (target: ActivityTarget) => void
     onOpenActivity?: (orgId: string) => void
 }) {
-    const [result, setResult] = useState<{ orgId: string; page: spaces.SpacesActivityPage } | null>(null)
+    const [result, setResult] = useState<{ orgId: string; page: spaces.SpacesActivityPage } | null>(() => {
+        const cached = lastPage.get(orgId)
+        return cached ? { orgId, page: cached } : null
+    })
     const [error, setError] = useState<string | null>(null)
     const [retry, setRetry] = useState(0)
-    const page = result?.orgId === orgId ? result.page : null
+    const page = result?.orgId === orgId ? result.page : lastPage.get(orgId) ?? null
     const names = useMemo(() => new Map(Object.entries(page?.names ?? {})), [page?.names])
     const spaceNames = useSpaceNames(orgId)
 
@@ -32,6 +41,7 @@ export function RecentActivity({ orgId, active = true, onOpenMessage, onOpenActi
             setError(null)
             try {
                 const next = await window.ipc.invoke('spaces:getActivity', { orgId, limit: LIMIT })
+                lastPage.set(orgId, next)
                 if (!disposed && current === generation) setResult({ orgId, page: next })
             } catch (err) {
                 if (!disposed && current === generation) setError(err instanceof Error ? err.message : 'Could not load activity')

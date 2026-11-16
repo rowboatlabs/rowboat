@@ -1,13 +1,18 @@
+import { StreamSkeleton } from '@/components/spaces/spaces-skeleton'
+import { EmptySpaceStart } from '@/components/spaces/empty-space-start'
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
+import { useSpaceAccess, ArchivedNotice } from '@/lib/spaces-access'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, Loader2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, CornerDownRight, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
-import { mentionToken, messageUrl } from '@x/shared/dist/spaces.js'
+import { mentionToken, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import { MembershipLine } from '@/components/spaces/membership-line'
-import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
+import type { ChatMessage, SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
     STREAM_READ_KEY, ingestStreamMessage, jumpToLatest, loadNewerStreamMessages,
     loadOlderStreamMessages, loadStreamAround, prefetchThread, removeStreamMessage, updateStreamMessage,
@@ -15,7 +20,9 @@ import {
 } from '@/hooks/use-space-chat'
 import { useSpaceNames, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
-import { applyReaction, dayKey, formatDayLabel, isContinuation } from '@/lib/spaces-conventions'
+import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
+import { useStreamView } from '@/lib/spaces-stream-view'
+import { requestJump } from '@/lib/spaces-jump'
 import { consumeJump, jumpFailureMessage, resolveJumpOffset, scrollToMessage, subscribeJump, type JumpAnchor } from '@/lib/spaces-jump'
 import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
@@ -32,21 +39,67 @@ import {
 } from '@/lib/spaces-auto-route'
 import type { BannerChip } from '@/components/spaces/auto-banner'
 import { readThreadDraft, stageThreadDraft } from '@/lib/spaces-thread-draft'
-import { agentOptionsPayload, postStreamMessage } from '@/lib/spaces-post'
+import { agentOptionsPayload, postInlineReply, postStreamMessage } from '@/lib/spaces-post'
 import { noteInvocations } from '@/hooks/use-space-invocations'
+import { useFollowUpAgent } from '@/hooks/use-follow-up-agent'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { FindBanner } from '@/components/spaces/find-banner'
+import { sessionCommand } from '@/components/spaces/session-command'
+import { refreshMyThreads, sessionsOf, useMyThreads } from '@/lib/spaces-my-threads'
 import { runFind, searchInstead } from '@/lib/spaces-find'
 import { toast } from '@/lib/toast'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
 import { toast as notify } from 'sonner'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
+import { answersOwnerOnly, directAvatarId, isSelfDirect } from '@/lib/spaces-direct'
+import { useSpaceMembers } from '@/hooks/use-space-members'
 
 // The space's one stream: ROOT messages in order; each message's flat thread
 // lives behind its reply chip (annotation model — replying creates nothing,
 // a Discussion is a deliberate annotation on a thread).
+
+/** More new rows than this in one update is a catch-up (reconnect, resync), not live arrival. */
+const LIVE_ARRIVAL_MAX = 3
+
+/**
+ * Spaces redesign (2026-10-21): which rows arrived LIVE at the tail, so only
+ * those play the rise-in. Everything present when the stream first paints is
+ * the baseline; after that a new id counts when it lands past the newest
+ * offset seen (an older page prepends below it, so it never counts), the
+ * window is attached to the tail, and few enough rows came at once. The
+ * viewer's own confirmed send is skipped: its pending echo already rose in,
+ * and the confirm only swaps the id. Kept as state adjusted during render
+ * (React's "derive from props" pattern), keyed by the ids on screen.
+ */
+type Arrivals = { key: string; ids: string; seen: ReadonlySet<string>; live: ReadonlySet<string>; maxOffset: number }
+const settledMax = (ms: ChatMessage[]) => ms.reduce((max, m) => (!m.pending && !m.failed && m.offset > max ? m.offset : max), 0)
+function nextArrivals(cur: Arrivals | null, messages: ChatMessage[], key: string, ids: string, detached: boolean, selfMemberId: string): Arrivals {
+    if (!cur || cur.key !== key) return { key, ids, seen: new Set(messages.map((m) => m.id)), live: new Set(), maxOffset: settledMax(messages) }
+    const fresh = messages.filter((m) => !cur.seen.has(m.id))
+    if (fresh.length === 0) return { ...cur, ids }
+    const seen = new Set(cur.seen)
+    for (const m of fresh) seen.add(m.id)
+    const live = new Set(cur.live)
+    if (!detached && fresh.length <= LIVE_ARRIVAL_MAX) {
+        for (const m of fresh) {
+            const ownConfirm = !m.pending && m.author.memberId === selfMemberId && m.author.actingMode === 'direct'
+            if (!ownConfirm && (m.pending || m.offset > cur.maxOffset)) live.add(m.id)
+        }
+    }
+    return { key, ids, seen, live, maxOffset: Math.max(cur.maxOffset, settledMax(fresh)) }
+}
+function useLiveArrivals(messages: ChatMessage[], key: string, ready: boolean, detached: boolean, selfMemberId: string): ReadonlySet<string> {
+    const [arrivals, setArrivals] = useState<Arrivals | null>(null)
+    if (!ready) return arrivals?.key === key ? arrivals.live : EMPTY_IDS
+    const ids = messages.map((m) => m.id).join('\n')
+    if (arrivals && arrivals.key === key && arrivals.ids === ids) return arrivals.live
+    const next = nextArrivals(arrivals, messages, key, ids, detached, selfMemberId)
+    setArrivals(next)
+    return next.live
+}
+const EMPTY_IDS: ReadonlySet<string> = new Set()
 
 /** The first frame renders a short tail — markdown is the paint cost; the full window follows right after. */
 const FIRST_PAINT_CAP = 16
@@ -64,7 +117,7 @@ const AUTO_POST_HOLD_MS = 5_000
 const shortLabel = (label: string, max = 40): string => (label.length > max ? `${label.slice(0, max - 1)}…` : label)
 
 export function GeneralStream({
-    org, space, stream, presence, memberNames, onOpenThread, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
+    org, space, stream, presence, memberNames, onOpenThread, onOpenThreadIn, openThreadId, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true, onAddPeople, onOpenFiles
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -73,6 +126,10 @@ export function GeneralStream({
     memberNames: Map<string, string>
     /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
     onOpenThread: (rootMessageId: string) => void
+    /** Open a thread in any space of this org: /session jumps to sessions elsewhere (2026-11-05). */
+    onOpenThreadIn?: (spaceId: string, rootMessageId: string) => void
+    /** The root of the thread open beside the stream — its reply line stays tinted (spaces redesign, 2026-10-21). */
+    openThreadId?: string | null
     /** Navigate to a chat session — the working strip's "Open chat" affordance. */
     onOpenSession?: (sessionId: string) => void
     /** Set while a doc column sits beside the chat: closes THIS column, the doc takes the width. */
@@ -87,13 +144,84 @@ export function GeneralStream({
     composeActive?: boolean
     /** The content strip already labels a lone stream; split panes retain their headings. */
     showHeader?: boolean
+    /** A space with no messages yet shows its first-run page (EmptySpaceStart, 2026-11-09): these are its actions. */
+    onAddPeople?: () => void
+    onOpenFiles?: () => void
 }) {
+    const { writable } = useSpaceAccess()
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, undefined, visible)
     // The plain-text faces (quotes, titles, copies) name a space token by its current name.
     const spaceNames = useSpaceNames(org.id)
+
+    // Replies inline (2026-10-25, this space's setting): there are no threads
+    // here. Every reply shows in the stream under a line quoting what it
+    // answers, Reply writes here, and no chip or pane exists.
+    const inline = useStreamView(org.id, space.id) === 'inline'
+    const [replyingTo, setReplyingTo] = useState<{ rootMessageId: string; label: string } | null>(null)
+    useEffect(() => {
+        if (!inline) setReplyingTo(null)
+    }, [inline, org.id, space.id])
+    // An implicit reply (2026-10-29, "inline thread ui" in Main): inline the
+    // stream reads as one chat, so when its newest message belongs to a thread
+    // where the person invoked an agent, the box starts out replying there.
+    // The target locks at the first keystroke (a message landing mid-sentence
+    // must not move the reply) and frees when the box empties. "New message
+    // instead" (or Esc) dismisses it until a newer message lands at the bottom.
+    const bottom = stream.messages.at(-1)
+    const bottomRoot = inline && !stream.hasMoreAfter && bottom && !bottom.failed ? (bottom.threadRoot ?? bottom.id) : undefined
+    const [dismissedFor, setDismissedFor] = useState<string | null>(null)
+    const [locked, setLocked] = useState<{ rootMessageId: string | null } | null>(null)
+    const candidateRoot = locked ? locked.rootMessageId ?? undefined : bottom && dismissedFor === bottom.id ? undefined : bottomRoot
+    // Who the reply goes to (Harbor spec §8, 2026-10-29): the agent the person
+    // last invoked in that thread, named on the Replying-to bar like the
+    // thread pane's follow-up line. Its × holds for one reply, and another
+    // target resets it.
+    const targetRoot = replyingTo?.rootMessageId ?? candidateRoot
+    // Only a conversation that is the thread's latest (2026-11-05): the inline
+    // stream holds every reply by offset, unless a jump detached it.
+    const followUpThread = useMemo(() => {
+        if (targetRoot === undefined || stream.hasMoreAfter) return []
+        const replies = stream.messages.filter((m) => !m.pending && !m.failed && (m.id === targetRoot || m.threadRoot === targetRoot))
+        const root = stream.threadRoots.get(targetRoot)
+        return root && replies[0]?.id !== targetRoot ? [root, ...replies] : replies
+    }, [targetRoot, stream.hasMoreAfter, stream.messages, stream.threadRoots])
+    const followUp = useFollowUpAgent(org.id, space.id, targetRoot, org.memberId, followUpThread)
+    const implicitTo = !replyingTo && candidateRoot !== undefined && followUp !== undefined ? candidateRoot : undefined
+    const replyRoot = replyingTo?.rootMessageId ?? implicitTo
+    const [peopleOnly, setPeopleOnly] = useState(false)
+    const [draftMentions, setDraftMentions] = useState(false)
+    useEffect(() => {
+        setPeopleOnly(false)
+    }, [replyRoot])
+    const dismissImplicit = () => {
+        if (bottom) setDismissedFor(bottom.id)
+        if (locked) setLocked({ rootMessageId: null })
+    }
+    // Cancelling a picked reply means a new message: no implicit one steps in.
+    const cancelReply = () => {
+        setReplyingTo(null)
+        dismissImplicit()
+    }
+    /** What a reply quotes: the discussion's title, else the root's first line, with its author when known. */
+    const quoteFor = (rootMessageId: string): { author?: string; label: string } => {
+        const topic = stream.topicsByRoot.get(rootMessageId)
+        const root = stream.messages.find((m) => m.id === rootMessageId) ?? stream.threadRoots.get(rootMessageId)
+        const label = topic ? topic.title : root ? (root.deletedAt ? 'a deleted message' : threadLabelOf(root.body)) : 'an earlier message'
+        const author = root ? memberNames.get(root.author.memberId) : undefined
+        return { ...(author ? { author } : {}), label: resolveMentions(label, memberNames, spaceNames) }
+    }
+    const threadLineFor = (rootMessageId: string): string => {
+        const quote = quoteFor(rootMessageId)
+        return quote.author ? `${quote.author}: ${quote.label}` : quote.label
+    }
+    /** Clicking a reply's quote lands on the message it answers, in this stream (a pane would be a thread). */
+    const jumpToQuoted = (rootMessageId: string) => {
+        const root = stream.messages.find((m) => m.id === rootMessageId) ?? stream.threadRoots.get(rootMessageId)
+        requestJump({ topicId: STREAM_READ_KEY, messageId: rootMessageId, ...(root ? { offset: root.offset } : {}) })
+    }
 
     // "New" divider: snapshot the read mark when the stream opens; mark read
     // from then on — but only while actually on screen. A kept-alive hidden
@@ -120,9 +248,20 @@ export function GeneralStream({
         if (!visible || !stream.ready) return
         // The newest root on screen, never head (Slack's rule).
         const newest = newestSettledOffset()
+        // Inline (2026-10-25), replies are read where they show: each thread
+        // with a reply past the stream mark reads up to its newest one here.
+        if (inline && newest > 0) {
+            const since = getStreamReadOffset(org.id, space.id)
+            const reached = new Map<string, number>()
+            for (const m of stream.messages) {
+                if (m.threadRoot === undefined || m.pending || m.failed || m.offset <= since) continue
+                reached.set(m.threadRoot, Math.max(reached.get(m.threadRoot) ?? 0, m.offset))
+            }
+            for (const [root, offset] of reached) markThreadRead(org.id, space.id, root, offset)
+        }
         if (newest > 0) markStreamRead(org.id, space.id, newest)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [org.id, space.id, stream.ready, stream.messages.length, visible])
+    }, [org.id, space.id, stream.ready, stream.messages.length, visible, inline])
 
     // First paint: start at the bottom — the newest messages, always. After
     // that: keep the tail in view when new messages land, unless the reader
@@ -279,7 +418,7 @@ export function GeneralStream({
         const label = threadLabelFor(rootMessageId)
         let posted: spaces.Message
         try {
-            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
+            const result = await invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body, ...agentOptionsPayload(agent) })
             posted = result.message
             noteInvocations(org.id, space.id, result.invocations)
         } catch (err) {
@@ -312,6 +451,11 @@ export function GeneralStream({
     // for. A post that fails after the hold puts the words back in this box.
     const holdsRef = useRef(new Map<number, { timer: number; fire: () => void }>())
     const holdSeqRef = useRef(0)
+    useEffect(() => {
+        if (writable) return
+        for (const hold of holdsRef.current.values()) window.clearTimeout(hold.timer)
+        holdsRef.current.clear()
+    }, [writable])
     const holdThenPostInThread = (rootMessageId: string, body: string, agent?: AgentOptions) => {
         const label = threadLabelFor(rootMessageId)
         const id = ++holdSeqRef.current
@@ -379,6 +523,9 @@ export function GeneralStream({
     // stripped, so tagging never re-asks Jev. Every gesture is logged: Jev
     // learns nothing from them, but the threshold can.
     const tagSuggestions = useTagSuggestionsEnabled()
+    // A tag is a mention, so Auto never offers an agent whose seat here is someone else's alone (2026-11-09).
+    const roster = useSpaceMembers(org.id, space.id)
+    const untaggable = useMemo(() => new Set(roster.filter((m) => answersOwnerOnly(m, org.memberId)).map((m) => m.id)), [roster, org.memberId])
     const [currentDraft, setCurrentDraft] = useState('')
     const [declined, setDeclined] = useState<ReadonlySet<string>>(() => new Set())
     const HERE_TOKEN = mentionToken({ kind: 'here' })
@@ -433,6 +580,14 @@ export function GeneralStream({
     }
 
     const post = async (body: string, agent?: AgentOptions): Promise<void | 'keep'> => {
+        // A reply picked, or shown implicitly, in the inline view goes to its thread; Auto has nothing to decide.
+        if (replyRoot !== undefined) {
+            if (detachedRef.current) await snapToLatest()
+            const thread = replyingTo ?? { rootMessageId: replyRoot, label: quoteFor(replyRoot).label }
+            postInlineReply(org, space, thread, body, agent, peopleOnly && followUp !== undefined && !mentionsAnyone(body))
+            setReplyingTo(null)
+            return
+        }
         if (autoRouteMode === 'off') return postToStream(body, agent)
         const confirmed =
             confirmedRef.current || (autoRouteMode === 'preview' && !!verdict && stripMentionTokens(verdict.body) === stripMentionTokens(body))
@@ -453,7 +608,7 @@ export function GeneralStream({
                 draft: body,
                 ...(authorName ? { authorName } : {}),
                 candidates: collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames),
-                members: [...memberNames].map(([id, name]) => ({ id, name })),
+                members: [...memberNames].filter(([id]) => !untaggable.has(id)).map(([id, name]) => ({ id, name })),
                 senderId: org.memberId,
                 // A direct space has nobody to tag.
                 suggestTags: tagSuggestions && space.kind !== 'direct',
@@ -483,18 +638,26 @@ export function GeneralStream({
 
     const retryFailed = (message: spaces.Message) => {
         removeStreamMessage(org.id, space.id, message.id)
-        void postToStream(message.body)
+        if (message.threadRoot !== undefined) postInlineReply(org, space, { rootMessageId: message.threadRoot, label: quoteFor(message.threadRoot).label }, message.body)
+        else void postToStream(message.body)
     }
     const discardFailed = (message: spaces.Message) => removeStreamMessage(org.id, space.id, message.id)
 
     // Reply creates NOTHING: the thread pane opens on the message itself —
-    // a thread with zero replies is just a thread (annotation model).
-    const replyInThread = (parent: spaces.Message) => onOpenThread(parent.id)
+    // a thread with zero replies is just a thread (annotation model). In the
+    // inline view (2026-10-25) the reply is written here instead, under a
+    // "Replying to" line, and lands in the stream with the rest.
+    const replyInThread = (parent: spaces.Message) => {
+        const rootMessageId = parent.threadRoot ?? parent.id
+        if (inline) setReplyingTo({ rootMessageId, label: threadLineFor(rootMessageId) })
+        // (threadLineFor reads "Author: first line", what the bar above the box shows.)
+        else onOpenThread(rootMessageId)
+    }
 
     // The working strip's "Open chat": the thread's agent session, one click.
     const openAgentChat = async (rootMessageId: string) => {
         try {
-            const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            const { sessionId } = await invokeSpace('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (sessionId && onOpenSession) onOpenSession(sessionId)
             else if (!sessionId) toast('No agent chat for this thread yet', 'info')
         } catch {
@@ -511,7 +674,7 @@ export function GeneralStream({
     // The chip clears when the cancelled turn releases its presence lease.
     const stopAgent = async (rootMessageId: string) => {
         try {
-            const { stopped } = await window.ipc.invoke('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            const { stopped } = await invokeSpace('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (!stopped) toast('Nothing to stop — the run already finished', 'info')
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not stop the run', 'error')
@@ -557,6 +720,19 @@ export function GeneralStream({
 
     /** Opens the poll dialog (state lives in PollDialogHost — see its doc). */
     const openPollRef = useRef<(() => void) | null>(null)
+    // /session (2026-11-05): a new session is a root with its title, marked
+    // in the same post, opened at once so the request goes in its thread.
+    const mySessions = sessionsOf(useMyThreads(org.id).threads)
+    const startSession = async (title: string) => {
+        if (!title) return
+        try {
+            const res = await invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, body: title, session: { title } })
+            onOpenThread(res.message.id)
+            void refreshMyThreads(org.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not start the session', 'error')
+        }
+    }
     const createPoll = async (input: spaces.SpacesNewPollInput) => {
         try {
             if (detachedRef.current) await snapToLatest()
@@ -583,7 +759,7 @@ export function GeneralStream({
         try {
             let updated: spaces.Message | undefined
             for (const answerId of answerIds) {
-                const res = await window.ipc.invoke('spaces:votePoll', {
+                const res = await invokeSpace('spaces:votePoll', {
                     orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'add',
                 })
                 updated = res.message
@@ -607,7 +783,7 @@ export function GeneralStream({
         try {
             let updated: spaces.Message | undefined
             for (const answerId of mine) {
-                const res = await window.ipc.invoke('spaces:votePoll', {
+                const res = await invokeSpace('spaces:votePoll', {
                     orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'remove',
                 })
                 updated = res.message
@@ -622,7 +798,7 @@ export function GeneralStream({
     const endPoll = async (message: spaces.Message) => {
         if (!window.confirm('End this poll now? Voting stops immediately.')) return
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:endPoll', {
+            const { message: updated } = await invokeSpace('spaces:endPoll', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
             updateStreamMessage(org.id, space.id, updated)
@@ -642,7 +818,7 @@ export function GeneralStream({
             reactions: applyReaction(message.reactions, { emoji, memberId: org.memberId, action: action === 'add' ? 'added' : 'removed' }),
         })
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
+            const { message: updated } = await invokeSpace('spaces:reactToMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
             })
             updateStreamMessage(org.id, space.id, updated)
@@ -658,7 +834,7 @@ export function GeneralStream({
     const editMessage = async (message: spaces.Message, body: string) => {
         updateStreamMessage(org.id, space.id, { ...message, body, editedAt: new Date().toISOString() })
         try {
-            const { message: updated } = await window.ipc.invoke('spaces:editMessage', {
+            const { message: updated } = await invokeSpace('spaces:editMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, body,
             })
             updateStreamMessage(org.id, space.id, updated)
@@ -671,7 +847,7 @@ export function GeneralStream({
     const deleteMessage = async (message: spaces.Message) => {
         if (!window.confirm('Delete this message? This cannot be undone.')) return
         try {
-            const { message: deleted } = await window.ipc.invoke('spaces:deleteMessage', {
+            const { message: deleted } = await invokeSpace('spaces:deleteMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
             updateStreamMessage(org.id, space.id, deleted)
@@ -710,6 +886,7 @@ export function GeneralStream({
         if (!detached) setRenderCap((c) => Math.max(c, streamMessages.length + 10))
     }
     const hiddenCount = detached ? 0 : Math.max(0, streamMessages.length - renderCap)
+    const arrivingIds = useLiveArrivals(streamMessages, memoryKey, stream.ready, detached, org.memberId)
     const visibleMessages = hiddenCount > 0 ? streamMessages.slice(hiddenCount) : streamMessages
 
     // "Earlier" is one gesture with two gears: locally-hidden rows reveal
@@ -908,9 +1085,10 @@ export function GeneralStream({
     visibleMessages.forEach((message) => {
         drawLinesBefore(message.offset)
         // Deleted messages disappear — unless a thread grew from one, which
-        // keeps a tombstone row so the thread stays reachable.
-        const thread = threadRowFor(message)
-        if (message.deletedAt && !thread) return
+        // keeps a tombstone row so the thread stays reachable (inline: so the
+        // replies quoting it have somewhere to land).
+        const thread = inline ? null : threadRowFor(message)
+        if (message.deletedAt && !thread && !(inline && (message.replyCount ?? 0) > 0)) return
         const day = dayKey(message.postedAt)
         if (day !== prevDay) {
             rows.push(<DayDivider key={`day:${day}`} label={formatDayLabel(message.postedAt)} />)
@@ -922,6 +1100,9 @@ export function GeneralStream({
             newShown = true
             prev = undefined
         }
+        // Inline (2026-10-25): a run continues only within one thread (or the
+        // stream), so every switch of thread draws its header and thread line.
+        const continuation = prev?.threadRoot === message.threadRoot && isContinuation(prev, message)
         rows.push(
             <MessageRow
                 orgId={org.id}
@@ -930,8 +1111,12 @@ export function GeneralStream({
                 message={message}
                 memberNames={memberNames}
                 spaceNames={spaceNames}
-                continuation={isContinuation(prev, message)}
+                continuation={continuation}
                 thread={thread}
+                inline={inline}
+                inThread={message.threadRoot !== undefined && !continuation ? { ...quoteFor(message.threadRoot), onClick: () => jumpToQuoted(message.threadRoot!) } : null}
+                threadOpen={!!thread && thread.rootMessageId === openThreadId}
+                arriving={arrivingIds.has(message.id)}
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
                 onPrefetchThread={(id) => prefetchThread(org.id, space.id, id)}
@@ -1030,16 +1215,17 @@ export function GeneralStream({
             >
                 {/* One measurable child — the tail pin observes its size. */}
                 <div ref={contentRef}>
-                {(!stream.ready || snapping) && (
-                    <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
+                {(!stream.ready || snapping) && <StreamSkeleton />}
+                {stream.ready && !snapping && messageRows === 0 && space.kind === 'shared' && !space.archived && (
+                    <EmptySpaceStart orgId={org.id} space={space} onAddPeople={onAddPeople} onOpenFiles={onOpenFiles} />
                 )}
-                {stream.ready && !snapping && messageRows === 0 && (
+                {stream.ready && !snapping && messageRows === 0 && !(space.kind === 'shared' && !space.archived) && (
                     <div className="px-2 py-6 text-sm text-muted-foreground">
                         {space.kind === 'direct' && (space.participants ?? []).length === 1
-                            ? 'Your notes to self — drafts, links, files for later. Only you can see this, and @rowboat works here too.'
+                            ? `Your notes to self — drafts, links, files for later. Only you can see this${LOCAL_RUNTIME ? ', and @rowboat works here too' : ''}.`
                             : space.kind === 'direct'
-                                ? 'Private to the two of you — say hello, or @rowboat to ask your agent.'
-                                : 'Nothing here yet — say hello, or @rowboat to ask your agent.'}
+                                ? `Private to the two of you — say hello${LOCAL_RUNTIME ? ', or @rowboat to ask your agent' : ''}.`
+                                : `Nothing here yet — say hello${LOCAL_RUNTIME ? ', or @rowboat to ask your agent' : ''}.`}
                     </div>
                 )}
                 {rows}
@@ -1085,10 +1271,10 @@ export function GeneralStream({
                 )
             })()}
             </div>
-            {forwarding && (
+            {writable && forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
+            {writable && <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />}
             {picking && (
                 <ThreadPickerDialog
                     candidates={collectRouteCandidates(org.id, space.id, stream, memberNames, spaceNames)}
@@ -1124,26 +1310,79 @@ export function GeneralStream({
                     chips={tagChips}
                 />
             )}
-            <Composer
-                placeholder={`Message ${space.name} — @rowboat to ask your agent`}
+            {writable && replyRoot !== undefined && (
+                <div className="mx-4 mb-1 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
+                    <CornerDownRight className="size-3 shrink-0" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">Replying to <span className="font-medium text-foreground">{replyingTo ? replyingTo.label : threadLineFor(replyRoot)}</span></span>
+                    {followUp && !draftMentions && (
+                        <span role="status" className="flex shrink-0 items-center gap-1">
+                            <span aria-hidden className="text-muted-foreground/60">·</span>
+                            {peopleOnly ? (
+                                <>
+                                    <span>To people only</span>
+                                    <button type="button" className="text-foreground hover:underline" onClick={() => setPeopleOnly(false)}>
+                                        Include {followUp.displayName}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>to <span className="font-medium text-foreground">{followUp.displayName}</span></span>
+                                    <button
+                                        type="button"
+                                        aria-label={`Send to people only, not ${followUp.displayName}`}
+                                        title="Send to people only"
+                                        className="rounded p-0.5 hover:bg-background hover:text-foreground"
+                                        onClick={() => setPeopleOnly(true)}
+                                    >
+                                        <X className="size-3" />
+                                    </button>
+                                </>
+                            )}
+                            <span aria-hidden className="ml-1 h-3 w-px bg-border" />
+                        </span>
+                    )}
+                    {replyingTo ? (
+                        <button type="button" aria-label="Cancel reply" className="shrink-0 rounded p-0.5 hover:bg-background hover:text-foreground" onClick={cancelReply}>
+                            <X className="size-3.5" />
+                        </button>
+                    ) : (
+                        <button type="button" className="shrink-0 text-foreground hover:underline" onClick={dismissImplicit}>
+                            New message instead
+                        </button>
+                    )}
+                </div>
+            )}
+            {writable ? <Composer
+                // Spaces redesign (2026-10-21): the @rowboat hint moved to the composer's
+                // Ask Rowboat chip, so the placeholder just names where you're writing.
+                placeholder={space.kind === 'direct'
+                    ? (isSelfDirect(space, org.memberId) ? 'Note to self' : `Message ${memberNames.get(directAvatarId(space, org.memberId)) ?? 'them'}`)
+                    : `Message #${space.name}`}
                 busy={routing}
                 draftKey={memoryKey}
                 onSend={post}
                 submit={submit}
                 onDraftChange={(draft) => {
                     setCurrentDraft(draft)
+                    setDraftMentions(mentionsAnyone(draft))
+                    if (!draft) setLocked(null)
+                    else setLocked((prev) => prev ?? { rootMessageId: implicitTo ?? null })
                     // An emptied box starts over: nothing declined any more.
                     if (!draft && declined.size > 0) setDeclined(new Set())
                 }}
                 onEscape={() => {
+                    if (replyRoot !== undefined) {
+                        cancelReply()
+                        return true
+                    }
                     if (!verdict) return false
                     setVerdict(null)
                     return true
                 }}
                 autoRoute={jev ? { mode: autoRouteMode, onToggle: toggleAutoRoute, onModeChange: setAutoRouteMode } : undefined}
-                onSchedule={async (body, at) => {
+                onSchedule={!LOCAL_RUNTIME ? undefined : async (body, at) => {
                     setVerdict(null)
-                    await window.ipc.invoke('spaces:schedule', {
+                    await invokeSpace('spaces:schedule', {
                         orgId: org.id, spaceId: space.id, body, at: at.toISOString(), kind: 'message',
                     })
                     toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
@@ -1152,12 +1391,21 @@ export function GeneralStream({
                 onType={onType}
                 seed={seed}
                 commands={[
+                    sessionCommand({
+                        spaceId: space.id,
+                        sessions: mySessions,
+                        newLabel: (title) => `New session: ${title}`,
+                        onNew: startSession,
+                        onOpen: (session) => session.spaceId === space.id
+                            ? onOpenThread(session.root.id)
+                            : onOpenThreadIn?.(session.spaceId, session.root.id),
+                    }),
                     {
                         name: 'invite',
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
@@ -1201,18 +1449,19 @@ export function GeneralStream({
                             }
                         },
                     }] : []),
-                    {
+                    // Scheduled sends live on the desktop (core's scheduler), so the browser has no /remind.
+                    ...(LOCAL_RUNTIME ? [{
                         name: 'remind',
                         args: '<when> <text>',
                         hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
-                        run: async (args) => {
+                        run: async (args: string) => {
                             const parsed = parseRemindArgs(args)
                             if (typeof parsed === 'string') {
                                 toast(parsed, 'info')
                                 return
                             }
                             try {
-                                await window.ipc.invoke('spaces:schedule', {
+                                await invokeSpace('spaces:schedule', {
                                     orgId: org.id, spaceId: space.id, body: parsed.text, at: parsed.at.toISOString(), kind: 'reminder',
                                 })
                                 toast(`Reminder set for ${formatScheduleTime(parsed.at)}`, 'success')
@@ -1220,7 +1469,7 @@ export function GeneralStream({
                                 toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
                             }
                         },
-                    },
+                    }] : []),
                     {
                         name: 'read',
                         hint: 'Mark everything in this space read',
@@ -1232,7 +1481,7 @@ export function GeneralStream({
                         },
                     },
                 ]}
-            />
+            /> : <ArchivedNotice />}
         </section>
     )
 }

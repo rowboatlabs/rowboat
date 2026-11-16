@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { fetchBlob } from '@/lib/spaces-presentation'
 import { Loader2 } from 'lucide-react'
 import { DocumentFileViewer } from '@/components/document-file-viewer'
 import { FileViewerSourceContext } from '@/components/file-viewer-source'
@@ -25,7 +26,7 @@ function TextAttachmentPreview({ src }: { src: string }) {
         setError(false)
         void (async () => {
             try {
-                const response = await fetch(src, { signal: controller.signal })
+                const response = await fetchBlob(src, { signal: controller.signal })
                 if (!response.ok) throw new Error('Could not load attachment')
                 const blob = await response.blob()
                 const mime = blob.type.split(';')[0] ?? ''

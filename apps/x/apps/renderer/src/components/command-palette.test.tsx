@@ -76,7 +76,7 @@ vi.mock('@/components/code/use-code-sessions', () => ({
     }),
     projectLabel: (row: { project: { name: string } }) => row.project.name,
 }))
-vi.mock('@/lib/feature-flags', () => ({ SPACES_ENABLED: true }))
+vi.mock('@/lib/feature-flags', () => ({ SPACES_ENABLED: true, LOCAL_RUNTIME: true }))
 vi.mock('@/lib/analytics', () => ({ searchOpened: vi.fn(), searchExecuted: vi.fn(), searchResultSelected: vi.fn() }))
 vi.mock('posthog-js', () => ({ default: { people: { set_once: vi.fn() } } }))
 
@@ -116,7 +116,7 @@ describe('CommandPalette', () => {
         const goTo = await screen.findByText('Go to')
         const group = goTo.closest('[cmdk-group]')!
         const labels = within(group as HTMLElement).getAllByRole('option').map((o) => o.textContent?.replace(/⌘\d|Ctrl\+\d/g, '').trim())
-        expect(labels.slice(0, 6)).toEqual(['Todo', 'Spaces', 'Email', 'Meetings', 'Brain', 'Apps'])
+        expect(labels.slice(0, 6)).toEqual(['Email', 'Meetings', 'Todo', 'Brain', 'Projects', 'Background agents'])
         expect(labels).toContain('Settings')
         // Visited spaces and DMs, most recent first; never-opened ones stay out.
         expect(groupTitles('Recent spaces')).toEqual(['Main', 'Pat Lee'])

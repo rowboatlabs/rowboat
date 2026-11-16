@@ -29,7 +29,17 @@ function fold(k: string, incoming: readonly spaces.Invocation[]): void {
     const next = new Map(state.get(k) ?? EMPTY)
     for (const invocation of incoming) {
         const prev = next.get(invocation.id)
-        if (!prev || prev.updatedAt <= invocation.updatedAt) next.set(invocation.id, invocation)
+        const prevFinished = prev && ['done', 'failed', 'cancelled', 'refused'].includes(prev.state)
+        const current = prev && (prevFinished || prev.updatedAt > invocation.updatedAt) ? prev : invocation
+        if (current.state !== 'working' && current.state !== 'waiting') {
+            const { activityHistory: _finished, ...rest } = current
+            next.set(current.id, rest)
+            continue
+        }
+        // A snapshot can finish after newer live frames. Merge by Harbor's monotonic
+        // entry ids so it fills earlier history without losing or duplicating lines (2026-11-01).
+        const entries = new Map([...(prev?.activityHistory ?? []), ...(invocation.activityHistory ?? [])].map((entry) => [entry.id, entry]))
+        next.set(current.id, { ...current, activityHistory: [...entries.values()].sort((a, b) => a.id.localeCompare(b.id)) })
     }
     const all = new Map(state)
     all.set(k, next)
@@ -59,7 +69,7 @@ function wire(): void {
     subscribeSpacesFeed((event) => {
         if (!('frame' in event)) return
         const frame = event.frame
-        if (frame.kind === 'invocation_state') fold(key(event.orgId, frame.spaceId), [frame.invocation])
+        if (frame.kind === 'invocation_state') fold(key(event.orgId, frame.spaceId), [{ ...frame.invocation, ...(frame.activityEntry ? { activityHistory: [frame.activityEntry] } : {}) }])
         else if (frame.kind === 'subscribed' && loaded.has(key(event.orgId, frame.spaceId))) void load(event.orgId, frame.spaceId)
     })
 }
@@ -162,12 +172,13 @@ export function useAgentCapabilities(orgId: string | undefined, agentIds: readon
         () => capabilitiesVersion,
     )
     const idsKey = agentIds.join('|')
+    // On every render, not only when the agents change (2026-10-29): a connector can declare more after it
+    // first connects (a local agent's models arrive seconds after its Stop), and a list read in between
+    // would otherwise stick. loadCapabilities does nothing while the cached one is under a minute old.
     useEffect(() => {
         if (!orgId) return
         for (const id of agentIds) void loadCapabilities(orgId, id)
-        // The joined key IS the dependency — the array identity changes every render.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [orgId, idsKey])
+    })
     return useMemo(() => {
         const out = new Map<string, spaces.ConnectorCapabilities>()
         if (!orgId) return out

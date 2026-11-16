@@ -1,0 +1,432 @@
+import type { ipc, spaces as spacesShared } from '@x/shared';
+import { SpacesClient } from './client.js';
+import type { SpacesLive } from './live.js';
+import type { SpaceSubscriptions } from './subscriptions.js';
+
+// The Spaces IPC channels that are one Harbor call each, served the same way
+// wherever they run. The desktop's main process and rowboat-server each
+// carried this table verbatim until 2026-10-09; one copy now, and the browser
+// host of the Spaces web-app plan serves it too. Channels that depend on the
+// host stay with the host: signing in, the server record, uploads by file
+// path, save dialogs, link previews, the local agent, scheduled sends.
+//
+// Everything a person does through these is attributed 'direct': the app is
+// the human surface; agents write through the server's MCP face.
+
+type IPCChannels = ipc.IPCChannels;
+
+export type HarborChannel =
+  | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
+  | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:renameSpace'
+  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
+  | 'spaces:setSpaceGraph' | 'spaces:getSpaceGraph'
+  | 'spaces:removeMember' | 'spaces:setMemberRole' | 'spaces:setAgentAccess'
+  | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listContacts'
+  | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
+  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
+  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:deleteAgent' | 'spaces:setHostingLlm'
+  | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower' | 'spaces:getHostingSize' | 'spaces:setHostingSize'
+  | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
+  | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
+  | 'spaces:listHostingSkills' | 'spaces:installHostingSkill' | 'spaces:removeHostingSkill'
+  | 'spaces:listHostingTriggers' | 'spaces:createHostingTrigger' | 'spaces:updateHostingTrigger' | 'spaces:deleteHostingTrigger'
+  | 'spaces:createInvite' | 'spaces:resolveInvite' | 'spaces:acceptInvite'
+  | 'spaces:listAssets' | 'spaces:createAsset' | 'spaces:moveAsset' | 'spaces:deleteAsset' | 'spaces:restoreAsset'
+  | 'spaces:readAsset' | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff'
+  | 'spaces:listTopics' | 'spaces:createTopic' | 'spaces:manageTopic' | 'spaces:archiveThread' | 'spaces:listArchivedThreads' | 'spaces:setSession' | 'spaces:myThreads' | 'spaces:search'
+  | 'spaces:listStream' | 'spaces:getMessage' | 'spaces:readMessageSecret' | 'spaces:listThread' | 'spaces:postMessage'
+  | 'spaces:reactToMessage' | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
+  | 'spaces:listInvocations' | 'spaces:cancelInvocation' | 'spaces:getAgentCapabilities' | 'spaces:setAgentOptionDefaults'
+  | 'spaces:decideApproval'
+  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:activity' | 'spaces:presence' | 'spaces:whiteboard'
+  | 'spaces:markRead' | 'spaces:followThread' | 'spaces:getUnread' | 'spaces:getActivity' | 'spaces:markActivitySeen'
+  | 'spaces:readAll';
+
+export type HarborChannelHandlers = {
+  [K in HarborChannel]: (args: IPCChannels[K]['req']) => Promise<IPCChannels[K]['res']>;
+};
+
+export interface HarborChannelDeps {
+  /** Whether this host is active (desktop: system idle time); absent, the renderer's report stands (2026-11-11, shared Online/Away status). */
+  isActive?: () => boolean;
+  /** The server's REST client; throws for an id the host doesn't know (SPACES_SERVER_ID since 2026-11-09). */
+  getClient(orgId: string): SpacesClient;
+  /** The server's live socket. */
+  getLive(orgId: string): Pick<SpacesLive, 'activity' | 'presence' | 'whiteboard'>;
+  /** The host's per-space subscriptions. */
+  subscriptions: SpaceSubscriptions;
+  /** Where a subscribed space's frames go: every window on the desktop. */
+  emit(event: spacesShared.SpacesBusEvent): void;
+}
+
+export function harborChannelHandlers({ getClient, getLive, subscriptions, emit, isActive }: HarborChannelDeps): HarborChannelHandlers {
+  return {
+    'spaces:getProfile': (args) => getClient(args.orgId).me(),
+    'spaces:updateProfile': async ({ orgId, ...input }) => ({ member: await getClient(orgId).updateProfile(input) }),
+    'spaces:setAvatar': async (args) => ({ member: await getClient(args.orgId).setAvatar({ bytes: Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0)), mime: args.mime }) }),
+    'spaces:clearAvatar': async (args) => ({ member: await getClient(args.orgId).clearAvatar() }),
+    'spaces:getProfileImage': async (args) => {
+      const { bytes, mime } = await getClient(args.orgId).fetchProfileImage(args.hash);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return { src: `data:${mime};base64,${btoa(binary)}` };
+    },
+    'spaces:listSpaces': async (args) => getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false }),
+
+    'spaces:createSpace': async (args) => ({
+      space: await getClient(args.orgId).createSpace(args.name),
+    }),
+
+    'spaces:renameSpace': async (args) => ({
+      space: await getClient(args.orgId).renameSpace(args.spaceId, args.name),
+    }),
+
+    'spaces:setSpaceGraph': async (args) => ({
+      space: await getClient(args.orgId).setSpaceGraph(args.spaceId, args.enabled),
+    }),
+
+    'spaces:getSpaceGraph': async (args) =>
+      getClient(args.orgId).getSpaceGraph(args.spaceId, { ...(args.about !== undefined ? { about: args.about } : {}), ...(args.limit !== undefined ? { limit: args.limit } : {}) }),
+
+    'spaces:archiveSpace': async (args) => ({
+      space: await getClient(args.orgId).archiveSpace(args.spaceId),
+    }),
+
+    'spaces:unarchiveSpace': async (args) => ({
+      space: await getClient(args.orgId).unarchiveSpace(args.spaceId),
+    }),
+
+    'spaces:deleteSpace': async (args) => {
+      await getClient(args.orgId).deleteSpace(args.spaceId);
+      return { deleted: true as const };
+    },
+
+    'spaces:removeMember': async (args) => ({
+      removed: await getClient(args.orgId).removeMember(args.spaceId, args.memberId),
+    }),
+
+    'spaces:setMemberRole': async (args) => ({
+      membership: await getClient(args.orgId).setSpaceRole(args.spaceId, args.memberId, args.role),
+    }),
+
+    'spaces:setAgentAccess': async (args) => ({
+      membership: await getClient(args.orgId).setAgentAccess(args.spaceId, args.agentId, args.invocableBy),
+    }),
+
+    'spaces:addMembers': async (args) => ({
+      memberships: await getClient(args.orgId).addMembers(args.spaceId, args.memberIds, args.invocableBy),
+    }),
+
+    'spaces:openDirect': async (args) => getClient(args.orgId).openDirect(args.memberId),
+
+    'spaces:listMembers': async (args) => ({
+      members: await getClient(args.orgId).listMembers(args.spaceId),
+    }),
+
+    // The roster the app keeps is everyone it can address, you included (2026-11-09): the route
+    // lists the others, so your own record comes from `me`, first — the account row, the sidebar's
+    // self row and a profile update all look you up there.
+    'spaces:listContacts': async (args) => {
+      const client = getClient(args.orgId);
+      const [{ member: me }, contacts] = await Promise.all([client.me(), client.listContacts()]);
+      return { ...contacts, members: [me, ...contacts.members.filter((m) => m.id !== me.id)] };
+    },
+
+    'spaces:listAgents': async (args) => ({ agents: await getClient(args.orgId).listAgents() }),
+    'spaces:addAgent': async ({ orgId, ...input }) => getClient(orgId).addAgent(input),
+    'spaces:setAgentCredential': async (args) => ({ credential: await getClient(args.orgId).setAgentCredential(args.agentId, args.secret) }),
+    'spaces:setAgentHook': async (args) => getClient(args.orgId).setAgentHook(args.agentId, args.spaceId),
+    'spaces:clearAgentHook': async (args) => {
+      await getClient(args.orgId).clearAgentHook(args.agentId);
+      return {};
+    },
+    'spaces:createAgentKey': async (args) => ({ key: await getClient(args.orgId).createAgentKey(args.agentId) }),
+    'spaces:revokeAgentKey': async (args) => ({ key: await getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
+    'spaces:renameAgent': async (args) => ({ agent: await getClient(args.orgId).renameAgent(args.agentId, args.displayName) }),
+    'spaces:setAgentProfile': async ({ orgId, agentId, ...profile }) => ({ agent: await getClient(orgId).setAgentProfile(agentId, profile) }),
+    'spaces:setAgentSuper': async (args) => ({ agent: await getClient(args.orgId).setAgentSuper(args.agentId, args.superAgent) }),
+    'spaces:setupInstances': async (args) => ({ instances: await getClient(args.orgId).setupInstances(args.connection, args.key) }),
+    'spaces:createSetupInstance': async ({ orgId, connection, ...input }) => ({ instance: await getClient(orgId).createSetupInstance(connection, input) }),
+    'spaces:managedAgentKinds': async (args) => getClient(args.orgId).managedAgentKinds(),
+    'spaces:createManagedAgent': async ({ orgId, ...input }) => getClient(orgId).createManagedAgent(input),
+    'spaces:deleteManagedAgent': async (args) => ({ hosting: await getClient(args.orgId).deleteManagedAgent(args.agentId) }),
+    'spaces:deleteAgent': async (args) => getClient(args.orgId).deleteAgent(args.agentId),
+    'spaces:setHostingLlm': async ({ orgId, agentId, ...input }) => ({ hosting: await getClient(orgId).setHostingLlm(agentId, input) }),
+    'spaces:getHosting': async (args) => getClient(args.orgId).getHosting(args.agentId),
+    'spaces:setHostingEnv': async (args) => ({ env: await getClient(args.orgId).setHostingEnv(args.agentId, args.key, args.value, args.secret ?? false) }),
+    'spaces:deleteHostingEnv': async (args) => ({ env: await getClient(args.orgId).deleteHostingEnv(args.agentId, args.key) }),
+    'spaces:getHostingSize': async (args) => ({ size: await getClient(args.orgId).getHostingSize(args.agentId) }),
+    'spaces:setHostingSize': async (args) => ({ size: await getClient(args.orgId).setHostingSize(args.agentId, { memMb: args.memMb, diskGb: args.diskGb }) }),
+    'spaces:hostingPower': async (args) => ({ machine: await getClient(args.orgId).hostingPower(args.agentId, args.action) }),
+    'spaces:runHostingCommand': async (args) => ({ execution: await getClient(args.orgId).runHostingCommand(args.agentId, args.command, args.timeoutSeconds) }),
+    'spaces:getHostingCommand': async (args) => ({ execution: await getClient(args.orgId).getHostingCommand(args.agentId, args.executionId) }),
+    'spaces:cancelHostingCommand': async (args) => ({ execution: await getClient(args.orgId).cancelHostingCommand(args.agentId, args.executionId) }),
+    'spaces:openHostingConsole': async (args) => ({ console: await getClient(args.orgId).openHostingConsole(args.agentId) }),
+    'spaces:checkHostingSignIn': async (args) => getClient(args.orgId).checkHostingSignIn(args.agentId),
+    'spaces:revokeHostingSignIn': async (args) => ({ hosting: await getClient(args.orgId).revokeHostingSignIn(args.agentId) }),
+    'spaces:getHostingLogs': async ({ orgId, agentId, ...opts }) => getClient(orgId).getHostingLogs(agentId, opts),
+    'spaces:listHostingFiles': async (args) => getClient(args.orgId).listHostingFiles(args.agentId, args.path ?? '/'),
+    'spaces:readHostingFile': async (args) => getClient(args.orgId).readHostingFile(args.agentId, args.path),
+    'spaces:writeHostingFile': async (args) => {
+      await getClient(args.orgId).writeHostingFile(args.agentId, args.path, args.content);
+      return {};
+    },
+    'spaces:makeHostingDir': async (args) => {
+      await getClient(args.orgId).makeHostingDir(args.agentId, args.path);
+      return {};
+    },
+    'spaces:moveHostingFile': async (args) => {
+      await getClient(args.orgId).moveHostingFile(args.agentId, args.from, args.to);
+      return {};
+    },
+    'spaces:deleteHostingFile': async (args) => {
+      await getClient(args.orgId).deleteHostingFile(args.agentId, args.path);
+      return {};
+    },
+    'spaces:listHostingSkills': async (args) => ({ skills: await getClient(args.orgId).listHostingSkills(args.agentId, args.q) }),
+    'spaces:installHostingSkill': async (args) => ({ skills: await getClient(args.orgId).installHostingSkill(args.agentId, args.name) }),
+    'spaces:removeHostingSkill': async (args) => ({ skills: await getClient(args.orgId).removeHostingSkill(args.agentId, args.name) }),
+    'spaces:listHostingTriggers': async (args) => ({ triggers: await getClient(args.orgId).listHostingTriggers(args.agentId) }),
+    'spaces:createHostingTrigger': async ({ orgId, agentId, ...input }) => ({ triggers: await getClient(orgId).createHostingTrigger(agentId, input) }),
+    'spaces:updateHostingTrigger': async ({ orgId, agentId, triggerId, ...input }) => ({ triggers: await getClient(orgId).updateHostingTrigger(agentId, triggerId, input) }),
+    'spaces:deleteHostingTrigger': async (args) => ({ triggers: await getClient(args.orgId).deleteHostingTrigger(args.agentId, args.triggerId) }),
+
+    'spaces:createInvite': async (args) => getClient(args.orgId).createInvite({
+      ...(args.spaceId ? { spaceId: args.spaceId } : {}),
+      ...(args.direct ? { direct: true as const } : {}),
+      ...(args.expiresInHours !== undefined ? { expiresInHours: args.expiresInHours } : {}),
+    }),
+
+    // Pre-auth: works before this install has signed in, so the join flow can show
+    // what's being joined (spec §4). The token is unused on this route.
+    'spaces:resolveInvite': async (args) =>
+      new SpacesClient({ baseUrl: args.baseUrl, token: 'dev-preauth' }).resolveInvite(args.token),
+
+    'spaces:acceptInvite': async (args) => getClient(args.orgId).acceptInvite(args.token),
+
+    'spaces:listAssets': async (args) => ({
+      entries: await getClient(args.orgId).listAssets(args.spaceId, {
+        ...(args.includeDeleted !== undefined ? { includeDeleted: args.includeDeleted } : {}),
+      }),
+    }),
+
+    'spaces:createAsset': async (args) =>
+      getClient(args.orgId).createAsset(args.spaceId, {
+        path: args.input.path,
+        // Exactly one of the two variants (contract decision 1, amended).
+        ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
+        ...(args.input.reason ? { reason: args.input.reason } : {}),
+        actingMode: 'direct',
+      }),
+
+    'spaces:moveAsset': async (args) =>
+      getClient(args.orgId).moveAsset(args.spaceId, {
+        assetId: args.assetId,
+        toPath: args.toPath,
+        baseVersion: args.baseVersion,
+        ...(args.reason ? { reason: args.reason } : {}),
+        actingMode: 'direct',
+      }),
+
+    'spaces:deleteAsset': async (args) =>
+      getClient(args.orgId).deleteAsset(args.spaceId, {
+        assetId: args.assetId,
+        baseVersion: args.baseVersion,
+        ...(args.reason ? { reason: args.reason } : {}),
+        actingMode: 'direct',
+      }),
+
+    'spaces:restoreAsset': async (args) =>
+      getClient(args.orgId).restoreAsset(args.spaceId, { assetId: args.assetId, actingMode: 'direct' }),
+
+    'spaces:readAsset': async (args) => getClient(args.orgId).readAsset(args.spaceId, args.assetId, args.version),
+
+    'spaces:proposeChange': async (args) =>
+      getClient(args.orgId).proposeChange(args.spaceId, {
+        assetId: args.input.assetId,
+        baseVersion: args.input.baseVersion,
+        // Exactly one of the two variants (contract decision 1, amended).
+        ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
+        ...(args.input.reason ? { reason: args.input.reason } : {}),
+        actingMode: 'direct',
+      }),
+
+    'spaces:assetHistory': async (args) => ({
+      changeSets: await getClient(args.orgId).assetHistory(args.spaceId, {
+        ...(args.assetId !== undefined ? { assetId: args.assetId } : {}),
+        ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      }),
+    }),
+
+    'spaces:diff': async (args) => ({
+      unified: await getClient(args.orgId).diff(args.spaceId, args.assetId, args.from, args.to),
+    }),
+
+    'spaces:listTopics': async (args) => ({
+      topics: await getClient(args.orgId).listTopics(args.spaceId, args.includeArchived ?? false),
+    }),
+
+    'spaces:createTopic': async (args) =>
+      getClient(args.orgId).createTopic(args.spaceId, {
+        ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
+        title: args.title,
+        ...(args.body ? { body: args.body } : {}),
+        ...(args.documentAssetId ? { documentAssetId: args.documentAssetId } : {}),
+        actingMode: 'direct',
+      }),
+
+    'spaces:manageTopic': async (args) => ({
+      topic: await getClient(args.orgId).manageTopic(args.spaceId, args.topicId, { ...args.action, actingMode: 'direct' }),
+    }),
+
+    'spaces:archiveThread': async (args) => ({
+      root: await getClient(args.orgId).archiveThread(args.spaceId, args.rootMessageId, args.archived),
+    }),
+
+    'spaces:listArchivedThreads': async (args) => ({
+      threads: await getClient(args.orgId).listArchivedThreads(args.spaceId),
+    }),
+
+    'spaces:setSession': async (args) => ({
+      root: await getClient(args.orgId).setSession(args.spaceId, args.rootMessageId, args.session),
+    }),
+
+    'spaces:myThreads': async (args) => ({ threads: await getClient(args.orgId).myThreads(args.archived === true) }),
+
+    'spaces:search': async (args) =>
+      getClient(args.orgId).search(args.spaceId, {
+        q: args.q,
+        ...(args.kinds !== undefined ? { kinds: args.kinds } : {}),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      }),
+
+    'spaces:listStream': async (args) =>
+      getClient(args.orgId).listStream(args.spaceId, {
+        ...(args.replies ? { replies: true } : {}),
+        ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+        ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+        ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      }),
+
+    'spaces:readMessageSecret': async (args) => ({
+      value: await getClient(args.orgId).readMessageSecret(args.spaceId, args.messageId, args.name),
+    }),
+
+    'spaces:getMessage': async (args) => ({
+      message: await getClient(args.orgId).getMessage(args.spaceId, args.messageId),
+    }),
+
+    'spaces:listThread': async (args) =>
+      getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
+        ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+        ...(args.afterOffset !== undefined ? { afterOffset: args.afterOffset } : {}),
+        ...(args.aroundOffset !== undefined ? { aroundOffset: args.aroundOffset } : {}),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      }),
+
+    'spaces:postMessage': async (args) =>
+      getClient(args.orgId).postMessage(args.spaceId, {
+        ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
+        ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
+        body: args.body,
+        ...(args.poll ? { poll: args.poll } : {}),
+        ...(args.agentOptions ? { agentOptions: args.agentOptions } : {}),
+        ...(args.peopleOnly ? { peopleOnly: true } : {}),
+        ...(args.secrets && args.secrets.length > 0 ? { secrets: args.secrets } : {}),
+        ...(args.session ? { session: args.session } : {}),
+        actingMode: 'direct',
+      }),
+
+    'spaces:reactToMessage': async (args) => ({
+      message: await getClient(args.orgId).reactToMessage(args.spaceId, args.messageId, {
+        emoji: args.emoji,
+        action: args.action,
+        actingMode: 'direct',
+      }),
+    }),
+
+    'spaces:deleteMessage': async (args) => ({
+      message: await getClient(args.orgId).deleteMessage(args.spaceId, args.messageId, { actingMode: 'direct' }),
+    }),
+
+    'spaces:editMessage': async (args) => ({
+      message: await getClient(args.orgId).editMessage(args.spaceId, args.messageId, { body: args.body, actingMode: 'direct' }),
+    }),
+
+    'spaces:votePoll': async (args) => ({
+      message: await getClient(args.orgId).votePoll(args.spaceId, args.messageId, {
+        answerId: args.answerId,
+        action: args.action,
+        actingMode: 'direct',
+      }),
+    }),
+
+    'spaces:endPoll': async (args) => ({
+      message: await getClient(args.orgId).endPoll(args.spaceId, args.messageId, { actingMode: 'direct' }),
+    }),
+
+    'spaces:listInvocations': async (args) => ({
+      invocations: await getClient(args.orgId).listInvocations(args.spaceId, args.threadRootId),
+    }),
+
+    'spaces:cancelInvocation': async (args) => ({
+      invocation: await getClient(args.orgId).cancelInvocation(args.invocationId),
+    }),
+
+    'spaces:getAgentCapabilities': async (args) => getClient(args.orgId).getAgentCapabilities(args.agentId),
+
+    'spaces:setAgentOptionDefaults': async (args) => ({
+      defaults: await getClient(args.orgId).setAgentOptionDefaults(args.agentId, args.defaults),
+    }),
+
+    'spaces:decideApproval': async (args) => ({
+      approval: await getClient(args.orgId).decideApproval(args.spaceId, args.approvalId, {
+        decision: args.decision,
+        ...(args.note ? { note: args.note } : {}),
+        actingMode: 'direct',
+      }),
+    }),
+
+    'spaces:subscribeSpace': async (args) => {
+      subscriptions.subscribe(args.orgId, args.spaceId, (frame) => emit({ orgId: args.orgId, frame }), args.afterOffset);
+      return { success: true };
+    },
+
+    'spaces:unsubscribeSpace': async (args) => {
+      subscriptions.unsubscribe(args.orgId, args.spaceId);
+      return { success: true };
+    },
+
+    'spaces:activity': async (args) => {
+      getLive(args.orgId).activity(isActive ? isActive() : args.active);
+      return { success: true };
+    },
+    'spaces:presence': async (args) => {
+      getLive(args.orgId).presence(args.spaceId, args.state, args.threadRootId);
+      return { success: true };
+    },
+
+    // Fire-and-forget like presence; incoming whiteboard frames ride the same
+    // per-space live subscription and reach clients on 'spaces:events'.
+    'spaces:whiteboard': async (args) => {
+      getLive(args.orgId).whiteboard(args.spaceId, args.boardId, args.payload);
+      return { success: true };
+    },
+
+    // Read state: the org owns the cursors (offsets, per member).
+    'spaces:markRead': async (args) =>
+      getClient(args.orgId).markRead(args.spaceId, {
+        ...(args.threadRootId ? { threadRootId: args.threadRootId } : {}),
+        offset: args.offset,
+      }),
+
+    'spaces:followThread': async (args) => getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
+
+    'spaces:getUnread': async (args) => getClient(args.orgId).unread(),
+    'spaces:getActivity': async ({ orgId, ...query }) => getClient(orgId).activity(query),
+    'spaces:markActivitySeen': async (args) => getClient(args.orgId).markActivitySeen(args.at),
+    'spaces:readAll': async (args) => getClient(args.orgId).readAll(args.spaceId !== undefined ? { spaceId: args.spaceId } : {}),
+  };
+}

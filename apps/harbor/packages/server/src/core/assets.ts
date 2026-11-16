@@ -21,6 +21,7 @@ import { blobHash, type BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
 import { merge3 } from '../merge.js';
 import { dispositionFor, imageDimensions, resolveMime } from '../mime.js';
+import { canWriteSpace, enforce } from '../policy.js';
 import type { AssetRecord, AssetVersionData } from '../store.js';
 import { Kernel, type ActorCtx } from './kernel.js';
 
@@ -39,7 +40,7 @@ const RECENT_HISTORY = 10;
 export class Assets {
   constructor(
     private readonly k: Kernel,
-    /** Absent = uploads unconfigured on this org (routes refuse loudly, everything else works). */
+    /** Absent = uploads unconfigured on this server (routes refuse loudly, everything else works). */
     private readonly blobs?: BlobStore,
   ) {}
 
@@ -64,7 +65,7 @@ export class Assets {
   }
 
   async listAssets(ctx: ActorCtx, spaceId: string, includeDeleted = false): Promise<Asset[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const records = await this.k.store.listAssets(spaceId, includeDeleted);
     return records.map((a) => this.toAsset(a));
   }
@@ -92,7 +93,7 @@ export class Assets {
   }
 
   async readAsset(ctx: ActorCtx, spaceId: string, assetId: string, version?: number): Promise<ReadAssetResult> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const asset = await this.requireLiveAsset(spaceId, assetId);
     const v = version ?? asset.version;
     const data = await this.k.store.getAssetVersion(spaceId, asset.id, v);
@@ -303,7 +304,7 @@ export class Assets {
 
   private requireBlobStore(): BlobStore {
     if (!this.blobs) {
-      throw new HarborError('internal', 'file uploads are not configured on this org');
+      throw new HarborError('internal', 'file uploads are not configured on this server');
     }
     return this.blobs;
   }
@@ -319,7 +320,8 @@ export class Assets {
     bytes: Uint8Array,
     opts: { declaredSha256: string; declaredMime?: string },
   ): Promise<BlobInfo> {
-    await this.k.requireMember(ctx, spaceId);
+    // Refused before the bytes are stored, not only at the lock (2026-10-13).
+    enforce(canWriteSpace(await this.k.requireMember(ctx, spaceId)));
     this.k.guardWrite();
     const blobs = this.requireBlobStore();
     const hash = blobHash(bytes);
@@ -360,7 +362,7 @@ export class Assets {
   /**
    * The bytes back: a presigned URL when the driver can mint one (S3-family —
    * bytes never transit Harbor), the bytes themselves otherwise (disk/memory).
-   * Which one an org uses is a driver detail, invisible in the route contract.
+   * Which one a server uses is a driver detail, invisible in the route contract.
    */
   async downloadBlob(
     ctx: ActorCtx,
@@ -369,15 +371,23 @@ export class Assets {
     name?: string,
     // A connector handing a platform an image link needs it to outlive the
     // platform's own queue (spec §8 Connectors, 2026-09-30); people get 5 minutes.
-    opts: { expiresInSeconds?: number } = {},
-  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    // `inline`: serve the bytes through Harbor instead of redirecting to the
+    // store, for a browser on the session cookie (2026-10-12). `attachment`:
+    // force a download (getBlob's download=1).
+    opts: { expiresInSeconds?: number; inline?: boolean; attachment?: boolean } = {},
+  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
+    await this.k.requireMember(ctx, spaceId);
     const blobs = this.requireBlobStore();
     const stored = await this.k.store.getSpaceBlob(spaceId, hash);
     if (!stored) throw new HarborError('not_found', 'no such blob in this space');
     const blob: BlobInfo = { hash: stored.hash, size: stored.size, mime: stored.mime, ...blobDims(stored) };
-    const disposition = dispositionFor(stored.mime, name);
-    if (blobs.downloadUrl) {
+    const disposition = dispositionFor(stored.mime, name, { attachment: opts.attachment === true });
+    if (opts.inline && blobs.stream) {
+      const stream = await blobs.stream(hash);
+      if (!stream) throw new HarborError('internal', 'blob registered but bytes are missing from storage');
+      return { blob, disposition, stream };
+    }
+    if (blobs.downloadUrl && !opts.inline) {
       const url = await blobs.downloadUrl(hash, {
         expiresInSeconds: opts.expiresInSeconds ?? 300,
         responseContentType: stored.mime,
@@ -494,7 +504,7 @@ export class Assets {
     spaceId: string,
     opts: { assetId?: string; beforeOffset?: number; limit?: number },
   ): Promise<ChangeSet[]> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     // An assetId filter means "this file's lineage" — live or trashed alike,
     // the record stays queryable across moves and after deletion.
     if (opts.assetId !== undefined && !(await this.k.store.getAssetById(spaceId, opts.assetId))) return [];
@@ -506,7 +516,7 @@ export class Assets {
   }
 
   async diff(ctx: ActorCtx, spaceId: string, assetId: string, from: number, to: number): Promise<string> {
-    await this.k.requireReadableSpace(ctx, spaceId);
+    await this.k.requireMember(ctx, spaceId);
     const asset = await this.requireAsset(spaceId, assetId);
     const fromData = await this.k.store.getAssetVersion(spaceId, asset.id, from);
     const toData = await this.k.store.getAssetVersion(spaceId, asset.id, to);

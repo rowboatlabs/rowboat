@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { containsRowboatAddress, decorateMentions, mentionToken, resolveMentions } from './spaces.js';
+import { containsRowboatAddress, decorateMentions, followUpAgentId, mentionToken, mentionsAnyone, resolveMentions } from './spaces.js';
+import type { Invocation } from '@rowboat/spaces-protocol';
 
 // The app's faces over the protocol's mention grammar: a token carries the id,
 // the roster supplies the name, and nothing is ever read out of a bare word.
@@ -37,5 +38,47 @@ describe('decorateMentions / resolveMentions', () => {
   it('a bare @name or @id is prose and renders as typed', () => {
     expect(decorateMentions('@Arjun Kumar and @01M0F8S2MC8HYMF4MYWM61MR7B', names)).toBe('@Arjun Kumar and @01M0F8S2MC8HYMF4MYWM61MR7B');
     expect(resolveMentions('mail arjun@rowboat.com', names)).toBe('mail arjun@rowboat.com');
+  });
+});
+
+describe('thread follow-ups (Harbor spec §8, 2026-10-27)', () => {
+  const inv = (id: string, agentId: string, authorId: string, createdAt: string, state: Invocation['state'] = 'done', threadRootId = 'root') =>
+    ({
+      id, agentId, state, depth: 0, createdAt, updatedAt: createdAt,
+      conversation: { spaceId: 's', threadRootId },
+      trigger: { messageId: id, authorId, body: '' },
+      where: { spaceKind: 'shared', spaceName: 'S' },
+    }) as Invocation;
+  const msg = (id: string, memberId: string) => ({ id, author: { memberId } });
+
+  it('is the agent this person invoked last in this thread', () => {
+    const all = [inv('1', 'hermes', 'me', '2026-10-27T09:00:00Z'), inv('2', 'codex', 'me', '2026-10-27T09:05:00Z')];
+    expect(followUpAgentId(all, 'root', 'me', [msg('2', 'me')])).toBe('codex');
+  });
+
+  it('only while that conversation is the thread’s latest (2026-11-05)', () => {
+    const all = [inv('1', 'hermes', 'me', '2026-10-27T09:00:00Z')];
+    expect(followUpAgentId(all, 'root', 'me', [msg('1', 'me'), msg('a', 'hermes')])).toBe('hermes');
+    expect(followUpAgentId(all, 'root', 'me', [msg('1', 'me'), msg('b', 'alex')])).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', [msg('1', 'me'), msg('c', 'me')])).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', [])).toBeUndefined();
+  });
+
+  it('skips other people’s, other threads’ and refused ones', () => {
+    const all = [
+      inv('1', 'hermes', 'me', '2026-10-27T09:00:00Z'),
+      inv('2', 'codex', 'alex', '2026-10-27T09:01:00Z'),
+      inv('3', 'codex', 'me', '2026-10-27T09:02:00Z', 'done', 'elsewhere'),
+      inv('4', 'codex', 'me', '2026-10-27T09:03:00Z', 'refused'),
+    ];
+    expect(followUpAgentId(all, 'root', 'me', [msg('1', 'me')])).toBe('hermes');
+    expect(followUpAgentId(all, 'root', 'sam', [msg('1', 'me')])).toBeUndefined();
+  });
+
+  it('a mention of anyone, @here or Ro counts; a bare name does not', () => {
+    expect(mentionsAnyone(`${tok(arjun.id, 'Arjun')} look`)).toBe(true);
+    expect(mentionsAnyone('[@here](#here) heads up')).toBe(true);
+    expect(mentionsAnyone('[@rowboat](#rowboat) do it')).toBe(true);
+    expect(mentionsAnyone('Arjun, look')).toBe(false);
   });
 });

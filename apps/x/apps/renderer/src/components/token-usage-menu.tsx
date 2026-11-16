@@ -35,8 +35,6 @@ export function TokenUsageMenu({
   align = 'center',
 }: TokenUsageMenuProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
-  const total = totalTokensOf(usage)
-  const totalText = `${formatTokenCount(total)} tokens`
   const title = `Token usage for this ${scope}`
 
   return (
@@ -83,27 +81,42 @@ export function TokenUsageMenu({
         </DropdownMenu>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{totalText}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <UsageRow label="Input tokens" value={usage.inputTokens} />
-            <UsageRow label="Output tokens" value={usage.outputTokens} />
-            <UsageRow label="Cached input tokens" value={usage.cachedInputTokens} />
-            <UsageRow label="Reasoning tokens" value={usage.reasoningTokens} />
-            {modelCallCount !== undefined && modelCallCount > 0 && (
-              <div className="flex items-center justify-between gap-3 border-t border-border pt-2 text-sm">
-                <span className="text-muted-foreground">Model calls</span>
-                <span className="tabular-nums">{modelCallCount}</span>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <TokenUsageDialog usage={usage} scope={scope} modelCallCount={modelCallCount} open={dialogOpen} onOpenChange={setDialogOpen} />
     </>
+  )
+}
+
+/** The usage breakdown on its own, for a menu item to open (the chat
+ *  header's ⋯ menu, 2026-10-22). */
+export function TokenUsageDialog({ usage, scope, modelCallCount, open, onOpenChange }: {
+  usage: TokenUsage
+  scope: 'turn' | 'session'
+  modelCallCount?: number
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const totalText = `${formatTokenCount(totalTokensOf(usage))} tokens`
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Token usage for this {scope}</DialogTitle>
+          <DialogDescription>{totalText}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <UsageRow label="Input tokens" value={usage.inputTokens} />
+          <UsageRow label="Output tokens" value={usage.outputTokens} />
+          <UsageRow label="Cached input tokens" value={usage.cachedInputTokens} />
+          <UsageRow label="Reasoning tokens" value={usage.reasoningTokens} />
+          {modelCallCount !== undefined && modelCallCount > 0 && (
+            <div className="flex items-center justify-between gap-3 border-t border-border pt-2 text-sm">
+              <span className="text-muted-foreground">Model calls</span>
+              <span className="tabular-nums">{modelCallCount}</span>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

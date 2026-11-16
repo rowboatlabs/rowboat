@@ -1,12 +1,12 @@
 import type { FileViewerSource } from '@/components/file-viewer-source'
-import { parseBlobAppUrl } from './spaces-presentation'
+import { fetchBlob, parseBlobAppUrl } from './spaces-presentation'
 
 /** The original message attachment is immutable, even after it is saved to Files. */
 export function createSpaceAttachmentSource(src: string, name: string): FileViewerSource {
   const attachment = parseBlobAppUrl(src)
   if (!attachment) throw new Error('Invalid attachment URL')
   let loaded: Promise<ArrayBuffer> | undefined
-  const readBytes = () => loaded ??= fetch(src).then(async (response) => {
+  const readBytes = () => loaded ??= fetchBlob(src).then(async (response) => {
     if (!response.ok) throw new Error('Could not load attachment')
     return response.arrayBuffer()
   }).catch((error) => { loaded = undefined; throw error })

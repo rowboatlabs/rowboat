@@ -1,51 +1,69 @@
+import { SpaceSettings } from '@/components/spaces/space-settings'
+import { SpacesSkeleton } from '@/components/spaces/spaces-skeleton'
+import { onServer } from '@x/shared/dist/spaces.js'
+import { MemberDirectory } from '@/components/spaces/member-directory'
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
+import { SpaceAccessProvider, useSpaceAccess } from '@/lib/spaces-access'
+import { StartHere } from '@/components/spaces/start-here'
 import '@/styles/spaces.css'
+import '@/styles/spaces-header.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, UserPlus, Users } from 'lucide-react'
+import { isTodoListPath, NEW_TODO_LIST_CONTENT } from '@/lib/todo-list'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import type { SecondaryRailPeek } from '@/components/secondary-rail'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Archive, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MessagesSquare, PanelLeftOpen, PenTool, Rows3, Settings, UserPlus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
-import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { AgentBadge, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { MemberAvatar } from '@/components/spaces/atoms'
 import { openServerDialog } from '@/lib/server-dialog'
-import { BookmarksPopover } from '@/components/spaces/bookmarks'
+import type { OrgView } from '@/lib/spaces-navigation'
+import { AgentsView } from '@/components/spaces/agents-view'
+import { BookmarksPanel } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { AddMembersDialog } from '@/components/spaces/add-members-dialog'
+import { MemberAdminProvider } from '@/components/spaces/member-admin'
+import { InviteLinkPanel } from '@/components/spaces/invite-link'
 import { SpaceInvocationsProvider } from '@/components/spaces/invocation-lines'
 import { useSpaceInvocations } from '@/hooks/use-space-invocations'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
-import { ServerSwitcher } from '@/components/spaces/server-switcher'
-import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { ActivityView, type ActivityTarget } from '@/components/spaces/activity-view'
-import { SpaceRailSections } from '@/components/spaces/space-rail-sections'
+import { MyThreadsView } from '@/components/spaces/my-threads-view'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceContentTabs } from '@/components/spaces/space-content-tabs'
-import { SpaceDiscussionsView } from '@/components/spaces/space-discussions-view'
+import { getStreamView, setStreamView, useStreamView } from '@/lib/spaces-stream-view'
+import { SpaceThreadsView } from '@/components/spaces/space-threads-view'
 import { SpaceFilesView } from '@/components/spaces/space-files-view'
+import { SpaceGraphView } from '@/components/spaces/space-graph-view'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
-import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
-import { refreshMembers, useOrgRoster, useSpaceMembers } from '@/hooks/use-space-members'
+import { loadOlderStreamMessages, STREAM_READ_KEY, useSpacePresence, useSpacesUnreadCounts, useStream } from '@/hooks/use-space-chat'
+import { refreshMembers, useOrgRoster, useSpaceMembers, usePeopleOnline } from '@/hooks/use-space-members'
+import type { Profile } from '@/components/spaces/member-text'
 import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
-import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
+import { directAvatarId, directLabel, isSelfDirect, memberLabel } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
 import { AttachmentColumn, SpaceAssetsProvider, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
-import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
+import { isBlobAppUrl, isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { getSpaceReadState, markStreamRead, markThreadRead, useStreamReadOffset } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { cn } from '@/lib/utils'
 import * as analytics from '@/lib/analytics'
+import { useSidebarShortcut } from '@/hooks/use-sidebar-shortcut'
+import { Keys } from '@/components/keys'
+import { SHORTCUTS } from '@/lib/shortcuts'
+import { useTitlebarTabsClearance } from '@/hooks/use-titlebar-tabs-clearance'
 
 export { OrgMonogram } from '@/components/spaces/atoms'
 
@@ -60,12 +78,12 @@ export { OrgMonogram } from '@/components/spaces/atoms'
 // stays the v0 contract; general/topic/artifact semantics come from the
 // contract with legacy fallbacks in lib/spaces-conventions.ts.
 
-/** Which space is open (org + space) — the app-level selection the sidebar drives. */
+/** Which space is open — the app-level selection the sidebar drives. `orgId` is the one server's id (2026-11-09). */
 export type SpaceSelection = {
     orgId: string
     spaceId: string
-    /** An org-level surface instead of a space (spaceId is '' then): Activity, layer 3. */
-    view?: 'activity'
+    /** A server-level surface instead of a space (spaceId is '' then): Activity, Agents, Threads. */
+    view?: OrgView
 } | null
 
 /** Chat never squeezes below this beside a doc; the doc takes the rest. */
@@ -104,7 +122,7 @@ type ColumnAnim = { column: 'chat' | 'doc'; phase: 'enter' | 'exit'; width: numb
  */
 const columnMemory = new Map<string, { docKey: DocKey; docIsBoard: boolean; chatOpen: boolean }>()
 
-const isAttachmentKey = (key: string) => key.startsWith('app://space-blob/')
+const isAttachmentKey = (key: string) => isBlobAppUrl(key)
 
 // The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
 // the first time a board opens, never inflating the main renderer bundle.
@@ -112,10 +130,10 @@ const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 
 
 // ---------------------------------------------------------------------------
-// Root view: the selected space (the org/space list lives in the app sidebar)
+// Root view: the selected space (the chat list lives in the rail)
 // ---------------------------------------------------------------------------
 
-export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, active = true }: {
+export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, onOpenAgents, onOpenThreads, active = true, accountMenu }: {
     selection: SpaceSelection
     onSelect: (selection: SpaceSelection) => void
     /** Navigate to the destination and its rail together, without using the current space's selection. */
@@ -126,7 +144,10 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
     onOpenSession?: (sessionId: string) => void
     /** Activity → a message: the host navigates (space or thread, landing on the row). */
     onOpenMessage?: (target: ActivityTarget) => void
-    /** The org's Activity surface. */
+    /** Your agents (2026-10-21). */
+    onOpenAgents?: (orgId: string) => void
+    /** Your threads across the server, sessions among them (2026-11-05); absent = no row. */
+    onOpenThreads?: (orgId: string) => void
     onOpenActivity?: (orgId: string) => void
     /**
      * False while the view is kept mounted but hidden (the app shows another
@@ -134,19 +155,34 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
      * "viewing" or mark arriving messages read.
      */
     active?: boolean
+    /** Your account row at the sidebar's foot, from the host (2026-11-09). */
+    accountMenu?: ReactNode
 }) {
     const { orgs, loading } = useSpacesOrgs()
     // No Rowboat session → the empty state offers the sign-in first (one
-    // session, two uses): one browser trip lists every managed org.
+    // session, two uses): one browser trip connects Rowboat's server.
     const account = useSpacesAccountState()
+    // The sidebar is mounted once here, beside whichever content is open, so
+    // its scroll and its drawer state survive a switch (2026-11-09; it used to
+    // live inside the per-space pane and remount with it). Docked by default
+    // (persisted), or a sliver at the edge that peeks the rail on hover.
+    const railPinKey = 'spaces:railOpen'
+    const [railPinned, setRailPinned] = useState(() => localStorage.getItem(railPinKey) !== '0')
+    const toggleRailPin = () => {
+        const pin = !railPinned
+        localStorage.setItem(railPinKey, pin ? '1' : '0')
+        setRailPinned(pin)
+    }
+    const railPeekRef = useRef<SecondaryRailPeek | null>(null)
+    useSidebarShortcut(active, toggleRailPin)
     const [signingIn, setSigningIn] = useState(false)
     const signInRowboat = async () => {
         setSigningIn(true)
         try {
-            const { orgs: signedIn } = await window.ipc.invoke('spaces:signInRowboat', null)
+            const { orgs: signedIn } = await invokeSpace('spaces:signInRowboat', null)
             refreshSpacesAccountState()
             await refreshSpacesOrgs()
-            if (signedIn.length === 0) toast('Signed in — no servers yet. Create one or join with an invite link.', 'success')
+            if (signedIn.length === 0) toast('Signed in, but Spaces is not available for this account yet.', 'info')
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Sign-in failed', 'error')
         } finally {
@@ -154,15 +190,20 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         }
     }
 
-    const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
-    const selectedSpace = selection && selectedOrg ? (findSpace(selectedOrg, selection.spaceId) ?? null) : null
+    // One server (2026-11-09): no selection means the server itself, so the sidebar
+    // is there and an empty account lands on Start here — the web app's "/" starts
+    // with no selection, and a new account has nothing to land on (found the same
+    // evening: a wall that said "start a chat from the sidebar" with no sidebar).
+    const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : (orgs[0] ?? null)
+    // Membership is the one gate (2026-11-09, open spaces retired): a space you can select is one you are in.
+    const selectedSpace = selection && selectedOrg ? findSpace(selectedOrg, selection.spaceId) ?? null : null
 
-    // No (valid) selection: land on the first space there is. An org-level
+    // No (valid) selection: land on the first space there is. A server-level
     // surface (Activity) is a valid selection with no space.
     useEffect(() => {
         if (loading) return
         if (selectedOrg && selectedSpace) return
-        if (selectedOrg && selection?.view === 'activity') return
+        if (selectedOrg && (selection?.view || selection?.spaceId)) return
         const first = selectedOrg ?? orgs.find((o) => o.spaces.length > 0 || o.directs.length > 0)
         const space = first?.spaces[0] ?? first?.directs[0]
         if (first && space) {
@@ -172,53 +213,69 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
         }
     }, [loading, orgs, selection, selectedOrg, selectedSpace, onSelect])
 
-    if (loading) {
-        return (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground gap-2">
-                <Loader2 className="size-3.5 animate-spin" /> Loading…
-            </div>
-        )
-    }
-
-    if (selectedOrg && selectedSpace) {
-        return (
-            <SpacePane
-                key={`${selectedOrg.id}/${selectedSpace.id}`}
-                org={selectedOrg}
-                space={selectedSpace}
-                selection={railSelection}
-                onSelect={onRailSelect}
-                onSwitchSpace={onSwitchSpace}
-                onOpenSession={onOpenSession}
-                onOpenActivity={onOpenActivity}
-                onOpenMessage={onOpenMessage}
-                active={active}
-            />
-        )
-    }
+    // The screen's own shape, pulsing, until the server answers (2026-11-09).
+    if (loading) return <SpacesSkeleton />
 
     if (selectedOrg) {
-        return <div className="spaces-surface flex min-h-0 flex-1 flex-col">
-            <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
-                <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} />
-            </header>
-            <div className="flex min-h-0 flex-1">
-            <aside className="w-64 shrink-0 border-r border-border bg-[var(--rowboat-panel-soft)]">
-                <SpaceRailSections orgId={selectedOrg.id} active={active} activityActive={selection?.view === 'activity'}
-                    onOpenMessage={onOpenMessage} onOpenActivity={onOpenActivity}>
-                <div className="flex h-8 shrink-0 items-center px-2">
-                    <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
+        const empty = selectedOrg.spaces.length === 0 && selectedOrg.directs.length === 0
+        return <div className="spaces-surface flex min-h-0 flex-1">
+            <SpaceRail
+                org={selectedOrg}
+                spaceId={selectedSpace?.id ?? ''}
+                onOpenSpace={(orgId, spaceId) => {
+                    // The open space's own row: back to its stream.
+                    if (selectedSpace && orgId === selectedOrg.id && spaceId === selectedSpace.id) onRailSelect({ kind: 'general' })
+                    else onSwitchSpace(orgId, spaceId)
+                }}
+                onOpenSettings={(orgId, spaceId) => onSwitchSpace(orgId, spaceId, { kind: 'settings' })}
+                onOpenThreads={onOpenThreads} threadsActive={selection?.view === 'threads'}
+                onOpenAgents={onOpenAgents} agentsActive={selection?.view === 'agents'}
+                onOpenActivity={onOpenActivity} activityActive={selection?.view === 'activity'}
+                open={railPinned}
+                onTogglePin={toggleRailPin}
+                peekRef={railPeekRef}
+                account={accountMenu}
+                // In a space the header's "Show sidebar" button is the way back; the server pages keep the edge sliver.
+                edgeless={!!selectedSpace}
+            />
+            <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+            {selectedSpace ? (
+                <SpaceAccessProvider orgId={selectedOrg.id} space={selectedSpace}>
+                <SpacePane
+                    key={`${selectedOrg.id}/${selectedSpace.id}`}
+                    org={selectedOrg}
+                    space={selectedSpace}
+                    selection={railSelection}
+                    onSelect={onRailSelect}
+                    onSwitchSpace={onSwitchSpace}
+                    onOpenSession={onOpenSession}
+                    railOpen={railPinned}
+                    onToggleRail={toggleRailPin}
+                    railPeekRef={railPeekRef}
+                    active={active && railSelection.kind !== 'settings'}
+                />
+                </SpaceAccessProvider>
+            ) : selection?.spaceId ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-sm text-muted-foreground">
+                    <p>This chat is unavailable or you are no longer in it.</p>
+                    <Button variant="outline" onClick={() => onSelect({ orgId: selectedOrg.id, spaceId: '', view: 'activity' })}>Open Activity</Button>
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-                    <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} showDiscussions={false} />
-                </div>
-                </SpaceRailSections>
-            </aside>
-            {selection?.view === 'activity' && onOpenMessage ? (
+            ) : selection?.view === 'agents' ? (
+                <AgentsView key={selectedOrg.id} org={selectedOrg} />
+            ) : selection?.view === 'threads' ? (
+                <MyThreadsView key={selectedOrg.id} org={selectedOrg} active={active}
+                    onOpenThread={(spaceId, rootMessageId) => onSwitchSpace(selectedOrg.id, spaceId, { kind: 'thread', rootMessageId })} />
+            ) : selection?.view === 'activity' && onOpenMessage ? (
                 <ActivityView org={selectedOrg} active={active} onOpenMessage={onOpenMessage} />
+            ) : selectedOrg.error ? (
+                <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+                    Spaces is unreachable. Retry from the sidebar, or sign in again.
+                </div>
+            ) : empty ? (
+                <StartHere org={selectedOrg} onOpenSpace={onSwitchSpace} {...(onOpenAgents ? { onOpenAgents } : {})} />
             ) : (
                 <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-                    {selectedOrg.error ? 'This server is unreachable. Retry or sign in from the server options.' : 'Create a space to start a conversation.'}
+                    Pick a chat, or start a new one from the sidebar.
                 </div>
             )}
             </div>
@@ -231,38 +288,23 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-xl bg-muted">
                     <FolderOpen className="size-5 text-muted-foreground" />
                 </div>
-                {orgs.length === 0 ? (
-                    <>
-                        <h2 className="text-sm font-semibold">No spaces yet</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            Spaces are where your team talks every day — and where the files you decide on live. Your agent and
-                            your teammates&apos; agents work in them with you.
-                        </p>
-                        {account && !account.hasSession ? (
-                            <div className="mt-4 flex flex-col items-center gap-2">
-                                <Button size="sm" onClick={() => void signInRowboat()} disabled={signingIn}>
-                                    {signingIn ? <Loader2 className="size-4 mr-1 animate-spin" /> : null} Sign in with Rowboat
-                                </Button>
-                                <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => openServerDialog({ kind: 'join' })}>
-                                    Have an invite link or a server address?
-                                </button>
-                            </div>
-                        ) : (
-                            <Button size="sm" className="mt-4" onClick={() => openServerDialog({ kind: 'create' })}>
-                                <Plus className="size-4 mr-1" /> Add a server
-                            </Button>
-                        )}
-                    </>
-                ) : (
-                    <>
-                        <h2 className="text-sm font-semibold">No space to open</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            {orgs.some((o) => o.error)
-                                ? 'A server is unreachable — check it is running and you are signed in.'
-                                : 'Create the first space from the server row in the sidebar.'}
-                        </p>
-                    </>
-                )}
+                {/* No server record at all: signed out, or the server never answered. */}
+                <h2 className="text-sm font-semibold">Spaces</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                    Where you and your agents work with other people: direct messages, and spaces for whatever you are working on.
+                </p>
+                <div className="mt-4 flex flex-col items-center gap-2">
+                    {account && !account.hasSession ? (
+                        <Button size="sm" onClick={() => void signInRowboat()} disabled={signingIn}>
+                            {signingIn ? <Loader2 className="size-4 mr-1 animate-spin" /> : null} Sign in with Rowboat
+                        </Button>
+                    ) : (
+                        <Button size="sm" onClick={() => void refreshSpacesOrgs()}>Retry</Button>
+                    )}
+                    <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => openServerDialog({ kind: 'join' })}>
+                        Have an invite link, or your own server?
+                    </button>
+                </div>
             </div>
         </div>
     )
@@ -272,26 +314,34 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, onOpenMessage, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, active = true, railOpen, onToggleRail, railPeekRef }: {
     org: OrgWithSpaces
     space: spaces.Space
+    /** The sidebar, hoisted to SpacesView (2026-11-09): docked or tucked away, its lock, and its hover peek — for the header's "Show sidebar" button. */
+    railOpen: boolean
+    onToggleRail: () => void
+    railPeekRef: RefObject<SecondaryRailPeek | null>
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     /** The quick switcher can land on another space entirely. */
     onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
-    onOpenActivity?: (orgId: string) => void
-    onOpenMessage?: (target: ActivityTarget) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
 }) {
+    const { writable, archived } = useSpaceAccess()
+    // Membership is the one gate (2026-11-09): an open space is a space you are in.
+    const member = true
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
     const [filesLoaded, setFilesLoaded] = useState(false)
     const [filesError, setFilesError] = useState<string | null>(null)
-    const collectionOpen = selection.kind === 'discussions' || selection.kind === 'files'
+    // 2026-11-03: Threads uses the stream's side-pane layout and keeps its list in place.
+    const threadsListOpen = selection.kind === 'discussions'
+    // Files and the graph each take the whole pane; the stream stays mounted behind them.
+    const collectionOpen = selection.kind === 'files' || selection.kind === 'graph'
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
-    // The org listing (module store): resolves a canonical link's org address
-    // + space to an org this install is in.
+    // The listing (module store): resolves a canonical link's address + space
+    // to the server this install is in.
     const { orgs } = useSpacesOrgs()
     // Local-only empty folders: folders are key prefixes, so an empty one has
     // nothing to store — it lives here until its first file lands (then the
@@ -302,26 +352,28 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     const feed = useSpaceFeed(org.id, space.id)
     const stream = useStream(org.id, space.id)
-    const presence = useSpacePresence(org.id, space.id, org.memberId)
+    const presence = useSpacePresence(org.id, space.id, org.memberId, member || active)
     const readOffset = useStreamReadOffset(org.id, space.id)
     // The roster comes from the module store (cached, hydrated in render) so
     // names resolve in the same first frame as the stream's cached tail.
-    // `members` is THIS space's roster — membership: header avatars, invites,
-    // presence. Names and profiles reach past it to the whole org (this
-    // roster winning on identity), so a chip for someone mentioned from
-    // another space still reads as a person here.
+    // `members` is THIS space's roster — membership, roles and seats: header
+    // avatars, invites, presence. Names and profiles reach past it to your
+    // contacts (this roster winning on identity), so a chip for someone
+    // mentioned from another space still reads as a person here.
     const members = useSpaceMembers(org.id, space.id)
     // Agent invocations (Harbor spec §8): the lines under messages that invoked an agent.
     const invocationsByMessage = useSpaceInvocations(org.id, space.id)
     const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
     const orgRoster = useOrgRoster(org.id, orgSpaceIds)
     const profiles = useMemo(() => {
-        const byId = new Map(orgRoster.map((m) => [m.id, m]))
+        const byId = new Map<string, Profile>(orgRoster.map((m) => [m.id, m]))
         for (const m of members) byId.set(m.id, m)
         return [...byId.values()]
     }, [orgRoster, members])
-    const memberNames = useMemo(() => new Map(profiles.map((m) => [m.id, m.displayName])), [profiles])
-    const selfIsAdmin = profiles.find((m) => m.id === org.memberId)?.role === 'admin'
+    // A deleted account keeps its name on what it wrote, marked (2026-10-13).
+    const memberNames = useMemo(() => new Map(profiles.map((m) => [m.id, memberLabel(m)])), [profiles])
+    // Roles are the space's (spec §4 Roles, 2026-11-09): the admin bit is on this roster's row.
+    const selfIsAdmin = members.find((m) => m.id === org.memberId)?.role === 'admin'
     const spaceNames = useSpaceNames(org.id)
     // A direct message is this same pane with a two-person roster: named by
     // the other person, no invites.
@@ -339,7 +391,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         // The roster store fetches on its own mount; the tick keeps it fresh
         // on live activity (throttled inside — one refetch per burst).
         refreshMembers(org.id, space.id)
-        void window.ipc.invoke('spaces:listAssets', { orgId: org.id, spaceId: space.id })
+        void invokeSpace('spaces:listAssets', { orgId: org.id, spaceId: space.id })
             .then((assetsRes) => {
                 if (cancelled) return
                 setEntries(assetsRes.entries)
@@ -374,17 +426,18 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const removeFolder = (path: string) =>
         setDraftFolders((prev) => prev.filter((f) => f !== path && !f.startsWith(`${path}/`)))
 
-    useSpaceLive(org.id, space.id, (frame) => {
+    useSpaceLive(member || active ? org.id : null, member || active ? space.id : null, (frame) => {
         // Coarse-grained on purpose: any durable event refreshes the open
         // panes — and so does a (re)subscribe, since events published while a
         // socket was dead may have no replay to arrive by.
+        if (frame.kind === 'event' && frame.event.type === 'membership') refreshMembers(org.id, space.id, { force: true })
         if (frame.kind !== 'event' && frame.kind !== 'subscribed') return
         setRefreshTick((t) => t + 1)
     })
 
     const invite = async () => {
         try {
-            const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+            const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
             await navigator.clipboard.writeText(result.link)
             analytics.spacesInviteLinkCopied()
             toast('Invite link copied to clipboard', 'success')
@@ -409,8 +462,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // excluded: their saves are throttled snapshots, not reading material —
     // the boards rail is their surface, not the files tree.
     const unreadAssetIds = useMemo(
-        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetId)),
-        [feed.changeSets, readOffset, org.memberId],
+        () => new Set(feed.changeSets.filter((c) => member && isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetId)),
+        [feed.changeSets, readOffset, org.memberId, member],
     )
 
     // ------------------------------------------------------------------
@@ -433,13 +486,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     useEffect(() => {
         columnMemory.set(memoryKey, { docKey, docIsBoard, chatOpen })
     }, [memoryKey, docKey, chatOpen])
-    // The chat/files rail: docked by default (persisted), or a sliver at the
-    // edge that peeks the rail as a drawer on hover — see SpaceRail. (The
-    // shell sidebar contracts to the dock while in Spaces, so this rail is
-    // THE sidebar here.)
-    const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railOpen') !== '0')
-
-    // Width of the pane drives the Split floor and pinnability.
+    // Width of the pane (the content beside the sidebar) drives the Split floor.
     const paneRef = useRef<HTMLDivElement | null>(null)
     const [paneWidth, setPaneWidth] = useState(() => window.innerWidth)
     useEffect(() => {
@@ -466,11 +513,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // the doc shows when open; both = two columns. Narrow: one column — the
     // doc if open, else the chat.
     const twoFits = paneWidth >= SPLIT_FLOOR
-    const docOpen = docKey !== null
-    const showChat = twoFits ? chatOpen || !docOpen : !docOpen
+    const docOpen = !threadsListOpen && docKey !== null
+    const showChat = threadsListOpen || (twoFits ? chatOpen || !docOpen : !docOpen)
     const showDoc = docOpen
     const split = showChat && showDoc
-    const railOpen = railPinned
 
     // Resizable divider: drag it; the document width persists.
     const [docWidth, setDocWidth] = useState<number>(() => {
@@ -573,7 +619,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const docAnim = anim?.column === 'doc' ? anim : null
     // What is in the tree: the logical state, plus whatever is still sliding out
     // (or, narrow, the chat being pushed out by an entering doc).
-    const docRender = docKey ?? (docAnim?.phase === 'exit' ? docAnim.docKey : null)
+    const docRender = threadsListOpen ? null : docKey ?? (docAnim?.phase === 'exit' ? docAnim.docKey : null)
     const chatRender = showChat || chatAnim?.phase === 'exit' || docAnim?.phase === 'enter'
     const columnStyle = (a: ColumnAnim): React.CSSProperties => ({
         ['--rb-col-w' as string]: `${a.width}px`,
@@ -584,7 +630,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // right; anything from Chat reopens the left — and, narrow, closes the
     // doc so the chat actually shows.
     const placeSelection = (next: RailSelection) => {
-        if (next.kind === 'discussions' || next.kind === 'files') return
+        if (next.kind === 'discussions' || next.kind === 'files' || next.kind === 'graph') return
         if (next.kind === 'file' || next.kind === 'whiteboard') {
             setDocKey(next.assetId)
             setDocIsBoard(next.kind === 'whiteboard' || spaces.isWhiteboardPath(entryById.get(next.assetId)?.path ?? ''))
@@ -603,7 +649,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
      * store follows, and the caller opens it by id.
      */
     const createFile = async (input: spaces.SpacesCreateInput): Promise<spaces.SpacesAssetEntry> => {
-        const { asset } = await window.ipc.invoke('spaces:createAsset', { orgId: org.id, spaceId: space.id, input })
+        const { asset } = await invokeSpace('spaces:createAsset', { orgId: org.id, spaceId: space.id, input })
         setEntries((prev) => {
             const next = [...prev.filter((e) => e.id !== asset.id), asset]
             noteListingFromEntries(org.id, space.id, next)
@@ -668,12 +714,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the board', 'error'))
     }
 
-    /** The rail's lock: docked ⇄ edge sliver (the rail peeks on hover by itself). */
-    const toggleRailPin = () => {
-        const pin = !railPinned
-        localStorage.setItem('spaces:railOpen', pin ? '1' : '0')
-        setRailPinned(pin)
-    }
+    const railUnread = useSpacesUnreadCounts()
+    const railHasUnread = [...railUnread].some(([key, badge]) => key.startsWith(`${org.id}/`) && badge.unread > 0)
 
     // Selecting places the thing in its column (see placeSelection). The
     // rail stays where it is — it is a sidebar, not a flyout.
@@ -683,6 +725,19 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         placeSelection(next)
     }
     const openFile = (assetId: string) => select({ kind: 'file', assetId })
+    // A thread anywhere in the org (sessions, 2026-11-05): here it is a
+    // selection, elsewhere a switch of space that lands on the thread.
+    const openThreadIn = (spaceId: string, rootMessageId: string) => {
+        if (spaceId === space.id) select({ kind: 'thread', rootMessageId })
+        else onSwitchSpace(org.id, spaceId, { kind: 'thread', rootMessageId })
+    }
+    // Replies inline (2026-10-25): a space shown inline has no threads, so an
+    // open thread pane closes with the switch, and a reply link lands in the stream.
+    const streamView = useStreamView(org.id, space.id)
+    const setRepliesInline = (inline: boolean) => {
+        setStreamView(org.id, space.id, inline ? 'inline' : 'threads')
+        if (inline && selection.kind === 'thread') select({ kind: 'general' })
+    }
     /**
      * The tree's "+ New file": the file is born empty at the typed path (the
      * org refuses an occupied one, so a name already in use just opens that
@@ -698,19 +753,30 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .then((asset) => openFile(asset.id))
             .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the file', 'error'))
     }
+    /** "New todo list": born with one section, opens in the todo editor (a taken name opens that list). */
+    const createTodoList = (path: string) => {
+        const existing = entries.find((e) => e.path === path && !e.state)
+        if (existing) {
+            openFile(existing.id)
+            return
+        }
+        createFile({ path, newContent: NEW_TODO_LIST_CONTENT, reason: 'new todo list' })
+            .then((asset) => openFile(asset.id))
+            .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the todo list', 'error'))
+    }
     /** A canonical link into another space the reader is in: the org address names the org, App does the navigation. */
-    const resolveSpace = (orgAddress: string, spaceId: string): string | null => {
-        const target = orgs.find((o) => o.address === orgAddress)
-        return target && findSpace(target, spaceId) ? target.id : null
+    const resolveSpace = (orgAddress: string, _spaceId: string): string | null => {
+        const target = orgs.find((o) => onServer(orgAddress, o.address))
+        return target?.id ?? null
     }
     const openSpaceFile = (orgId: string, spaceId: string, assetId: string) => {
         if (orgId === org.id && spaceId === space.id) openFile(assetId)
         else onSwitchSpace(orgId, spaceId, { kind: 'file', assetId })
     }
-    const resolveOrg = (orgAddress: string): string | null => orgs.find((o) => o.address === orgAddress)?.id ?? null
+    const resolveOrg = (orgAddress: string): string | null => orgs.find((o) => onServer(orgAddress, o.address))?.id ?? null
     /** A person link or the popover's Message action: the org creates the DM on first use, the listing learns it, then it opens. */
     const openDirect = (orgId: string, memberId: string) => {
-        void window.ipc.invoke('spaces:openDirect', { orgId, memberId })
+        void invokeSpace('spaces:openDirect', { orgId, memberId })
             .then(async ({ space: dm }) => {
                 await refreshSpacesOrgs()
                 if (dm.id !== space.id) onSwitchSpace(orgId, dm.id)
@@ -719,9 +785,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }
     /** A message link: read the message to learn its thread, then land on it — here, or in the space it lives in. */
     const openMessage = (orgId: string, spaceId: string, messageId: string) => {
-        void window.ipc.invoke('spaces:getMessage', { orgId, spaceId, messageId })
+        void invokeSpace('spaces:getMessage', { orgId, spaceId, messageId })
             .then(({ message }) => {
-                const rootId = message.threadRoot ?? STREAM_READ_KEY
+                const rootId = message.threadRoot === undefined || getStreamView(orgId, spaceId) === 'inline' ? STREAM_READ_KEY : message.threadRoot
                 if (orgId === org.id && spaceId === space.id) {
                     navigateToMessage(rootId, messageId, message.offset)
                     return
@@ -739,9 +805,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     /** Search / pinned / saved landings: open the surface, then scroll + flash (the offset, when held, spares the pane a lookup). */
     const navigateToMessage = (rootMessageId: string, messageId: string, offset?: number) => {
-        requestJump({ topicId: rootMessageId, messageId, ...(offset !== undefined ? { offset } : {}) })
-        // STREAM_READ_KEY stands for the stream itself; anything else is a thread.
-        if (rootMessageId === STREAM_READ_KEY) select({ kind: 'general' })
+        // STREAM_READ_KEY stands for the stream itself; anything else is a thread,
+        // unless this space shows replies inline, where the stream holds them all.
+        const toStream = rootMessageId === STREAM_READ_KEY || streamView === 'inline'
+        requestJump({ topicId: toStream ? STREAM_READ_KEY : rootMessageId, messageId, ...(offset !== undefined ? { offset } : {}) })
+        if (toStream) select({ kind: 'general' })
         else select({ kind: 'thread', rootMessageId })
     }
 
@@ -801,18 +869,19 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     const selfName = memberNames.get(org.memberId) ?? org.memberId
 
-    const here = presence.here.filter((id) => members.some((m) => m.id === id))
-    // Roster for the members popover: whoever is here floats up, then A–Z.
+    const peopleOnline = usePeopleOnline(org.id)
+    const here = members.filter(m => m.kind === 'human' && peopleOnline.has(m.id)).map(m => m.id)
     const hereSet = new Set(here)
-    const roster = [...members].sort(
-        (a, b) => Number(hereSet.has(b.id)) - Number(hereSet.has(a.id)) || a.displayName.localeCompare(b.displayName),
-    )
+    // The header's face pile: people before integrations, whoever is here first.
+    const facepile = [...members].sort((a, b) => Number(a.kind === 'agent') - Number(b.kind === 'agent')
+        || Number(hereSet.has(b.id)) - Number(hereSet.has(a.id))).slice(0, 3)
 
     // The chat surface keeps its context while a file has focus: a thread
     // stays open beside the document it changed (fromThreadRootId), otherwise
     // the last chat selection sticks until the user picks another.
     const chatContextRef = useRef<string | null>(null)
     if (selection.kind === 'thread') chatContextRef.current = selection.rootMessageId
+    else if (selection.kind === 'discussions') chatContextRef.current = selection.rootMessageId ?? null
     else if (selection.kind === 'general') chatContextRef.current = null
     else if ((selection.kind === 'file' || selection.kind === 'attachment') && selection.fromThreadRootId) chatContextRef.current = selection.fromThreadRootId
     const chatRootId = chatContextRef.current
@@ -862,10 +931,38 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
     const [trashOpen, setTrashOpen] = useState(false)
     const [addMembersOpen, setAddMembersOpen] = useState(false)
+    // The header's two menus each swap to a sub-view (pins, invite link) in place.
+    const [titleMenuOpen, setTitleMenuOpen] = useState(false)
+    // The title stops short of the desktop's centred Spaces | Local tabs (2026-11-13).
+    const titleRef = useRef<HTMLButtonElement | null>(null)
+    useTitlebarTabsClearance(titleRef)
+    const [titleMenuView, setTitleMenuView] = useState<'menu' | 'bookmarks'>('menu')
+    const [peopleOpen, setPeopleOpen] = useState(false)
+    const [peopleView, setPeopleView] = useState<'list' | 'invite'>('list')
+    // Archive and delete are a space admin's, on a shared space (harbor #1186, #1189; spec §4 Roles, 2026-11-09).
+    const canAdminSpace = selfIsAdmin && !isDirect
+    // Anyone in a space invites to it (2026-11-09): no policy knob.
+    const mayInvite = !isDirect
+    const [unarchiving, setUnarchiving] = useState(false)
+    const unarchive = async () => {
+        setUnarchiving(true)
+        try {
+            await window.ipc.invoke('spaces:unarchiveSpace', { orgId: org.id, spaceId: space.id })
+            await refreshSpacesOrgs()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not unarchive the space', 'error')
+        } finally {
+            setUnarchiving(false)
+        }
+    }
+
+    if (selection.kind === 'settings' && !isDirect) return <SpaceSettings org={org} space={space} members={members} onBack={() => select({ kind: 'general' })} onShowSidebar={onToggleRail} />
 
     return (
         <SpaceMembersProvider members={memberNames} spaceNames={spaceNames}>
         <SpaceProfilesProvider members={profiles} here={hereSet} selfId={org.memberId}>
+        <MemberAdminProvider orgId={org.id} selfId={org.memberId} isAdmin={selfIsAdmin}
+            space={canAdminSpace ? space : undefined} spaceMembers={members}>
         <SpaceRefsProvider refs={spaceRefs}>
         <SpaceInvocationsProvider byMessage={invocationsByMessage} orgId={org.id} selfId={org.memberId} isAdmin={selfIsAdmin}>
         <SpaceAssetsProvider entries={entries}>
@@ -875,18 +972,43 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
         }}>
         <div className="spaces-surface relative flex-1 min-h-0 flex flex-col">
+            {member && archived && <div className="flex items-center justify-between gap-3 border-b border-border bg-muted px-4 py-2 text-sm">
+                <span className="flex items-center gap-2"><Archive className="size-3.5 shrink-0 text-muted-foreground" />This space is archived. You can read it, but nobody can post.</span>
+                {canAdminSpace && <Button size="sm" variant="outline" onClick={() => void unarchive()} disabled={unarchiving}>{unarchiving ? 'Unarchiving…' : 'Unarchive'}</Button>}
+            </div>}
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
-            <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
-                <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} />
-                <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>
-                {/* Click to keep the identity card and its copy actions open. */}
-                <Popover>
-                    <PopoverTrigger asChild>
+            {/* Spaces redesign (2026-10-21): the header is the space's name (one
+                menu for details, pins, admin), its three views, then search,
+                people and the board. The old Invite button, bookmark icon and ⋯
+                menu folded into those — every action is still one or two clicks. */}
+            <header className="spaces-header flex shrink-0 items-center gap-3 border-b border-border">
+                {/* With the rail tucked away, this is the way back (2026-10-22),
+                    replacing the hidden 10px edge sliver: hover previews the
+                    rail, click docks it. It carries the sliver's unread dot. */}
+                {!railOpen && <Tooltip delayDuration={500}>
+                    <TooltipTrigger asChild>
                         <button
                             type="button"
-                            aria-label={isDirect ? 'Conversation details' : 'Space details'}
-                            className="flex h-9 min-w-0 max-w-[320px] shrink items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
+                            aria-label="Show sidebar"
+                            onClick={() => { railPeekRef.current?.leave(); onToggleRail() }}
+                            onMouseEnter={() => railPeekRef.current?.enter()}
+                            onMouseLeave={() => railPeekRef.current?.leave()}
+                            className="spaces-header-button spaces-rail-reveal relative -mr-1"
+                        >
+                            <PanelLeftOpen className="size-4" />
+                            {railHasUnread && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 rounded-full bg-foreground" />}
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={6} className="flex items-center gap-2">Show sidebar <Keys keys={SHORTCUTS.toggleSidebar} tone="dark" /></TooltipContent>
+                </Tooltip>}
+                <Popover open={titleMenuOpen} onOpenChange={(open) => { setTitleMenuOpen(open); if (!open) setTitleMenuView('menu') }}>
+                    <PopoverTrigger asChild>
+                        <button
+                            ref={titleRef}
+                            type="button"
+                            aria-label={isDirect ? 'Conversation menu' : 'Group menu'}
+                            className="spaces-title-button shrink"
                         >
                             <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
                                 {isDirect
@@ -894,216 +1016,161 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     : <Hash className="size-4 shrink-0 text-muted-foreground" />}
                                 <h1 className="truncate text-[15px] font-semibold">{spaceTitle}</h1>
                             </span>
+                            <ChevronDown className="spaces-title-chevron size-3.5 shrink-0 text-muted-foreground" />
                         </button>
                     </PopoverTrigger>
-                    <PopoverContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
-                        {/* "About this space", in the shape of About This Mac: the
-                            org's mark as the hero, the space as the title, then a
-                            label/value table — what you're looking at, who it
-                            belongs to, and who you are in it. */}
-                        <div className="flex flex-col items-center text-center">
-                            <OrgMonogram org={org} size="xl" />
-                            <div className={cn('mt-3 flex items-center text-lg font-semibold leading-tight', isDirect ? 'gap-1.5' : 'gap-0.5')}>
-                                {isDirect
-                                    ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
-                                    : <Hash className="size-4 text-muted-foreground" />}
-                                <span className="truncate">{spaceTitle}</span>
+                    <PopoverContent align="start" sideOffset={6} className="w-[300px] p-1.5">
+                        {titleMenuView === 'bookmarks' ? (
+                            <div className="spaces-subview">
+                                <button type="button" className="spaces-menu-row font-medium" onClick={() => setTitleMenuView('menu')}>
+                                    <ChevronLeft /> Pinned & saved
+                                </button>
+                                <div className="spaces-menu-sep" />
+                                <BookmarksPanel orgId={org.id} spaceId={space.id} streamKey={STREAM_READ_KEY} topics={feed.topics}
+                                    onNavigate={navigateToMessage} onClose={() => setTitleMenuOpen(false)} />
                             </div>
-                            <div className="mt-0.5 text-xs text-muted-foreground">
-                                {isSelf
-                                    ? `Your notes in ${org.name} — just you and your agent`
-                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : `A space in ${org.name}`}
+                        ) : <>
+                            <div className="px-2.5 pb-3 pt-2">
+                                <div className={cn('flex items-center text-[14px] font-semibold', isDirect ? 'gap-1.5' : 'gap-0.5')}>
+                                    {isDirect
+                                        ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
+                                        : <Hash className="size-3.5 text-muted-foreground" />}
+                                    <span className="truncate">{spaceTitle}</span>
+                                </div>
+                                <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                    {isSelf
+                                        ? 'Your notes — just you and your agents'
+                                        : isDirect ? 'A direct message — just the two of you' : 'A group: the people and agents in it, and nobody else'}
+                                </div>
+                                <div className="mt-2 text-xs text-muted-foreground">
+                                    {members.length} {members.length === 1 ? 'member' : 'members'}
+                                    {here.length > 0 && ` · ${here.length} online`}
+                                </div>
                             </div>
-                        </div>
-                        <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px]">
-                            <dt className="text-right font-medium">Server</dt>
-                            <dd className="truncate text-muted-foreground">{org.name}</dd>
-                            <dt className="text-right font-medium">Members</dt>
-                            <dd className="truncate text-muted-foreground">
-                                {members.length}{here.length > 0 && <span> · {here.length} here</span>}
-                            </dd>
-                            <dt className="text-right font-medium">You</dt>
-                            <dd className="min-w-0">
-                                <span className="inline-block max-w-full truncate rounded-[4px] bg-[var(--stream-you-wash)] px-[3px] py-px align-middle font-medium text-[var(--stream-you-ink)]">@{selfName}</span>
-                            </dd>
-                            <dt className="text-right font-medium">Member id</dt>
-                            <dd className="min-w-0"><CopyLine text={org.memberId} title="Copy your member id" className="font-mono text-xs" /></dd>
-                        </dl>
-                        <div className="mt-4 flex flex-col gap-1 border-t border-border pt-3">
-                            <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.spaceUrl(org.address, space.id))}>
-                                <LinkIcon className="size-3.5" /> {isDirect ? 'Copy conversation link' : 'Copy space link'}
-                            </Button>
-                            {isDirect && (
-                                <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.memberUrl(org.address, directOtherId))}>
-                                    <LinkIcon className="size-3.5" /> Copy member link
-                                </Button>
+                            {canAdminSpace && <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); select({ kind: 'settings' }) }}><Settings aria-hidden="true" /> Space settings</button>}
+                            <div className="spaces-menu-sep" />
+                            <button type="button" className="spaces-menu-row" onClick={() => setTitleMenuView('bookmarks')}>
+                                <Bookmark /> Pinned & saved <ChevronRight className="ml-auto" />
+                            </button>
+                            {LOCAL_RUNTIME && (
+                                <button type="button" className="spaces-menu-row" disabled={!writable} onClick={() => { setTitleMenuOpen(false); setScheduledOpen(true) }}>
+                                    <Clock /> Scheduled messages
+                                </button>
                             )}
-                            <Button variant="ghost" size="sm" className="justify-start" onClick={() => void copySpacesLink(spaces.orgUrl(org.address))}>
-                                <LinkIcon className="size-3.5" /> Copy server link
-                            </Button>
-                        </div>
+                            <button type="button" className="spaces-menu-row" disabled={!member} onClick={() => { setTitleMenuOpen(false); markAllRead() }}>
+                                <Check /> Mark all as read
+                            </button>
+                            {/* Replies inline or in threads (2026-10-25): this space's choice, kept on this device. */}
+                            <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); setRepliesInline(streamView !== 'inline') }}>
+                                {streamView === 'inline' ? <><MessagesSquare /> Show replies in threads</> : <><Rows3 /> Show replies inline</>}
+                            </button>
+                            <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void copySpacesLink(spaces.spaceUrl(org.address, space.id)) }}>
+                                <LinkIcon /> {isDirect ? 'Copy conversation link' : 'Copy space link'}
+                            </button>
+                            {isDirect && (
+                                <button type="button" className="spaces-menu-row" onClick={() => { setTitleMenuOpen(false); void copySpacesLink(spaces.memberUrl(org.address, directOtherId)) }}>
+                                    <LinkIcon /> Copy member link
+                                </button>
+                            )}
+
+                            <div className="spaces-menu-sep" />
+                            <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-0.5 text-[11.5px] text-muted-foreground">
+                                <span className="shrink-0">You are</span>
+                                <span className="min-w-0 truncate rounded-[4px] bg-[var(--stream-you-wash)] px-[3px] py-px font-medium text-[var(--stream-you-ink)]">@{selfName}</span>
+                                <CopyLine text={org.memberId} title="Copy your member id" className="font-mono text-[11px]" />
+                            </div>
+                        </>}
                     </PopoverContent>
                 </Popover>
 
-                {/* Centre: search gets the room. */}
-                <div className="flex min-w-0 flex-1 justify-center px-2">
-                    <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} className="w-full max-w-[480px]" />
-                </div>
+                <SpaceContentTabs orgId={org.id} spaceId={space.id} direct={isDirect} graph={space.graph === true || selection.kind === 'graph'}
+                    entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} />
 
-                {/* Right: Invite (a DM's membership is fixed — nobody to
-                    invite), members as one pill (a dot when anyone is here —
-                    the roster says who), then the tools. */}
-                {!isDirect && (
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <button
-                                type="button"
-                                title={`Invite someone to #${space.name}`}
-                                className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
-                            >
-                                <UserPlus className="size-3.5" />
-                                <span>Invite</span>
-                            </button>
-                        </PopoverTrigger>
-                        <PopoverContent align="end" className="w-96 p-3">
-                            <InviteLinkPanel orgId={org.id} spaceId={space.id} spaceName={space.name} />
-                        </PopoverContent>
-                    </Popover>
-                )}
-                <Popover>
+                <div className="min-w-0 flex-1" />
+
+                <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} className="spaces-header-search shrink-0" />
+
+                {/* Members and invites are one control: the face pile opens the
+                    roster with Invite on top (a DM's membership is fixed). */}
+                <Popover open={peopleOpen} onOpenChange={(open) => { setPeopleOpen(open); if (!open) setPeopleView('list') }}>
                     <PopoverTrigger asChild>
                         <button
                             type="button"
-                            className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
-                            title={here.length > 0 ? `${members.length} members · ${here.length} here` : `${members.length} members`}
+                            className="spaces-header-button"
+                            aria-label={`Members — ${members.length}${here.length > 0 ? `, ${here.length} online` : ''}`}
+                            title={here.length > 0 ? `${members.length} members · ${here.length} online` : `${members.length} members`}
                         >
-                            <span className="relative">
-                                <Users className="size-3.5" />
-                                {here.length > 0 && <span className="absolute -right-1 -top-1 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-background" />}
+                            <span className="spaces-facepile flex" aria-hidden="true">
+                                {facepile.map((m) => <MemberAvatar key={m.id} id={m.id} name={m.displayName} size="sm" agent={m.kind === 'agent'} agentKind={m.agentKind} />)}
                             </span>
                             <span className="tabular-nums">{members.length}</span>
+                            {here.length > 0 && <span aria-hidden="true" className="-ml-0.5 size-1.5 rounded-full bg-[var(--rowboat-success)]" />}
                         </button>
                     </PopoverTrigger>
-                    <PopoverContent align="end" className="w-64 p-1.5">
-                        <div className="px-2 pb-1 pt-0.5 text-[13px] text-muted-foreground">
-                            Members — {members.length}
-                        </div>
-                        <div className="max-h-72 overflow-y-auto">
-                            {roster.map((m) => {
-                                const isHere = hereSet.has(m.id)
-                                return (
-                                    <MemberProfilePopover key={m.id} id={m.id}>
-                                        <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
-                                            <span className="relative shrink-0">
-                                                <MemberAvatar id={m.id} name={m.displayName} size="md" agent={m.kind === 'agent'} agentKind={m.agentKind} />
-                                                {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
-                                            </span>
-                                            <span className="min-w-0 flex-1 truncate text-sm">
-                                                {m.displayName}
-                                                {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
-                                            </span>
-                                            {m.kind === 'agent' && <AgentBadge agentKind={m.agentKind} agentConnection={m.agentConnection} />}
-                                            {m.role === 'admin' && (
-                                                <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
-                                            )}
-                                            {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
-                                        </button>
-                                    </MemberProfilePopover>
-                                )
-                            })}
-                        </div>
-                        {/* A DM's membership is fixed — there is nobody to add or invite. */}
-                        {!isDirect && (
-                            <div className="mt-1 border-t border-border pt-1">
-                                <button
-                                    type="button"
-                                    onClick={() => setAddMembersOpen(true)}
-                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                                >
-                                    <UserPlus className="size-3.5" /> Add people
+                    <PopoverContent align="end" sideOffset={6} className={cn('max-w-[calc(100vw-24px)] p-1.5', peopleView === 'invite' ? 'w-96' : 'w-[400px]')}>
+                        {peopleView === 'invite' ? (
+                            <div className="spaces-subview">
+                                <button type="button" className="spaces-menu-row font-medium" onClick={() => setPeopleView('list')}>
+                                    <ChevronLeft /> Invite to #{space.name}
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => void invite()}
-                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                                >
-                                    <LinkIcon className="size-3.5" /> Copy invite link
-                                </button>
+                                <div className="spaces-menu-sep" />
+                                <div className="p-1.5"><InviteLinkPanel orgId={org.id} spaceId={space.id} /></div>
                             </div>
-                        )}
+                        ) : <>
+                            <div className="flex items-baseline justify-between px-2.5 pb-2 pt-1.5">
+                                <span className="text-sm font-semibold">Members</span>
+                                <span className="text-xs text-muted-foreground">{members.length}{here.length > 0 && ` · ${here.length} online`}</span>
+                            </div>
+                            {writable && !isDirect && (
+                                <div className="flex flex-col gap-0.5 px-1 pb-1">
+                                    {mayInvite && (
+                                        <Button size="sm" className="mb-1 w-full" onClick={() => setPeopleView('invite')}>
+                                            <UserPlus className="size-3.5" /> Invite to #{space.name}
+                                        </Button>
+                                    )}
+                                    <button type="button" className="spaces-menu-row" onClick={() => { setPeopleOpen(false); setAddMembersOpen(true) }}>
+                                        <Users /> Add people and your agents
+                                    </button>
+                                    {mayInvite && (
+                                        <button type="button" className="spaces-menu-row" onClick={() => void invite()}>
+                                            <LinkIcon /> Copy invite link
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                            {writable && !isDirect && <div className="spaces-menu-sep" />}
+                            <MemberDirectory members={members} here={hereSet} selfId={org.memberId} />
+                        </>}
                     </PopoverContent>
                 </Popover>
-                <BookmarksPopover
-                    orgId={org.id}
-                    spaceId={space.id}
-                    streamKey={STREAM_READ_KEY}
-                    topics={feed.topics}
-                    onNavigate={navigateToMessage}
-                />
                 {!docOpen && lastDocEntry && !lastDocEntry.state && (
                     <button
                         type="button"
                         onClick={reopenDoc}
                         title={`Reopen ${lastDocEntry.path} beside the conversation`}
-                        className="inline-flex h-6 max-w-[14rem] items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                        className="spaces-header-button max-w-[14rem]"
                     >
-                        <FileText className="size-3 shrink-0" />
+                        <FileText className="size-3.5 shrink-0" />
                         <span className="truncate font-mono text-[11px]">{lastDocEntry.path.split('/').pop()}</span>
-                        <Columns2 className="size-3 shrink-0" />
+                        <Columns2 className="size-3.5 shrink-0" />
                     </button>
                 )}
                 <button
                     type="button"
+                    aria-label="Whiteboard"
+                    aria-pressed={isWhiteboard}
                     title={isWhiteboard ? `Close the board ${chord('4')}` : `Whiteboard — draw together, live ${chord('4')}`}
                     onClick={toggleWhiteboard}
-                    className={cn(
-                        'inline-flex h-6 items-center gap-1.5 rounded-md border px-2 text-xs',
-                        isWhiteboard
-                            ? 'border-primary/40 bg-primary/10 text-foreground'
-                            : 'border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                    )}
+                    className="spaces-header-button"
                 >
-                    <PenTool className="size-3.5" />
-                    {/* Stable identity on purpose: always "Board", active state via the
-                        highlight — the board's NAME lives in the chip on the canvas. */}
-                    <span className="hidden lg:inline">Board</span>
+                    <PenTool className="size-4" />
                 </button>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="size-7 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={markAllRead}>
-                            <Check className="size-3.5 mr-2" /> Mark all read
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setScheduledOpen(true)}>
-                            <Clock className="size-3.5 mr-2" /> Scheduled
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
             </header>
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
-                <SpaceRail
-                    onOpenMessage={onOpenMessage}
-                    active={active}
-                    onOpenActivity={onOpenActivity}
-                    org={org}
-                    onOpenSpace={(orgId, spaceId) => {
-                        if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })
-                        else onSwitchSpace(orgId, spaceId)
-                    }}
-                    spaceId={space.id}
-                    open={railOpen}
-                    onTogglePin={toggleRailPin}
-                />
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
-                    <SpaceContentTabs orgId={org.id} orgAddress={org.address} spaceId={space.id} direct={isDirect} topics={feed.topics}
-                        entries={entries} unreadAssetIds={unreadAssetIds} selection={selection} memberNames={memberNames}
-                        spaceNames={spaceNames} onSelect={select} topicsLoaded={feed.loaded} filesLoaded={filesLoaded} filesError={filesError} />
-                    {selection.kind === 'discussions' && <SpaceDiscussionsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
-                        topics={feed.topics} direct={isDirect} loaded={feed.loaded} memberNames={memberNames} spaceNames={spaceNames}
-                        presence={presence} onOpen={(rootMessageId) => select({ kind: 'thread', rootMessageId })} />}
+                    {selection.kind === 'graph' && <SpaceGraphView orgId={org.id} space={space} members={members} admin={canAdminSpace} refreshTick={refreshTick}
+                        onOpenThread={(rootMessageId) => select({ kind: 'thread', rootMessageId })} onOpenSettings={() => select({ kind: 'settings' })} />}
                     {selection.kind === 'files' && <>
                         {filesError && <div role="alert" className="flex items-center gap-3 px-5 py-2 text-xs text-destructive">
                             Could not refresh files. <button type="button" className="underline" onClick={() => setRefreshTick((tick) => tick + 1)}>Retry</button>
@@ -1111,7 +1178,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         {!filesLoaded && <p className="px-5 py-2 text-xs text-muted-foreground">Loading files…</p>}
                         <SpaceFilesView orgId={org.id} orgAddress={org.address} spaceId={space.id} entries={entries} draftFolders={draftFolders}
                             unreadAssetIds={unreadAssetIds} selection={selection} onSelect={select} onCreateFile={createNamedFile}
-                            onCreateBoard={createBoard} onUploadFiles={setUploadFiles} onOpenTrash={() => setTrashOpen(true)}
+                            onCreateBoard={createBoard} onCreateTodoList={createTodoList} onUploadFiles={setUploadFiles} onOpenTrash={() => setTrashOpen(true)}
                             onAddFolder={addFolder} onRemoveFolder={removeFolder} />
                     </>}
                 {/* The columns. Chat on the left — the stream, or an open
@@ -1131,19 +1198,32 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 >
                 <div style={chatAnim ? { width: chatAnim.width } : undefined} className={cn('flex min-w-0 min-h-0', chatAnim ? 'shrink-0' : 'flex-1')}>
                     <div className={cn('flex-1 min-w-0 min-h-0', chatRootId && !threadBesideStream ? 'hidden' : 'flex')}>
-                        <GeneralStream
-                            org={org}
-                            space={space}
-                            stream={stream}
-                            presence={presence}
-                            memberNames={memberNames}
-                            onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
-                            onOpenSession={onOpenSession}
-                            onClose={split ? closeChat : undefined}
-                            visible={active && !collectionOpen && showChat && (!chatRootId || threadBesideStream)}
-                            composeActive={!chatRootId}
-                            showHeader={threadBesideStream || split || !!stream.error}
-                        />
+                        <div className={cn('min-w-0 min-h-0 flex-1', threadsListOpen ? 'flex' : 'hidden')}>
+                            {selection.kind === 'discussions' && <SpaceThreadsView orgId={org.id} orgAddress={org.address} spaceId={space.id}
+                                selfMemberId={org.memberId} topics={feed.topics} roots={stream.messages} hasMore={stream.hasMore} loadingOlder={stream.loadingOlder}
+                                onLoadOlder={() => void loadOlderStreamMessages(org.id, space.id)} direct={isDirect} loaded={feed.loaded && stream.ready} memberNames={memberNames} spaceNames={spaceNames}
+                                presence={presence} inline={streamView === 'inline'} selectedRootMessageId={chatRootId}
+                                onOpen={(rootMessageId) => select({ kind: 'discussions', rootMessageId })} />}
+                        </div>
+                        <div className={cn('min-w-0 min-h-0 flex-1', threadsListOpen ? 'hidden' : 'flex')}>
+                            <GeneralStream
+                                org={org}
+                                space={space}
+                                stream={stream}
+                                presence={presence}
+                                memberNames={memberNames}
+                                onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                                onOpenThreadIn={openThreadIn}
+                                openThreadId={chatRootId}
+                                onOpenSession={onOpenSession}
+                                onClose={split ? closeChat : undefined}
+                                visible={active && !collectionOpen && !threadsListOpen && showChat && (!chatRootId || threadBesideStream)}
+                                composeActive={!chatRootId}
+                                showHeader={threadBesideStream || split || !!stream.error}
+                                onAddPeople={() => setAddMembersOpen(true)}
+                                onOpenFiles={() => select({ kind: 'files' })}
+                            />
+                        </div>
                     </div>
                     {threadBesideStream && (
                         <ThreadResizeHandle
@@ -1170,14 +1250,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                 showBack={!threadBesideStream}
                                 expanded={threadExpanded}
                                 onToggleExpanded={!docOpen && (conversationWidth >= 840 || threadExpanded) ? toggleThreadExpanded : undefined}
-                                onBack={() => select({ kind: 'general' })}
+                                onBack={() => select(threadsListOpen ? { kind: 'discussions' } : { kind: 'general' })}
                                 onCloseColumn={split ? closeChat : undefined}
                                 onOpenFile={openFileFromThread(chatRootId)}
                                 onOpenSession={onOpenSession}
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
-                                onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                                onOpenThread={(id) => select({ kind: threadsListOpen ? 'discussions' : 'thread', rootMessageId: id })}
+                                onOpenThreadIn={openThreadIn}
                                 visible={active && !collectionOpen && showChat}
                             />
                         </section>
@@ -1232,7 +1313,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             </Suspense>
                         ) : centerAssetId ? (
                             <div
-                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(entryById.get(centerAssetId)?.path ?? '') && 'mx-auto max-w-[880px]')}
+                                className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(entryById.get(centerAssetId)?.path ?? '') && !isTodoListPath(entryById.get(centerAssetId)?.path ?? '') && 'mx-auto max-w-[880px]')}
                                 // Beside the stream the markdown editor steps its headings
                                 // down to the compact scale (see editor.css).
                                 data-split-pane={split ? '' : undefined}
@@ -1268,14 +1349,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 </div>
                 </div>
             </div>
-            {scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
-            {!isDirect && (
+            {writable && scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
+            {writable && !isDirect && (
                 <AddMembersDialog org={org} space={space} members={members} open={addMembersOpen} onOpenChange={setAddMembersOpen} />
             )}
-            {trashOpen && (
+            {writable && trashOpen && (
                 <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
             )}
-            {uploadFiles && (
+            {writable && uploadFiles && (
                 <UploadFilesDialog
                     org={org}
                     space={space}
@@ -1290,115 +1371,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         </SpaceAssetsProvider>
         </SpaceInvocationsProvider>
         </SpaceRefsProvider>
+        </MemberAdminProvider>
         </SpaceProfilesProvider>
         </SpaceMembersProvider>
-    )
-}
-
-type InviteLinkState =
-    | { kind: 'loading' }
-    | { kind: 'ready'; link: string }
-    | { kind: 'error'; message: string }
-
-/** How much of the link's end stays visible when it is too long: enough of the token to recognise. */
-const INVITE_LINK_TAIL = 10
-
-/**
- * The link as plain monospace text, no box — a box says "type here". Too
- * long for the line, it truncates in the MIDDLE: the head gives way (an
- * ellipsis at its end) while the last characters stay put, so the token's
- * end is always there to recognise. The DOM holds the whole URL, so a click,
- * a drag or a copy carries all of it, not just what happens to be visible.
- */
-function InviteLinkText({ link }: { link: string }) {
-    const head = link.slice(0, -INVITE_LINK_TAIL)
-    const tail = link.slice(-INVITE_LINK_TAIL)
-    const selectAll = (el: HTMLElement) => {
-        const selection = window.getSelection()
-        if (!selection) return
-        const range = document.createRange()
-        range.selectNodeContents(el)
-        selection.removeAllRanges()
-        selection.addRange(range)
-    }
-    return (
-        <span
-            title={link}
-            onClick={(e) => selectAll(e.currentTarget)}
-            className="block w-full cursor-text select-text whitespace-nowrap font-mono text-xs leading-6"
-        >
-            {/* The head is an inline block (not a flex item) on purpose: block-level
-                pieces would put a line break between them in copied text. Its
-                width comes from spaces.css (.spaces-invite-link-head). */}
-            <span
-                className="spaces-invite-link-head inline-block overflow-hidden text-ellipsis align-bottom"
-                style={{ '--tail': `${INVITE_LINK_TAIL}ch` } as React.CSSProperties}
-            >{head}</span><span>{tail}</span>
-        </span>
-    )
-}
-
-/**
- * The header's Invite popover: the link as selectable text, a Copy button
- * that says "Copied" for a beat, and one line on who the link admits. A link
- * is minted each time the popover opens (its content mounts fresh), so there
- * is nothing stale to hand out.
- */
-function InviteLinkPanel({ orgId, spaceId, spaceName }: { orgId: string; spaceId: string; spaceName: string }) {
-    const [state, setState] = useState<InviteLinkState>({ kind: 'loading' })
-    const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
-    const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-    useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
-
-    useEffect(() => {
-        let cancelled = false
-        window.ipc.invoke('spaces:createInvite', { orgId, spaceId }).then(
-            (result) => { if (!cancelled) setState({ kind: 'ready', link: result.link }) },
-            (err: unknown) => {
-                if (cancelled) return
-                setState({ kind: 'error', message: err instanceof Error ? err.message : 'Could not create an invite' })
-            },
-        )
-        return () => { cancelled = true }
-    }, [orgId, spaceId])
-
-    const copyLink = (link: string) =>
-        navigator.clipboard.writeText(link).then(
-            () => {
-                analytics.spacesInviteLinkCopied()
-                setCopy('copied')
-                if (timer.current) clearTimeout(timer.current)
-                timer.current = setTimeout(() => setCopy('idle'), 1000)
-            },
-            () => setCopy('failed'),
-        )
-
-    const link = state.kind === 'ready' ? state.link : ''
-    return (
-        <div className="flex flex-col gap-2">
-            {state.kind === 'ready'
-                ? <InviteLinkText link={state.link} />
-                : <span className="block font-mono text-xs leading-6 text-muted-foreground">{state.kind === 'loading' ? 'Creating link…' : 'No link'}</span>}
-            <div className="flex items-center justify-between gap-3">
-                {state.kind === 'error'
-                    ? <p className="text-xs text-destructive">{state.message}</p>
-                    : copy === 'failed'
-                        ? <p className="text-xs text-destructive">Could not copy. Select the link above and copy it instead.</p>
-                        : <p className="text-xs text-muted-foreground">Anyone with it can join #{spaceName} on Rowboat.</p>}
-                <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={state.kind !== 'ready'}
-                    onClick={() => void copyLink(link)}
-                    className="min-w-24 rounded-md"
-                >
-                    {copy === 'copied'
-                        ? <><Check className="size-3.5 text-[var(--rowboat-success)]" /> Copied</>
-                        : 'Copy link'}
-                </Button>
-            </div>
-        </div>
     )
 }
 

@@ -1,3 +1,4 @@
+import { Availability } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
 import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
@@ -189,6 +190,7 @@ export const ipcSchemas = {
       installationId: z.string(),
       apiUrl: z.string(),
       appVersion: z.string(),
+      telemetryOptOut: z.boolean().optional(),
     }),
   },
   'workspace:getRoot': {
@@ -1342,13 +1344,6 @@ export const ipcSchemas = {
     ]),
     res: z.null(),
   },
-  // Main → renderer: View > Toggle Sidebar. Its own channel because the
-  // handler must live inside the SidebarProvider, below where menu:command's
-  // dispatcher sits.
-  'menu:toggleSidebar': {
-    req: z.null(),
-    res: z.null(),
-  },
   // The ⌥/⌃+Tab section switcher, forwarded from the main process when an
   // embedded page (e.g. the browser <webview>) holds keyboard focus — its
   // keystrokes go to the guest and never reach the app renderer's listeners.
@@ -1374,6 +1369,21 @@ export const ipcSchemas = {
   'app:setLoginItemSettings': {
     req: z.object({
       openAtLogin: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Anonymous product telemetry opt-out (2026-10-13, #415).
+  'app:getTelemetrySettings': {
+    req: z.null(),
+    res: z.object({
+      optOut: z.boolean(),
+    }),
+  },
+  'app:setTelemetrySettings': {
+    req: z.object({
+      optOut: z.boolean(),
     }),
     res: z.object({
       success: z.literal(true),
@@ -3821,7 +3831,9 @@ export const ipcSchemas = {
   },
 
   // ==========================================================================
-  // Spaces — shared containers on orgs speaking the spaces protocol.
+  // Spaces — the server speaking the spaces protocol. One server since
+  // 2026-11-09 (harbor spec §4): `orgId` on every channel is core's
+  // SPACES_SERVER_ID, the handle the many-org registry left behind.
   // Wire contract: @rowboat/spaces-protocol (apps/harbor/CONTRACT.md).
   // Protocol-shaped payloads cross as z.custom<T>() (see spaces.ts header).
   // ==========================================================================
@@ -3835,28 +3847,30 @@ export const ipcSchemas = {
     res: z.object({ org: SpacesOrgSummary }),
   },
   // The OAuth journey (spec §4). Paste an invite link → resolve pre-auth →
-  // join (system-browser dance if this install has no auth on the org, then
+  // join (system-browser dance if this install has no auth on the server, then
   // the server-side bind ceremony). signInOrg reruns the dance for a
-  // needs-relogin org. policy_refused / not_a_member surface as error
-  // messages verbatim — they are the honest states.
+  // needs-relogin server. not_a_member surfaces as an error message
+  // verbatim — it is the honest state.
   'spaces:resolveInviteLink': {
     req: z.object({ url: z.string() }),
     res: z.object({ baseUrl: z.string(), resolved: z.custom<SpacesTypes.ResolveInviteResult>() }),
   },
   'spaces:joinInvite': {
     req: z.object({ url: z.string() }),
-    res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>() }),
+    // The space joined, or the DM a person's link opened (2026-11-09); none
+    // when the link was the caller's own, or its target is gone.
+    res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>().optional() }),
   },
   'spaces:signInOrg': {
     req: z.object({ orgId: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
   },
   // One session, two uses (2026-09-14): the Rowboat account IS the identity
-  // every managed org trusts. accountState says whether a session exists and
+  // Rowboat's server trusts. accountState says whether a session exists and
   // whether the app is signed in on it (a space joined while staying signed
   // out of the app leaves a spaces-only session). signInRowboat is the Spaces
-  // door's sign-in: a browser trip only if there is no session, then the
-  // apex's listing of every managed org the person belongs to.
+  // door's sign-in: a browser trip only if there is no session, then Rowboat's
+  // server connected on it, the account made a member on first contact (2026-11-09).
   'spaces:accountState': {
     req: z.null(),
     res: z.object({ hasSession: z.boolean(), appSignedIn: z.boolean() }),
@@ -3865,27 +3879,12 @@ export const ipcSchemas = {
     req: z.null(),
     res: z.object({ orgs: z.array(SpacesOrgSummary) }),
   },
-  // The advanced door: a server by address — a URL, a host, or a managed
-  // org's slug — for an existing member (self-hosted orgs, or checking a
-  // specific one). Strangers get the not_a_member message.
+  // The advanced door: a server by address — a URL or a host — for
+  // self-hosters. Signing in makes the account a member of it (2026-11-09),
+  // and it becomes the one server this install talks to.
   'spaces:addOrgByAddress': {
     req: z.object({ address: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
-  },
-  // Self-serve org creation on the managed deployment's apex (free for now —
-  // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
-  // caller is the org's first admin. The address is generated in core
-  // (name-derived prefix + always-appended random suffix — decision
-  // 2026-09-07): the user names the server; nobody picks a slug.
-  'spaces:createOrg': {
-    req: z.object({ name: z.string() }),
-    res: z.object({ org: SpacesOrgSummary }),
-  },
-  // Where the Create button makes orgs (from /v1/config via core). null =
-  // no spaces fleet for this environment; the dialog says so honestly.
-  'spaces:apexInfo': {
-    req: z.null(),
-    res: z.object({ apexDomain: z.string().nullable() }),
   },
   'spaces:removeOrg': {
     req: z.object({ orgId: z.string() }),
@@ -3897,6 +3896,7 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), includeDirect: z.boolean().optional() }),
     res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
   },
+  // A new group: its creator is its admin (spec §4 Roles, 2026-11-09).
   'spaces:createSpace': {
     req: z.object({ orgId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
@@ -3905,8 +3905,49 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
-  // Agent members and their keys (2026-09-29): the caller's own agents, or
-  // every agent for an admin. A key's secret crosses IPC once, on the
+  // The space graph (2026-11-12, harbor spec §8 Space graph): an admin turns
+  // it on or off, any member reads it. `about` narrows the read to one thing.
+  'spaces:setSpaceGraph': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), enabled: z.boolean() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:getSpaceGraph': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), about: z.string().optional(), limit: z.number().optional() }),
+    res: z.custom<SpacesTypes.SpaceGraph>(),
+  },
+  // Archive, unarchive and delete a shared space (2026-10-14, harbor #1186
+  // and #1189): admin only. A delete's departure reaches every window as
+  // the space_removed frame, the same as leaving.
+  'spaces:archiveSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:unarchiveSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:deleteSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ deleted: z.literal(true) }),
+  },
+  // Admin controls (spec §4 Roles; per space since 2026-11-09): removing
+  // someone from a space, and the space's admins. The server refuses a
+  // non-admin; the app hides the controls too.
+  'spaces:removeMember': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberId: z.string() }),
+    res: z.object({ removed: z.boolean() }),
+  },
+  'spaces:setMemberRole': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberId: z.string(), role: z.enum(['admin', 'member']) }),
+    res: z.object({ membership: z.custom<SpacesTypes.Membership>() }),
+  },
+  // An agent's seat in a space — who may ask it there — its owner only (2026-11-09, harbor setAgentAccess).
+  'spaces:setAgentAccess': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), agentId: z.string(), invocableBy: z.enum(['owner', 'members']) }),
+    res: z.object({ membership: z.custom<SpacesTypes.Membership>() }),
+  },
+  // Agent members and their keys (2026-09-29): the caller's own agents (and
+  // nobody else's, 2026-11-09). A key's secret crosses IPC once, on the
   // response that created it, for the Agents dialog to show and forget.
   'spaces:listAgents': {
     req: z.object({ orgId: z.string() }),
@@ -3921,12 +3962,177 @@ export const ipcSchemas = {
       kind: z.string().optional(),
       connection: z.string().optional(),
       credential: z.string().optional(),
+      instance: z.string().optional(),
+      // A super agent's setup card this completes (2026-11-02).
+      request: z.string().optional(),
     }),
     res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>() }),
+  },
+  // The Add flow's platform setup (2026-11-02, harbor listSetupInstances /
+  // createSetupInstance): the instances a pasted key reaches on Agent37 or
+  // Maritime, and a new Agent37 instance, through the server so the web
+  // app can do it too. The key is not kept.
+  'spaces:setupInstances': {
+    req: z.object({ orgId: z.string(), connection: z.string(), key: z.string() }),
+    res: z.object({ instances: z.array(z.custom<SpacesTypes.PlatformInstance>()) }),
+  },
+  'spaces:createSetupInstance': {
+    req: z.object({ orgId: z.string(), connection: z.string(), key: z.string(), kind: z.string(), name: z.string(), monthlyBudgetUsd: z.number(), autoSleep: z.boolean() }),
+    res: z.object({ instance: z.custom<SpacesTypes.PlatformInstance>() }),
+  },
+  // Managed agents (2026-10-26): the kinds this server creates on Rowboat's own
+  // Maritime account (none when the deployment has no key: no Create button), creating
+  // one, and deleting its hosting. The Anthropic key for Claude Code goes to the agent's
+  // environment on Maritime and is kept nowhere; the `env` variables the same way.
+  'spaces:managedAgentKinds': {
+    req: z.object({ orgId: z.string() }),
+    // `billed` (2026-11-04): what Harbor creates bills to its creator's Rowboat plan; `upgradeUrl` is where it changes.
+    res: z.object({ kinds: z.array(z.string()), billed: z.boolean().optional(), upgradeUrl: z.string().optional() }),
+  },
+  'spaces:createManagedAgent': {
+    req: z.object({
+      orgId: z.string(),
+      displayName: z.string(),
+      kind: z.string(),
+      anthropicApiKey: z.string().optional(),
+      env: z.array(z.object({ key: z.string(), value: z.string(), secret: z.boolean().optional() })).optional(),
+      request: z.string().optional(),
+    }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>(), key: z.custom<SpacesTypes.AgentKeySecret>(), hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
+  'spaces:deleteManagedAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
+  /** Delete an agent its owner made, whatever runs it (2026-11-13); a managed one's hosting goes too. */
+  'spaces:deleteAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>(), hosting: z.custom<SpacesTypes.AgentHosting>().optional() }),
+  },
+  /** The owner's own provider key for a managed agent (2026-10-27): the end of its trial; also how a key is replaced. */
+  'spaces:setHostingLlm': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), provider: z.custom<SpacesTypes.LlmProvider>(), apiKey: z.string(), model: z.string().optional() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
+  // Managing a managed agent's VM from its page (2026-10-27): one Harbor call each, the owner or an admin.
+  'spaces:getHosting': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), machine: z.custom<SpacesTypes.HostingMachine>().optional(), env: z.array(z.custom<SpacesTypes.HostingEnvVar>()), spend: z.custom<SpacesTypes.HostingSpend>().optional(), usage: z.custom<SpacesTypes.HostingUsage>().optional() }),
+  },
+  'spaces:setHostingEnv': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), key: z.string(), value: z.string(), secret: z.boolean().optional() }),
+    res: z.object({ env: z.array(z.custom<SpacesTypes.HostingEnvVar>()) }),
+  },
+  'spaces:deleteHostingEnv': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), key: z.string() }),
+    res: z.object({ env: z.array(z.custom<SpacesTypes.HostingEnvVar>()) }),
+  },
+  'spaces:hostingPower': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), action: z.enum(['restart', 'sleep', 'wake', 'reload']) }),
+    res: z.object({ machine: z.custom<SpacesTypes.HostingMachine>() }),
+  },
+  // A managed agent's machine size (2026-11-04): the platform's range and estimate, and resizing it, which restarts it.
+  'spaces:getHostingSize': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ size: z.custom<SpacesTypes.HostingSize>() }),
+  },
+  'spaces:setHostingSize': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), memMb: z.number(), diskGb: z.number() }),
+    res: z.object({ size: z.custom<SpacesTypes.HostingSize>() }),
+  },
+  'spaces:runHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), command: z.string(), timeoutSeconds: z.number().optional() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  'spaces:getHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), executionId: z.string() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  'spaces:cancelHostingCommand': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), executionId: z.string() }),
+    res: z.object({ execution: z.custom<SpacesTypes.HostingExecution>() }),
+  },
+  /** A console into a managed agent's VM (2026-10-30): the platform's terminal socket and a token that opens it for a few minutes. */
+  'spaces:openHostingConsole': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ console: z.custom<SpacesTypes.HostingConsole>() }),
+  },
+  'spaces:checkHostingSignIn': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>(), signedIn: z.boolean() }),
+  },
+  'spaces:revokeHostingSignIn': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ hosting: z.custom<SpacesTypes.AgentHosting>() }),
+  },
+  'spaces:getHostingLogs': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), limit: z.number().optional(), before: z.string().optional(), level: z.string().optional() }),
+    res: z.object({ logs: z.array(z.custom<SpacesTypes.HostingLogLine>()), nextBefore: z.string().optional() }),
+  },
+  'spaces:listHostingFiles': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string().optional() }),
+    res: z.object({ path: z.string(), entries: z.array(z.custom<SpacesTypes.HostingFileEntry>()) }),
+  },
+  'spaces:readHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({ path: z.string(), content: z.string(), truncated: z.boolean() }),
+  },
+  'spaces:writeHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string(), content: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:makeHostingDir': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:moveHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), from: z.string(), to: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:deleteHostingFile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), path: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:listHostingSkills': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), q: z.string().optional() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:installHostingSkill': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), name: z.string() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:removeHostingSkill': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), name: z.string() }),
+    res: z.object({ skills: z.array(z.custom<SpacesTypes.HostingSkill>()) }),
+  },
+  'spaces:listHostingTriggers': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:createHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), type: z.string(), config: z.record(z.string(), z.unknown()), enabled: z.boolean().optional() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:updateHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), triggerId: z.string(), config: z.record(z.string(), z.unknown()).optional(), enabled: z.boolean().optional() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
+  },
+  'spaces:deleteHostingTrigger': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), triggerId: z.string() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.HostingTrigger>()) }),
   },
   'spaces:setAgentCredential': {
     req: z.object({ orgId: z.string(), agentId: z.string(), secret: z.string() }),
     res: z.object({ credential: z.custom<SpacesTypes.AgentCredential>() }),
+  },
+  // A platform agent's alerts (2026-10-03): the address crosses IPC once, on its way to the screen.
+  'spaces:setAgentHook': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), spaceId: z.string() }),
+    res: z.object({ hook: z.custom<SpacesTypes.AgentHook>(), url: z.string() }),
+  },
+  'spaces:clearAgentHook': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({}),
   },
   'spaces:createAgentKey': {
     req: z.object({ orgId: z.string(), agentId: z.string() }),
@@ -3936,35 +4142,84 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), agentId: z.string(), keyId: z.string() }),
     res: z.object({ key: z.custom<SpacesTypes.AgentKey>() }),
   },
-  // Add existing org members, people or agents, to a space the caller is in
-  // (2026-09-29). They learn of it by the space_added frame.
+  // Profile bytes use base64 across the JSON RPC boundary (2026-10-22, Spaces profiles).
+  'spaces:getProfile': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:updateProfile': {
+    req: z.object({ orgId: z.string(), displayName: z.string().max(128).optional(), title: z.string().max(128).optional(), availability: Availability.optional() }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:setAvatar': {
+    req: z.object({ orgId: z.string(), bytes: z.string().max(1398104), mime: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']) }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:clearAvatar': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ member: z.custom<SpacesTypes.Member>() }),
+  },
+  'spaces:getProfileImage': {
+    req: z.object({ orgId: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) }),
+    res: z.object({ src: z.string() }),
+  },
+  // Renaming an agent (2026-10-21, harbor renameAgent): its owner only.
+  'spaces:renameAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), displayName: z.string() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // An agent's description and instructions (2026-10-29, harbor setAgentProfile): its owner only.
+  // A field left out is left alone; an empty one clears it.
+  'spaces:setAgentProfile': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), title: z.string().optional(), instructions: z.string().optional() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // Describe → Write (2026-10-29): a light Rowboat model writes an agent's instructions from a few words.
+  // Desktop only: it runs in core, on the app's own models.
+  'spaces:writeAgentInstructions': {
+    req: z.object({ name: z.string(), kind: z.string().optional(), brief: z.string() }),
+    res: z.object({ instructions: z.string() }),
+  },
+  // Making an agent a super agent, or ordinary again with null (2026-11-02, harbor setAgentSuper): its owner's switch since 2026-11-09.
+  'spaces:setAgentSuper': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), superAgent: z.object({ askBeforeCreate: z.boolean(), askBeforeDelete: z.boolean() }).nullable() }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // Add your contacts, people or your own agents, to a space the caller is in
+  // (2026-09-29; 2026-11-09: only an agent's owner adds it, `invocableBy` is
+  // its seat there). They learn of it by the space_added frame.
   'spaces:addMembers': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), memberIds: z.array(z.string()).min(1) }),
+    req: z.object({ orgId: z.string(), spaceId: z.string(), memberIds: z.array(z.string()).min(1), invocableBy: z.enum(['owner', 'members']).optional() }),
     res: z.object({ memberships: z.array(z.custom<SpacesTypes.Membership>()) }),
   },
-  // Direct messages: get-or-create the DM with another org member. No
-  // invite, no acceptance — the other side learns of it by a space_added
-  // frame on 'spaces:events' and shows it in their sidebar.
+  // Direct messages: get-or-create the DM with someone you share a space with,
+  // or your own agent (the reach rule, 2026-11-09). No invite, no acceptance —
+  // the other side learns of it by a space_added frame on 'spaces:events'.
   'spaces:openDirect': {
     req: z.object({ orgId: z.string(), memberId: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>(), created: z.boolean() }),
   },
+  // A space's members with their role, join time and, for agents, their seat (2026-11-09).
   'spaces:listMembers': {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
-    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+    res: z.object({ members: z.array(z.custom<SpacesTypes.SpaceMember>()) }),
   },
-  // The org roster: every member, people and agents, A–Z — computed by the
-  // org (GET /v1/members; the whole org since 2026-09-29).
-  'spaces:listOrgMembers': {
+  // Your contacts: the people you share a space with and the agents you own,
+  // A–Z — computed by the server (GET /v1/contacts, 2026-11-09; the org
+  // roster until then).
+  'spaces:listContacts': {
     req: z.object({ orgId: z.string() }),
-    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+    // `online`: the agents connected now (local agents, 2026-10-28); `onlinePeople` likewise (2026-11-04).
+    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()), online: z.array(z.string()).optional(), onlinePeople: z.array(z.string()).optional() }),
   },
+  // An invite to one space, or your personal link (`direct`), whose target
+  // is a DM with you (2026-11-09). Multi-use, seven days unless said.
   'spaces:createInvite': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), expiresInHours: z.number().optional() }),
+    req: z.object({ orgId: z.string(), spaceId: z.string().optional(), direct: z.literal(true).optional(), expiresInHours: z.number().optional() }),
     res: z.custom<SpacesTypes.CreateInviteResult>(),
   },
-  // Pre-auth by design (spec §4): resolvable before the org has been added,
-  // so the app can show what's being joined. baseUrl, not orgId.
+  // Pre-auth by design (spec §4): resolvable before this install has signed
+  // in, so the app can show what's being joined. baseUrl, not orgId.
   'spaces:resolveInvite': {
     req: z.object({ baseUrl: z.string(), token: z.string() }),
     res: z.custom<SpacesTypes.ResolveInviteResult>(),
@@ -4051,13 +4306,14 @@ export const ipcSchemas = {
   // Space search: categorized top-N (messages / topics / assets), served by
   // the org's GET /v1/spaces/:spaceId/search. Snippets arrive raw — resolve
   // mentions renderer-side like any message body.
+  // One space, or — no spaceId — every space the caller is in (2026-11-09).
   'spaces:search': {
     req: z.object({
       orgId: z.string(),
-      spaceId: z.string(),
+      spaceId: z.string().optional(),
       q: z.string(),
       kinds: z.array(z.enum(['messages', 'topics', 'assets'])).optional(),
-      /** Per-category cap (org default 10, max 50). */
+      /** Per-category cap (server default 10, max 50). */
       limit: z.number().optional(),
     }),
     res: z.custom<SpacesTypes.SearchResults>(),
@@ -4070,6 +4326,8 @@ export const ipcSchemas = {
       spaceId: z.string(),
       /** Page back: only roots below this offset. Absent = the latest page. */
       beforeOffset: z.number().optional(),
+      /** The inline view (2026-10-25): every reply lists with the roots. */
+      replies: z.boolean().optional(),
       afterOffset: z.number().optional(),
       aroundOffset: z.number().optional(),
       limit: z.number().optional(),
@@ -4079,6 +4337,11 @@ export const ipcSchemas = {
   // One flat thread: root + topic annotation (null = plain thread) + windowed
   // replies. A reply id resolves to its root on the org.
   /** One message by id — what a message link resolves through (a reply names its thread root). */
+  // A secret a message shared with the caller (Harbor spec §8, 2026-11-04): readers only, on reveal.
+  'spaces:readMessageSecret': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string(), name: z.string() }),
+    res: z.object({ value: z.string() }),
+  },
   'spaces:getMessage': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string() }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
@@ -4109,6 +4372,12 @@ export const ipcSchemas = {
       poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
       /** Options picked for agents the message mentions, keyed by agent member id (2026-09-30). */
       agentOptions: z.record(z.string(), z.record(z.string(), z.union([z.string(), z.boolean()]))).optional(),
+      /** A thread reply for the people only: it follows up no agent (Harbor spec §8, 2026-10-27). */
+      peopleOnly: z.boolean().optional(),
+      /** Secrets for the members the message mentions, its readers (Harbor spec §8, 2026-11-04). */
+      secrets: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
+      /** Start a session with this root (harbor Message.session, 2026-11-05). */
+      session: z.object({ title: z.string() }).optional(),
     }),
     res: z.custom<SpacesPostResult>(),
   },
@@ -4165,6 +4434,27 @@ export const ipcSchemas = {
   },
   // One-row lifecycle ops on the annotation ('remove' = convert back to
   // thread; the conversation is untouched).
+  // A plain thread archived without a name (harbor archiveThread, 2026-11-03);
+  // a discussion archives through spaces:manageTopic.
+  'spaces:archiveThread': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), archived: z.boolean() }),
+    res: z.object({ root: z.custom<SpacesTypes.Message>() }),
+  },
+  'spaces:listArchivedThreads': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ threads: z.array(z.custom<SpacesTypes.Message>()) }),
+  },
+  // Sessions and your threads (harbor setSession / myThreads, 2026-11-05):
+  // mark, retitle or unmark a thread (null), and the member's threads across
+  // the org (active, or archived).
+  'spaces:setSession': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), session: z.object({ title: z.string() }).nullable() }),
+    res: z.object({ root: z.custom<SpacesTypes.Message>() }),
+  },
+  'spaces:myThreads': {
+    req: z.object({ orgId: z.string(), archived: z.boolean().optional() }),
+    res: z.object({ threads: z.array(z.custom<SpacesTypes.ThreadListing>()) }),
+  },
   'spaces:manageTopic': {
     req: z.object({
       orgId: z.string(),
@@ -4453,6 +4743,10 @@ export const ipcSchemas = {
     req: z.null(),
     res: z.object({ success: z.literal(true) }),
   },
+  'spaces:activity': {
+    req: z.object({ orgId: z.string(), active: z.boolean() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'spaces:presence': {
     req: z.object({
       orgId: z.string(),
@@ -4480,6 +4774,42 @@ export const ipcSchemas = {
   },
   'spaces:events': {
     req: z.custom<SpacesBusEvent>(),
+    res: z.null(),
+  },
+  // Local agents (2026-10-28): the owner's own Claude Code or Codex, run by
+  // this computer as a Spaces agent (core/spaces/local-agents.ts). The key
+  // never leaves main: adding one creates the member and keeps its key here.
+  'spaces:localAgents': {
+    req: z.object({}),
+    // `defaultCwd`: where a new one works unless its owner picks a folder (code mode's default project, else home).
+    res: z.object({ agents: z.array(z.custom<SpacesTypes.SpacesLocalAgent>()), defaultCwd: z.string() }),
+  },
+  'spaces:addLocalAgent': {
+    req: z.object({
+      orgId: z.string(),
+      displayName: z.string(),
+      kind: z.enum(['claude-code', 'codex']),
+      cwd: z.string(),
+      policy: z.enum(['ask', 'auto-approve-reads', 'yolo']),
+    }),
+    res: z.object({ agent: z.custom<SpacesTypes.Member>() }),
+  },
+  // Run an existing local agent here: a new key on this computer, every other one revoked.
+  'spaces:connectLocalAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), cwd: z.string(), policy: z.enum(['ask', 'auto-approve-reads', 'yolo']) }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:updateLocalAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string(), cwd: z.string().optional(), policy: z.enum(['ask', 'auto-approve-reads', 'yolo']).optional() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:forgetLocalAgent': {
+    req: z.object({ orgId: z.string(), agentId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Pushed on every change in what this computer runs, or how its connections are.
+  'spaces:localAgentsChanged': {
+    req: z.object({ agents: z.array(z.custom<SpacesTypes.SpacesLocalAgent>()) }),
     res: z.null(),
   },
 } as const;

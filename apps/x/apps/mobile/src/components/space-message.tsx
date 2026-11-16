@@ -1,20 +1,25 @@
 import * as Haptics from 'expo-haptics';
-import { memo, useMemo } from 'react';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { memo, useMemo, useState, type ReactNode } from 'react';
+import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
+import * as Clipboard from 'expo-clipboard';
 import { spaces } from '@x/shared';
 
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
-import { SpaceBlobImage } from '@/components/space-blob-image';
+import { PollCard } from '@/components/poll-card';
+import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
+import { EmojiPicker } from '@/components/emoji-picker';
+import { Avatar, AuthedImage } from '@/components/avatar';
+import { BottomSheet } from '@/components/bottom-sheet';
 import { useColors } from '@/theme/colors';
-
-// Shared message presentation for the stream and thread screens: row, reaction
-// chips, long-press action sheet. All server calls stay in the screens — this
-// file only renders and calls back.
-
+import { memberLabel } from '@/lib/spaces/profiles';
+import { blobLinkName, isVideoName } from '@/lib/spaces/open-blob';
+import { PIN_EMOJI, pinnedByMe } from '@/lib/spaces/pins';
+import { isPending } from '@/lib/spaces/send';
+import { MessageVideo } from '@/components/blob-video';
 
 /** The contract's file link: https://<org>/s/<spaceId>/a/<assetId> (the label is the file's name at write time). */
 const ASSET_LINK_RE = /^https:\/\/([^/?#]+)\/s\/([^/?#]+)\/a\/([^/?#]+)$/;
@@ -23,6 +28,186 @@ export function parseAssetLink(url: string): { host: string; spaceId: string; as
   if (!m) return null;
   return { host: m[1]!, spaceId: m[2]!, assetId: decodeURIComponent(m[3]!), label: '' };
 }
+
+/**
+ * File links read as the file (2026-10-28): a bare link (pasted, or written by
+ * an agent) has only its URL as text, so it gets the file's name from the
+ * space's listing. Code is left alone.
+ */
+const BARE_ASSET_LINK_RE = /(^|[^(\[<])(https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#<>]+)/g;
+export function nameFileLinks(body: string, fileNames?: ReadonlyMap<string, string>): string {
+  const named = (url: string) => {
+    const link = parseAssetLink(url);
+    return ((link && fileNames?.get(link.assetId)?.split('/').pop()) || 'File').replace(/[[\]]/g, '');
+  };
+  return body
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part
+            // A link whose label is its own URL ([url](url), as the composer
+            // writes a pasted link) is as good as bare.
+            .replace(/\[(https:\/\/[^\]\s]+)\]\((https:\/\/[^)\s]+)\)/g, (m, label: string, url: string) =>
+              label === url && parseAssetLink(url) ? `[${named(url)}](${url})` : m,
+            )
+            .replace(BARE_ASSET_LINK_RE, (_m, lead: string, url: string) => `${lead}[${named(url)}](${url})`),
+    )
+    .join('');
+}
+
+/** What kind of file a name is, for the card's second line. */
+function fileKind(name: string): string {
+  const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase();
+  if (!ext || ext === 'md' || ext === 'markdown') return 'Document';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'svg'].includes(ext)) return 'Image';
+  if (ext === 'pdf') return 'PDF';
+  if (isVideoName(name)) return 'Video';
+  if (['csv', 'tsv', 'xlsx'].includes(ext)) return 'Spreadsheet';
+  return `${ext.toUpperCase()} file`;
+}
+
+const FILE_LINE_RE = /^\s*\[([^\]]+)\]\((https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/a\/[^\s)?#]+)\)\s*$/;
+// An attached video on its own line plays in the message, like an image
+// (2026-11-07); other attachments stay links.
+const BLOB_LINE_RE = /^\s*\[([^\]]+)\]\((https:\/\/[^\s/?#]+\/s\/[^\s/?#]+\/b\/[0-9a-f]{64}(?:\?[^\s)#]*)?)\)\s*$/;
+type BodySegment = { kind: 'markdown'; text: string } | { kind: 'file' | 'video'; name: string; url: string };
+
+/** Split a message into markdown and the file links that stand on their own line. */
+function splitFileCards(body: string): BodySegment[] {
+  const out: BodySegment[] = [];
+  let buffer: string[] = [];
+  let fence = false;
+  const flush = () => {
+    const text = buffer.join('\n');
+    if (text.trim()) out.push({ kind: 'markdown', text });
+    buffer = [];
+  };
+  for (const line of body.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    const m = fence ? null : FILE_LINE_RE.exec(line);
+    const video = fence || m ? null : BLOB_LINE_RE.exec(line);
+    if (m) {
+      flush();
+      out.push({ kind: 'file', name: m[1]!, url: m[2]! });
+    } else if (video && isVideoName(video[1]!)) {
+      flush();
+      out.push({ kind: 'video', name: video[1]!, url: video[2]! });
+    } else buffer.push(line);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * A file shared on its own line (2026-10-28): a card — icon, name, and what it
+ * is and where it lives — instead of an inline link. Tapping opens the file.
+ */
+function FileCard({ name, path, onPress }: { name: string; path?: string; onPress?: () => void }) {
+  const colors = useColors();
+  const folder = path && path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start', maxWidth: 320, minWidth: 220,
+        marginVertical: 4, paddingVertical: 10, paddingHorizontal: 12,
+        borderRadius: 12, borderCurve: 'continuous', borderWidth: 0.5, borderColor: colors.separator,
+        backgroundColor: pressed ? colors.separator : colors.secondaryBackground,
+      })}
+    >
+      <Image source="sf:doc.text" style={{ width: 22, height: 22 }} contentFit="contain" tintColor={colors.secondaryLabel} />
+      <View style={{ flexShrink: 1, gap: 1 }}>
+        <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>{name}</Text>
+        <Text numberOfLines={1} style={{ fontSize: 12, color: colors.secondaryLabel }}>{[fileKind(name), folder].filter(Boolean).join(' · ')}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+/** A message body: markdown, with files on their own line as cards and videos as players. */
+export function MessageBody({ body, fileNames, rules, onLinkPress }: {
+  body: string;
+  /** asset id → path in the space. */
+  fileNames?: ReadonlyMap<string, string>;
+  rules: Record<string, unknown>;
+  onLinkPress: (url: string) => boolean;
+}) {
+  const segments = useMemo(() => splitFileCards(body), [body]);
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.kind === 'markdown' ? (
+          <ChatMarkdown key={i} extraRules={rules} onLinkPress={onLinkPress}>
+            {seg.text}
+          </ChatMarkdown>
+        ) : seg.kind === 'video' ? (
+          <MessageVideo key={i} src={seg.url} name={blobLinkName(seg.url, seg.name)} />
+        ) : (
+          <FileCard key={i} name={seg.name} path={fileNames?.get(parseAssetLink(seg.url)?.assetId ?? '')} onPress={() => void onLinkPress(seg.url)} />
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * Mentions read as Slack's chips (2026-11-13): tokens keep their link form with
+ * the roster's current name ("[@Name](#member:id)", "[@here](#here)"), so the
+ * link rule can paint them; space tokens stay bold "#Space" as before.
+ */
+export function chipMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
+  return spaces.mapMentionTokens(body, (ref) => {
+    if (ref.kind === 'space') return `**#${ref.label}**`;
+    if (ref.kind === 'member') return `[@${(memberNames.get(ref.id) ?? ref.label).replace(/[[\]\n]/g, ' ').trim() || ref.id}](#member:${ref.id})`;
+    return `[@${ref.kind}](#${ref.kind})`;
+  });
+}
+
+const MENTION_HREF_RE = /^#(member:|here$|rowboat$)/;
+// The link blue the reply chips already use, and a faint wash of it behind mentions.
+const LINK_BLUE = '#0a84ff';
+
+type LinkNode = { key: string; attributes: { href?: string }; content?: string; children?: LinkNode[] };
+const nodeText = (node: LinkNode): string => node.content || (node.children ?? []).map(nodeText).join('');
+
+/** A mention chip: blue on a faint blue wash, small rounded corners (an inline view, so the corners round). */
+function MentionChip({ label }: { label: string }) {
+  return (
+    <View style={{ backgroundColor: 'rgba(10,132,255,0.13)', borderRadius: 4, borderCurve: 'continuous', paddingHorizontal: 3, transform: [{ translateY: 4 }] }}>
+      <Text style={{ fontSize: 16, lineHeight: 20, color: LINK_BLUE }}>{label}</Text>
+    </View>
+  );
+}
+
+/**
+ * Markdown link rule: a file link is a file label (📄 name, no underline), a
+ * mention is a chip; other links keep the default look. Taps go through
+ * onLinkPress either way.
+ */
+export function fileLinkRule(labelColor: string) {
+  return (node: LinkNode, children: ReactNode, _parent: unknown, styles: { link?: object }, onLinkPress?: (url: string) => boolean) => {
+    const href = String(node.attributes.href ?? '');
+    if (MENTION_HREF_RE.test(href)) return <MentionChip key={node.key} label={nodeText(node)} />;
+    const file = parseAssetLink(href) !== null;
+    return (
+      <Text
+        key={node.key}
+        style={file ? { fontWeight: '600', color: labelColor } : styles.link}
+        onPress={() => {
+          if (onLinkPress?.(href) !== false) void Linking.openURL(href).catch(() => {});
+        }}
+      >
+        {file ? '📄 ' : null}
+        {children}
+      </Text>
+    );
+  };
+}
+
+// Shared message presentation for the stream and thread screens: row, reaction
+// chips, long-press action sheet. All server calls stay in the screens — this
+// file only renders and calls back.
 
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '😮', '🙏'];
 
@@ -51,22 +236,90 @@ function avatarColor(id: string, dark: boolean): string {
   return `hsl(${AVATAR_HUES[h % AVATAR_HUES.length]}, 45%, ${dark ? 32 : 82}%)`;
 }
 
+/**
+ * When the last reply landed, like Slack's reply row (2026-11-13): the time
+ * today, "Yesterday at 10:02 PM", "Sep 1 at 11:02 PM", and the year once it
+ * isn't this one.
+ */
+export function replyTimeLabel(iso: string, now = new Date()): string {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (at.toDateString() === now.toDateString()) return time;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (at.toDateString() === yesterday.toDateString()) return `Yesterday at ${time}`;
+  const day = at.toLocaleDateString([], at.getFullYear() === now.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  return `${day} at ${time}`;
+}
+
+/**
+ * Slack's reply row under a root in the stream (2026-11-13): who replied (the
+ * first few, rounded squares), "N replies" in link blue, then when the last one
+ * landed. One tap target that opens the thread. `trailing` sits at the end of
+ * the row, vertically centered (the combined branches put the agent status there).
+ */
+export function ReplyRow({ message, members, memberNames, onPress, trailing }: {
+  message: Message;
+  members?: ReadonlyMap<string, Member>;
+  memberNames?: ReadonlyMap<string, string>;
+  onPress: () => void;
+  trailing?: ReactNode;
+}) {
+  const colors = useColors();
+  const authors = message.replyAuthors.slice(0, 4);
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={6}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, alignSelf: 'flex-start' }}
+    >
+      {authors.length > 0 ? (
+        <View style={{ flexDirection: 'row', gap: 3 }}>
+          {authors.map((id) => {
+            const m = members?.get(id);
+            return <Avatar key={id} id={id} name={(m ? memberLabel(m) : memberNames?.get(id)) ?? '?'} url={m?.avatarUrl} size={22} radius={5} />;
+          })}
+        </View>
+      ) : null}
+      <Text style={{ fontSize: 13, fontWeight: '500', color: LINK_BLUE }}>
+        {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}
+      </Text>
+      {message.lastReplyAt ? (
+        <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{replyTimeLabel(message.lastReplyAt)}</Text>
+      ) : null}
+      {trailing}
+    </Pressable>
+  );
+}
+
 export const MessageRow = memo(function MessageRow({
   message,
   member,
   memberNames,
+  fileNames,
+  members,
   me,
   onToggleReaction,
   onOpenThread,
   onLongPress,
   onAddReaction,
   alwaysShowReactionBar,
+  onVote,
+  onRemoveVote,
+  onEndPoll,
   onOpenAsset,
+  onOpenBlob,
+  approvalCard,
+  invocationLines,
 }: {
   message: Message;
   member?: Member;
   /** id → displayName for the whole space — resolves @<memberId> mentions. */
   memberNames?: ReadonlyMap<string, string>;
+  /** asset id → file name, so bare file links show the file's name. */
+  fileNames?: ReadonlyMap<string, string>;
+  /** id → member, for the reply row's avatars. */
+  members?: ReadonlyMap<string, Member>;
   me: string;
   onToggleReaction: (message: Message, emoji: string) => void;
   /** Omit on the thread screen (replies have no threads). */
@@ -76,59 +329,101 @@ export const MessageRow = memo(function MessageRow({
   onAddReaction?: (message: Message) => void;
   /** Thread root: keep the emoji+ pill visible even with zero reactions (Slack). */
   alwaysShowReactionBar?: boolean;
-  /** A tapped file link (https://<org>/s/<spaceId>/a/<assetId>) — the screen opens the file or hands it to the browser. */
+  /** Polls: cast / withdraw / end. Absent = read-only card. */
+  onVote?: (message: Message, answerIds: number[]) => void;
+  onRemoveVote?: (message: Message) => void;
+  onEndPoll?: (message: Message) => void;
+  /** A tapped file link (https://<server>/s/<spaceId>/a/<assetId>) — the screen opens the file or hands it to the browser. */
   onOpenAsset?: (link: { host: string; spaceId: string; assetId: string; label: string }) => void;
+  /** A tapped attachment (https://<org>/s/<spaceId>/b/<hash>?name=…) — the screen downloads and opens it. */
+  onOpenBlob?: (link: { host: string; spaceId: string; hash: string; url: string }) => void;
+  /** An agent's approval card (2026-11-13): replaces the body, which is its text fallback. Pass only for a message with `approval`. */
+  approvalCard?: ReactNode;
+  /** What the agents this message invoked are doing (InvocationLines). Pass only when there is something to say, so other rows stay memoized. */
+  invocationLines?: ReactNode;
 }) {
   const colors = useColors();
-  const dark = colors.background === '#000000';
-  const name = member?.displayName ?? message.author.memberId;
+  const dark = colors.isDark;
+  const name = member ? memberLabel(member) : message.author.memberId;
   const agent = message.author.actingMode !== 'direct';
+  // A send not yet confirmed (2026-11-13): faded, and no actions — it has no
+  // real id for reactions, edits, deletes or a thread yet.
+  const pending = isPending(message);
   const time = new Date(message.postedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   // Wire member addresses ("@01ABC…") → bold display names, code spans untouched.
   const body = useMemo(
-    () => (memberNames ? spaces.decorateMentions(message.body, memberNames) : message.body),
-    [message.body, memberNames],
+    () => nameFileLinks(memberNames ? chipMentions(message.body, memberNames) : message.body, fileNames),
+    [message.body, memberNames, fileNames],
   );
+
+  // Long-press a reaction chip → who reacted (opens on that emoji's tab).
+  const [reactorsFor, setReactorsFor] = useState<string | null>(null);
+  // The 📌 group is the pin's storage, not a reaction to show (lib/spaces/pins.ts).
+  const reactions = message.reactions.filter((g) => g.emoji !== PIN_EMOJI);
 
   const imageRule = useMemo(
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
         node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} /> : null,
+      link: fileLinkRule(colors.label),
     }),
-    [],
+    [colors.label],
   );
 
+  // Deleted messages are filtered out by the screens (Slack); one that still
+  // has replies stays as a placeholder so its thread remains reachable.
   if (message.deletedAt) {
     return (
-      <Text style={{ paddingHorizontal: 16, paddingVertical: 6, fontSize: 13, fontStyle: 'italic', color: colors.tertiaryLabel }}>
-        Message deleted
-      </Text>
+      <Pressable
+        onPress={onOpenThread && message.replyCount > 0 ? () => onOpenThread(message) : undefined}
+        style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 6 }}
+      >
+        <View
+          style={{
+            width: 34, height: 34, borderRadius: 8, borderCurve: 'continuous', marginTop: 2,
+            alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondaryBackground,
+          }}
+        >
+          <Image source="sf:trash" style={{ width: 15, height: 15 }} tintColor={colors.tertiaryLabel} />
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center', gap: 4 }}>
+          <Text style={{ fontSize: 15, color: colors.tertiaryLabel }}>This message was deleted.</Text>
+          {onOpenThread && message.replyCount > 0 ? (
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#0a84ff' }}>
+              {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'} ›
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
     );
   }
 
   return (
+    <>
     <Pressable
       // Tap opens the thread (Slack); long-press keeps the action sheet.
-      onPress={onOpenThread ? () => onOpenThread(message) : undefined}
-      onLongPress={() => {
+      onPress={onOpenThread && !pending ? () => onOpenThread(message) : undefined}
+      onLongPress={pending ? undefined : () => {
         if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         onLongPress(message);
       }}
       delayLongPress={250}
       style={({ pressed }) => ({
         flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 6,
-        backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+        backgroundColor: pressed && !pending ? colors.secondaryBackground : 'transparent',
+        opacity: pending ? 0.6 : 1,
       })}
     >
       <View
         style={{
           width: 34, height: 34, borderRadius: 8, borderCurve: 'continuous', marginTop: 2,
-          alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColor(message.author.memberId, dark),
+          alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColor(message.author.memberId, dark), overflow: 'hidden',
         }}
       >
         <Text style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>
           {(name[0] ?? '?').toUpperCase()}
         </Text>
+        {member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 34, height: 34 }} /> : null}
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
@@ -139,21 +434,41 @@ export const MessageRow = memo(function MessageRow({
           <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{time}</Text>
           {message.editedAt ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>(edited)</Text> : null}
         </View>
-        <ChatMarkdown
-          extraRules={imageRule}
-          onLinkPress={(url) => {
-            const link = parseAssetLink(url);
-            if (!link || !onOpenAsset) return true;
-            onOpenAsset(link);
-            return false;
-          }}
-        >
-          {body}
-        </ChatMarkdown>
-        <MessageLinkPreviews body={message.body} />
-        {message.reactions.length > 0 || alwaysShowReactionBar ? (
+        {message.approval && approvalCard ? (
+          approvalCard
+        ) : message.poll ? (
+          <PollCard
+            message={message}
+            poll={message.poll}
+            me={me}
+            onVote={onVote ?? (() => {})}
+            onRemoveVote={onRemoveVote ?? (() => {})}
+            onEndPoll={onEndPoll}
+          />
+        ) : (
+          <>
+            <MessageBody
+              body={body}
+              fileNames={fileNames}
+              rules={imageRule}
+              onLinkPress={(url) => {
+                const blob = parseBlobLink(url);
+                if (blob && onOpenBlob) {
+                  onOpenBlob({ ...blob, url });
+                  return false;
+                }
+                const link = parseAssetLink(url);
+                if (!link || !onOpenAsset) return true;
+                onOpenAsset(link);
+                return false;
+              }}
+            />
+            <MessageLinkPreviews body={message.body} />
+          </>
+        )}
+        {!pending && (reactions.length > 0 || alwaysShowReactionBar) ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-            {message.reactions.map((g) => {
+            {reactions.map((g) => {
               const mine = g.memberIds.includes(me);
               return (
                 <Pressable
@@ -162,6 +477,11 @@ export const MessageRow = memo(function MessageRow({
                     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
                     onToggleReaction(message, g.emoji);
                   }}
+                  onLongPress={() => {
+                    if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setReactorsFor(g.emoji);
+                  }}
+                  delayLongPress={250}
                   style={{
                     flexDirection: 'row', gap: 4, paddingHorizontal: 8, paddingVertical: 3,
                     borderRadius: 12, backgroundColor: colors.secondaryBackground,
@@ -191,17 +511,102 @@ export const MessageRow = memo(function MessageRow({
             </Pressable>
           </View>
         ) : null}
+        {/* The agent status closes the message (2026-11-13): in the stream a small
+            icon beside the replies link (InvocationLines compact), in the thread the full line. */}
         {onOpenThread && message.replyCount > 0 ? (
-          <Pressable onPress={() => onOpenThread(message)} hitSlop={6} style={{ marginTop: 4, alignSelf: 'flex-start' }}>
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#0a84ff' }}>
-              {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'} ›
-            </Text>
-          </Pressable>
-        ) : null}
+          <ReplyRow message={message} members={members} memberNames={memberNames} onPress={() => onOpenThread(message)} trailing={invocationLines} />
+        ) : invocationLines ? <View style={{ marginTop: 4 }}>{invocationLines}</View> : null}
       </View>
     </Pressable>
+    {reactorsFor !== null ? (
+      <ReactorsSheet
+        message={message}
+        initial={reactorsFor}
+        me={me}
+        memberNames={memberNames}
+        onClose={() => setReactorsFor(null)}
+      />
+    ) : null}
+    </>
   );
 });
+
+/**
+ * Who reacted (Slack's reactions sheet): an "All" tab plus one tab per emoji,
+ * each listing the people behind it. Names come from the space roster; you
+ * show as "You".
+ */
+function ReactorsSheet({
+  message,
+  initial,
+  me,
+  memberNames,
+  onClose,
+}: {
+  message: Message;
+  initial: string;
+  me: string;
+  memberNames?: ReadonlyMap<string, string>;
+  onClose: () => void;
+}) {
+  const colors = useColors();
+  const dark = colors.isDark;
+  const [tab, setTab] = useState<string>(initial);
+  const nameOf = (id: string) => (id === me ? 'You' : memberNames?.get(id) ?? 'Unknown member');
+  const reactions = message.reactions.filter((g) => g.emoji !== PIN_EMOJI);
+  const total = reactions.reduce((n, g) => n + g.memberIds.length, 0);
+  const rows =
+    tab === 'all'
+      ? reactions.flatMap((g) => g.memberIds.map((id) => ({ id, emoji: g.emoji })))
+      : (reactions.find((g) => g.emoji === tab)?.memberIds ?? []).map((id) => ({ id, emoji: tab }));
+
+  const tabs = [{ key: 'all', label: `All ${total}` }, ...reactions.map((g) => ({ key: g.emoji, label: `${g.emoji} ${g.memberIds.length}` }))];
+
+  return (
+    <BottomSheet visible={true} onClose={onClose} maxHeight={0.6}
+      style={{ paddingTop: 10, paddingBottom: 34, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: colors.background }}
+    >
+          <View style={{ alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: colors.separator, marginBottom: 12 }} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 10 }}>
+            {tabs.map((t) => {
+              const on = t.key === tab;
+              return (
+                <Pressable
+                  key={t.key}
+                  onPress={() => {
+                    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+                    setTab(t.key);
+                  }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: on ? colors.label : colors.secondaryBackground }}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: on ? colors.background : colors.label }}>{t.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <View style={{ height: 0.5, backgroundColor: colors.separator }} />
+          <ScrollView contentContainerStyle={{ paddingVertical: 6 }}>
+            {rows.map(({ id, emoji }) => {
+              const name = nameOf(id);
+              return (
+                <View key={`${emoji}:${id}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 9 }}>
+                  <View
+                    style={{
+                      width: 32, height: 32, borderRadius: 8, borderCurve: 'continuous',
+                      alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColor(id, dark),
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.label }}>{(name[0] ?? '?').toUpperCase()}</Text>
+                  </View>
+                  <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{name}</Text>
+                  {tab === 'all' ? <Text style={{ fontSize: 20 }}>{emoji}</Text> : null}
+                </View>
+              );
+            })}
+          </ScrollView>
+    </BottomSheet>
+  );
+}
 
 /** Long-press sheet: quick reactions + reply. Kept dependency-free (RN Modal). */
 export function MessageActionSheet({
@@ -210,6 +615,15 @@ export function MessageActionSheet({
   onClose,
   onToggleReaction,
   onReply,
+  onQuote,
+  onForward,
+  onToggleSave,
+  isSaved,
+  onEdit,
+  onDelete,
+  onReport,
+  onBlock,
+  linkFor,
   reactionsOnly,
 }: {
   message: Message | null;
@@ -218,12 +632,47 @@ export function MessageActionSheet({
   onToggleReaction: (message: Message, emoji: string) => void;
   /** Omit on the thread screen — the composer is already the reply box. */
   onReply?: (message: Message) => void;
+  onQuote?: (message: Message) => void;
+  /** Opens the forward screen (2026-11-13). */
+  onForward?: (message: Message) => void;
+  /** Saved for later, this phone only (lib/spaces/saved.ts). */
+  onToggleSave?: (message: Message) => void;
+  isSaved?: (message: Message) => boolean;
+  /** Author-only (the content plane is role-flat). */
+  onEdit?: (message: Message) => void;
+  onDelete?: (message: Message) => void;
+  /** Someone else's message only (App Store Guideline 1.2, 2026-10-20). */
+  onReport?: (message: Message) => void;
+  onBlock?: (message: Message) => void;
+  /** The message's canonical link (https://<org>/s/<space>/m/<id>). */
+  linkFor?: (message: Message) => string;
   /** The emoji+ pill's mode: just the reactions row. */
   reactionsOnly?: boolean;
 }) {
   const colors = useColors();
+  const [more, setMore] = useState(false);
   if (!message) return null;
   const mine = new Set(message.reactions.filter((g) => g.memberIds.includes(me)).map((g) => g.emoji));
+  const isAuthor = message.author.memberId === me;
+
+  // Slack's long-press menu, cut to what the server supports.
+  const actions: { key: string; icon: string; label: string; destructive?: boolean; run: () => void }[] = [];
+  if (onReply) actions.push({ key: 'reply', icon: 'sf:arrowshape.turn.up.left', label: 'Reply in thread', run: () => onReply(message) });
+  if (onQuote) actions.push({ key: 'quote', icon: 'sf:quote.opening', label: 'Quote reply', run: () => onQuote(message) });
+  actions.push({ key: 'copy', icon: 'sf:doc.on.doc', label: 'Copy message', run: () => void Clipboard.setStringAsync(message.body) });
+  if (linkFor) actions.push({ key: 'link', icon: 'sf:link', label: 'Copy link', run: () => void Clipboard.setStringAsync(linkFor(message)) });
+  if (onForward) actions.push({ key: 'forward', icon: 'sf:arrowshape.turn.up.right', label: 'Forward message', run: () => onForward(message) });
+  // Pin = the 📌 reaction (lib/spaces/pins.ts); unpin takes back only yours.
+  const pinned = pinnedByMe(message, me);
+  actions.push({ key: 'pin', icon: pinned ? 'sf:pin.slash' : 'sf:pin', label: pinned ? 'Unpin message' : 'Pin message', run: () => onToggleReaction(message, PIN_EMOJI) });
+  if (onToggleSave) {
+    const saved = isSaved?.(message) ?? false;
+    actions.push({ key: 'save', icon: saved ? 'sf:bookmark.fill' : 'sf:bookmark', label: saved ? 'Remove from saved' : 'Save for later', run: () => onToggleSave(message) });
+  }
+  if (isAuthor && onEdit && !message.poll) actions.push({ key: 'edit', icon: 'sf:pencil', label: 'Edit message', run: () => onEdit(message) });
+  if (isAuthor && onDelete) actions.push({ key: 'delete', icon: 'sf:trash', label: 'Delete message', destructive: true, run: () => onDelete(message) });
+  if (!isAuthor && onReport) actions.push({ key: 'report', icon: 'sf:flag', label: 'Report message', destructive: true, run: () => onReport(message) });
+  if (!isAuthor && onBlock) actions.push({ key: 'block', icon: 'sf:hand.raised', label: 'Block this person', destructive: true, run: () => onBlock(message) });
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose}>
@@ -231,11 +680,11 @@ export function MessageActionSheet({
         <Pressable
           onPress={(e) => e.stopPropagation()}
           style={{
-            marginHorizontal: 12, marginBottom: 40, padding: 14, gap: 12,
+            marginHorizontal: 12, marginBottom: 40, padding: 10, gap: 6,
             borderRadius: 20, borderCurve: 'continuous', backgroundColor: colors.background,
           }}
         >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4, paddingBottom: reactionsOnly ? 0 : 4 }}>
             {QUICK_REACTIONS.map((emoji) => (
               <Pressable
                 key={emoji}
@@ -252,21 +701,43 @@ export function MessageActionSheet({
                 <Text style={{ fontSize: 26 }}>{emoji}</Text>
               </Pressable>
             ))}
-          </View>
-          {onReply && !reactionsOnly ? (
             <Pressable
-              onPress={() => {
-                onReply(message);
-                onClose();
-              }}
-              style={({ pressed }) => ({
-                paddingVertical: 12, borderRadius: 12, borderCurve: 'continuous', alignItems: 'center',
-                backgroundColor: pressed ? colors.separator : colors.secondaryBackground,
-              })}
+              onPress={() => setMore(true)}
+              style={{ width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondaryBackground }}
             >
-              <Text style={{ fontSize: 16, fontWeight: '600', color: colors.label }}>Reply in thread</Text>
+              <Image source="sf:plus" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
             </Pressable>
-          ) : null}
+          </View>
+          <EmojiPicker
+            visible={more}
+            onClose={() => setMore(false)}
+            onPick={(emoji) => {
+              onToggleReaction(message, emoji);
+              onClose();
+            }}
+          />
+          {!reactionsOnly
+            ? actions.map((a) => (
+                <Pressable
+                  key={a.key}
+                  onPress={() => {
+                    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+                    onClose();
+                    // After the menu's fade-out (2026-10-20): presenting a sheet or
+                    // alert over a dismissing modal can crash on iOS.
+                    setTimeout(a.run, 350);
+                  }}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 46,
+                    paddingHorizontal: 12, borderRadius: 12, borderCurve: 'continuous',
+                    backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+                  })}
+                >
+                  <Image source={a.icon} style={{ width: 20, height: 20 }} tintColor={a.destructive ? colors.destructive : colors.secondaryLabel} />
+                  <Text style={{ fontSize: 16, color: a.destructive ? colors.destructive : colors.label }}>{a.label}</Text>
+                </Pressable>
+              ))
+            : null}
         </Pressable>
       </Pressable>
     </Modal>

@@ -36,7 +36,9 @@ class Org {
   async start(): Promise<this> {
     this.harbor = await startHarbor({
       store: this.store.store,
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
+      // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
+      seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'harsh', displayName: 'Harsh' },
@@ -111,12 +113,24 @@ describe('the Replicas connector', () => {
     expect(r).toMatchObject({ status: 400, body: { message: expect.stringMatching(/Replicas did not accept this key/) } });
   });
 
-  it('declares what the composer offers: Plan first, and no Stop', async () => {
+  it('declares what the composer offers: the model picker, Plan first, and no Stop', async () => {
     const caps = await until(async () => {
       const r = await org.as('dev-harsh').get(`/v1/agents/${claude.id}/capabilities`);
       return r.body.capabilities?.options?.length ? r.body.capabilities : undefined;
     }, 'capabilities');
-    expect(caps).toEqual({ stop: false, options: [{ type: 'toggle', key: 'plan_first', label: 'Plan first' }] });
+    expect(caps).toEqual({
+      stop: false,
+      options: [
+        { type: 'select', key: 'model', label: 'Model', choices: [{ id: 'claude-opus-5-5', label: 'Opus 5.5' }, { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }] },
+        {
+          type: 'select',
+          key: 'effort',
+          label: 'Effort',
+          choices: ['Low', 'Medium', 'High', 'Extra high', 'Max', 'Ultracode'].map((label) => ({ id: expect.any(String), label })),
+        },
+        { type: 'toggle', key: 'plan_first', label: 'Plan first' },
+      ],
+    });
   });
 
   it('a first mention creates the thread’s workspace, shows progress, and answers in the thread', async () => {
@@ -148,7 +162,8 @@ describe('the Replicas connector', () => {
     const root = message.id;
     expect((await org.ended(first[0]!.id)).state).toBe('done');
     const creates = fake.creates().length;
-    await org.post("it's the session cookie", { threadRoot: root });
+    // Sent to people only: a reply that mentions nobody would follow up the agent itself (spec §8, 2026-10-27).
+    await org.post("it's the session cookie", { threadRoot: root, peopleOnly: true });
     const { invocations } = await org.post(`${mention(claude)} also add a test`, { threadRoot: root });
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     expect(fake.creates()).toHaveLength(creates);
@@ -193,6 +208,18 @@ describe('the Replicas connector', () => {
     await org.post(`${mention(claude)} api`, { threadRoot: message.id });
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     expect(fake.creates().at(-1)!.body).toMatchObject({ environment_id: 'env-api' });
+  });
+
+  it('passes the model and effort picked in the composer, on the first request and a follow-up', async () => {
+    const { message, invocations } = await org.post(`${mention(claude)} refactor it`, {
+      agentOptions: { [claude.id]: { environment: 'env-api', model: 'claude-sonnet-5-5', effort: 'max' } },
+    });
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    expect(fake.creates().at(-1)!.body).toMatchObject({ model: 'claude-sonnet-5-5', thinking_level: 'max' });
+    const next = await org.post(`${mention(claude)} now test it`, { threadRoot: message.id, agentOptions: { [claude.id]: { effort: 'low' } } });
+    expect((await org.ended(next.invocations[0]!.id)).state).toBe('done');
+    expect(fake.sends().at(-1)!.body).toMatchObject({ thinking_level: 'low' });
+    expect(fake.sends().at(-1)!.body).not.toHaveProperty('model');
   });
 
   it('takes the environment and plan mode picked in the composer', async () => {
@@ -289,6 +316,13 @@ describe('the Replicas connector', () => {
     fake.chatter = false;
     expect(ended.state).toBe('done');
     expect((await org.thread(message.id)).find((m) => m.author.memberId === claude.id)!.body).toBe('Hi Ramnique!');
+    const workspace = [...fake.workspaces.values()].find((w) => w.name === `spaces-${message.id}`);
+    expect(workspace).toBeDefined();
+    const creates = fake.creates().length;
+    const { invocations: followUp } = await org.post(`${mention(claude)} thanks, one more thing`, { threadRoot: message.id });
+    expect((await org.ended(followUp[0]!.id)).state).toBe('done');
+    expect(fake.creates()).toHaveLength(creates);
+    expect(fake.sends().at(-1)!.path).toBe(`/v1/replica/${workspace!.id}/messages`);
   });
 
   it('picks a dropped stream back up', async () => {
@@ -334,12 +368,12 @@ describe('the Replicas connector starting up', () => {
     let releaseList!: () => void;
     const listHeld = new Promise<void>((r) => (releaseList = r));
     vi.spyOn(service, 'listAgentInvocations').mockImplementationOnce(async (...args) => (await listHeld, list(...args)));
-    const members = service.listOrgMembers.bind(service);
+    const members = service.namesFor.bind(service);
     let releasePrompt!: () => void;
     const promptHeld = new Promise<void>((r) => (releasePrompt = r));
     let first = true;
-    vi.spyOn(service, 'listOrgMembers').mockImplementation(async (...args) => {
-      if (args[0].agent && first) {
+    vi.spyOn(service, 'namesFor').mockImplementation(async (...args) => {
+      if (first) {
         first = false;
         await promptHeld;
       }

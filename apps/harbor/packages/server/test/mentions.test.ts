@@ -82,7 +82,7 @@ let main: string;
 
 async function start(): Promise<void> {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },
@@ -209,6 +209,7 @@ describe('mentions', () => {
       postedAt: new Date().toISOString(),
       offset: head + 1,
       replyCount: 0,
+      replyAuthors: [],
       reactions: [],
       mentions: [],
       mentionsHere: false,

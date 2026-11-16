@@ -3,8 +3,9 @@ import type { spaces } from '@x/shared'
 import { toast } from '@/lib/toast'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
-import { applyReaction, mergeMessages } from '@/lib/spaces-conventions'
+import { applyReaction, mergeMessages, withArchived, withSession } from '@/lib/spaces-conventions'
 import { applyPollVote } from '@/lib/spaces-poll'
+import { getStreamView, subscribeStreamView, useStreamView } from '@/lib/spaces-stream-view'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, isReconnect, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
 import { countUnread, noteStreamReadOffset, spaceBadge, subscribeReadState, type SpaceBadge } from '@/lib/spaces-read-state'
 
@@ -18,6 +19,16 @@ export type { SpaceBadge } from '@/lib/spaces-read-state'
 
 function key(orgId: string, spaceId: string): string {
     return `${orgId}/${spaceId}`
+}
+
+/**
+ * A space shown inline (2026-10-25) has its own window: roots and every
+ * reply, by offset. Keyed apart, so neither view's pages, cache or paging
+ * edges leak into the other's.
+ */
+const inlineView = (orgId: string, spaceId: string): boolean => getStreamView(orgId, spaceId) === 'inline'
+function streamKey(orgId: string, spaceId: string): string {
+    return inlineView(orgId, spaceId) ? `${key(orgId, spaceId)}#inline` : key(orgId, spaceId)
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +57,7 @@ export function buildPendingMessage(spaceId: string, memberId: string, body: str
         postedAt: new Date().toISOString(),
         offset: Number.MAX_SAFE_INTEGER - 1_000_000 + pendingSeq,
         replyCount: 0,
+        replyAuthors: [],
         mentions: [],
         mentionsHere: false,
         mentionsRowboat: false,
@@ -63,6 +75,11 @@ export interface StreamState {
     messages: ChatMessage[]
     /** Topic annotations for loaded roots, by rootMessageId. */
     topicsByRoot: ReadonlyMap<string, spaces.Topic>
+    /**
+     * The inline view (2026-10-25): roots that replies in the window belong
+     * to and the window may not hold, by id — the line naming each reply's thread.
+     */
+    threadRoots: ReadonlyMap<string, spaces.Message>
     /**
      * Join and leave lines for the loaded window, oldest first (2026-09-29):
      * the log's membership events, drawn between messages by offset. Facts
@@ -88,7 +105,7 @@ export interface StreamState {
 }
 
 const EMPTY_STREAM: StreamState = {
-    messages: [], topicsByRoot: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false,
+    messages: [], topicsByRoot: new Map(), threadRoots: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: false,
 }
 
 let streamState: ReadonlyMap<string, StreamState> = new Map()
@@ -115,6 +132,13 @@ function withEvents(current: readonly spaces.StreamEvent[], incoming: readonly s
 }
 
 /** Fold a page's topic rows into the per-root map (annotation removed = caller deletes). */
+function withThreadRoots(current: ReadonlyMap<string, spaces.Message>, incoming: spaces.Message[] | undefined): ReadonlyMap<string, spaces.Message> {
+    if (!incoming || incoming.length === 0) return current
+    const next = new Map(current)
+    for (const m of incoming) next.set(m.id, m)
+    return next
+}
+
 function withTopics(current: ReadonlyMap<string, spaces.Topic>, incoming: spaces.Topic[]): ReadonlyMap<string, spaces.Topic> {
     if (incoming.length === 0) return current
     const next = new Map(current)
@@ -142,6 +166,8 @@ interface StreamCache {
     v: number
     messages: spaces.Message[]
     topics: spaces.Topic[]
+    /** The roots the tail's replies belong to (the inline view, 2026-10-25); absent from older caches. */
+    threadRoots?: spaces.Message[]
     hasMore: boolean
     /** The tail's join lines (2026-09-29); absent from older caches, read as none. */
     events?: spaces.StreamEvent[]
@@ -161,7 +187,9 @@ function persistStream(k: string): void {
     const payload: StreamCache = {
         v: CACHE_VERSION,
         messages: tail,
-        topics: tail.map((m) => state.topicsByRoot.get(m.id)).filter((t): t is spaces.Topic => !!t),
+        topics: tail.map((m) => state.topicsByRoot.get(m.threadRoot ?? m.id)).filter((t): t is spaces.Topic => !!t),
+        threadRoots: [...new Set(tail.flatMap((m) => (m.threadRoot !== undefined ? [m.threadRoot] : [])))]
+            .flatMap((id) => (state.threadRoots.has(id) ? [state.threadRoots.get(id)!] : [])),
         hasMore,
         events: state.events.filter((e) => e.offset > floor),
     }
@@ -174,6 +202,14 @@ function persistStream(k: string): void {
 
 /** Keys painted from the cache and not yet confirmed by the org. */
 const streamCacheOnly = new Set<string>()
+
+// A space's view switch (2026-10-25): the window being switched to missed
+// every live event while the other was on, so it reads as unconfirmed and refetches.
+subscribeStreamView((orgId, spaceId) => {
+    const k = streamKey(orgId, spaceId)
+    if (streamState.has(k)) streamCacheOnly.add(k)
+    emitStream()
+})
 
 /**
  * Seed module state from the persisted cache. Render-safe on purpose: it
@@ -195,6 +231,7 @@ function hydrateStream(k: string): void {
             ...EMPTY_STREAM,
             messages: cached.messages,
             topicsByRoot: new Map((cached.topics ?? []).map((t) => [t.rootMessageId, t])),
+            threadRoots: new Map((cached.threadRoots ?? []).map((m) => [m.id, m])),
             events: Array.isArray(cached.events) ? cached.events : [],
             hasMore: cached.hasMore,
             ready: true,
@@ -211,14 +248,14 @@ function hydrateStream(k: string): void {
  * so the click that follows finds everything already in.
  */
 export function prefetchStream(orgId: string, spaceId: string): void {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     hydrateStream(k)
     const current = streamState.get(k)
     if (!current?.ready || streamCacheOnly.has(k)) void loadStream(orgId, spaceId)
 }
 
 async function loadStream(orgId: string, spaceId: string): Promise<void> {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     if (streamLoading.has(k)) return
     streamLoading.add(k)
     try {
@@ -226,7 +263,7 @@ async function loadStream(orgId: string, spaceId: string): Promise<void> {
         // older pages the reader scrolled to stay put, hasMore keeps describing
         // OUR oldest edge, and optimistic pending/failed rows the response
         // doesn't already contain are carried over.
-        const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId })
+        const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, ...(inlineView(orgId, spaceId) ? { replies: true } : {}) })
         const prev = streamState.get(k)
         streamCacheOnly.delete(k)
         // The page carries our stream mark — the earliest word on it when a
@@ -248,6 +285,7 @@ async function loadStream(orgId: string, spaceId: string): Promise<void> {
         setStream(k, {
             messages: [...mergeMessages(settled, res.messages), ...carried],
             topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
+            threadRoots: withThreadRoots(prev?.threadRoots ?? new Map(), res.threadRoots),
             events: withEvents(prev?.events ?? [], res.events),
             hasMore: reachesDeeper && prev ? prev.hasMore : res.hasMore,
             ready: true,
@@ -268,14 +306,14 @@ const olderLoading = new Set<string>()
 
 /** Scroll-up pagination: fetch the page below the loaded window and prepend it. */
 export async function loadOlderStreamMessages(orgId: string, spaceId: string): Promise<void> {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     const oldest = state?.messages.find((m) => !m.pending && !m.failed)
     if (!oldest || !state?.hasMore || olderLoading.has(k)) return
     olderLoading.add(k)
     setStream(k, { loadingOlder: true })
     try {
-        const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, beforeOffset: oldest.offset })
+        const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, beforeOffset: oldest.offset, ...(inlineView(orgId, spaceId) ? { replies: true } : {}) })
         const cur = streamState.get(k)
         // A jump swapped the window meanwhile: this page continues the one that left.
         if (!cur?.messages.some((m) => m.id === oldest.id)) {
@@ -285,6 +323,7 @@ export async function loadOlderStreamMessages(orgId: string, spaceId: string): P
         setStream(k, {
             messages: mergeMessages(cur.messages, res.messages),
             topicsByRoot: withTopics(cur.topicsByRoot, res.topics),
+            threadRoots: withThreadRoots(cur.threadRoots, res.threadRoots),
             events: withEvents(cur.events, res.events),
             hasMore: res.hasMore,
             loadingOlder: false,
@@ -313,14 +352,15 @@ function newestSettled(messages: readonly ChatMessage[] | undefined): ChatMessag
  * and come back with it. Throws when the org refuses (the caller toasts).
  */
 export async function loadStreamAround(orgId: string, spaceId: string, offset: number): Promise<void> {
-    const k = key(orgId, spaceId)
-    const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, aroundOffset: offset })
+    const k = streamKey(orgId, spaceId)
+    const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, aroundOffset: offset, ...(inlineView(orgId, spaceId) ? { replies: true } : {}) })
     const prev = streamState.get(k)
     streamCacheOnly.delete(k)
     noteStreamReadOffset(orgId, spaceId, res.readOffset)
     setStream(k, {
         messages: res.messages,
         topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
+        threadRoots: withThreadRoots(prev?.threadRoots ?? new Map(), res.threadRoots),
         events: res.events ?? [],
         hasMore: res.hasMore,
         loadingOlder: false,
@@ -335,13 +375,13 @@ const newerLoading = new Set<string>()
 
 /** Scroll-down pagination while detached: fetch the page above the window and append it; reaching the head re-attaches. */
 export async function loadNewerStreamMessages(orgId: string, spaceId: string): Promise<void> {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     const newest = newestSettled(state?.messages)
     if (!newest || !state?.hasMoreAfter || newerLoading.has(k)) return
     newerLoading.add(k)
     try {
-        const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, afterOffset: newest.offset })
+        const res = await window.ipc.invoke('spaces:listStream', { orgId, spaceId, afterOffset: newest.offset, ...(inlineView(orgId, spaceId) ? { replies: true } : {}) })
         const cur = streamState.get(k)
         // A jump swapped the window meanwhile (to latest, or around another row): this page continues the one that left.
         if (!cur?.hasMoreAfter || !cur.messages.some((m) => m.id === newest.id)) return
@@ -349,6 +389,7 @@ export async function loadNewerStreamMessages(orgId: string, spaceId: string): P
         setStream(k, {
             messages: mergeMessages(cur.messages, res.messages),
             topicsByRoot: withTopics(cur.topicsByRoot, res.topics),
+            threadRoots: withThreadRoots(cur.threadRoots, res.threadRoots),
             events: withEvents(cur.events, res.events),
             hasMoreAfter,
             // The head reached: everything counted while detached is in the window now.
@@ -367,7 +408,7 @@ export async function loadNewerStreamMessages(orgId: string, spaceId: string): P
  * must merge into the head, never into the window being left.
  */
 export async function jumpToLatest(orgId: string, spaceId: string): Promise<void> {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     if (!streamState.get(k)?.hasMoreAfter) return
     // Not ready until the head page lands: an empty, ready window would paint
     // the space's empty-state copy for a round trip.
@@ -377,7 +418,7 @@ export async function jumpToLatest(orgId: string, spaceId: string): Promise<void
 
 /** Replace one stream message in place (e.g. the folded result of a reaction toggle). */
 export function updateStreamMessage(orgId: string, spaceId: string, message: spaces.Message): void {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     if (!state?.messages.some((m) => m.id === message.id)) return
     setStream(k, { messages: state.messages.map((m) => (m.id === message.id ? message : m)) })
@@ -390,8 +431,9 @@ export function updateStreamMessage(orgId: string, spaceId: string, message: spa
  * never comes) and the dedupe makes whichever copy arrives second a no-op.
  */
 export function ingestStreamMessage(orgId: string, spaceId: string, message: spaces.Message): void {
-    if (message.threadRoot !== undefined) return
-    const k = key(orgId, spaceId)
+    // Replies stay in their threads, except in a space shown inline (2026-10-25).
+    if (message.threadRoot !== undefined && !inlineView(orgId, spaceId)) return
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     if (!state) return
     if (state.messages.some((m) => m.id === message.id)) return
@@ -407,15 +449,33 @@ export function ingestStreamMessage(orgId: string, spaceId: string, message: spa
     // two messages.)
     const echoed =
         message.author.actingMode === 'direct' && !(message as ChatMessage).pending
-            ? state.messages.find((m) => m.pending && !m.threadRoot && m.author.memberId === message.author.memberId && m.body === message.body)
+            ? state.messages.find((m) => m.pending && m.threadRoot === message.threadRoot && m.author.memberId === message.author.memberId && m.body === message.body)
             : undefined
     const rest = echoed ? state.messages.filter((m) => m.id !== echoed.id) : state.messages
     setStream(k, { messages: [...rest, message].sort((a, b) => a.offset - b.offset) })
 }
 
+/**
+ * A live reply in the inline view names its thread (2026-10-25), and may
+ * belong to a root the window does not hold: fetch it once, so the line
+ * reads its title or first line instead of a placeholder.
+ */
+export async function noteThreadRoot(orgId: string, spaceId: string, rootId: string): Promise<void> {
+    const k = streamKey(orgId, spaceId)
+    const state = streamState.get(k)
+    if (!state || state.threadRoots.has(rootId) || state.messages.some((m) => m.id === rootId)) return
+    try {
+        const { message } = await window.ipc.invoke('spaces:getMessage', { orgId, spaceId, messageId: rootId })
+        const cur = streamState.get(k)
+        if (cur) setStream(k, { threadRoots: withThreadRoots(cur.threadRoots, [message]) })
+    } catch {
+        // The line keeps its placeholder; the next page load carries the root.
+    }
+}
+
 /** A reply landed somewhere: bump its root's chip denorm in place (no refetch). */
 function noteReplyActivity(orgId: string, spaceId: string, reply: spaces.Message): void {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     const rootId = reply.threadRoot
     if (!state || !rootId) return
@@ -423,14 +483,23 @@ function noteReplyActivity(orgId: string, spaceId: string, reply: spaces.Message
     if (!root) return
     setStream(k, {
         messages: state.messages.map((m) =>
-            m.id === rootId ? { ...m, replyCount: (m.replyCount ?? 0) + 1, lastReplyAt: reply.postedAt } : m,
+            m.id === rootId ? {
+                ...m,
+                replyCount: (m.replyCount ?? 0) + 1,
+                lastReplyAt: reply.postedAt,
+                // Only extend a list Harbor keeps: a root with replies and no
+                // authors is an older Harbor, which the Threads list reads
+                // from the thread instead (lib/spaces-thread-participants).
+                replyAuthors: (m.replyCount ?? 0) > 0 && (m.replyAuthors?.length ?? 0) === 0 ? m.replyAuthors
+                    : (m.replyAuthors ?? []).includes(reply.author.memberId) ? m.replyAuthors : [...(m.replyAuthors ?? []), reply.author.memberId],
+            } : m,
         ),
     })
 }
 
 /** The write confirmed: swap the pending row for the org's message (a no-op side if the live frame landed it first). */
 export function resolvePendingStreamMessage(orgId: string, spaceId: string, pendingId: string, message: spaces.Message): void {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     if (!state) return
     // A jump landed mid-send: the pending row went with the tail, and the
@@ -449,7 +518,7 @@ export function resolvePendingStreamMessage(orgId: string, spaceId: string, pend
  * so the sender is told instead of losing the words silently.
  */
 export function failPendingStreamMessage(orgId: string, spaceId: string, pendingId: string, body?: string): void {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     if (!state?.messages.some((m) => m.id === pendingId)) {
         if (body !== undefined) toast(`Could not send: “${excerptOf(body)}”`, 'error')
@@ -465,7 +534,7 @@ function excerptOf(body: string): string {
 
 /** Drop a message row outright (discarding a failed send, or re-sending it). */
 export function removeStreamMessage(orgId: string, spaceId: string, messageId: string): void {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     if (!state?.messages.some((m) => m.id === messageId)) return
     setStream(k, { messages: state.messages.filter((m) => m.id !== messageId) })
@@ -473,7 +542,7 @@ export function removeStreamMessage(orgId: string, spaceId: string, messageId: s
 
 /** Fold a topic annotation change in (create/retitle/archive from any surface or the live bus). */
 export function ingestTopic(orgId: string, spaceId: string, topic: spaces.Topic): void {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     if (!state) return
     setStream(k, { topicsByRoot: withTopics(state.topicsByRoot, [topic]) })
@@ -481,7 +550,7 @@ export function ingestTopic(orgId: string, spaceId: string, topic: spaces.Topic)
 
 /** The annotation was removed ("convert back to thread") — the root stays, the badge goes. */
 export function removeTopicByRoot(orgId: string, spaceId: string, rootMessageId: string): void {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     const state = streamState.get(k)
     if (!state?.topicsByRoot.has(rootMessageId)) return
     const next = new Map(state.topicsByRoot)
@@ -490,7 +559,7 @@ export function removeTopicByRoot(orgId: string, spaceId: string, rootMessageId:
 }
 
 async function ensureStream(orgId: string, spaceId: string): Promise<void> {
-    const k = key(orgId, spaceId)
+    const k = streamKey(orgId, spaceId)
     // Paint the cached tail first — a cold open shows messages while the
     // network round-trips.
     hydrateStream(k)
@@ -499,6 +568,14 @@ async function ensureStream(orgId: string, spaceId: string): Promise<void> {
     // last visit left detached goes back to the tail.
     if (current?.hasMoreAfter) await jumpToLatest(orgId, spaceId)
     else if (!current?.ready || streamCacheOnly.has(k)) await loadStream(orgId, spaceId)
+}
+
+/** The summary an edit leaves (2026-10-25): the frame carries it, and its absence means none. */
+function withEditedSummary<M extends spaces.Message>(message: M, summary: string | undefined): M {
+    const next = { ...message }
+    if (summary) next.summary = summary
+    else delete next.summary
+    return next
 }
 
 let busWired = false
@@ -519,13 +596,13 @@ function wireBus(): void {
             // resync that mattered.
             const reconnect = isReconnect(event.orgId, frame.spaceId, frame)
             if (!reconnect && feedSyncedRecently(event.orgId, frame.spaceId)) return
-            const k = key(event.orgId, frame.spaceId)
+            const k = streamKey(event.orgId, frame.spaceId)
             void refreshSpaceFeed(event.orgId, frame.spaceId)
             if (streamState.get(k)?.ready) void loadStream(event.orgId, frame.spaceId)
             return
         }
         if (frame.kind !== 'event') return
-        const k = key(event.orgId, frame.spaceId)
+        const k = streamKey(event.orgId, frame.spaceId)
         const state = streamState.get(k)
         if (!state) return
         if (frame.event.type === 'message') {
@@ -537,6 +614,10 @@ function wireBus(): void {
                 // the count BEFORE this reply), then bump the chip.
                 ingestThreadReply(event.orgId, frame.spaceId, message)
                 noteReplyActivity(event.orgId, frame.spaceId, message)
+                if (inlineView(event.orgId, frame.spaceId)) {
+                    ingestStreamMessage(event.orgId, frame.spaceId, message)
+                    void noteThreadRoot(event.orgId, frame.spaceId, message.threadRoot)
+                }
             }
         } else if (frame.event.type === 'membership') {
             // A join or leave line. Detached, it belongs to a page above the
@@ -548,6 +629,14 @@ function wireBus(): void {
             ingestTopic(event.orgId, frame.spaceId, frame.event.topic)
         } else if (frame.event.type === 'topic_removed') {
             removeTopicByRoot(event.orgId, frame.spaceId, frame.event.removal.rootMessageId)
+        } else if (frame.event.type === 'thread_archive') {
+            const { rootMessageId, action } = frame.event
+            const root = state.messages.find((m) => m.id === rootMessageId)
+            if (root) updateStreamMessage(event.orgId, frame.spaceId, withArchived(root, action === 'archived'))
+        } else if (frame.event.type === 'thread_session') {
+            const { rootMessageId, session } = frame.event
+            const root = state.messages.find((m) => m.id === rootMessageId)
+            if (root) updateStreamMessage(event.orgId, frame.spaceId, withSession(root, session))
         } else if (frame.event.type === 'reaction') {
             // Fold the toggle into the message in place (thread panes refetch on
             // their own tick; the stream keeps its messages live here). The
@@ -600,7 +689,7 @@ function wireBus(): void {
                 setStream(k, {
                     messages: state.messages.map((m) =>
                         m.id === edit.messageId
-                            ? { ...m, body: edit.body, editedAt: edit.at, mentions: edit.mentions, mentionsHere: edit.mentionsHere, mentionsRowboat: edit.mentionsRowboat }
+                            ? withEditedSummary({ ...m, body: edit.body, editedAt: edit.at, mentions: edit.mentions, mentionsHere: edit.mentionsHere, mentionsRowboat: edit.mentionsRowboat }, edit.summary)
                             : m,
                     ),
                 })
@@ -626,7 +715,7 @@ function wireBus(): void {
     // Feed store changes (the topics rail list) → fold annotations for loaded roots.
     subscribeSpaceFeedStore(() => {
         for (const k of watched) {
-            const [orgId, spaceId] = k.split('/') as [string, string]
+            const [orgId, spaceId] = k.replace(/#inline$/, '').split('/') as [string, string]
             const feed = getSpaceFeed(orgId, spaceId)
             const state = streamState.get(k)
             if (!feed.loaded || !state) continue
@@ -647,17 +736,19 @@ function wireBus(): void {
 
 /** Non-React read of a space's stream, for helpers that run outside the hook. */
 export function getStreamState(orgId: string, spaceId: string): StreamState {
-    return streamState.get(key(orgId, spaceId)) ?? EMPTY_STREAM
+    return streamState.get(streamKey(orgId, spaceId)) ?? EMPTY_STREAM
 }
 
 const watched = new Set<string>()
 
 /** The stream for one space: roots + annotations, kept live. */
 export function useStream(orgId: string, spaceId: string): StreamState {
+    // A view switch (2026-10-25) reads the other view's window, so it re-runs the open below.
+    const view = useStreamView(orgId, spaceId)
     // Before the snapshot read, not in an effect: a space with a persisted
     // tail must paint messages in its FIRST frame (the Slack feel). The call
     // is idempotent and never emits, so it is safe during render.
-    hydrateStream(key(orgId, spaceId))
+    hydrateStream(streamKey(orgId, spaceId))
     const state = useSyncExternalStore(
         (l) => {
             streamListeners.add(l)
@@ -669,14 +760,14 @@ export function useStream(orgId: string, spaceId: string): StreamState {
     )
     useEffect(() => {
         wireBus()
-        const k = key(orgId, spaceId)
+        const k = streamKey(orgId, spaceId)
         watched.add(k)
         void ensureStream(orgId, spaceId)
         return () => {
             watched.delete(k)
         }
-    }, [orgId, spaceId])
-    return state.get(key(orgId, spaceId)) ?? EMPTY_STREAM
+    }, [orgId, spaceId, view])
+    return state.get(streamKey(orgId, spaceId)) ?? EMPTY_STREAM
 }
 
 // ---------------------------------------------------------------------------
@@ -888,12 +979,12 @@ function foldLeases(leases: Map<string, Lease>, selfMemberId: string): SpacePres
     return { here: [...here], typing, working }
 }
 
-export function useSpacePresence(orgId: string, spaceId: string, selfMemberId: string): SpacePresence {
+export function useSpacePresence(orgId: string, spaceId: string, selfMemberId: string, active = true): SpacePresence {
     const leasesRef = useRef<Map<string, Lease>>(new Map())
     const [presence, setPresence] = useState<SpacePresence>(EMPTY_PRESENCE)
     const ownActivity = useSpaceAgentActivity(orgId, spaceId)
 
-    useSpaceLive(orgId, spaceId, (frame) => {
+    useSpaceLive(active ? orgId : null, active ? spaceId : null, (frame) => {
         if (frame.kind !== 'presence') return
         const leases = leasesRef.current
         // Human and agent leases are independent per (member, thread) — the frame's
@@ -961,6 +1052,7 @@ export function usePresenceSender(orgId: string, spaceId: string, threadRootId?:
     }, [send, active])
 
     const onType = useCallback(() => {
+        if (!active) return
         const now = Date.now()
         if (now - lastTypingRef.current > 4_000) {
             lastTypingRef.current = now
@@ -968,7 +1060,7 @@ export function usePresenceSender(orgId: string, spaceId: string, threadRootId?:
         }
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
         idleTimerRef.current = setTimeout(() => send('viewing'), 6_000)
-    }, [send])
+    }, [send, active, orgId, spaceId])
 
     return { onType }
 }
@@ -1013,7 +1105,7 @@ export function countSpaceUnread(orgId: string, spaceId: string, _selfMemberId: 
  * activity, else null (callers fall back to the space's createdAt).
  */
 export function spaceLastActivityAt(orgId: string, spaceId: string): string | null {
-    const state = streamState.get(key(orgId, spaceId))
+    const state = streamState.get(streamKey(orgId, spaceId))
     let latest: string | null = null
     if (state?.ready) {
         for (const m of state.messages) {

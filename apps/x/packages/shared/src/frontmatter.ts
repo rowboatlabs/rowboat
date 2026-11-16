@@ -29,7 +29,7 @@ export function parseFrontmatter(content: string): { fields: Record<string, stri
     }
 
     // Top-level key: value
-    const topMatch = line.match(/^(\w[\w\s]*\w|\w+):\s*(.*)$/);
+    const topMatch = line.match(/^(\w[\w\s-]*\w|\w+):\s*(.*)$/);
     if (topMatch) {
       const key = topMatch[1];
       const value = topMatch[2].trim();

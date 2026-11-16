@@ -28,16 +28,16 @@ export interface PaletteSection {
     digit?: number
 }
 
-/** Ordered as the Go menu and the dock are. */
+/** Ordered as the Go menu and the sidebar are (Assistant, ⌘1, has no section here). */
 export const PALETTE_SECTIONS: readonly PaletteSection[] = [
-    { key: 'home', label: 'Todo', keywords: ['home', 'today'], digit: 1 },
-    { key: 'spaces', label: 'Spaces', keywords: ['servers', 'channels', 'messages'], digit: 2 },
-    { key: 'email', label: 'Email', keywords: ['mail', 'inbox'], digit: 3 },
-    { key: 'meetings', label: 'Meetings', keywords: ['calls', 'recordings', 'transcripts'], digit: 5 },
-    { key: 'brain', label: 'Brain', keywords: ['knowledge', 'notes', 'files'], digit: 6 },
-    { key: 'apps', label: 'Apps', keywords: ['mini apps'], digit: 7 },
-    { key: 'bg-tasks', label: 'Background agents', keywords: ['agents', 'tasks', 'automations'], digit: 8 },
-    { key: 'projects', label: 'Projects', keywords: ['workspaces', 'code', 'coding', 'sessions', 'worktrees'], digit: 9 },
+    { key: 'email', label: 'Email', keywords: ['mail', 'inbox'], digit: 2 },
+    { key: 'meetings', label: 'Meetings', keywords: ['calls', 'recordings', 'transcripts'], digit: 3 },
+    { key: 'home', label: 'Todo', keywords: ['home', 'today'], digit: 4 },
+    { key: 'brain', label: 'Brain', keywords: ['knowledge', 'notes', 'files'], digit: 5 },
+    { key: 'projects', label: 'Projects', keywords: ['workspaces', 'code', 'coding', 'sessions', 'worktrees'], digit: 6 },
+    { key: 'bg-tasks', label: 'Background agents', keywords: ['agents', 'tasks', 'automations'], digit: 7 },
+    { key: 'apps', label: 'Apps', keywords: ['mini apps'], digit: 8 },
+    { key: 'spaces', label: 'Spaces', keywords: ['servers', 'channels', 'messages'], digit: 9 },
     { key: 'chat-history', label: 'Chat history', keywords: ['chats', 'conversations', 'history'] },
     { key: 'live-notes', label: 'Live notes', keywords: ['live'] },
     { key: 'graph', label: 'Graph', keywords: ['knowledge graph'] },

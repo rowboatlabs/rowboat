@@ -352,10 +352,11 @@ export function TurnConversation({
     }
 
     if (isTurnUsageMessage(item)) {
-      // Right-aligned, hover-revealed footer for the turn (see the
-      // [data-turn-usage] rules in App.css: shown when the row itself or the
-      // element just above it is hovered, or while the menu is open). The
-      // menu sits last so per-turn actions (copy) slot in before it.
+      // Hover-revealed footer for the turn, under the reply's first line of
+      // text — left-aligned since 2026-10-22, where the eye finishes reading
+      // (see the [data-turn-usage] rules in App.css: shown when the row itself
+      // or the element just above it is hovered, or while the menu is open).
+      // Copy first, then the menu; the effort label trails them.
       // The copy target is the turn's final assistant message — the last one
       // before this usage marker — copied verbatim, no transformation.
       const usageIndex = items.findIndex((entry) => entry.id === item.id)
@@ -368,22 +369,22 @@ export function TurnConversation({
       return (
         <div
           key={item.id}
-          className="-mt-6 -mr-1 flex items-center justify-end gap-1"
+          className="-mt-6 -ml-1 flex items-center justify-start gap-1"
           data-turn-usage
           data-message-id={item.id}
         >
-          {item.reasoningEffort && (
-            <span className="text-xs text-muted-foreground/70">
-              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
-            </span>
-          )}
           {finalOutput && <MessageCopyButton text={finalOutput} className="opacity-100" />}
           <TokenUsageMenu
             usage={item.usage}
             scope="turn"
             modelCallCount={item.modelCallCount}
-            align="end"
+            align="start"
           />
+          {item.reasoningEffort && (
+            <span className="ml-1 text-xs text-muted-foreground/70">
+              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
+            </span>
+          )}
         </div>
       )
     }

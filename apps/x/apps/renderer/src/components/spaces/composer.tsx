@@ -1,14 +1,18 @@
+import { invokeSpace } from '@/lib/spaces-invoke'
+import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { SearchMenu } from '@/components/search-menu'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Clock, Eye, FileText, Loader2, LoaderIcon, Mic, Paperclip, Route, Send, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Clock, Eye, FileText, KeyRound, Loader2, LoaderIcon, Mic, Paperclip, Plus, Route, Send, ShieldCheck, Sparkles, Square, Terminal, Type, X as XIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useSpaceNames } from '@/hooks/use-spaces'
 import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
 import { VoiceWaveform } from '@/components/chat-input-with-mentions'
@@ -23,8 +27,11 @@ import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress, mentionedMemberIds } from '@/lib/spaces-mentions'
 import { AgentOptionsStrip, type AgentOptionValues } from '@/components/spaces/agent-options-strip'
+import { AddSecretDialog, DraftSecretChips, type DraftSecret } from '@/components/spaces/message-secrets'
+import { useMemberNames } from '@/components/spaces/member-text'
+import { mentionsAnyone } from '@x/shared/dist/spaces.js'
 import type { AutoRouteMode } from '@/lib/spaces-auto-route'
-import { draftStorageKey } from '@/lib/spaces-thread-draft'
+import { draftStorageKey, readComposerPicks, writeComposerPicks } from '@/lib/spaces-thread-draft'
 import { schedulePresets } from '@/lib/spaces-schedule'
 import { blobAppUrl, blobWireUrl, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -38,7 +45,7 @@ import { toast } from '@/lib/toast'
 // (model · permissions · search · terminal) appears; they ride along with the
 // invocation for that one turn. The message itself always goes to the team.
 //
-// Attachments (paperclip · paste · drag-drop) upload at ATTACH time, not send
+// Attachments (the + menu · paste · drag-drop) upload at ATTACH time, not send
 // time — send is instant and can't fail on a slow upload (the two-phase upload
 // model, spec §6). Chips keep insertion order regardless of completion order;
 // send appends each done attachment as a canonical blob link on the wire.
@@ -65,6 +72,24 @@ export interface AgentOptions {
     codeMode?: 'claude' | 'codex'
     /** Options picked for agent members the text mentions, by agent id (Harbor spec §8, 2026-09-30). */
     members?: AgentOptionValues
+    /** Secrets for the members the text mentions (Harbor spec §8, 2026-11-04): only they read the values. */
+    secrets?: DraftSecret[]
+}
+
+/**
+ * One row a command offers for what is typed after it (2026-11-05, /session):
+ * the first is the default, so Enter picks it.
+ */
+export interface SlashChoice {
+    key: string
+    label: string
+    detail?: string
+    icon?: ReactNode
+    /** A heading above this row and the ones after it, until the next. */
+    section?: string
+    /** Shown, not pickable: says what is still missing. */
+    disabled?: boolean
+    run: () => void | Promise<void>
 }
 
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
@@ -74,9 +99,23 @@ export interface SlashCommand {
     args?: string
     hint: string
     run: (args: string) => void | Promise<void>
+    /** Rows to pick from while the argument is typed, in place of the usage hint. */
+    choices?: (args: string) => SlashChoice[]
 }
 
 type CommandEntry = Omit<SlashCommand, 'run'> & { run?: SlashCommand['run'] }
+
+// Spaces redesign (2026-10-21): the formatting bar is hidden by default behind
+// the "Aa" toggle; the choice is per install, shared by every composer.
+const FORMATTING_OPEN_KEY = 'spaces:formattingOpen'
+
+function readFormattingOpen(): boolean {
+    try {
+        return window.localStorage.getItem(FORMATTING_OPEN_KEY) === '1'
+    } catch {
+        return false
+    }
+}
 
 /** Built into the composer itself: /ask rewrites to an @rowboat message and sends. */
 const ASK_COMMAND: CommandEntry = { name: 'ask', args: '<question>', hint: 'Ask your Rowboat — same as @rowboat' }
@@ -102,7 +141,7 @@ async function formatTranscript(raw: string): Promise<string> {
     }
 }
 
-export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, draftKey, commands = [], autoRoute, submit, onDraftChange, onEscape, followUpAgentId }: {
     placeholder: string
     /**
      * Post the message. Resolve 'keep' to leave the draft in the box (the
@@ -112,7 +151,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     onSend: (body: string, agent?: AgentOptions) => Promise<void | 'keep'>
     /** Send-later: the clock menu hands the built body + fire time here. */
     onSchedule?: (body: string, at: Date) => Promise<void>
-    /** Opens the poll creation dialog (same flow as /poll) — the button beside attach. */
+    /** Opens the poll creation dialog (same flow as /poll) — an item in the + menu. */
     onCreatePoll?: () => void
     busy: boolean
     autoFocus?: boolean
@@ -142,10 +181,16 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     onDraftChange?: (draft: string) => void
     /** Esc with no popover open. Return true to consume it (a pane closing its notice). */
     onEscape?: () => boolean
+    /**
+     * The agent a reply that mentions nobody goes to (a thread follow-up,
+     * 2026-10-27): its options are offered and sent as if the draft mentioned
+     * it (2026-10-29). Absent when the reply goes to people only.
+     */
+    followUpAgentId?: string
 }) {
     const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(draftStorageKey(draftKey)) ?? '' : ''))
-    // Picked options for mentioned agent members; sticky for the session, sent only for agents the text mentions.
-    const [memberOptions, setMemberOptions] = useState<AgentOptionValues>({})
+    // Picked options for mentioned agent members; kept per draft key (2026-11-07), sent only for agents the text mentions.
+    const [memberOptions, setMemberOptions] = useState<AgentOptionValues>(() => (draftKey ? readComposerPicks(draftKey).members ?? {} : {}))
     useEffect(() => {
         if (!draftKey) return
         try {
@@ -219,7 +264,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
             void (async () => {
                 try {
                     const input = await uploadInputFor(file)
-                    const res = await window.ipc.invoke('spaces:uploadBlob', {
+                    const res = await invokeSpace('spaces:uploadBlob', {
                         orgId: refs.orgId,
                         spaceId: refs.spaceId,
                         ...input,
@@ -297,7 +342,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         !!(refs && event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files'))
 
     // Agent options — only meaningful (and only shown) when @rowboat is addressed.
-    const [model, setModel] = useState<ModelSelection | null>(null)
+    const [model, setModel] = useState<ModelSelection | null>(() => (draftKey ? readComposerPicks(draftKey).model ?? null : null))
+    useEffect(() => {
+        if (draftKey) writeComposerPicks(draftKey, { ...(model ? { model } : {}), members: memberOptions })
+    }, [draftKey, model, memberOptions])
     const [permissionMode, setPermissionMode] = useState<'auto' | 'manual'>('auto')
     const [searchEnabled, setSearchEnabled] = useState(false)
     const [codeMode, setCodeMode] = useState<'claude' | 'codex' | null>(null)
@@ -363,7 +411,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // --- slash commands ------------------------------------------------------
     // "/name" (no space yet) filters the menu; "/name args" pins the matched
     // command's usage hint above the box; Enter runs it via send().
-    const allCommands: CommandEntry[] = [ASK_COMMAND, ...commands]
+    // /ask is your own Rowboat, which runs on your machine (LOCAL_RUNTIME).
+    const allCommands: CommandEntry[] = LOCAL_RUNTIME ? [ASK_COMMAND, ...commands] : commands
     const cmdMenuMatch = /^\/([a-zA-Z]*)$/.exec(draft)
     const cmdQuery = cmdMenuMatch?.[1]?.toLowerCase() ?? null
     const cmdCandidates = cmdQuery !== null ? allCommands.filter((c) => c.name.startsWith(cmdQuery)) : []
@@ -381,6 +430,26 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         const m = /^\/([a-zA-Z]+)\s/.exec(draft)
         return m ? allCommands.find((c) => c.name === m[1]!.toLowerCase()) ?? null : null
     })()
+
+    // A command's rows for what follows it (2026-11-05, /session): New first,
+    // then what there is to jump to. Enter picks; Esc falls back to the hint.
+    const activeArgs = activeCommand ? draft.replace(/^\/[a-zA-Z]+\s/, '') : ''
+    const choices = !showCommands && !showMentions && activeCommand?.choices ? activeCommand.choices(activeArgs) : []
+    const [choiceIndex, setChoiceIndex] = useState(0)
+    const [choicesDismissed, setChoicesDismissed] = useState(false)
+    const [lastChoiceDraft, setLastChoiceDraft] = useState(draft)
+    if (draft !== lastChoiceDraft) {
+        setLastChoiceDraft(draft)
+        setChoiceIndex(0)
+        if (!activeCommand) setChoicesDismissed(false)
+    }
+    const showChoices = !choicesDismissed && choices.length > 0
+    const pickChoice = (choice: SlashChoice | undefined) => {
+        if (!choice || choice.disabled) return
+        editor?.chain().clearContent().run()
+        setDraft('')
+        void choice.run()
+    }
 
     const pickCommand = (c: CommandEntry) => {
         if (!editor) return
@@ -411,6 +480,38 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
 
     // --- send ----------------------------------------------------------------
     const mentioned = containsRowboatAddress(draft)
+    // Spaces redesign (2026-10-21): a draft addressing @rowboat puts the whole
+    // frame in an "asking" state (accent border + one-line hint). Desktop only —
+    // a browser has no Rowboat to invoke (maybeInvokeRowboat), so nothing to signal.
+    const asking = LOCAL_RUNTIME && mentioned
+    // The hint names where the ask is posted: the team sees it, and the agent's
+    // answer lands as a reply in the thread under it (lib/spaces-rowboat.ts).
+    const spaceNames = useSpaceNames(refs?.orgId ?? '')
+    const spaceName = refs ? spaceNames.get(refs.spaceId) : undefined
+    const askHint = spaceName
+        ? `${refs?.directWith ? `Sent to ${spaceName}` : `Posted to #${spaceName}`}. Your Rowboat replies in the thread.`
+        : 'Your Rowboat replies in the thread.'
+
+    const [formattingOpen, setFormattingOpen] = useState(readFormattingOpen)
+    const toggleFormatting = () => {
+        const next = !formattingOpen
+        setFormattingOpen(next)
+        try {
+            window.localStorage.setItem(FORMATTING_OPEN_KEY, next ? '1' : '0')
+        } catch {
+            // Private mode: the choice lasts for this session only.
+        }
+    }
+
+    // Secrets waiting to go with the message (2026-11-04): held in memory only, never in the saved draft.
+    const [secrets, setSecrets] = useState<DraftSecret[]>([])
+    const [secretOpen, setSecretOpen] = useState(false)
+    const memberNames = useMemberNames()
+    /** Who a text's secrets go to, as Harbor decides it at post: the members it mentions, and in a DM the other member. */
+    const secretReaders = (text: string) => [...new Set([...mentionedMemberIds(text), ...(refs?.directWith ? [refs.directWith] : [])])]
+
+    const hasDoneAttachment = attachments.some((a) => a.status === 'done')
+    const canSend = !busy && !uploading && (!!draft.trim() || hasDoneAttachment)
 
     /**
      * Per-turn agent options — @rowboat's whenever the outgoing text addresses
@@ -418,9 +519,12 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
      */
     const agentOptionsFor = (text: string): AgentOptions | undefined => {
         const mentionedIds = new Set(mentionedMemberIds(text))
+        // A follow-up reaches its agent without a mention: its picks go with it.
+        if (followUpAgentId && !mentionsAnyone(text)) mentionedIds.add(followUpAgentId)
         const members = Object.fromEntries(Object.entries(memberOptions).filter(([id]) => mentionedIds.has(id)))
+        const handing = secrets
         const rowboat = containsRowboatAddress(text)
-        if (!rowboat && Object.keys(members).length === 0) return undefined
+        if (!rowboat && Object.keys(members).length === 0 && handing.length === 0) return undefined
         return {
             ...(rowboat
                 ? {
@@ -431,6 +535,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                   }
                 : {}),
             ...(Object.keys(members).length > 0 ? { members } : {}),
+            ...(handing.length > 0 ? { secrets: handing } : {}),
         }
     }
 
@@ -455,6 +560,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         const m = COMMAND_RE.exec(raw)
         if (m && allCommands.some((c) => c.name === m[1]!.toLowerCase())) {
             toast('Commands run now — schedule a plain message instead', 'info')
+            return
+        }
+        if (secrets.length > 0) {
+            toast('A message with a secret is sent now — remove the secret to schedule it', 'info')
             return
         }
         const body = buildBody(raw)
@@ -496,6 +605,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         // buildBody, shared with send-later.
         const body = buildBody(raw)
         if (!body) return
+        if (secrets.length > 0 && secretReaders(raw).length === 0) {
+            toast('Mention who should read the secret, or remove it', 'info')
+            return
+        }
         // From the text actually going out — an /ask rewrite mentions @rowboat
         // even though the draft it came from didn't.
         let result: void | 'keep'
@@ -510,6 +623,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
+        setSecrets([])
         mention.close()
     }
 
@@ -671,6 +785,24 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // editor keymap), then the send keys. Formatting chords live in the
     // editor's own extensions. Returning true consumes the event.
     const handleEditorKeyDown = (view: EditorView, e: KeyboardEvent): boolean => {
+        if (showChoices) {
+            if (e.key === 'ArrowDown') {
+                setChoiceIndex((i) => (i + 1) % choices.length)
+                return true
+            }
+            if (e.key === 'ArrowUp') {
+                setChoiceIndex((i) => (i - 1 + choices.length) % choices.length)
+                return true
+            }
+            if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                pickChoice(choices[Math.min(choiceIndex, choices.length - 1)])
+                return true
+            }
+            if (e.key === 'Escape') {
+                setChoicesDismissed(true)
+                return true
+            }
+        }
         if (showCommands) {
             if (e.key === 'ArrowDown') {
                 setCmdIndex((i) => (i + 1) % cmdCandidates.length)
@@ -760,14 +892,14 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         <div className="spaces-composer-dock shrink-0">
             <div
                 ref={setBox}
-                className="spaces-composer-frame relative border bg-background"
+                className={cn('spaces-composer-frame relative border bg-background', asking && 'is-asking')}
                 onDragEnter={onDragEnter}
                 onDragOver={(e) => { if (refs && dragHasFiles(e)) e.preventDefault() }}
                 onDragLeave={onDragLeave}
                 onDrop={onDrop}
             >
                 {dragOver && (
-                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-foreground/40 bg-background/90 text-sm text-muted-foreground">
+                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-[inherit] border-2 border-dashed border-foreground/40 bg-background/90 text-sm text-muted-foreground">
                         Drop to attach
                     </div>
                 )}
@@ -851,7 +983,33 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             <div className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
                         </div>
                     )}
-                    {!showCommands && activeCommand && !showMentions && (
+                    {showChoices && (
+                        <div role="listbox" aria-label={`/${activeCommand!.name}`} className="absolute bottom-full left-0 right-0 z-20 mb-1.5 max-h-80 overflow-y-auto rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
+                            {choices.map((c, i) => (
+                                <div key={c.key}>
+                                    {c.section && c.section !== choices[i - 1]?.section && (
+                                        <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">{c.section}</div>
+                                    )}
+                                    <button
+                                        type="button"
+                                        role="option"
+                                        aria-selected={i === choiceIndex}
+                                        aria-disabled={c.disabled || undefined}
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onMouseEnter={() => setChoiceIndex(i)}
+                                        onClick={() => pickChoice(c)}
+                                        className={cn('flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left', i === choiceIndex ? 'bg-accent' : 'hover:bg-accent/60', c.disabled && 'text-muted-foreground')}
+                                    >
+                                        {c.icon && <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">{c.icon}</span>}
+                                        <span className="min-w-0 flex-1 truncate text-sm">{c.label}</span>
+                                        {c.detail && <span className="shrink-0 text-xs text-muted-foreground">{c.detail}</span>}
+                                    </button>
+                                </div>
+                            ))}
+                            <div className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground/80">↑↓ · ↵ to pick · esc</div>
+                        </div>
+                    )}
+                    {!showCommands && !showChoices && activeCommand && !showMentions && (
                         <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 rounded-2xl border-none bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--rowboat-shadow)]">
                             <span className="font-mono text-sm font-medium text-foreground">/{activeCommand.name}</span>
                             {activeCommand.args && <span className="font-mono text-sm"> {activeCommand.args}</span>} — {activeCommand.hint} · ↵ to run
@@ -879,10 +1037,27 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     {!recording && mention.show && (
                         <MentionMenu anchor={box} candidates={mention.candidates} index={mention.index} onPick={mention.pick} />
                     )}
-                    {/* The formatting bar rides the top edge. */}
-                    <RichFormattingToolbar editor={editor} className="spaces-formatting px-2 py-1" />
-                    {attachments.length > 0 && (
+                    {LOCAL_RUNTIME && (
+                        <div className="spaces-collapse" data-open={asking}>
+                            <div inert={!asking}>
+                                <div className="spaces-ask-hint">
+                                    <Sparkles className="size-3.5 shrink-0" />
+                                    <span className="min-w-0 truncate">{askHint}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {/* The formatting bar rides the top edge, collapsed until
+                        "Aa" opens it; the editor's own shortcuts work either way.
+                        Collapsed, it is inert — out of the tab order. */}
+                    <div className="spaces-collapse" data-open={formattingOpen}>
+                        <div inert={!formattingOpen}>
+                            <RichFormattingToolbar editor={editor} className="spaces-formatting" />
+                        </div>
+                    </div>
+                    {(attachments.length > 0 || secrets.length > 0) && (
                         <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
+                            <DraftSecretChips secrets={secrets} readers={secretReaders(draft)} names={memberNames} onRemove={(gone) => setSecrets((all) => all.filter((x) => x !== gone))} />
                             {attachments.map((a) => (
                                 <span
                                     key={a.id}
@@ -916,50 +1091,101 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     {/* The rich input. What you see is what sends — the doc
                         serializes back to wire markdown on every update. */}
                     <EditorContent editor={editor} className="space-composer" />
-                    <div className="spaces-compose-actions flex flex-wrap items-center gap-1.5 px-2 pb-2">
+                    <div className="spaces-compose-actions flex flex-wrap items-center gap-1 px-2 pb-2 pt-1.5">
                         {refs && (
-                            <>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    multiple
-                                    className="hidden"
-                                    onChange={(e) => {
-                                        addFiles(Array.from(e.target.files ?? []))
-                                        e.target.value = ''
-                                    }}
-                                />
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                multiple
+                                className="hidden"
+                                onChange={(e) => {
+                                    addFiles(Array.from(e.target.files ?? []))
+                                    e.target.value = ''
+                                }}
+                            />
+                        )}
+                        {/* Spaces redesign (2026-10-21): attach and poll share one
+                            "+" menu instead of two bare icons. Paste and drop
+                            still attach without it. */}
+                        {(refs || onCreatePoll) && (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <button
+                                        type="button"
+                                        aria-label="Add"
+                                        className="spaces-plus inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
+                                    >
+                                        <Plus className="size-[17px]" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent side="top" align="start" sideOffset={6} className="w-60 p-1.5">
+                                    {refs && (
+                                        <DropdownMenuItem onSelect={() => fileInputRef.current?.click()} className="items-start">
+                                            <Paperclip className="mt-0.5" />
+                                            <span className="flex flex-col">
+                                                <span>Attach files</span>
+                                                <span className="text-xs text-muted-foreground">or drop them anywhere</span>
+                                            </span>
+                                        </DropdownMenuItem>
+                                    )}
+                                    {refs && (
+                                        <DropdownMenuItem onSelect={() => setSecretOpen(true)} className="items-start">
+                                            <KeyRound className="mt-0.5" />
+                                            <span className="flex flex-col">
+                                                <span>Add a secret</span>
+                                                <span className="text-xs text-muted-foreground">only the people and agents you mention see it</span>
+                                            </span>
+                                        </DropdownMenuItem>
+                                    )}
+                                    {onCreatePoll && (
+                                        <DropdownMenuItem onSelect={onCreatePoll}>
+                                            <BarChart3 />
+                                            <span>Create a poll</span>
+                                            <DropdownMenuShortcut className="tracking-normal">/poll</DropdownMenuShortcut>
+                                        </DropdownMenuItem>
+                                    )}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        )}
+                        <Tooltip delayDuration={400}>
+                            <TooltipTrigger asChild>
                                 <button
                                     type="button"
-                                    onClick={() => fileInputRef.current?.click()}
-                                    title="Attach files (or paste / drop them)"
-                                    className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                                    aria-label="Formatting"
+                                    aria-pressed={formattingOpen}
+                                    // Keep the editor focused (and its selection alive) through the click.
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={toggleFormatting}
+                                    className={cn(
+                                        'inline-flex size-8 items-center justify-center rounded-lg transition-colors hover:bg-muted hover:text-foreground',
+                                        formattingOpen ? 'bg-muted text-foreground' : 'text-muted-foreground',
+                                    )}
                                 >
-                                    <Paperclip className="size-4" />
+                                    <Type className="size-4" />
                                 </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">Formatting</TooltipContent>
+                        </Tooltip>
+                        {LOCAL_RUNTIME && (
+                            <>
+                                <span className="mx-1 h-4 w-px shrink-0 bg-border" />
+                                <Tooltip delayDuration={400}>
+                                    <TooltipTrigger asChild>
+                                        <button
+                                            type="button"
+                                            onMouseDown={(e) => e.preventDefault()}
+                                            onClick={insertRowboatChip}
+                                            aria-pressed={mentioned}
+                                            className={cn('spaces-ask-chip', mentioned && 'is-on')}
+                                        >
+                                            <Sparkles className="size-3.5 shrink-0" />
+                                            <span>Ask Rowboat</span>
+                                        </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top">Ask your Rowboat — or type @rowboat</TooltipContent>
+                                </Tooltip>
                             </>
                         )}
-                        {onCreatePoll && (
-                            <button
-                                type="button"
-                                onClick={onCreatePoll}
-                                title="Create a poll"
-                                className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                            >
-                                <BarChart3 className="size-4" />
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            onClick={insertRowboatChip}
-                            title="Address your Rowboat — it acts only when asked"
-                            className={cn(
-                                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
-                                mentioned ? 'bg-foreground text-background' : 'bg-muted text-foreground/80 hover:bg-accent',
-                            )}
-                        >
-                            @rowboat
-                        </button>
                         {autoRoute && (
                             <>
                                 <button
@@ -993,7 +1219,9 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 )}
                             </>
                         )}
-                        <AgentOptionsStrip draft={draft} values={memberOptions} onChange={setMemberOptions} />
+                        <AgentOptionsStrip draft={draft} values={memberOptions} onChange={setMemberOptions} {...(followUpAgentId && !mentionsAnyone(draft) ? { followUpAgentId } : {})} />
+                        <AddSecretDialog open={secretOpen} onOpenChange={setSecretOpen} readers={secretReaders(draft)} names={memberNames}
+                            onAdd={(added) => setSecrets((all) => [...all.filter((x) => x.name !== added.name), added])} />
                         {mentioned && (
                             <>
                                 <span className="mx-0.5 h-4 w-px bg-border" />
@@ -1034,7 +1262,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             </>
                         )}
                         <div className="flex-1" />
-                        {onSchedule && (draft.trim() || attachments.some((a) => a.status === 'done')) && (
+                        {onSchedule && (draft.trim() || hasDoneAttachment) && (
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <button
@@ -1069,10 +1297,14 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                         <button
                             type="button"
                             onClick={() => void send()}
-                            disabled={busy || uploading || (!draft.trim() && !attachments.some((a) => a.status === 'done'))}
+                            disabled={!canSend}
                             aria-label="Send"
                             title={uploading ? 'Waiting for uploads…' : 'Send (↵ · Shift+↵ for a new line)'}
-                            className="inline-flex spaces-send size-8 items-center justify-center rounded bg-foreground text-background disabled:opacity-30 transition-opacity"
+                            className={cn(
+                                'spaces-send inline-flex size-8 items-center justify-center rounded-lg',
+                                // Spaces redesign (2026-10-21): muted until there is something to send, then filled.
+                                canSend ? 'bg-foreground text-background hover:bg-foreground/90' : 'bg-muted text-muted-foreground',
+                            )}
                         >
                             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
                         </button>

@@ -15,9 +15,9 @@ describe('schema migrations', () => {
     await migrate(db);
     const applied = await db.query<{ id: string }>('select id from schema_migrations order by id');
     expect(applied.map((r) => r.id)).toEqual(MIGRATIONS.map((m) => m.id));
-    // The 002 column exists.
+    // The admin bit lives on the membership row (062), not the member.
     const cols = await db.query<{ column_name: string }>(
-      `select column_name from information_schema.columns where table_name = 'members'`,
+      `select column_name from information_schema.columns where table_name = 'memberships'`,
     );
     expect(cols.map((c) => c.column_name)).toContain('role');
     await db.close();
@@ -29,6 +29,7 @@ describe('schema migrations', () => {
       await migrate(db);
       await db.query(`alter table reactions drop column stream_offset`);
       await db.query(`delete from schema_migrations where id = '021-reaction-read-offsets'`);
+      await db.query(`insert into spaces (id, name, created_at) values ('space', 'Space', '2026-09-15T10:00:00Z')`);
       const by = { memberId: 'reader', actingMode: 'direct' };
       await db.query(`insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
         values ('space', 'message', '✅', 'reader', $1::jsonb, '2026-09-15T10:00:00Z')`, [JSON.stringify(by)]);
@@ -39,6 +40,20 @@ describe('schema migrations', () => {
       await migrate(db);
       const rows = await db.query<{ stream_offset: string | number }>('select stream_offset from reactions');
       expect(Number(rows[0]!.stream_offset)).toBe(13);
+    } finally { await db.close(); }
+  });
+
+  it('preserves availability when upgrading an earlier availability test build', async () => {
+    const db = await pgliteDb();
+    try {
+      await migrate(db);
+      await db.query(`insert into members (id, display_name, availability) values ('test-person', 'Test person', '{"manualAway":true}'::jsonb)`);
+      await db.query(`update schema_migrations set id = '060-member-availability' where id = '061-member-availability'`);
+      await migrate(db);
+      const members = await db.query<{ availability: unknown }>(`select availability from members where id = 'test-person'`);
+      expect(members[0]!.availability).toEqual({ manualAway: true });
+      const applied = await db.query(`select id from schema_migrations where id = '061-member-availability'`);
+      expect(applied).toHaveLength(1);
     } finally { await db.close(); }
   });
 
@@ -73,6 +88,8 @@ describe('schema migrations', () => {
     // The legacy stream, a marker-anchored thread (pre-004 style, with the
     // machine COPY of the parent as its seed), a first-line-titled standalone
     // topic (an accident of the reply gesture), and an explicitly-renamed one.
+    // Its space: 039 drops rows whose space does not exist (2026-10-13).
+    await db.query(`insert into spaces (id, name, created_at) values ('s1', 'Roadboard', '2026-08-20T09:00:00Z')`);
     await topic('t-gen', 'messages', '2026-08-20T09:00:00Z');
     await topic('t-thread-a', 'The parent text', '2026-08-20T10:01:00Z');
     await topic('t-standalone', 'standalone opener', '2026-08-20T10:02:00Z');
@@ -149,38 +166,32 @@ describe('schema migrations', () => {
     // The legacy row survived and picked up the role default via 002.
     const store = new PgStore(db);
     const member = await store.getMember('ramnique');
-    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', role: 'member', kind: 'human' });
+    expect(member).toEqual({ id: 'ramnique', displayName: 'Ramnique', kind: 'human' });
     await db.close();
   });
 });
 
-describe('open-space migration', () => {
-  it('keeps legacy spaces private and preserves membership/content, then enforces visibility constraints', async () => {
+describe('Agent37 effort key migration', () => {
+  it('moves an Agent37 agent’s Reasoning default to Effort, and leaves every other agent’s options alone', async () => {
     const db = await pgliteDb();
     try {
       await db.query('create table schema_migrations (id text primary key, applied_at text not null)');
-      for (const migration of MIGRATIONS.filter((m) => m.id !== '023-open-spaces')) {
+      // Everything before 035, as a database that predates it (later entries re-key these tables, 061).
+      for (const migration of MIGRATIONS.slice(0, MIGRATIONS.findIndex((m) => m.id === '035-agent37-effort-key'))) {
         for (const statement of migration.statements) await db.query(statement);
-        await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-09-22T00:00:00Z']);
+        await db.query('insert into schema_migrations values ($1, $2)', [migration.id, '2026-10-07T00:00:00Z']);
       }
-      await db.query(`insert into spaces (id, name, created_at, kind, direct_key) values
-        ('legacy-shared', 'Legacy', '2026-09-22T00:00:00Z', 'shared', null),
-        ('legacy-direct', 'Direct', '2026-09-22T00:00:00Z', 'direct', '["a","b"]')`);
-      await db.query(`insert into memberships (space_id, member_id, joined_at) values ('legacy-shared', 'a', '2026-09-22T00:00:00Z')`);
-      await db.query(`insert into events (space_id, stream_offset, at, event) values ('legacy-shared', 1, '2026-09-22T00:00:00Z', '{"legacy":"content"}')`);
-      const memberships = await db.query('select * from memberships');
-      const events = await db.query('select * from events');
+      await db.query(`insert into members (org_id, id, display_name, role, kind, agent_kind, agent_connection, agent_instance) values
+        ('o', 'a37', 'Hermes', 'member', 'agent', 'hermes', 'agent37', 'inst1'),
+        ('o', 'rpl', 'Claude', 'member', 'agent', 'claude-code', 'replicas', null)`);
+      await db.query(`insert into agent_option_defaults (org_id, agent_id, data, set_by, set_at) values
+        ('o', 'a37', '{"reasoning":"high"}', 'ramnique', '2026-10-07T00:00:00Z'),
+        ('o', 'rpl', '{"reasoning":"x","environment":"env-api"}', 'ramnique', '2026-10-07T00:00:00Z')`);
       await migrate(db);
-      expect(await db.query('select id, visibility from spaces order by id')).toEqual([
-        { id: 'legacy-direct', visibility: 'private' }, { id: 'legacy-shared', visibility: 'private' },
+      expect(await db.query('select agent_id, data from agent_option_defaults order by agent_id')).toEqual([
+        { agent_id: 'a37', data: { effort: 'high' } },
+        { agent_id: 'rpl', data: { reasoning: 'x', environment: 'env-api' } },
       ]);
-      expect(await db.query('select * from memberships')).toEqual(memberships);
-      expect(await db.query('select * from events')).toEqual(events);
-      await expect(db.query("update spaces set visibility = 'open' where id = 'legacy-direct'")).rejects.toThrow();
-      await expect(db.query("update spaces set visibility = 'public' where id = 'legacy-shared'")).rejects.toThrow();
-      await db.query("update spaces set visibility = 'open' where id = 'legacy-shared'");
-      await migrate(db);
-      expect(await db.query("select visibility from spaces where id = 'legacy-shared'")).toEqual([{ visibility: 'open' }]);
     } finally { await db.close(); }
   });
 });

@@ -44,7 +44,7 @@ export function splitFrontmatter(content: string): {
     if (!content.startsWith('---')) {
         return { frontmatter: {}, body: content };
     }
-    const close = /\r?\n---\r?\n/.exec(content);
+    const close = /\r?\n---(?:\r?\n|$)/.exec(content);
     if (!close) {
         return { frontmatter: {}, body: content };
     }

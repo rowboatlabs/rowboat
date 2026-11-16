@@ -23,6 +23,25 @@ export function threadLabelOf(rootBody: string, max = 80): string {
     return label.length > max ? `${label.slice(0, max - 1)}…` : label
 }
 
+/** A root with its plain-thread archive flag set or cleared (harbor archiveThread, 2026-11-03). */
+export function withArchived(root: spaces.Message, archived: boolean): spaces.Message {
+    const { archived: _was, ...rest } = root
+    return archived ? { ...rest, archived: true } : rest
+}
+
+/** A plain thread's archive action: a session ends and reopens (2026-11-05); any other thread archives. */
+export function sessionArchiveLabel(root: spaces.Message): string {
+    if (root.session) return root.archived ? 'Reopen session' : 'End session'
+    return root.archived ? 'Unarchive' : 'Archive'
+}
+
+/** A root with its session mark set, retitled or cleared (harbor setSession, 2026-11-05). */
+export function withSession(root: spaces.Message, session: { title: string } | null): spaces.Message {
+    const next = { ...root }
+    delete next.session
+    return session ? { ...next, session } : next
+}
+
 // ---------------------------------------------------------------------------
 // Artifacts — change-sets made from a thread carry its root id at the end of
 // the reason ("· thread:<id>"; the legacy spelling "topic:<id>" still parses).
@@ -156,3 +175,19 @@ export function mergeMessages<M extends spaces.Message>(existing: readonly M[], 
     for (const m of incoming) byId.set(m.id, m)
     return [...byId.values()].sort((a, b) => a.offset - b.offset)
 }
+
+// ---------------------------------------------------------------------------
+// Long messages (2026-10-25, the threads discussion in Main): a body past
+// these shows collapsed — its summary when the author wrote one, else its
+// first lines — with "Show more". Counted on the source, so the call is the
+// same in every pane and needs no layout.
+// ---------------------------------------------------------------------------
+
+export const LONG_MESSAGE_LINES = 8
+export const LONG_MESSAGE_CHARS = 700
+
+export function isLongBody(body: string): boolean {
+    const text = body.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+    return text.length > LONG_MESSAGE_CHARS || text.split('\n').filter((line) => line.trim().length > 0).length > LONG_MESSAGE_LINES
+}
+

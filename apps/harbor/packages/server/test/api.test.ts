@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { memberUrl, messageUrl, orgUrl, parseOrgUrl, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
+import { memberUrl, messageUrl, serverUrl, onServer, parseSpacesUrl, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { liveClient, startTestHarbor } from './helpers.js';
 
@@ -9,7 +9,11 @@ let harbor: RunningHarbor;
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Test Org',
+    name: 'Test Org',
+    // The web app the link landings offer beside the desktop app (2026-10-13).
+    webAppUrl: 'https://web.test/',
+    // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
@@ -48,10 +52,17 @@ const gagan = api('dev-gagan');
 const prakhar = api('dev-prakhar');
 
 describe('auth', () => {
-  it('health is pre-auth', async () => {
+  it('health is pre-auth, and names the running build when the deployment set one', async () => {
     const r = await api(null).get('/v1/health');
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);
+    expect(r.body.build).toBeUndefined();
+    process.env.HARBOR_BUILD = 'abcdef0123456789';
+    try {
+      expect((await api(null).get('/v1/health')).body.build).toBe('abcdef012345');
+    } finally {
+      delete process.env.HARBOR_BUILD;
+    }
   });
 
   it('routes reject missing and malformed tokens', async () => {
@@ -114,19 +125,14 @@ describe('spaces, invites, membership', () => {
     expect((await prakhar.post('/v1/invites/accept', { token: inv.body.token })).status).toBe(403);
   });
 
-  it('the /join/<token> page names the space pre-auth and hands the invite to the app', async () => {
+  it('the /join/<token> link sends a browser to the web app with the invite (2026-11-09)', async () => {
     const inv = await ramnique.post('/v1/invites', { spaceId });
-    const res = await fetch(`${harbor.url}/join/${inv.body.token}`);
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('text/html');
-    const html = await res.text();
-    expect(html).toContain('Show HN draft');
-    // The deep link names the org by address and carries the token — the app
-    // rebuilds the https invite link from those two (spaces-navigation.ts).
-    expect(html).toContain(
-      `rowboat://open?type=spaces&org=${encodeURIComponent(harbor.service.org.address)}&invite=${encodeURIComponent(inv.body.token)}`,
-    );
-    expect(html).toContain('location.replace(');
+    const res = await fetch(`${harbor.url}/join/${inv.body.token}`, { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    // The deep link's query, unchanged: the server by address and the token — the web app
+    // rebuilds the https invite link from those two (spaces-navigation.ts) and shows its card.
+    const query = `type=spaces&server=${encodeURIComponent(harbor.service.server.address)}&invite=${encodeURIComponent(inv.body.token)}`;
+    expect(res.headers.get('location')).toBe(`https://web.test/open?${query}`);
 
     // A dead invite: says so, launches nothing.
     const stored = await harbor.store.getInvite(inv.body.token);
@@ -374,35 +380,80 @@ describe('feed: the stream, threads, and topic annotations', () => {
   });
 
   it('every org link opened in a browser lands on a hand-off page that deep-links into the app, without looking anything up', async () => {
-    const address = harbor.service.org.address;
+    const address = harbor.service.server.address;
     const cases: Array<[string, string]> = [
-      [orgUrl(address), `type=spaces&org=`],
-      [spaceUrl(address, spaceId), `spaceId=${spaceId}&org=`],
-      [messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'), `messageId=01JZZZZZZZZZZZZZZZZZZZZZZZ&org=`],
-      [assetUrl(address, spaceId, 'A%2Fx'), 'assetId=A%252Fx&org='],
-      [memberUrl(address, 'google|123'), 'memberId=google%7C123&org='],
+      [serverUrl(address), `type=spaces&server=`],
+      [spaceUrl(address, spaceId), `spaceId=${spaceId}&server=`],
+      [messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'), `messageId=01JZZZZZZZZZZZZZZZZZZZZZZZ&server=`],
+      [assetUrl(address, spaceId, 'A%2Fx'), 'assetId=A%252Fx&server='],
+      [memberUrl(address, 'google|123'), 'memberId=google%7C123&server='],
     ];
     for (const [link, expected] of cases) {
-      // The links are minted on the org's public address; the test server answers on its local url.
-      const res = await fetch(link.replace(`https://${address}`, harbor.url));
-      expect(res.status).toBe(200);
-      expect(res.headers.get('content-type')).toContain('text/html');
-      const html = await res.text();
-      expect(html).toContain('rowboat://open?type=spaces&');
-      expect(html).toContain(expected);
-      expect(html).not.toContain('Feed'); // never the space's name — nothing is looked up
+      // The links are minted on the server's public address; the test server answers on its local url.
+      // A browser is sent to the web app (2026-11-09), the deep link's query unchanged on its /open.
+      const res = await fetch(link.replace(`https://${address}`, harbor.url), { redirect: 'manual' });
+      expect(res.status).toBe(302);
+      const location = res.headers.get('location')!;
+      expect(location.startsWith('https://web.test/open?type=spaces&')).toBe(true);
+      expect(location).toContain(expected);
+      expect(location).not.toContain('Feed'); // never the space's name — nothing is looked up
     }
     // The one parser reads every one of them back.
-    expect(parseOrgUrl(orgUrl(address))).toEqual({ kind: 'org', orgAddress: address });
-    expect(parseOrgUrl(`https://${address}`)).toEqual({ kind: 'org', orgAddress: address });
-    expect(parseOrgUrl(spaceUrl(address, spaceId))).toEqual({ kind: 'space', orgAddress: address, spaceId });
-    expect(parseOrgUrl(messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'))).toEqual({ kind: 'message', orgAddress: address, spaceId, messageId: '01JZZZZZZZZZZZZZZZZZZZZZZZ' });
-    expect(parseOrgUrl(assetUrl(address, spaceId, 'A/x'))).toEqual({ kind: 'asset', orgAddress: address, spaceId, assetId: 'A/x' });
-    expect(parseOrgUrl(memberUrl(address, 'google|123'))).toEqual({ kind: 'member', orgAddress: address, memberId: 'google|123' });
-    expect(parseOrgUrl(`https://${address}/s/${spaceId}/b/${'a'.repeat(64)}`)).toBeNull();
-    expect(parseOrgUrl(`https://${address}/join/tok`)).toBeNull();
-    expect(parseOrgUrl(`https://${address}/s/not-a-ulid`)).toBeNull();
-    expect(parseOrgUrl('not a url')).toBeNull();
+    // Old org hosts (`<org>.<address>`, every link from before 2026-11-09) still name this server.
+    expect(onServer(`rowboat.${address}`, address)).toBe(true);
+    expect(onServer(address.toUpperCase(), address)).toBe(true);
+    expect(onServer(`evil-${address}`, address)).toBe(false);
+    expect(onServer('other.example', address)).toBe(false);
+    expect(parseSpacesUrl(serverUrl(address))).toEqual({ kind: 'server', address });
+    expect(parseSpacesUrl(`https://${address}`)).toEqual({ kind: 'server', address });
+    expect(parseSpacesUrl(spaceUrl(address, spaceId))).toEqual({ kind: 'space', address, spaceId });
+    expect(parseSpacesUrl(messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'))).toEqual({ kind: 'message', address, spaceId, messageId: '01JZZZZZZZZZZZZZZZZZZZZZZZ' });
+    expect(parseSpacesUrl(assetUrl(address, spaceId, 'A/x'))).toEqual({ kind: 'asset', address, spaceId, assetId: 'A/x' });
+    expect(parseSpacesUrl(memberUrl(address, 'google|123'))).toEqual({ kind: 'member', address, memberId: 'google|123' });
+    expect(parseSpacesUrl(`https://${address}/s/${spaceId}/b/${'a'.repeat(64)}`)).toBeNull();
+    expect(parseSpacesUrl(`https://${address}/join/tok`)).toBeNull();
+    expect(parseSpacesUrl(`https://${address}/s/not-a-ulid`)).toBeNull();
+    expect(parseSpacesUrl('not a url')).toBeNull();
+  });
+
+  it('a phone\u2019s browser gets the hand-off page even with a web app: the phone app, the App Store, the browser; nothing launched', async () => {
+    const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+    const res = await fetch(`${harbor.url}/s/${spaceId}`, { headers: { 'user-agent': ua }, redirect: 'manual' });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(`rowboat://open?type=spaces&amp;spaceId=${spaceId}&amp;server=`);
+    expect(html).toContain('apps.apple.com');
+    expect(html).toContain('href="https://web.test/open?');
+    expect(html).not.toContain('location.replace(');
+    // The invite too: its card names the space, pre-auth.
+    const inv = await ramnique.post('/v1/invites', { spaceId });
+    const join = await fetch(`${harbor.url}/join/${inv.body.token}`, { headers: { 'user-agent': ua }, redirect: 'manual' });
+    expect(join.status).toBe(200);
+    const named = (await api(null).post('/v1/invites/resolve', { token: inv.body.token })).body.space.name as string;
+    expect(await join.text()).toContain(named);
+  });
+
+  it('serves the Apple site association for the phone app, so its links open the app directly (2026-11-09)', async () => {
+    for (const path of ['/.well-known/apple-app-site-association', '/apple-app-site-association']) {
+      const res = await fetch(`${harbor.url}${path}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('application/json');
+      const body = await res.json() as { applinks: { details: Array<{ appIDs: string[]; components: Array<{ '/': string }> }> } };
+      expect(body.applinks.details[0]!.appIDs).toEqual(['9526N79222.com.rowboatlabs.spaces']);
+      expect(body.applinks.details[0]!.components.map((c) => c['/'])).toEqual(['/join/*', '/s/*', '/u/*']);
+    }
+  });
+
+  it('a deployment that names no web app keeps the hand-off page: the desktop app at once, and its download', async () => {
+    const bare = await startTestHarbor({ seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }] });
+    try {
+      const html = await (await fetch(`${bare.url}/`)).text();
+      expect(html).toContain('rowboat://open?type=spaces&');
+      expect(html).toContain('Download Rowboat');
+      expect(html).not.toContain('in your browser');
+    } finally {
+      await bare.close();
+    }
   });
 
   it('a new space has an empty stream and no topics — the stream is not an object', async () => {
@@ -412,6 +463,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(stream.body).toEqual({
       messages: [],
       topics: [],
+      threadRoots: [],
       hasMore: false,
       hasMoreAfter: false,
       readOffset: 0,

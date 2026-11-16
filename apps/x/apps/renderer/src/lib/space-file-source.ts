@@ -1,6 +1,6 @@
 import type { spaces } from '@x/shared'
 import type { FileViewerSource } from '@/components/file-viewer-source'
-import { blobAppUrl } from './spaces-presentation'
+import { blobAppUrl, fetchBlob } from './spaces-presentation'
 import { getViewerType } from './file-types'
 
 function base64(bytes: Uint8Array): string {
@@ -52,7 +52,7 @@ export function createSpaceFileSource(
       const asset = await readAsset()
       let bytes: Uint8Array
       if (asset.blob) {
-        const response = await fetch(blobAppUrl({ orgId, spaceId }, asset.blob.hash))
+        const response = await fetchBlob(blobAppUrl({ orgId, spaceId }, asset.blob.hash))
         if (!response.ok) throw new Error('Could not load document')
         bytes = new Uint8Array(await response.arrayBuffer())
       } else bytes = new TextEncoder().encode(asset.content)

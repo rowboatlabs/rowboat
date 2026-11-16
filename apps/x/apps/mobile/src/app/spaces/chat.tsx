@@ -1,16 +1,42 @@
+import { PrimaryButton } from '@/components/grouped';
+import { reportMobileActivity } from '../../lib/spaces/activity';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { Image } from 'expo-image';
+import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHeaderHeight } from 'expo-router/react-navigation';
+import { useHomeBackButton } from '@/components/home-back';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
-import type { Member, Message } from '@rowboat/spaces-protocol';
+import { onServer, type Approval, type Invocation, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
+import { spaces } from '@x/shared';
 
 import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
+import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
+import { SpaceHeaderMenu } from '@/components/space-header-menu';
+import { applyPollVote } from '@/components/poll-card';
+import { ApprovalCard } from '@/components/approval-card';
+import { InvocationLines } from '@/components/invocation-lines';
+import { foldInvocations, frameInvocation, invocationsByMessage, useAgentsCanStop } from '@/lib/spaces/invocations';
+import { setActiveSpace } from '@/lib/push';
 import { useSpacesAccount } from '@/lib/spaces/account';
+import { STREAM_CACHE_LIMIT, loadRoster, loadValue, peekRoster, peekValue, saveRoster, saveValue, seedThreadRoot } from '@/lib/spaces/cache';
+import { StatusBanner } from '@/components/status-banner';
+import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
+import { blobLinkName, isVideoName, openBlobFile } from '@/lib/spaces/open-blob';
+import { foldLive, lastConfirmedOffset, pendingMessage, postMessageReliably, settlePending, withoutPending } from '@/lib/spaces/send';
+import { toggleSaved, useSaved } from '@/lib/spaces/saved';
+import { fetchLinkPreview, peekLinkPreview, previewUrls } from '@/lib/spaces/link-preview';
+
+/** Rows whose link cards must be in before a channel is revealed, and how long we'll wait. */
+const TAIL_ROWS = 8;
+const TAIL_WAIT_MS = 700;
 import { SpacesClient } from '@/lib/spaces/client';
-import { SpacesLive } from '@/lib/spaces/live';
+import { isDeparted, answersOwnerOnly, memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
+import { SpacesLive } from '@x/spaces-client';
 import { useColors } from '@/theme/colors';
 
 // One space's stream (S2): root messages newest at the bottom, live over the
@@ -21,108 +47,420 @@ export default function SpaceChatScreen() {
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const account = useSpacesAccount();
-  const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string }>();
-  const { org, space, title, me } = params;
+  const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string; kind?: string }>();
+  const { org, space, me } = params;
+  // The space as Home last listed it (2026-11-10): links and pushes open the
+  // chat with no title or kind, so the name and kind come from here, or from
+  // the server when the list hasn't seen this space yet.
+  // Keyed by id: the router reuses this screen when a link opens another space.
+  const [fetchedSpace, setFetchedSpace] = useState<Space | undefined>();
+  const spaceInfo = useMemo(
+    () => (fetchedSpace?.id === space ? fetchedSpace : peekValue<Space[]>(`spaces:${org}`)?.find((s) => s.id === space)),
+    [fetchedSpace, org, space],
+  );
+  // A DM's membership is fixed, so it has no Members button (2026-11-02). Home
+  // says so in the params; other ways in fall back to the space list.
+  const direct = params.kind === 'direct' || spaceInfo?.kind === 'direct';
 
   const client = useMemo(
     () => new SpacesClient({ baseUrl: `https://${org}`, token: (opts) => account.getAccessToken(opts) }),
     [org, account],
   );
 
-  const [messages, setMessages] = useState<Message[] | null>(null);
-  const [members, setMembers] = useState<Map<string, Member>>(new Map());
-  const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
+  // Stream tail cache: paint the last visit instantly (and offline), then the
+  // server's answer replaces it.
+  const streamCacheKey = `stream:${org}:${space}`;
+  const [messages, setMessages] = useState<Message[] | null>(() => peekValue<Message[]>(streamCacheKey) ?? null);
+  const [members, setMembers] = useState<Map<string, Member>>(() => new Map((peekRoster(org, space) ?? []).map((m) => [m.id, m])));
+  const profiles = useProfiles(client, members);
+  useEffect(() => {
+    if (params.title || spaceInfo) return;
+    let cancelled = false;
+    client
+      .listSpaces({ includeDirect: true })
+      .then((all) => !cancelled && setFetchedSpace(all.find((s) => s.id === space)))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, space, params.title, spaceInfo]);
+  // A DM is named for the other person; notes to self for you.
+  const dmName = useMemo(() => {
+    if (!direct) return undefined;
+    const other = [...members.values()].find((m) => m.id !== me);
+    if (other) return memberLabel(other);
+    const self = members.get(me);
+    return self ? `${self.displayName} (you)` : undefined;
+  }, [direct, members, me]);
+  const title = params.title ?? dmName ?? spaceInfo?.name;
+  // File names by id (2026-10-28), so a bare file link in a message shows the
+  // file's name instead of its URL.
+  const [fileNames, setFileNames] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .listAssets(space)
+      .then((list) => !cancelled && setFileNames(new Map(list.map((a) => [a.id, a.path]))))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, space]);
+  // People you blocked (2026-10-20): their messages are hidden on this phone.
+  const blockedIds = useBlockedIds(org);
+  const blockedKey = [...blockedIds].join(',');
+  const memberNames = useMemo(() => new Map([...profiles].map(([id, m]) => [id, memberLabel(m)])), [profiles]);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
   const [reactionsOnly, setReactionsOnly] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const listRef = useRef<ScrollView>(null);
+  // Android's header is solid (spaces/_layout.tsx), so content already starts below it.
+  const headerHeight = useHeaderHeight() * (process.env.EXPO_OS === 'android' ? 0 : 1);
+  // Bottom-anchored by hand (so iOS's soft scroll edge can run under the
+  // see-through header — an inverted list breaks it):
+  //  - first paint is hidden until we've jumped to the newest message;
+  //  - content growth follows the bottom only while you're AT the bottom
+  //    and not touching the list;
+  //  - maintainVisibleContentPosition keeps your place when rows above you
+  //    grow (late link cards/images) — the old flicker.
+  const [positioned, setPositioned] = useState(false);
+  const revealing = useRef(false);
+  const messagesRef = useRef<Message[] | null>(null);
+  // "Follow the bottom" is YOUR intent, decided only when a drag settles —
+  // never by programmatic or keep-position scrolls (those fooled it before).
+  // Keep-position (maintainVisibleContentPosition) is always on: when rows
+  // ABOVE the viewport change height — a first open lands a dozen link cards
+  // in ~1.5s — iOS corrects the offset natively in the same frame. Doing it
+  // from JS a frame late was the flicker.
+  const atBottom = useRef(true);
+  const dragging = useRef(false);
+  // Jump-to-latest button: shown once you're more than a screenful-ish up,
+  // with a dot when something new landed while you were away.
+  const [away, setAway] = useState(false);
+  const [newWhileAway, setNewWhileAway] = useState(false);
+  const awayRef = useRef(false);
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
+    const gap = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height);
+    const next = gap > 400;
+    if (next !== awayRef.current) {
+      awayRef.current = next;
+      setAway(next);
+      if (!next) setNewWhileAway(false);
+    }
+  }, []);
+  const jumpToLatest = useCallback(() => {
+    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+    atBottom.current = true;
+    programmaticUntil.current = Date.now() + 800;
+    listRef.current?.scrollToEnd({ animated: true });
+  }, []);
+  // Our own scrolls end with a momentum-end event too; only a finger's
+  // scroll may change whether we're following the bottom.
+  const programmaticUntil = useRef(0);
+  const settle = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const byHand = dragging.current || Date.now() > programmaticUntil.current;
+    dragging.current = false;
+    if (!byHand) return;
+    const { contentOffset, contentSize, layoutMeasurement, contentInset } = e.nativeEvent;
+    atBottom.current = contentSize.height + (contentInset?.bottom ?? 0) - (contentOffset.y + layoutMeasurement.height) < 80;
+  }, []);
+  // After layout commits (a frame later), not mid-layout.
+  const toEnd = useCallback(() => {
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
+  }, []);
+  const onContentSizeChange = useCallback(() => {
+    if (!positioned) {
+      toEnd();
+      if (revealing.current) return;
+      revealing.current = true;
+      // Reveal once the last screenful's link cards are in (they'd grow rows
+      // you're looking at), capped so a slow site can't hold the screen.
+      const urls = (messagesRef.current ?? []).slice(-TAIL_ROWS).flatMap((m) => previewUrls(m.body)).filter((u) => peekLinkPreview(u) === undefined);
+      const settled = urls.length ? Promise.race([Promise.allSettled(urls.map((u) => fetchLinkPreview(u))), new Promise((r) => setTimeout(r, TAIL_WAIT_MS))]) : Promise.resolve();
+      void settled.then(() =>
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToEnd({ animated: false });
+          requestAnimationFrame(() => setPositioned(true));
+        }),
+      );
+      return;
+    }
+    if (atBottom.current && !dragging.current) toEnd();
+  }, [positioned, toEnd]);
+  // The viewport changes size too — the composer and header settle after a
+  // push transition, the keyboard comes and goes. Same rule: re-pin if following.
+  const viewportHeight = useRef(0);
+  const onViewportLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const h = e.nativeEvent.layout.height;
+      if (h === viewportHeight.current) return;
+      viewportHeight.current = h;
+      if (atBottom.current && !dragging.current) toEnd();
+    },
+    [toEnd],
+  );
+  const composerRef = useRef<SpaceComposerHandle>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
   // Fold one live message into the stream: roots append; replies bump their
   // root's reply chip.
+  // Idempotent: the live socket replays from an offset the (cached or fresh)
+  // snapshot may already include, so a reply counts only once — by id, and
+  // only if it's newer than the root's lastReplyAt the server already folded.
+  const countedReplies = useRef(new Set<string>());
+  const countedDeletes = useRef(new Set<string>());
   const foldMessage = useCallback((message: Message) => {
     setMessages((prev) => {
       if (!prev) return prev;
       if (message.threadRoot) {
+        if (countedReplies.current.has(message.id)) return prev;
+        countedReplies.current.add(message.id);
         return prev.map((m) =>
-          m.id === message.threadRoot
+          m.id === message.threadRoot && (!m.lastReplyAt || message.postedAt > m.lastReplyAt)
             ? { ...m, replyCount: m.replyCount + 1, lastReplyAt: message.postedAt }
             : m,
         );
       }
       if (prev.some((m) => m.id === message.id)) return prev;
-      return [...prev, message];
+      // Your own echo may take its pending copy's place (2026-11-13).
+      const next = foldLive(prev, message);
+      if (awayRef.current && next.length > prev.length) setNewWhileAway(true);
+      return next;
     });
   }, []);
 
+  if (lastOffset.current === undefined && messages?.length) lastOffset.current = lastConfirmedOffset(messages);
+
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.listStream(space), client.listMembers(space)])
-      .then(([stream, memberList]) => {
+    // Disk cache after a relaunch — names and messages land in the same
+    // render, so rows never flash raw member ids before names arrive.
+    void Promise.all([loadValue<Message[]>(streamCacheKey), loadRoster(org, space)]).then(([cached, roster]) => {
+      if (cancelled) return;
+      if (roster) setMembers((prev) => (prev.size ? prev : new Map(roster.map((m) => [m.id, m]))));
+      if (cached) {
+        setMessages((prev) => {
+          if (prev) return prev;
+          lastOffset.current = cached.at(-1)?.offset;
+          return cached;
+        });
+      }
+    });
+    const rosterReq = client
+      .listMembers(space)
+      .then((memberList) => {
         if (cancelled) return;
         setMembers(new Map(memberList.map((m) => [m.id, m])));
-        setMessages(stream.messages);
-        lastOffset.current = stream.messages.at(-1)?.offset;
+        saveRoster(org, space, memberList);
+      })
+      .catch(() => {});
+    client
+      .listStream(space)
+      .then(async (stream) => {
+        // Names first: rows painted with raw member ids reflow when the
+        // roster lands (a visible jump on a first open).
+        await rosterReq;
+        if (cancelled) return;
+        const freshLast = stream.messages.at(-1)?.offset ?? 0;
+        // Keep anything live delivered after the server's snapshot.
+        setMessages((prev) => [...stream.messages, ...(prev ?? []).filter((m) => m.offset > freshLast && !stream.messages.some((f) => f.id === m.id))]);
+        lastOffset.current = Math.max(lastOffset.current ?? 0, freshLast) || undefined;
+        setError(null);
       })
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)));
     return () => {
       cancelled = true;
     };
-  }, [client, space]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- streamCacheKey derives from org+space
+  }, [client, org, space, reloadKey]);
+
+  // Write-through (tail only).
+  useEffect(() => {
+    // Pending sends (2026-11-13) are never saved: they have no real id yet.
+    if (messages) saveValue(streamCacheKey, withoutPending(messages).slice(-STREAM_CACHE_LIMIT));
+  }, [streamCacheKey, messages]);
+
+  // Newest first for the inverted list: row 0 sits at the bottom, so content
+  // that grows later (link cards, images) pushes history UP, never the view.
+  // Deleted messages vanish (Slack) unless replies still hang off them.
+  messagesRef.current = messages;
+  const visible = useMemo(
+    () => messages?.filter((m) => (!m.deletedAt || m.replyCount > 0) && !blockedIds.has(m.author.memberId)) ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+    [messages, blockedKey],
+  );
 
   // Live: one socket for this screen's lifetime, replay from the last offset
   // the initial fetch saw (subscribe waits until that fetch lands).
   useEffect(() => {
     if (messages === null) return;
     const live = new SpacesLive({ baseUrl: `https://${org}`, token: () => account.getAccessToken() });
+    const stopActivity = reportMobileActivity(live);
     const off = live.subscribe(
       space,
       (frame) => {
+        if (frame.kind === 'invocation_state') {
+          setInvocations((prev) => foldInvocations(prev, [frameInvocation(frame)]));
+          return;
+        }
+        // State frames are never replayed: each (re)subscribe reads the snapshot.
+        if (frame.kind === 'subscribed') {
+          client.listInvocations(space).then((list) => setInvocations((prev) => foldInvocations(prev, list))).catch(() => {});
+          return;
+        }
         if (frame.kind !== 'event') return;
         const event = frame.event;
-        if (event.type === 'message') foldMessage(event.message);
+        if (event.type === 'approval') patchApproval(event.approval);
+        else if (event.type === 'message') foldMessage(event.message);
         else if (event.type === 'message_deleted') {
-          setMessages((prev) => prev?.map((m) => (m.id === event.deletion.messageId ? { ...m, body: '', deletedAt: event.deletion.at } : m)) ?? null);
+          // A deleted reply leaves its root's count (the server's count is live replies only).
+          const { messageId, threadRoot, at } = event.deletion;
+          setMessages((prev) =>
+            prev?.map((m) =>
+              m.id === messageId
+                ? { ...m, body: '', deletedAt: at }
+                : threadRoot && m.id === threadRoot && !countedDeletes.current.has(messageId)
+                  ? (countedDeletes.current.add(messageId), { ...m, replyCount: Math.max(0, m.replyCount - 1) })
+                  : m,
+            ) ?? null,
+          );
         } else if (event.type === 'message_edited') {
           setMessages((prev) => prev?.map((m) => (m.id === event.edit.messageId ? { ...m, body: event.edit.body, editedAt: event.edit.at } : m)) ?? null);
         } else if (event.type === 'reaction') {
           // Reactions fold server-side on reads; refetch the one message set is
           // overkill — apply the toggle locally.
           setMessages((prev) => prev?.map((m) => (m.id === event.reaction.messageId ? applyReaction(m, event.reaction.emoji, event.reaction.by.memberId, event.action) : m)) ?? null);
+        } else if (event.type === 'poll_vote') {
+          setMessages((prev) => prev?.map((m) => (m.id === event.vote.messageId && m.poll ? { ...m, poll: applyPollVote(m.poll, { answerId: event.vote.answerId, memberId: event.vote.by.memberId, action: event.action }) } : m)) ?? null);
+        } else if (event.type === 'poll_ended') {
+          setMessages((prev) => prev?.map((m) => (m.id === event.end.messageId && m.poll ? { ...m, poll: { ...m.poll, endedAt: event.end.at } } : m)) ?? null);
         }
       },
       lastOffset.current,
     );
     return () => {
       off();
+      stopActivity();
       live.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- connect once per screen after first load
   }, [messages === null, org, space]);
 
-  useEffect(() => {
-    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 50);
-    return () => clearTimeout(t);
-  }, [messages?.length]);
 
-  const send = async () => {
-    const body = draft.trim();
-    if (!body || sending) return;
-    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+  const send = async (body: string): Promise<boolean> => {
+    if (sending) return false;
     setSending(true);
-    setDraft('');
+    // Show it now, not when the POST returns (2026-11-13): a pending copy,
+    // faded, settled by the server's message or removed on failure.
+    const pending = pendingMessage(space, me, body);
+    setMessages((prev) => (prev ? [...prev, pending] : prev));
+    // Your own message: always land on it, wherever you were scrolled.
+    // (2026-10-05) The old animated scroll started BEFORE the new row was
+    // laid out, aimed at the old end, and kept running over the follow-up
+    // jump — the message stayed just below the fold until you re-entered.
+    // Now: follow the bottom, and scroll once the row exists.
+    atBottom.current = true;
+    dragging.current = false;
+    programmaticUntil.current = Date.now() + 800;
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 250);
     try {
-      const { message } = await client.postMessage(space, { body, actingMode: 'direct' });
-      foldMessage(message);
+      const { message, invocations: started } = await postMessageReliably(client, space, { body }, me);
+      setMessages((prev) => (prev ? settlePending(prev, pending.id, message) : prev));
+      setInvocations((prev) => foldInvocations(prev, started));
+      return true;
     } catch (err) {
-      setDraft(body);
-      setError(err instanceof Error ? err.message : String(err));
+      // The composer brings the text back as "Not sent"; the pending row goes.
+      setMessages((prev) => prev?.filter((m) => m.id !== pending.id) ?? null);
+      // Offline is said by the composer ("Not sent"); anything else is the server's words.
+      if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSending(false);
     }
   };
+
+  // Read state (org-owned, CONTRACT.md): the newest offset on screen is our
+  // stream mark. Debounced — Slack's advice, don't mark on every tick.
+  // A pending send's offset is a placeholder (2026-11-13), never a mark.
+  const newest = lastConfirmedOffset(messages);
+  useEffect(() => {
+    if (newest === undefined) return;
+    const t = setTimeout(() => void client.markRead(space, { offset: newest }).catch(() => {}), 800);
+    return () => clearTimeout(t);
+  }, [client, space, newest]);
+
+  // No push banner for the space on screen.
+  useEffect(() => {
+    setActiveSpace(space);
+    return () => setActiveSpace(null);
+  }, [space]);
+
+  const replaceMessage = useCallback((folded: Message) => {
+    setMessages((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
+  }, []);
+
+  // Agent lines under the messages that invoked an agent, and approval cards
+  // (2026-11-13, desktop parity): the space's invocations, read on every
+  // (re)subscribe and folded from live `invocation_state` frames.
+  const [invocations, setInvocations] = useState<Invocation[]>([]);
+  const self = members.get(me);
+  // The roster is held as Member; listMembers' rows carry the space role. An admin may stop anyone's agent.
+  const isAdmin = !!self && 'role' in self && self.role === 'admin';
+  const linesByMessage = useMemo(() => invocationsByMessage(invocations), [invocations]);
+  const runningAgents = useMemo(
+    () => [...new Set(invocations.filter((i) => i.state === 'working' || i.state === 'waiting').map((i) => i.agentId))],
+    [invocations],
+  );
+  const canStop = useAgentsCanStop(client, org, runningAgents);
+  const foldInvocation = useCallback((updated: Invocation) => setInvocations((prev) => foldInvocations(prev, [updated])), []);
+  const linesFor = (message: Message) => {
+    const list = linesByMessage.get(message.id);
+    if (!list?.some((i) => i.state !== 'done')) return undefined;
+    return <InvocationLines compact onOpen={() => openThread(message)} invocations={list} memberNames={memberNames} me={me} isAdmin={isAdmin} canStop={canStop} client={client} onUpdated={foldInvocation} />;
+  };
+  // An approval event carries the whole approval; keep whichever copy is newer.
+  const patchApproval = useCallback((approval: Approval) => {
+    setMessages((prev) => prev?.map((m) => (m.approval?.id === approval.id && m.approval.updatedAt <= approval.updatedAt ? { ...m, approval } : m)) ?? null);
+  }, []);
+  const cardFor = (message: Message) =>
+    message.approval ? (
+      <ApprovalCard approval={message.approval} client={client} me={me} memberNames={memberNames} ownerOf={(id) => members.get(id)?.ownerId} onDecided={patchApproval} />
+    ) : undefined;
+  const vote = useCallback(
+    (message: Message, answerIds: number[]) => {
+      void (async () => {
+        try {
+          let latest = message;
+          for (const answerId of answerIds) latest = await client.votePoll(space, message.id, { answerId, action: 'add', actingMode: 'direct' });
+          replaceMessage(latest);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    },
+    [client, space, replaceMessage],
+  );
+  const removeVote = useCallback(
+    (message: Message) => {
+      const mine = message.poll?.votes.filter((g) => g.memberIds.includes(me)).map((g) => g.answerId) ?? [];
+      void (async () => {
+        let latest = message;
+        for (const answerId of mine) latest = await client.votePoll(space, message.id, { answerId, action: 'remove', actingMode: 'direct' }).catch(() => latest);
+        replaceMessage(latest);
+      })();
+    },
+    [client, space, me, replaceMessage],
+  );
+  const endPoll = useCallback(
+    (message: Message) => {
+      client.endPoll(space, message.id, { actingMode: 'direct' }).then(replaceMessage).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [client, space, replaceMessage],
+  );
 
   // Optimistic toggle; the server's folded message (and the live echo — both
   // idempotent) settle the final state.
@@ -142,11 +480,91 @@ export default function SpaceChatScreen() {
     [client, space, me],
   );
 
-  // A file link in a message: this org's files open in the file screen (by
+  // "+" media: upload the bytes to the space's blob store and hand the
+  // composer the canonical wire link (space-blob-image.tsx renders it).
+  const uploadMedia = useCallback(
+    async (file: { uri: string; mime: string; name: string }) => {
+      const bytes = new Uint8Array(await (await fetch(file.uri)).arrayBuffer());
+      const blob = await client.uploadBlob(space, bytes, { declaredMime: file.mime });
+      const qs = new URLSearchParams({ name: file.name });
+      if (blob.width && blob.height) {
+        qs.set('w', String(blob.width));
+        qs.set('h', String(blob.height));
+      }
+      const link = `https://${org}/s/${space}/b/${blob.hash}?${qs.toString()}`;
+      // Brackets in a file name would end the markdown label early.
+      const label = file.name.replace(/[\[\]]/g, '_');
+      return blob.mime.startsWith('image/') ? `![${label}](${link})` : `[${label}](${link})`;
+    },
+    [client, org, space],
+  );
+
+  const quote = useCallback((message: Message) => composerRef.current?.quote(spaces.resolveMentions(message.body, memberNames)), [memberNames]);
+  const beginEdit = useCallback((message: Message) => composerRef.current?.beginEdit(message.id, message.body), []);
+  const saveEdit = useCallback(
+    (id: string, body: string) =>
+      client.editMessage(space, id, { body, actingMode: 'direct' }).then(
+        (m) => {
+          replaceMessage(m);
+          return true;
+        },
+        (err) => {
+          if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
+          return false;
+        },
+      ),
+    [client, space, replaceMessage],
+  );
+  const confirmDelete = useCallback(
+    (message: Message) => {
+      Alert.alert('Delete message?', 'This cannot be undone.', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            client.deleteMessage(space, message.id, { actingMode: 'direct' }).then(replaceMessage).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+          },
+        },
+      ]);
+    },
+    [client, space, replaceMessage],
+  );
+  const linkFor = useCallback((message: Message) => `https://${org}/s/${space}/m/${message.id}`, [org, space]);
+  // Forward, polls, saved (2026-11-13): each is its own screen.
+  const saved = useSaved(org, space);
+  const savedIds = useMemo(() => new Set(saved.map((s) => s.messageId)), [saved]);
+  const forward = useCallback((message: Message) => router.push({ pathname: '/spaces/forward', params: { org, space, message: message.id, me } }), [org, space, me]);
+
+  // A tapped attachment: the server's videos play in the app; other files
+  // download with the bearer and open in the share sheet (Quick Look, Save to
+  // Files); other hosts go to the browser.
+  const [openingFile, setOpeningFile] = useState(false);
+  const openBlobLink = useCallback(
+    (link: { host: string; spaceId: string; hash: string; url: string }) => {
+      if (!onServer(link.host, org)) {
+        void Linking.openURL(link.url);
+        return;
+      }
+      const name = blobLinkName(link.url, 'file');
+      if (isVideoName(name)) {
+        router.push({ pathname: '/spaces/video', params: { org, space: link.spaceId, hash: link.hash, name } });
+        return;
+      }
+      if (openingFile) return;
+      setOpeningFile(true);
+      openBlobFile(client, link.spaceId, link.hash, name)
+        .catch((err) => Alert.alert("Couldn't open the file", friendlyError(err, "You're offline. Try again when you're back online.")))
+        .finally(() => setOpeningFile(false));
+    },
+    [client, org, openingFile],
+  );
+
+  // A file link in a message: the server's files open in the file screen (by
   // id, so a rename never breaks it); any other host goes to the browser.
   const openAssetLink = useCallback(
     (link: { host: string; spaceId: string; assetId: string }) => {
-      if (link.host !== org) {
+      if (!onServer(link.host, org)) {
         void Linking.openURL(`https://${link.host}/s/${link.spaceId}/a/${link.assetId}`);
         return;
       }
@@ -157,81 +575,169 @@ export default function SpaceChatScreen() {
 
   const openThread = useCallback(
     (message: Message) => {
+      seedThreadRoot(org, space, message);
       router.push({ pathname: '/spaces/thread', params: { org, space, root: message.id, title: title ?? 'Thread', me } });
     },
     [org, space, title, me],
   );
 
+  const homeBack = useHomeBackButton();
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={insets.top + 44}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={0}>
       <Stack.Screen
         options={{
+          headerLeft: homeBack,
           title: title ?? 'Space',
-          headerRight: () => (
-            <Pressable
-              hitSlop={10}
-              onPress={() => router.push({ pathname: '/spaces/files', params: { org, space, title } })}
-            >
-              <Image source="sf:folder" style={{ width: 20, height: 20 }} tintColor={colors.label} />
-            </Pressable>
-          ),
         }}
       />
+      {/* Search, then ⋯ with the rest, in every chat so the title stays centred (2026-11-13). */}
+      <SpaceHeaderMenu
+        onSearch={() => router.push({ pathname: '/spaces/search', params: { org, space, title, me } })}
+        items={[
+          ...(direct ? [] : [{ key: 'members', label: 'Members', icon: 'person.2' as const, onPress: () => router.push({ pathname: '/spaces/members', params: { org, space, title, me } }) }]),
+          // Every thread in this space (2026-11-13, the web's Threads tab).
+          { key: 'threads', label: 'Threads', icon: 'bubble.left.and.bubble.right', onPress: () => router.push({ pathname: '/spaces/threads', params: { org, space, title, me } }) },
+          { key: 'saved', label: 'Pinned & saved', icon: 'bookmark', onPress: () => router.push({ pathname: '/spaces/saved', params: { org, space, title, me } }) },
+          { key: 'files', label: 'Files', icon: 'folder', onPress: () => router.push({ pathname: '/spaces/files', params: { org, space, title } }) },
+        ]}
+      />
+      <View pointerEvents="box-none" style={{ position: 'absolute', top: headerHeight, left: 0, right: 0, zIndex: 2 }}>
+      <StatusBanner
+        error={error}
+        offlineText={messages ? "You're offline. Showing saved messages." : "You're offline. This space will load when you're back online."}
+        onRetry={() => {
+          setError(null);
+          setReloadKey((k) => k + 1);
+        }}
+      />
+      </View>
       {messages === null && !error ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator />
         </View>
+      ) : messages === null || visible.length === 0 ? (
+        <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" alwaysBounceVertical style={{ flex: 1 }}>
+          {messages && visible.length === 0 ? (
+            direct ? (
+              <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>
+                No messages yet — say hi.
+              </Text>
+            ) : (
+              /* A space with no messages yet (2026-11-09, as the web's first-run page): its first steps. */
+              <View style={{ marginTop: 40, paddingHorizontal: 24, gap: 10, alignItems: 'center' }}>
+                <Text style={{ fontSize: 20, fontWeight: '700', color: colors.label, textAlign: 'center' }}>Welcome to #{title}</Text>
+                <Text style={{ fontSize: 14, lineHeight: 20, color: colors.secondaryLabel, textAlign: 'center', marginBottom: 8 }}>
+                  {members.size > 1
+                    ? "No messages yet. Say what this space is for, or bring in more people."
+                    : "It's just you here so far. Bring in the people who should work on this, then say what it's for."}
+                </Text>
+                <View style={{ alignSelf: 'stretch', gap: 10 }}>
+                  <PrimaryButton label="Add people" onPress={() => router.push({ pathname: '/spaces/add-people', params: { org, space, title, me } })} />
+                  <Pressable
+                    onPress={() => router.push({ pathname: '/spaces/invite', params: { org, space, title } })}
+                    style={({ pressed }) => ({ paddingVertical: 12, borderRadius: 12, borderCurve: 'continuous', alignItems: 'center', borderWidth: 1, borderColor: colors.separator, opacity: pressed ? 0.6 : 1 })}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>Share the link</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )
+          ) : null}
+        </ScrollView>
       ) : (
         <ScrollView
-          ref={scrollRef}
-          style={{ flex: 1 }}
+          ref={listRef}
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          alwaysBounceVertical
+          style={{ flex: 1, opacity: positioned ? 1 : 0 }}
           contentContainerStyle={{ paddingVertical: 12 }}
-          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          onScrollBeginDrag={() => { dragging.current = true; }}
+          onScrollEndDrag={settle}
+          onMomentumScrollEnd={settle}
+          onContentSizeChange={onContentSizeChange}
+          onLayout={onViewportLayout}
+          onScroll={onScroll}
+          scrollEventThrottle={100}
         >
-          {error ? <Text style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
-          {messages?.map((m) => (
+          {visible.map((m) => (
             <MessageRow
               key={m.id}
               message={m}
-              member={members.get(m.author.memberId)}
-              memberNames={memberNames}
+              member={profiles.get(m.author.memberId)}
+              memberNames={memberNames} fileNames={fileNames}
+              members={profiles}
               me={me}
               onToggleReaction={toggleReaction}
               onOpenThread={openThread}
               onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
-              onOpenAsset={openAssetLink}
               onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }}
+              onVote={vote}
+              onRemoveVote={removeVote}
+              onEndPoll={endPoll}
+              onOpenAsset={openAssetLink}
+              onOpenBlob={openBlobLink}
+              approvalCard={cardFor(m)}
+              invocationLines={linesFor(m)}
             />
           ))}
-          {messages?.length === 0 ? (
-            <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>
-              No messages yet — say hi.
-            </Text>
-          ) : null}
         </ScrollView>
       )}
 
+      {away && positioned ? (
+        <View pointerEvents="box-none" style={{ height: 0, alignItems: 'flex-end', zIndex: 3 }}>
+          <Pressable
+            onPress={jumpToLatest}
+            hitSlop={8}
+            style={({ pressed }) => ({
+              position: 'absolute', right: 16, bottom: 10, width: 38, height: 38, borderRadius: 19,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: colors.background, borderWidth: 0.5, borderColor: colors.separator,
+              shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Image source="sf:arrow.down" style={{ width: 15, height: 15 }} tintColor={colors.label} />
+            {newWhileAway ? (
+              <View style={{ position: 'absolute', top: 1, right: 1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#0a84ff', borderWidth: 1.5, borderColor: colors.background }} />
+            ) : null}
+          </Pressable>
+        </View>
+      ) : null}
+      {messages !== null && visible.length > 0 && !positioned ? (
+        <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator />
+        </View>
+      ) : null}
+
       {/* Composer */}
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 8, paddingBottom: (keyboardVisible ? 0 : insets.bottom) + 8 }}>
-        <TextInput
-          style={{
-            flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10,
-            fontSize: 16, color: colors.label, backgroundColor: colors.secondaryBackground,
-            borderRadius: 20, borderCurve: 'continuous',
-          }}
+      <View style={{ paddingTop: 8, paddingBottom: keyboardVisible ? 16 : insets.bottom + 10 }}>
+        {/* A deleted account only stays on a DM roster (shared spaces drop
+            it), so one here means the other person is gone (2026-10-19). */}
+        {[...members.values()].some((m) => m.deactivatedAt) ? (
+          <Text style={{ fontSize: 13, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 32, paddingVertical: 12 }}>
+            This account was deleted. You can still read your conversation.
+          </Text>
+        ) : members.size === 2 && [...members.keys()].some((id) => blockedIds.has(id)) ? (
+          <Text style={{ fontSize: 13, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 32, paddingVertical: 12 }}>
+            You blocked this person. Unblock them in Account → Blocked users.
+          </Text>
+        ) : (
+        <SpaceComposer
+          ref={composerRef}
           placeholder={`Message #${title ?? ''}`}
-          placeholderTextColor={colors.tertiaryLabel}
-          value={draft}
-          onChangeText={setDraft}
-          multiline
+          members={[...members.values()].filter((m) => !isDeparted(m) && !answersOwnerOnly(m, me))}
+          me={me}
+          sending={sending}
+          onSend={send}
+          onPickMedia={uploadMedia}
+          onEdit={saveEdit}
+          draftKey={`${org}:${space}`}
+          onCreatePoll={() => router.push({ pathname: '/spaces/new-poll', params: { org, space, me } })}
         />
-        <Pressable
-          onPress={() => void send()}
-          disabled={!draft.trim() || sending}
-          style={{ opacity: draft.trim() && !sending ? 1 : 0.35, paddingBottom: 4 }}
-        >
-          <Image source="sf:arrow.up.circle.fill" style={{ width: 32, height: 32 }} tintColor={colors.label} />
-        </Pressable>
+        )}
       </View>
 
       <MessageActionSheet
@@ -241,6 +747,15 @@ export default function SpaceChatScreen() {
         onClose={() => setActionMessage(null)}
         onToggleReaction={toggleReaction}
         onReply={openThread}
+        onQuote={quote}
+        onForward={forward}
+        onToggleSave={(m) => void toggleSaved(org, space, m)}
+        isSaved={(m) => savedIds.has(m.id)}
+        onEdit={beginEdit}
+        onDelete={confirmDelete}
+        onReport={(m) => reportMessage({ org, message: m, author: profiles.get(m.author.memberId), getAccessToken: () => account.getAccessToken() })}
+        onBlock={(m) => blockMember({ org, spaceId: space, member: { id: m.author.memberId, name: profiles.get(m.author.memberId)?.displayName ?? 'this person' }, getAccessToken: () => account.getAccessToken() })}
+        linkFor={linkFor}
       />
     </KeyboardAvoidingView>
   );

@@ -6,7 +6,7 @@
 // consent), renders "«client» wants access", and POSTs approve/deny; the AS
 // answers with the redirect that carries the code back to the client.
 //
-// This is Supabase-flagship glue, not protocol: an org whose AS hosts its own
+// This is Supabase-flagship glue, not protocol: a server whose AS hosts its own
 // login+consent (Keycloak, corporate IdP) never mounts this route. Sessions
 // ride sessionStorage only and are cleared after the decision.
 //
@@ -23,7 +23,7 @@ export interface ConsentPageOptions {
   /** The AS's publishable/anon key — public by design; the browser needs it as `apikey`. */
   publishableKey: string;
   /** Shown on the page so people know whose door they're at. */
-  orgName: string;
+  serverName: string;
 }
 
 /** Display names where capitalizing the provider id isn't right. */
@@ -46,13 +46,13 @@ export function consentPageHtml(opts: ConsentPageOptions): string {
     labels: PROVIDER_LABELS,
     nonSocial: NON_SOCIAL,
   });
-  const orgName = escapeHtml(opts.orgName);
+  const serverName = escapeHtml(opts.serverName);
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in — ${orgName}</title>
+<title>Sign in — ${serverName}</title>
 <style>
   :root { color-scheme: light dark; }
   body { margin: 0; font-family: system-ui, sans-serif; display: grid; place-items: center; min-height: 100vh;
@@ -60,7 +60,7 @@ export function consentPageHtml(opts: ConsentPageOptions): string {
   .card { width: min(92vw, 380px); padding: 28px; border-radius: 12px; background: light-dark(#fff, #1f1f25);
           box-shadow: 0 2px 16px rgba(0,0,0,.12); }
   h1 { font-size: 17px; margin: 0 0 4px; }
-  .org { font-size: 13px; opacity: .65; margin: 0 0 20px; }
+  .server { font-size: 13px; opacity: .65; margin: 0 0 20px; }
   .ask { font-size: 14px; line-height: 1.5; margin: 0 0 20px; }
   .ask b { font-weight: 600; }
   button, .btn { display: block; width: 100%; box-sizing: border-box; padding: 10px 14px; margin: 8px 0;
@@ -75,7 +75,7 @@ export function consentPageHtml(opts: ConsentPageOptions): string {
 <body>
 <div class="card">
   <h1 id="title">Sign in</h1>
-  <p class="org">${orgName}</p>
+  <p class="server">${serverName}</p>
   <div id="signin" hidden></div>
   <div id="consent" hidden>
     <p class="ask" id="ask"></p>
@@ -121,7 +121,7 @@ export function consentPageHtml(opts: ConsentPageOptions): string {
     if (!res.ok) return fail('Could not read the authorization server settings (' + res.status + ').');
     const external = (await res.json()).external || {};
     const providers = Object.keys(external).filter((id) => external[id] === true && !CFG.nonSocial.includes(id));
-    if (!providers.length) return fail('No social sign-in providers are enabled on this org\\'s authorization server.');
+    if (!providers.length) return fail('No social sign-in providers are enabled on this server\\'s authorization server.');
     for (const id of providers) {
       const a = document.createElement('a');
       a.className = 'btn';

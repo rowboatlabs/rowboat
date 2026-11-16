@@ -1,27 +1,96 @@
 import { PostHog } from 'posthog-node';
 import { getInstallationId } from './installation.js';
 import { API_URL } from '../config/env.js';
+import { loadAppSettings, saveAppSettings } from '../config/app_settings.js';
 
 // Build-time injected via esbuild `define` (apps/main/bundle.mjs).
 // In dev/tsc, fall back to process.env so local runs work too.
-const POSTHOG_KEY = process.env.POSTHOG_KEY ?? process.env.VITE_PUBLIC_POSTHOG_KEY ?? '';
-const POSTHOG_HOST = process.env.POSTHOG_HOST ?? process.env.VITE_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com';
+function getPostHogKey(): string {
+  return process.env.POSTHOG_KEY ?? process.env.VITE_PUBLIC_POSTHOG_KEY ?? '';
+}
+
+function getPostHogHost(): string {
+  return process.env.POSTHOG_HOST ?? process.env.VITE_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com';
+}
+
 const APP_VERSION = (process.env.ROWBOAT_APP_VERSION ?? process.env.npm_package_version ?? '').trim();
 
 let client: PostHog | null = null;
 let initAttempted = false;
 let identifiedUserId: string | null = null;
+let loggedOptOut = false;
+
+/**
+ * Returns true if product analytics has been opted out via environment variables
+ * (standard DO_NOT_TRACK or ROWBOAT_TELEMETRY_DISABLED) or saved app_settings.
+ * (2026-10-13, #415)
+ */
+export function isTelemetryOptedOut(): boolean {
+  const dnt = process.env.DO_NOT_TRACK;
+  if (dnt === '1' || dnt?.toLowerCase() === 'true') return true;
+
+  const disabled = process.env.ROWBOAT_TELEMETRY_DISABLED;
+  if (disabled === '1' || disabled?.toLowerCase() === 'true') return true;
+
+  try {
+    const settings = loadAppSettings();
+    if (settings.telemetryOptOut === true) return true;
+  } catch {
+    // Non-fatal if settings cannot be read
+  }
+
+  return false;
+}
+
+/**
+ * Persists the telemetry opt-out preference and updates active client state.
+ * (2026-10-13, #415)
+ */
+export function setTelemetryOptedOut(optOut: boolean): void {
+  saveAppSettings({ telemetryOptOut: optOut });
+  if (optOut) {
+    if (client) {
+      try {
+        client.shutdown().catch(() => {});
+      } catch {
+        // Non-fatal
+      }
+      client = null;
+    }
+  } else {
+    initAttempted = false;
+  }
+}
+
+/**
+ * Reset module-level caching for deterministic testing.
+ * (2026-10-13, #415)
+ */
+export function _resetStateForTesting(): void {
+  client = null;
+  initAttempted = false;
+  identifiedUserId = null;
+  loggedOptOut = false;
+}
 
 function getClient(): PostHog | null {
+  if (isTelemetryOptedOut()) {
+    if (!loggedOptOut) {
+      console.log('[Analytics] Telemetry opted out; analytics disabled');
+      loggedOptOut = true;
+    }
+    return null;
+  }
   if (initAttempted) return client;
   initAttempted = true;
-  if (!POSTHOG_KEY) {
+  const posthogKey = getPostHogKey();
+  if (!posthogKey) {
     console.log('[Analytics] POSTHOG_KEY not set; analytics disabled');
     return null;
   }
   try {
-    client = new PostHog(POSTHOG_KEY, {
-      host: POSTHOG_HOST,
+    client = new PostHog(posthogKey, {
+      host: getPostHogHost(),
       flushAt: 20,
       flushInterval: 10_000,
     });

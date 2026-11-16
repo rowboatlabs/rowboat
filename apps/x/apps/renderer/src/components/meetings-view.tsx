@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, ChevronDown, ChevronRight, Clock, ExternalLink, FileText, Loader2, MapPin, Mic, Sparkles, Square, UserPlus, UserRound, UsersRound, Video, X } from 'lucide-react'
-import { Streamdown } from 'streamdown'
+import { Streamdown } from '@/components/streamdown'
 
 import { Button } from '@/components/ui/button'
 import { MeetingEventContextMenu, MeetingNoteContextMenu } from '@/components/meeting-context-menu'

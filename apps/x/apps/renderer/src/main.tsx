@@ -33,11 +33,13 @@ async function bootstrap() {
   let installationId: string | undefined
   let apiUrl: string | undefined
   let appVersion: string | undefined
+  let telemetryOptOut = false
   try {
     const result = await window.ipc.invoke('analytics:bootstrap', null)
     installationId = result.installationId
     apiUrl = result.apiUrl
     appVersion = result.appVersion
+    telemetryOptOut = Boolean(result.telemetryOptOut)
   } catch (err) {
     console.error('[Analytics] Failed to bootstrap from main:', err)
   }
@@ -47,8 +49,10 @@ async function bootstrap() {
   const options = {
     api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
     defaults: '2025-11-30' as const,
+    opt_out_capturing_by_default: telemetryOptOut,
     ...(installationId ? { bootstrap: { distinctID: installationId } } : {}),
     before_send: (event: CaptureResult | null) => {
+      if (telemetryOptOut) return null
       if (!event) return event
       if (appVersion) {
         event.properties = {
@@ -58,14 +62,17 @@ async function bootstrap() {
       }
       return event
     },
-    loaded: () => {
+    loaded: (posthogInstance?: { opt_out_capturing?: () => void }) => {
+      if (telemetryOptOut && posthogInstance?.opt_out_capturing) {
+        posthogInstance.opt_out_capturing()
+      }
       configureAnalyticsContext({ apiUrl, appVersion })
     },
   }
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <PostHogProvider apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_KEY} options={options}>
+      <PostHogProvider apiKey={telemetryOptOut ? '' : (import.meta.env.VITE_PUBLIC_POSTHOG_KEY ?? '')} options={options}>
         <ThemeProvider defaultTheme="system">
           <App />
         </ThemeProvider>

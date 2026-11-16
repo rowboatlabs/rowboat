@@ -1,3 +1,8 @@
+import { SpaceAccessContext } from '@/lib/spaces-access'
+import { markThreadRead } from '@/lib/spaces-read-state'
+import { postInlineReply, postStreamMessage } from '@/lib/spaces-post'
+import { setStreamView } from '@/lib/spaces-stream-view'
+import { setAutoRouteMode } from '@/lib/spaces-auto-route'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spaces } from '@x/shared'
@@ -11,10 +16,41 @@ import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 // off while detached, pages forward from the bottom edge, and snaps back
 // through the pill. jsdom has no layout, so the list's geometry is faked.
 
-vi.mock('@/components/spaces/composer', () => ({ Composer: () => null }))
+const composer = vi.hoisted(() => ({ onDraftChange: undefined as ((draft: string) => void) | undefined }))
+const followUp = vi.hoisted(() => ({ byRoot: new Map<string, { id: string; displayName: string }>(), roots: [] as (string | undefined)[] }))
+// The first-run page mints the group's link; not this test's concern.
+vi.mock('@/components/spaces/empty-space-start', () => ({ EmptySpaceStart: ({ space }: { space: { name: string } }) => <h2>Welcome to #{space.name}</h2> }))
+vi.mock('@/lib/spaces-my-threads', () => ({
+    useMyThreads: () => ({ threads: [], loaded: true }), sessionsOf: () => [], useThreadListing: () => undefined, refreshMyThreads: vi.fn(), threadStatusLabel: () => '',
+}))
+vi.mock('@/components/spaces/composer', () => ({
+    Composer: ({ onSend, onDraftChange }: { onSend: (body: string) => void; onDraftChange?: (draft: string) => void }) => {
+        composer.onDraftChange = onDraftChange
+        return <button onClick={() => onSend('on it')}>Send</button>
+    },
+}))
+vi.mock('@/hooks/use-follow-up-agent', () => ({
+    useFollowUpAgent: (_org: string, _space: string, rootMessageId: string | undefined) => {
+        followUp.roots.push(rootMessageId)
+        return rootMessageId ? followUp.byRoot.get(rootMessageId) : undefined
+    },
+}))
+vi.mock('@/lib/spaces-post', () => ({ agentOptionsPayload: () => ({}), postStreamMessage: vi.fn(), postInlineReply: vi.fn() }))
 vi.mock('@/components/spaces/message-row', () => ({
     DayDivider: () => null,
-    MessageRow: ({ message }: { message: { id: string; body: string } }) => <div data-mid={message.id}>{message.body}</div>,
+    MessageRow: ({ message, arriving, threadOpen, thread, inline, inThread, continuation, onReplyInThread }: {
+        message: { id: string; body: string }; arriving?: boolean; threadOpen?: boolean; thread?: unknown; inline?: boolean
+        inThread?: { author?: string; label: string; onClick: () => void } | null; continuation?: boolean
+        onReplyInThread?: (message: { id: string; body: string }) => void
+    }) => (
+        <div data-mid={message.id} data-arriving={arriving || undefined} data-thread-open={threadOpen || undefined}
+            data-thread={thread ? 'yes' : undefined} data-inline={inline || undefined}
+            data-in-thread={inThread ? [inThread.author, inThread.label].filter(Boolean).join(': ') : undefined} data-continuation={continuation || undefined}>
+            {message.body}
+            {onReplyInThread && <button aria-label={`Reply to ${message.id}`} onClick={() => onReplyInThread(message)} />}
+            {inThread && <button aria-label={`Quote on ${message.id}`} onClick={inThread.onClick} />}
+        </div>
+    ),
     NewDivider: () => null,
     TypingIndicator: () => null,
 }))
@@ -35,7 +71,7 @@ vi.mock('@/hooks/use-space-chat', () => ({
     updateStreamMessage: vi.fn(),
     usePresenceSender: () => ({ onType: vi.fn() }),
 }))
-vi.mock('@/hooks/use-spaces', () => ({ useSpaceNames: () => new Map() }))
+vi.mock('@/hooks/use-spaces', () => ({ useSpaceNames: () => new Map(), getSpaceFeed: () => ({ topics: [] }) }))
 vi.mock('@/lib/spaces-compose', () => ({ subscribeComposeInsert: () => () => {} }))
 vi.mock('@/lib/spaces-read-state', () => ({
     getSpaceReadState: () => null,
@@ -73,7 +109,7 @@ const msg = (offset: number): spaces.Message =>
     }) as spaces.Message
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => msg(from + i))
 const streamOf = (messages: spaces.Message[], patch: Partial<StreamState> = {}): StreamState => ({
-    messages, topicsByRoot: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: true, ...patch,
+    messages, topicsByRoot: new Map(), threadRoots: new Map(), events: [], hasMore: false, loadingOlder: false, hasMoreAfter: false, newerSince: 0, ready: true, ...patch,
 })
 const org = { id: 'org', memberId: 'me', address: 'org.example', name: 'Org', spaces: [], directs: [], directLabels: {} } as unknown as OrgWithSpaces
 const space = { id: 'space', name: 'Space', createdAt: '2026-09-01T00:00:00Z', kind: 'shared' } as spaces.Space
@@ -124,6 +160,7 @@ beforeEach(() => {
 afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    setStreamView('org', 'space', 'threads')
 })
 
 function mount(stream: StreamState) {
@@ -215,6 +252,7 @@ describe('GeneralStream jump to a row outside the window', () => {
     })
 })
 
+
 describe('GeneralStream join lines (2026-09-29)', () => {
     const names = new Map([['alex', 'Alex'], ['sam', 'Sam'], ['kim', 'Kim']])
     const joined = (offset: number, memberId: string, by?: string): spaces.StreamEvent => ({
@@ -223,7 +261,7 @@ describe('GeneralStream join lines (2026-09-29)', () => {
         event: {
             type: 'membership',
             action: 'joined',
-            membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z' },
+            membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z', role: 'member' },
             ...(by ? { by: { memberId: by, actingMode: 'direct' as const } } : {}),
         },
     })
@@ -239,11 +277,240 @@ describe('GeneralStream join lines (2026-09-29)', () => {
 
     it('keeps the empty-space copy when only lines exist, and draws none in a DM', async () => {
         show(streamOf([], { events: [joined(1, 'alex')] }))
-        expect(screen.getByText(/Nothing here yet/)).toBeTruthy()
+        // A group with no messages opens on its first-run page (2026-11-09).
+        expect(screen.getByRole('heading', { name: /Welcome to #/ })).toBeTruthy()
         expect(drawn()).toEqual(['Alex joined'])
         cleanup()
         show(streamOf([msg(2)], { events: [joined(1, 'alex')] }), { ...space, kind: 'direct', participants: ['me', 'alex'] } as spaces.Space)
         await screen.findByText('body 2')
         expect(drawn()).toEqual(['body 2'])
+    })
+})
+
+describe('GeneralStream live arrivals (spaces redesign 2026-10-21)', () => {
+    const arriving = () => [...document.querySelectorAll('[data-arriving]')].map((el) => el.getAttribute('data-mid'))
+
+    it('rises in only rows that land live at the tail — not the first paint, an older page, or a catch-up burst', async () => {
+        const { rerender } = mount(streamOf(range(10, 12)))
+        await screen.findByText('body 12')
+        expect(arriving()).toEqual([])
+        rerender(streamOf(range(10, 13)))
+        expect(arriving()).toEqual(['m13'])
+        // An older page prepends below the newest offset seen: no entrance.
+        rerender(streamOf(range(5, 13)))
+        expect(arriving()).toEqual(['m13'])
+        // A burst bigger than live traffic is a resync.
+        rerender(streamOf(range(5, 20)))
+        expect(arriving()).toEqual(['m13'])
+    })
+
+    it('skips the confirm of the viewer\'s own send (its pending echo already rose in)', async () => {
+        const { rerender } = mount(streamOf(range(1, 2)))
+        await screen.findByText('body 2')
+        const pending = { ...msg(999), id: 'pending-1', author: { memberId: 'me', actingMode: 'direct' }, pending: true } as spaces.Message
+        rerender(streamOf([...range(1, 2), pending]))
+        expect(arriving()).toEqual(['pending-1'])
+        const confirmed = { ...msg(3), author: { memberId: 'me', actingMode: 'direct' } } as spaces.Message
+        rerender(streamOf([...range(1, 2), confirmed]))
+        expect(arriving()).toEqual([])
+    })
+
+    it('marks the root whose thread is open', async () => {
+        render(<GeneralStream org={org} space={space} stream={streamOf([{ ...msg(1), replyCount: 2 } as spaces.Message, msg(2)])} presence={presence}
+            memberNames={new Map()} onOpenThread={vi.fn()} openThreadId="m1" />)
+        await screen.findByText('body 2')
+        expect([...document.querySelectorAll('[data-thread-open]')].map((el) => el.getAttribute('data-mid'))).toEqual(['m1'])
+    })
+})
+
+describe('inline view (2026-10-25)', () => {
+    const root = { ...msg(1), id: 'root', body: 'Fix the login bug\nmore', replyCount: 2 } as spaces.Message
+    const reply = (offset: number, rootId: string, author = 'alex') =>
+        ({ ...msg(offset), id: `r${offset}`, threadRoot: rootId, author: { memberId: author, actingMode: 'direct' } }) as spaces.Message
+    const renderInline = (messages: spaces.Message[], patch: Partial<StreamState> = {}, onOpenThread = vi.fn()) =>
+        render(<SpaceAccessContext.Provider value={{ member: true, writable: true, join: () => {}, joining: false } as never}>
+            <GeneralStream org={org} space={space} stream={streamOf(messages, patch)} presence={presence} memberNames={new Map()} onOpenThread={onOpenThread} />
+        </SpaceAccessContext.Provider>)
+
+    beforeEach(() => {
+        setStreamView('org', 'space', 'inline')
+        vi.mocked(markThreadRead).mockClear()
+        vi.mocked(postInlineReply).mockClear()
+        vi.mocked(postStreamMessage).mockClear()
+    })
+
+    it('quotes what each reply answers, shows no thread chips, and starts a new run when the thread changes', async () => {
+        const old = { ...msg(2), id: 'old', body: 'unused' } as spaces.Message
+        renderInline([root, msg(3), reply(4, 'root'), reply(5, 'root'), reply(6, 'old-root')], { threadRoots: new Map([['old-root', { ...old, id: 'old-root', body: 'Release notes' }]]) })
+        await screen.findByText('body 6')
+        const attr = (id: string, name: string) => document.querySelector(`[data-mid="${id}"]`)?.getAttribute(name)
+        expect([attr('m3', 'data-in-thread'), attr('r4', 'data-in-thread'), attr('r6', 'data-in-thread')]).toEqual([null, 'Fix the login bug', 'Release notes'])
+        // The root has two replies, but inline there is no thread to open: no chip, and Reply is plain Reply.
+        expect(attr('root', 'data-thread')).toBeNull()
+        expect(attr('root', 'data-inline')).toBe('true')
+        // Same author, same thread, a minute apart: one run, its line drawn once.
+        expect(attr('r5', 'data-continuation')).toBe('true')
+        expect(attr('r5', 'data-in-thread')).toBeNull()
+        expect(attr('r6', 'data-continuation')).toBeNull()
+    })
+
+    it('reads each thread up to its newest reply on screen', async () => {
+        renderInline([root, reply(4, 'root'), reply(5, 'root'), reply(6, 'other')])
+        await screen.findByText('body 6')
+        expect(vi.mocked(markThreadRead).mock.calls.map((c) => [c[2], c[3]]).sort()).toEqual([['other', 6], ['root', 5]])
+    })
+
+    it('replies under a "Replying in" line instead of opening the thread, and Cancel drops it', async () => {
+        const onOpenThread = vi.fn()
+        renderInline([root, reply(4, 'root')], {}, onOpenThread)
+        fireEvent.click(await screen.findByRole('button', { name: 'Reply to r4' }))
+        expect(onOpenThread).not.toHaveBeenCalled()
+        expect(screen.getByText(/Replying to/)).toHaveTextContent('Replying to Fix the login bug')
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+        await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(1))
+        expect(vi.mocked(postInlineReply).mock.calls[0]![2]).toEqual({ rootMessageId: 'root', label: 'Fix the login bug' })
+        expect(screen.queryByText(/Replying to/)).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Reply to root' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel reply' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+        await vi.waitFor(() => expect(postStreamMessage).toHaveBeenCalledTimes(1))
+        expect(postInlineReply).toHaveBeenCalledTimes(1)
+    })
+
+    it('names the agent the reply goes to, and its × sends one reply to people only (Harbor spec §8, 2026-10-29)', async () => {
+        followUp.byRoot.set('root', { id: 'hermes', displayName: 'Hermes' })
+        try {
+            renderInline([root, reply(4, 'root'), msg(5)])
+            fireEvent.click(await screen.findByRole('button', { name: 'Reply to r4' }))
+            expect(followUp.roots).toContain('root')
+            expect(screen.getByRole('status')).toHaveTextContent('to Hermes')
+            // A mention decides who it goes to: the agent part hides.
+            act(() => composer.onDraftChange!('[@Alex](#member:alex) can you?'))
+            expect(screen.queryByRole('status')).toBeNull()
+            act(() => composer.onDraftChange!('plain'))
+            fireEvent.click(screen.getByRole('button', { name: 'Send to people only, not Hermes' }))
+            expect(screen.getByRole('status')).toHaveTextContent('To people only')
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(1))
+            expect(vi.mocked(postInlineReply).mock.calls[0]![5]).toBe(true)
+            // The × held for that reply only.
+            fireEvent.click(screen.getByRole('button', { name: 'Reply to r4' }))
+            expect(screen.getByRole('status')).toHaveTextContent('to Hermes')
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(2))
+            expect(vi.mocked(postInlineReply).mock.calls[1]![5]).toBe(false)
+        } finally {
+            followUp.byRoot.clear()
+        }
+    })
+
+    describe('implicit reply to the agent thread at the bottom (2026-10-29)', () => {
+        const wrap = (messages: spaces.Message[], patch: Partial<StreamState> = {}) => (
+            <SpaceAccessContext.Provider value={{ member: true, writable: true, join: () => {}, joining: false } as never}>
+                <GeneralStream org={org} space={space} stream={streamOf(messages, patch)} presence={presence} memberNames={new Map()} onOpenThread={vi.fn()} />
+            </SpaceAccessContext.Provider>
+        )
+        const bar = () => screen.queryByText(/Replying to/)
+        beforeEach(() => followUp.byRoot.set('root', { id: 'hermes', displayName: 'Hermes' }))
+        afterEach(() => followUp.byRoot.clear())
+
+        it('replies to it without a click', async () => {
+            render(wrap([root, reply(4, 'root', 'hermes')]))
+            await screen.findByText('body 4')
+            expect(bar()).toHaveTextContent('Replying to Fix the login bug')
+            expect(screen.getByRole('status')).toHaveTextContent('to Hermes')
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postInlineReply).toHaveBeenCalledTimes(1))
+            expect(vi.mocked(postInlineReply).mock.calls[0]![2]).toEqual({ rootMessageId: 'root', label: 'Fix the login bug' })
+            expect(postStreamMessage).not.toHaveBeenCalled()
+        })
+
+        it('is not offered for a thread without the person\'s agent, or off the tail', async () => {
+            const { rerender } = render(wrap([root, reply(4, 'other')]))
+            await screen.findByText('body 4')
+            expect(bar()).toBeNull()
+            rerender(wrap([root, reply(4, 'root', 'hermes')], { hasMoreAfter: true }))
+            expect(bar()).toBeNull()
+        })
+
+        it('"New message instead" posts to the stream, until a newer message lands at the bottom', async () => {
+            const { rerender } = render(wrap([root, reply(4, 'root', 'hermes')]))
+            await screen.findByText('body 4')
+            fireEvent.click(screen.getByRole('button', { name: 'New message instead' }))
+            expect(bar()).toBeNull()
+            fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+            await vi.waitFor(() => expect(postStreamMessage).toHaveBeenCalledTimes(1))
+            expect(postInlineReply).not.toHaveBeenCalled()
+            rerender(wrap([root, reply(4, 'root', 'hermes'), reply(5, 'root', 'hermes')]))
+            expect(bar()).toHaveTextContent('Replying to Fix the login bug')
+        })
+
+        it('locks the target while typing, and frees it when the box empties', async () => {
+            const { rerender } = render(wrap([root, reply(4, 'root', 'hermes')]))
+            await screen.findByText('body 4')
+            act(() => composer.onDraftChange!('so about that'))
+            // Someone posts something unrelated mid-sentence: the reply stays put.
+            rerender(wrap([root, reply(4, 'root', 'hermes'), msg(6)]))
+            expect(bar()).toHaveTextContent('Replying to Fix the login bug')
+            act(() => composer.onDraftChange!(''))
+            expect(bar()).toBeNull()
+        })
+    })
+
+    it('clicking a quote lands on the message it answers, in the stream', async () => {
+        const onOpenThread = vi.fn()
+        renderInline([root, msg(3), reply(4, 'root')], {}, onOpenThread)
+        fireEvent.click(await screen.findByRole('button', { name: 'Quote on r4' }))
+        await vi.waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
+        expect(onOpenThread).not.toHaveBeenCalled()
+        expect(loadStreamAround).not.toHaveBeenCalled()
+    })
+
+    it('with replies in threads, the chips stay and Reply opens the thread', async () => {
+        setStreamView('org', 'space', 'threads')
+        const onOpenThread = vi.fn()
+        renderInline([root], {}, onOpenThread)
+        fireEvent.click(await screen.findByRole('button', { name: 'Reply to root' }))
+        expect(onOpenThread).toHaveBeenCalledWith('root')
+        expect(document.querySelector('[data-mid="root"]')?.getAttribute('data-thread')).toBe('yes')
+        expect(screen.queryByText(/Replying to/)).not.toBeInTheDocument()
+    })
+
+    it('another space\'s choice does not reach this one', async () => {
+        setStreamView('org', 'space', 'threads')
+        setStreamView('org', 'elsewhere', 'inline')
+        renderInline([root, reply(4, 'root')])
+        await screen.findByText('body 4')
+        expect(document.querySelector('[data-mid="root"]')?.getAttribute('data-thread')).toBe('yes')
+        setStreamView('org', 'elsewhere', 'threads')
+    })
+})
+
+describe('GeneralStream Auto tags', () => {
+    it('never offers an agent whose seat here is someone else’s alone to tag, and still offers your own (2026-11-09)', async () => {
+        const roster = [
+            { id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' },
+            { id: 'theirs', displayName: 'Their Claude', role: 'member', kind: 'agent', invocableBy: 'owner', ownerId: 'harsh' },
+            { id: 'mine', displayName: 'My Claude', role: 'member', kind: 'agent', invocableBy: 'owner', ownerId: 'me' },
+        ]
+        const invoke = vi.fn<(channel: string, args?: unknown) => Promise<unknown>>(async (channel) => {
+            if (channel === 'typesafe:isConfigured') return { configured: true }
+            if (channel === 'spaces:listMembers') return { members: roster }
+            if (channel === 'spaces:autoRoute') return { destination: 'stream', reason: 'new_subject' }
+            return {}
+        })
+        Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } })
+        setAutoRouteMode('preview')
+        window.dispatchEvent(new Event('focus'))
+        const tagSpace = { ...space, id: 'space-tags' }
+        const names = new Map(roster.map((m) => [m.id, m.displayName]))
+        render(<GeneralStream org={org} space={tagSpace} stream={streamOf(range(1, 3))} presence={presence} memberNames={names} onOpenThread={vi.fn()} />)
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:listMembers', expect.objectContaining({ spaceId: 'space-tags' })))
+        await act(async () => {})
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:autoRoute', expect.anything()))
+        const request = invoke.mock.calls.find(([channel]) => channel === 'spaces:autoRoute')![1] as { members: { id: string }[] }
+        expect(request.members.map((m) => m.id)).toEqual(['harsh', 'mine'])
+        setAutoRouteMode('off')
     })
 })

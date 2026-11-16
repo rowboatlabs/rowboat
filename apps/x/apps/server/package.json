@@ -17,6 +17,7 @@
     "@hono/node-server": "^1.19.7",
     "@x/core": "workspace:*",
     "@x/shared": "workspace:*",
+    "@x/spaces-client": "workspace:*",
     "hono": "^4.11.9",
     "ws": "^8.18.3",
     "zod": "^4.2.1"

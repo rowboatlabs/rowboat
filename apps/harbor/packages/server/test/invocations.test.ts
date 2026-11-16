@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { routes, type Invocation, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
+import { AGENT_HOP_LIMIT } from '../src/policy.js';
 import type { RunningHarbor } from '../src/server.js';
 import { agentClient, liveClient, restClient, startTestHarbor, type LiveClient } from './helpers.js';
 
@@ -61,7 +62,9 @@ let hermes: Connector;
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
+    // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
+    seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },
@@ -69,7 +72,6 @@ beforeAll(async () => {
     ],
   });
   const ram = (await harbor.store.getMember('ramnique'))!;
-  await harbor.store.putMember({ ...ram, role: 'admin' });
   spaceId = (await as('dev-ramnique').post('/v1/spaces', { name: 'Payments' })).body.space.id;
   await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['harsh'], actingMode: 'direct' });
   const h = await addAgent('ramnique', 'Hermes');
@@ -129,6 +131,72 @@ describe('progress', () => {
     } finally {
       watcher.close();
     }
+  });
+});
+
+describe('in-memory turn activity', () => {
+  async function listed(id: string) {
+    const response = await as('dev-ramnique').get(`/v1/spaces/${spaceId}/invocations`);
+    expect(response.status).toBe(200);
+    return (response.body.invocations as Invocation[]).find((i) => i.id === id)!;
+  }
+
+  it('snapshots all reported lines for a late viewer, streams only new lines, and never persists history', async () => {
+    const watcher = await liveClient(harbor, 'dev-ramnique');
+    try {
+      watcher.send({ kind: 'subscribe', spaceId });
+      await watcher.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'subscribed');
+      const { invocations } = await post('dev-harsh', `${mention(hermes.agent)} activity history`);
+      const id = invocations[0]!.id;
+      await hermes.ack(id);
+      for (const activity of ['Reading files', 'Reading files', 'Running tests', 'Reading files']) {
+        expect((await hermes.report(id, { state: 'working', activity })).status).toBe(200);
+      }
+      await hermes.report(id, { state: 'waiting', activity: 'Which branch?' });
+      const snapshot = await listed(id);
+      expect(snapshot.activityHistory?.map((e) => e.activity)).toEqual(['Reading files', 'Running tests', 'Reading files', 'Which branch?']);
+      expect(snapshot.activityHistory?.at(-1)?.state).toBe('waiting');
+      const entries = () => watcher.frames.flatMap((f) => f.kind === 'invocation_state' && f.invocation.id === id && f.activityEntry ? [f.activityEntry] : []);
+      await watcher.until(() => entries().length === 4, 'four activity entries');
+      expect(entries()).toEqual(snapshot.activityHistory);
+      expect(new Set(entries().map((e) => e.id)).size).toBe(4);
+      expect((await harbor.store.getInvocation(id))?.activityHistory).toBeUndefined();
+      expect(watcher.frames.filter((f) => f.kind === 'invocation_state' && f.invocation.id === id).every((f) => f.kind !== 'invocation_state' || f.invocation.activityHistory === undefined)).toBe(true);
+      expect((await listed(id)).activityHistory).toEqual(snapshot.activityHistory);
+      expect((await as('dev-gagan').get(`/v1/spaces/${spaceId}/invocations`)).status).toBe(403);
+      await hermes.report(id, { state: 'done' });
+      expect((await listed(id)).activityHistory).toBeUndefined();
+    } finally {
+      watcher.close();
+    }
+  });
+
+  it.each(['done', 'failed', 'cancelled'] as const)('clears history on %s and isolates simultaneous turns', async (state) => {
+    const first = (await post('dev-harsh', `${mention(hermes.agent)} first`)).invocations[0]!;
+    const second = (await post('dev-harsh', `${mention(hermes.agent)} second`)).invocations[0]!;
+    await hermes.report(first.id, { state: 'working', activity: 'First task' });
+    await hermes.report(second.id, { state: 'working', activity: 'Second task' });
+    await hermes.report(first.id, { state });
+    expect((await listed(first.id)).activityHistory).toBeUndefined();
+    expect((await listed(second.id)).activityHistory?.map((e) => e.activity)).toEqual(['Second task']);
+    await hermes.report(second.id, { state: 'done' });
+  });
+
+  it('does not record a report whose transaction rolls back', async () => {
+    const id = (await post('dev-harsh', `${mention(hermes.agent)} rollback`)).invocations[0]!.id;
+    await hermes.report(id, { state: 'working', activity: 'Committed' });
+    const lock = harbor.store.withSpaceLock.bind(harbor.store);
+    const failCommit = vi.spyOn(harbor.store, 'withSpaceLock').mockImplementationOnce((space, fn) => lock(space, async () => {
+      await fn();
+      throw new Error('simulated rollback');
+    }));
+    try {
+      expect((await hermes.report(id, { state: 'working', activity: 'Never committed' })).status).toBe(500);
+    } finally {
+      failCommit.mockRestore();
+    }
+    expect((await listed(id)).activityHistory?.map((e) => e.activity)).toEqual(['Committed']);
+    await hermes.report(id, { state: 'done' });
   });
 });
 
@@ -192,20 +260,112 @@ describe('the queue', () => {
   });
 });
 
+describe('thread follow-ups without a mention (2026-10-27)', () => {
+  /** A thread where Harsh asked Hermes something, with that turn finished. */
+  async function askedHermes() {
+    const asked = await post('dev-harsh', `${mention(hermes.agent)} look at the logs`);
+    await hermes.report(asked.invocations[0]!.id, { state: 'done' });
+    return asked.message.id;
+  }
+  const reply = (token: string, body: string, root: string, extra: Record<string, unknown> = {}) =>
+    post(token, body, { threadRoot: root, ...extra });
+
+  it('a reply that mentions nobody continues its author’s conversation with the agent', async () => {
+    const root = await askedHermes();
+    const seen = hermes.delivered().length;
+    const { message, invocations } = await reply('dev-harsh', 'and the ones from yesterday?', root);
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0]).toMatchObject({
+      agentId: hermes.agent.id,
+      state: 'pending',
+      depth: 0,
+      conversation: { spaceId, threadRootId: root },
+      trigger: { messageId: message.id, authorId: 'harsh' },
+    });
+    expect((await hermes.next(seen)).id).toBe(invocations[0]!.id);
+    // A follow-up while the turn still runs queues behind it, like a mention.
+    expect((await reply('dev-harsh', 'also the errors', root)).invocations[0]!.state).toBe('queued');
+    await hermes.report(invocations[0]!.id, { state: 'done' });
+    const queued = await hermes.next(seen + 1);
+    await hermes.report(queued.id, { state: 'done' });
+  });
+
+  it('only for the person who invoked it: someone else’s reply in the thread invokes nobody', async () => {
+    const root = await askedHermes();
+    expect((await reply('dev-ramnique', 'I can take this one', root)).invocations).toEqual([]);
+  });
+
+  it('not when the reply mentions anyone, is sent to people only, or is not a person acting directly', async () => {
+    const root = await askedHermes();
+    const ram = (await harbor.store.getMember('ramnique'))!;
+    expect((await reply('dev-harsh', `[@Ramnique](#member:${ram.id}) can you check?`, root)).invocations).toEqual([]);
+    const toPeople = await reply('dev-harsh', 'thanks, team', root, { peopleOnly: true });
+    expect(toPeople.invocations).toEqual([]);
+    expect(toPeople.message.peopleOnly).toBe(true);
+    const listed = await as('dev-harsh').get(`/v1/spaces/${spaceId}/threads/${root}`);
+    const stored = (listed.body.messages as Array<{ id: string; peopleOnly?: boolean }>).find((m) => m.id === toPeople.message.id);
+    expect(stored?.peopleOnly).toBe(true);
+    expect((await reply('dev-harsh', 'drafted by my assistant', root, { actingMode: 'agent', agentName: 'Rowboat' })).invocations).toEqual([]);
+    expect((await post(hermes.key, 'a note from Hermes', { threadRoot: root })).invocations).toEqual([]);
+  });
+
+  it('only while the conversation is the thread’s latest (2026-11-05): after the agent’s answer, not after someone else', async () => {
+    const root = await askedHermes();
+    await post(hermes.key, 'found two errors', { threadRoot: root });
+    const answered = await reply('dev-harsh', 'which one first?', root);
+    expect(answered.invocations.map((i) => i.agentId)).toEqual([hermes.agent.id]);
+    await hermes.report(answered.invocations[0]!.id, { state: 'done' });
+    await reply('dev-ramnique', 'I saw those too', root);
+    expect((await reply('dev-harsh', 'nice, thanks', root)).invocations).toEqual([]);
+    // Nor after the author's own reply to people: the conversation moved on.
+    expect((await reply('dev-harsh', 'one more for the team', root)).invocations).toEqual([]);
+  });
+
+  it('not on a new message in the stream, which starts a conversation of its own', async () => {
+    await askedHermes();
+    expect((await post('dev-harsh', 'unrelated news')).invocations).toEqual([]);
+  });
+
+  it('goes to the agent its author invoked last in the thread, and no other', async () => {
+    const created = await as('dev-ramnique').post('/v1/agents', { displayName: 'Codex' });
+    const codex = created.body.agent as Member;
+    await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: [codex.id], actingMode: 'direct' });
+    const codexKey = created.body.key.secret as string;
+    const root = await askedHermes();
+    const handed = await reply('dev-harsh', `${mention(codex)} fix what Hermes found`, root);
+    await restClient(harbor, codexKey).post(`/v1/agent/invocations/${handed.invocations[0]!.id}/update`, { state: 'done' });
+    const { invocations } = await reply('dev-harsh', 'and add a test', root);
+    expect(invocations.map((i) => i.agentId)).toEqual([codex.id]);
+    await restClient(harbor, codexKey).post(`/v1/agent/invocations/${invocations[0]!.id}/update`, { state: 'done' });
+  });
+
+  it('follows the agent’s rules: once its seat is owner-only, its owner’s follow-ups only', async () => {
+    const root = await askedHermes();
+    expect((await as('dev-ramnique').put(`/v1/spaces/${spaceId}/members/${hermes.agent.id}/access`, { invocableBy: 'owner', actingMode: 'direct' })).status).toBe(200);
+    try {
+      const refused = (await reply('dev-harsh', 'one more thing', root)).invocations;
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toMatchObject({ agentId: hermes.agent.id, state: 'refused' });
+      // A refused one never reached the agent: the next reply finds Harsh's earlier turn and is refused again, no work done.
+      expect((await reply('dev-harsh', 'hello?', root)).invocations[0]!.state).toBe('refused');
+    } finally {
+      await as('dev-ramnique').put(`/v1/spaces/${spaceId}/members/${hermes.agent.id}/access`, { invocableBy: 'members', actingMode: 'direct' });
+    }
+  });
+});
+
 describe('who may invoke', () => {
-  it('refuses a DM alone, and allows it once the person shares a space with the agent', async () => {
-    const dm = (await as('dev-gagan').post('/v1/direct', { memberId: hermes.agent.id })).body.space.id;
-    const inDm = (body: string) => as('dev-gagan').post(`/v1/spaces/${dm}/messages`, { body, actingMode: 'direct' });
-    const refused = (await inDm(`${mention(hermes.agent)} hi`)).body.invocations[0];
-    expect(refused).toMatchObject({ state: 'refused', refusal: { reason: 'not_permitted' } });
-    await as('dev-ramnique').post(`/v1/spaces/${spaceId}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
-    const allowed = (await inDm(`${mention(hermes.agent)} hi again`)).body.invocations[0];
+  it('a DM with an agent is its owner’s to open (2026-11-09); in it, every message invokes', async () => {
+    expect((await as('dev-gagan').post('/v1/direct', { memberId: hermes.agent.id })).status).toBe(403);
+    const dm = (await as('dev-ramnique').post('/v1/direct', { memberId: hermes.agent.id })).body.space.id;
+    const inDm = (body: string) => as('dev-ramnique').post(`/v1/spaces/${dm}/messages`, { body, actingMode: 'direct' });
+    const allowed = (await inDm(`${mention(hermes.agent)} hi`)).body.invocations[0];
     expect(allowed).toMatchObject({ state: 'pending', where: { spaceKind: 'direct' } });
     await hermes.report(allowed.id, { state: 'done' });
   });
 
-  it('lets agents hand work on three hops deep, then refuses the fourth', async () => {
-    const chain = await Promise.all(['A', 'B', 'C', 'D', 'E'].map(async (n) => {
+  it('lets agents hand work on up to the hop limit, then refuses the next', async () => {
+    const chain = await Promise.all(Array.from({ length: AGENT_HOP_LIMIT + 2 }, async (_, n) => {
       const { agent, key } = await addAgent('harsh', `Agent ${n}`);
       return Connector.start(agent, key);
     }));
@@ -213,7 +373,7 @@ describe('who may invoke', () => {
       const start = await post('dev-harsh', `${mention(chain[0]!.agent)} start`);
       const root = start.message.id;
       let invocation = start.invocations[0]!;
-      for (let hop = 0; hop < 4; hop += 1) {
+      for (let hop = 0; hop <= AGENT_HOP_LIMIT; hop += 1) {
         await chain[hop]!.ack(invocation.id);
         const handOff = await post(chain[hop]!.key, `${mention(chain[hop + 1]!.agent)} over to you`, { threadRoot: root });
         invocation = handOff.invocations[0]!;

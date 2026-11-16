@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
+import { Attribution, Member, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, SessionMark, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 import { Approval } from './approval.js';
-import { Invocation, InvocationId } from './invocation.js';
+import { Invocation, InvocationActivity, InvocationId } from './invocation.js';
 
-// Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
+// Decision 2 (CONTRACT.md): one WebSocket per server, per-space subscriptions,
 // offset-based catch-up. Subscribing with `afterOffset` replays durable events
 // after that offset, then goes live — the same resume pattern as the app's
 // turn-event spine. Presence is ephemeral and carries no offset.
@@ -57,6 +57,30 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   }),
   /** The row deleted ("convert back to thread") — the thread itself is untouched. */
   z.object({ type: z.literal('topic_removed'), removal: TopicRemoval }),
+  /**
+   * A plain thread archived or unarchived (api.ts archiveThread, 2026-11-03):
+   * clients set or clear the root's `archived`. A reply reviving it, or
+   * naming it (createTopic), emits 'unarchived' attributed to that member.
+   * Idempotent re-archives emit nothing.
+   */
+  z.object({
+    type: z.literal('thread_archive'),
+    rootMessageId: MessageId,
+    action: z.enum(['archived', 'unarchived']),
+    by: Attribution,
+  }),
+  /**
+   * A thread marked as a session, retitled, or unmarked (api.ts setSession,
+   * 2026-11-05): clients set or clear the root's `session`. A root posted as
+   * a session carries it on its `message` event instead. Same-state calls
+   * emit nothing.
+   */
+  z.object({
+    type: z.literal('thread_session'),
+    rootMessageId: MessageId,
+    session: SessionMark.nullable(),
+    by: Attribution,
+  }),
   MembershipEvent,
   /** A reaction toggled on or off a message. Idempotent re-adds/re-removes emit nothing. */
   z.object({
@@ -125,6 +149,52 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     space: Space,
     by: Attribution,
   }),
+  /**
+   * An admin archived or unarchived the space (api.ts archiveSpace,
+   * 2026-10-13) — the full row plus who did it, so clients move it in and
+   * out of their Archived list and the feed can render an attributed line.
+   */
+  z.object({
+    type: z.literal('space_archived'),
+    space: Space,
+    by: Attribution,
+  }),
+  z.object({
+    type: z.literal('space_unarchived'),
+    space: Space,
+    by: Attribution,
+  }),
+  /**
+   * An admin turned the space graph on or off (api.ts setSpaceGraph,
+   * 2026-11-12): the full row plus who did it, so every member's client
+   * shows or hides the graph and the feed can say who chose it.
+   */
+  z.object({
+    type: z.literal('space_graph_changed'),
+    space: Space,
+    by: Attribution,
+  }),
+  /**
+   * A member's admin bit in this space changed (spec §4 Roles, 2026-11-09):
+   * the membership row as it now stands, plus who acted — an admin giving or
+   * taking it, or, when the last admin left, the departing member, whose
+   * leaving made the longest-standing human admin.
+   */
+  z.object({
+    type: z.literal('role_changed'),
+    membership: Membership,
+    by: Attribution,
+  }),
+  /**
+   * An agent's seat in this space changed (spec §4 Agent members,
+   * 2026-11-09): the membership row as it now stands, plus its owner, who
+   * alone changes it.
+   */
+  z.object({
+    type: z.literal('agent_access_changed'),
+    membership: Membership,
+    by: Attribution,
+  }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 
@@ -139,10 +209,10 @@ export const PresenceState = z.enum(['viewing', 'typing', 'agent_working', 'agen
 export type PresenceState = z.infer<typeof PresenceState>;
 
 /**
- * Why the org is telling you about a message (notifications, 2026-09-10):
+ * Why the server is telling you about a message (notifications, 2026-09-10):
  * a token named you, `@here` named everyone, it landed in your DM, or it is
  * a reply in a thread you follow. Priority in that order when several hold.
- * GitHub's inbox reasons, cut to what the org can decide today.
+ * GitHub's inbox reasons, cut to what the server can decide today.
  */
 export const NotifyReason = z.enum(['mention', 'here', 'dm', 'reply']);
 export type NotifyReason = z.infer<typeof NotifyReason>;
@@ -207,20 +277,24 @@ export const ServerFrame = z.discriminatedUnion('kind', [
   /**
    * Addressed to a MEMBER (2026-09-22), the mirror of `space_added`: your
    * membership of a space ended — you left it (on this device or another)
-   * today; an admin removed you tomorrow. The live face drops the space's
+   * or an admin removed you (2026-10-19). The live face drops the space's
    * subscription on this frame BEFORE forwarding it, so no frame of that
-   * space reaches you after your departure, and a re-subscribe to a private space is refused.
+   * space reaches you after your departure, and a re-subscribe is refused.
    * Ephemeral, never replayed: the durable truth is the `membership` event
    * (`left` / `removed`) on the space's own log. Pre-2026-09-22 clients drop
-   * the unknown frame by contract.
+   * the unknown frame by contract. Also sent when an admin deletes the space
+   * (2026-10-14), to every member: there is no log left to replay. (Open
+   * spaces, which also sent it to non-members, were retired 2026-11-09.)
    */
   z.object({
     kind: z.literal('space_removed'),
     spaceId: SpaceId,
-    /** Who ended it: yourself on leave, the remover once removal exists. */
+    /** Who ended it: yourself on leave, the admin on a removal. */
     by: MemberId,
     at: z.iso.datetime(),
   }),
+  // Profiles bypass space subscriptions; missed updates are recovered by contact reads (2026-10-22).
+  z.object({ kind: z.literal('profile_updated'), member: Member, at: z.iso.datetime() }),
   /**
    * Addressed to a MEMBER (read state, 2026-09-09): one of your own
    * connections advanced a read mark — the stream's (no threadRootId) or a
@@ -237,16 +311,16 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     at: z.iso.datetime(),
   }),
   /**
-   * Addressed to a MEMBER (notifications, 2026-09-10): the org decided this
+   * Addressed to a MEMBER (notifications, 2026-09-10): the server decided this
    * message deserves your attention and tells every connection you hold —
    * Slack's `desktop_notification` shape, where the server decides and the
    * client only shows. One decision serves every surface: the same rows the
    * push sender delivers to phones ride here to desktops, so a banner and a
-   * toast never disagree. `title`/`body` are the org's rendering (names
+   * toast never disagree. `title`/`body` are the server's rendering (names
    * resolved, tokens flattened, excerpt cut); the ids are for the deep link.
    * Ephemeral, never replayed: a closed client catches up from badges
    * (`GET /v1/unread`), a phone from push. Policy (levels, DND, presence) is
-   * the org's business too and lands in a later layer; this frame's shape
+   * the server's business too and lands in a later layer; this frame's shape
    * does not change when it does.
    */
   z.object({
@@ -264,7 +338,7 @@ export const ServerFrame = z.discriminatedUnion('kind', [
   /**
    * Ephemeral whiteboard collaboration traffic (scene diffs, cursors, idle
    * state), fanned out to the space's subscribers. The payload is opaque to
-   * the org on purpose — the same content-blind posture as the relay servers
+   * the server on purpose — the same content-blind posture as the relay servers
    * whiteboard tools ship: membership is checked, bytes are relayed, nothing
    * is inspected. Never persisted, never replayed, no offset; durable board
    * state travels the normal asset path as blob snapshots, so a dropped frame
@@ -301,12 +375,24 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * never replayed; listInvocations is the snapshot. Older clients ignore
    * unknown frame kinds by contract.
    */
-  z.object({ kind: z.literal('invocation_state'), spaceId: SpaceId, invocation: Invocation }),
+  z.object({ kind: z.literal('invocation_state'), spaceId: SpaceId, invocation: Invocation, activityEntry: InvocationActivity.optional() }),
+  /**
+   * To every member's connections (local agents, 2026-10-28): an agent
+   * whose connector holds its own key (anything Harbor does not run) opened
+   * its first live connection, or closed its last one. Offline is sent only
+   * after a short grace, so a reconnect does not flicker. Ephemeral, never
+   * replayed: the roster's `online` (listOrgMembers) is the snapshot. Older
+   * clients ignore unknown frame kinds by contract.
+   */
+  z.object({ kind: z.literal('agent_presence'), agentId: MemberId, online: z.boolean(), at: z.iso.datetime() }),
+  /** Human activity status, server-wide; snapshot is listContacts.onlinePeople (2026-11-05). */
+  z.object({ kind: z.literal('member_presence'), memberId: MemberId, online: z.boolean(), at: z.iso.datetime() }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 
 /** Client → server frames. */
 export const ClientFrame = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('activity'), active: z.boolean() }),
   z.object({
     kind: z.literal('subscribe'),
     spaceId: SpaceId,

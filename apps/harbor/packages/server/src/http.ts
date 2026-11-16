@@ -1,8 +1,11 @@
 import { Hono, type Context } from 'hono';
 import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
-import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
+import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type ServerAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
+import { webCors } from './cors.js';
+import { clearedSessionCookie, sessionCookie, sessionToken, type SessionCookieConfig } from './session.js';
+import { MAX_PROFILE_IMAGE_BYTES } from './core/images.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
 import type { HarborService } from './service.js';
@@ -12,10 +15,12 @@ import type { HarborService } from './service.js';
 // too before they leave, so contract drift fails loudly in the stub instead of
 // silently in a client.
 
-type Env = { Variables: { memberId: string; agent?: boolean; identity?: AuthIdentity } };
+type Env = { Variables: { memberId: string; agent?: boolean; identity?: AuthIdentity; viaSession?: boolean } };
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Uploads only (raw-bytes route). 100MB across the board — dogfood decision 2026-08-24. */
 const DEFAULT_MAX_BLOB_BYTES = 100 * 1024 * 1024;
+/** A service's alert is a small JSON event (spec §8 Alerts, 2026-10-03). */
+const MAX_HOOK_BYTES = 256 * 1024;
 
 function parseWith<S extends z.ZodType>(schema: S, value: unknown): z.infer<S> {
   const r = schema.safeParse(value);
@@ -44,17 +49,77 @@ function reply<S extends z.ZodType>(c: Context<Env>, schema: S, data: z.infer<S>
   return c.json(r.data as object);
 }
 
+/** A blob or an image read: the routes a browser loads with no Origin (an <img>, a link opened in a tab). */
+function blobRead(method: string, path: string): boolean {
+  return (method === 'GET' || method === 'HEAD') && /^\/v1\/(spaces\/[^/]+\/blobs|images)\/[0-9a-f]{64}$/.test(path);
+}
+
+/** A served blob's body: its stream (a store that streams), else its bytes. */
+function bodyOf(result: { bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }): ArrayBuffer | ReadableStream<Uint8Array> {
+  if (result.stream) return result.stream;
+  const bytes = result.bytes!;
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+// One `Range: bytes=…` request, served as 206 when Harbor serves the bytes
+// itself (2026-11-04: a video in a message plays inline, and seeking asks for
+// the bytes it jumps to; a presigned store answers ranges on its own).
+// Several ranges, or a header that doesn't parse, get the whole blob, as
+// RFC 9110 §14.2 allows.
+function parseByteRange(header: string | undefined, size: number): { start: number; end: number } | 'unsatisfiable' | null {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header?.trim() ?? '');
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  if (m[1] === '') {
+    const n = Number(m[2]);
+    return n === 0 || size === 0 ? 'unsatisfiable' : { start: Math.max(0, size - n), end: size - 1 };
+  }
+  const start = Number(m[1]);
+  const end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  if (start >= size) return 'unsatisfiable';
+  return end < start ? null : { start, end };
+}
+
+/** Bytes start..end (inclusive) of a body; a stream is read only as far as it needs. */
+function sliceBody(body: ArrayBuffer | ReadableStream<Uint8Array>, start: number, end: number): ArrayBuffer | ReadableStream<Uint8Array> {
+  if (body instanceof ArrayBuffer) return body.slice(start, end + 1);
+  const reader = body.getReader();
+  let offset = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return controller.close();
+        const from = Math.max(0, start - offset);
+        const to = Math.min(value.byteLength, end + 1 - offset);
+        offset += value.byteLength;
+        if (to > from) controller.enqueue(value.subarray(from, to));
+        if (offset > end) {
+          controller.close();
+          await reader.cancel();
+          return;
+        }
+        if (to > from) return;
+      }
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+}
+
 function actor(c: Context<Env>): { memberId: string; agent?: boolean } {
   return { memberId: c.get('memberId'), ...(c.get('agent') ? { agent: true } : {}) };
 }
 
 export function buildHttpApp(deps: {
   service: HarborService;
-  auth: OrgAuth;
+  auth: ServerAuth;
   /** Mounts the login/consent page (Supabase-flagship glue; consent.ts). */
   consent?: { issuer: string; publishableKey: string };
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Browser origins allowed to call the server cross-origin (cors.ts), and to use the session cookie (session.ts). */
+  webOrigins?: readonly string[];
+  /** The Spaces web app, which a browser-opened link offers beside the desktop app (the landings below). */
+  webAppUrl?: string;
 }): Hono<Env> {
   const { service, auth, consent } = deps;
   const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
@@ -69,8 +134,12 @@ export function buildHttpApp(deps: {
     return c.json(e.toBody(), e.status as 400);
   });
 
-  // RFC 9728 protected-resource metadata: the org names its authorization
-  // server here (the org is only ever a resource server — spec §4). 404 under
+  app.use('*', webCors(deps.webOrigins ?? []));
+  // Host-only since 2026-11-09: there is one host (session.ts).
+  const session: SessionCookieConfig = { webOrigins: new Set(deps.webOrigins ?? []) };
+
+  // RFC 9728 protected-resource metadata: the server names its authorization
+  // server here (Harbor is only ever a resource server — spec §4). 404 under
   // the dev driver, which has no AS.
   app.get('/.well-known/oauth-protected-resource', (c) => {
     const meta = auth.metadata();
@@ -83,7 +152,7 @@ export function buildHttpApp(deps: {
   // here with an authorization_id.
   if (consent) {
     app.get('/oauth/consent', (c) =>
-      c.html(consentPageHtml({ ...consent, orgName: service.org.name })),
+      c.html(consentPageHtml({ ...consent, serverName: service.server.name })),
     );
   }
 
@@ -92,9 +161,21 @@ export function buildHttpApp(deps: {
   // legitimately authenticated-but-not-yet-a-member: it gets the identity and
   // the handler runs the bind ceremony instead.
   app.use('/v1/*', async (c, next) => {
-    if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health') return next();
-    const credentials = { authorization: c.req.header('authorization'), queryToken: new URL(c.req.url).searchParams.get('token') };
-    if (c.req.path === routes.acceptInvite.path) {
+    if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health' || c.req.path === routes.createSession.path) return next();
+    // A service's alert carries no bearer: the secret in its address is the credential (spec §8 Alerts, 2026-10-03).
+    if (c.req.path.startsWith('/v1/hooks/')) return next();
+    const authorization = c.req.header('authorization');
+    const query = new URL(c.req.url).searchParams.get('token');
+    // The web app's cookie (session.ts) counts only when neither the header
+    // nor a query token came, and only from a listed origin. A blob read may
+    // come with no Origin at all: an <img>, or a link opened in a tab.
+    const cookie = authorization || query
+      ? undefined
+      : sessionToken({ cookie: c.req.header('cookie'), origin: c.req.header('origin') }, session.webOrigins, { originless: blobRead(c.req.method, c.req.path) });
+    if (cookie) c.set('viaSession', true);
+    const credentials = { authorization, queryToken: query ?? cookie };
+    // The two routes a signed-in stranger may call: accepting an invite, and becoming a member (2026-11-09).
+    if (c.req.path === routes.acceptInvite.path || (c.req.path === routes.enroll.path && c.req.method === 'POST')) {
       const { identity, member } = await authenticateRequest(auth, credentials, { allowUnmapped: true });
       c.set('identity', identity);
       if (member) c.set('memberId', member.id);
@@ -107,9 +188,86 @@ export function buildHttpApp(deps: {
     return next();
   });
 
-  app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
+  // The build that is answering (2026-11-01): Render's commit for the running deploy, or whatever the deployment set
+  // as HARBOR_BUILD, so a reader can tell a merge from a deploy; absent where neither is set (local runs).
+  app.get('/v1/health', (c) => {
+    const build = (process.env.RENDER_GIT_COMMIT ?? process.env.HARBOR_BUILD ?? '').trim().slice(0, 12);
+    return c.json({ ok: true, server: { name: service.server.name, address: service.server.address }, ...(build ? { build } : {}) });
+  });
+
+  // The web app's session (session.ts): the bearer in, the cookie out. The
+  // token only has to be valid here; membership is checked on use.
+  app.post(routes.createSession.path, async (c) => {
+    const authorization = c.req.header('authorization');
+    if (!authorization?.startsWith('Bearer ')) throw new HarborError('unauthorized', 'a session starts from a bearer in the Authorization header');
+    await auth.authenticate(authorization);
+    const cookie = sessionCookie(authorization.slice('Bearer '.length), session);
+    c.header('set-cookie', cookie.header);
+    return reply(c, routes.createSession.response, { ok: true, ...(cookie.expiresAt ? { expiresAt: cookie.expiresAt } : {}) });
+  });
+
+  app.delete(routes.deleteSession.path, (c) => {
+    c.header('set-cookie', clearedSessionCookie(session));
+    return reply(c, routes.deleteSession.response, { ok: true });
+  });
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
+
+  // Becoming a member (2026-11-09, spec §4 Joining): the cold start with no invite link. A member already
+  // (the dev driver, an agent key, a mapped identity) gets their row back.
+  app.post(routes.enroll.path, async (c) => {
+    const memberId = c.get('memberId');
+    const result = memberId
+      ? { member: await service.me({ memberId }), created: false }
+      : await service.enroll(c.get('identity')!);
+    return reply(c, routes.enroll.response, result);
+  });
+
+  // Account deletion (2026-10-08; here since 2026-11-09, there being no apex): the app calls it before the
+  // account API bans the login, while the token is still good. Idempotent.
+  app.delete(routes.deleteMe.path, async (c) => {
+    await service.deactivateSelf(actor(c));
+    return reply(c, routes.deleteMe.response, { ok: true });
+  });
+
+  app.put(routes.updateMe.path, async (c) => {
+    const input = await body(c, routes.updateMe.request);
+    return reply(c, routes.updateMe.response, { member: await service.updateProfile(actor(c), input) });
+  });
+
+  // --- profile images (2026-10-02) -------------------------------------------
+  // The body is the image; the limit is checked on the claim and again on the bytes.
+  const imageBody = async (c: Context<Env>): Promise<Uint8Array> => {
+    if (Number(c.req.header('content-length') ?? '0') > MAX_PROFILE_IMAGE_BYTES) {
+      throw new HarborError('payload_too_large', `profile images are limited to ${MAX_PROFILE_IMAGE_BYTES} bytes`);
+    }
+    return new Uint8Array(await c.req.arrayBuffer());
+  };
+
+  app.put(routes.setAvatar.path, async (c) =>
+    reply(c, routes.setAvatar.response, { member: await service.setAvatar(actor(c), await imageBody(c), publicOrigin(c)) }));
+
+  app.delete(routes.clearAvatar.path, async (c) =>
+    reply(c, routes.clearAvatar.response, { member: await service.clearAvatar(actor(c)) }));
+
+  // Immutable by address → cache forever, privately. Always an image (sniffed at upload).
+  app.get(routes.getImage.path, async (c) => {
+    const { hash } = parseWith(routes.getImage.params, c.req.param());
+    // On the session cookie the bytes come through Harbor, so a browser caches
+    // them forever and needs no CORS from the store (2026-10-12).
+    const result = await service.getImage(actor(c), hash, { inline: c.get('viaSession') === true });
+    if (result.url) {
+      c.header('cache-control', 'private, max-age=240');
+      return c.redirect(result.url, 302);
+    }
+    c.header('content-type', result.blob.mime);
+    c.header('content-length', String(result.blob.size));
+    c.header('content-disposition', 'inline');
+    c.header('cache-control', 'private, max-age=31536000, immutable');
+    c.header('x-content-type-options', 'nosniff');
+    c.header('content-security-policy', "default-src 'none'");
+    return c.body(bodyOf(result));
+  });
 
   // --- spaces & membership ---------------------------------------------------
 
@@ -122,23 +280,52 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listSpaces.response, { spaces });
   });
 
-  app.get(routes.browseSpaces.path, async (c) =>
-    reply(c, routes.browseSpaces.response, { spaces: await service.browseSpaces(actor(c)) }));
-
-  app.post(routes.joinSpace.path, async (c) => {
-    const { spaceId } = parseWith(routes.joinSpace.params, c.req.param());
-    return reply(c, routes.joinSpace.response, await service.joinSpace(actor(c), spaceId));
-  });
-
   app.post(routes.createSpace.path, async (c) => {
     const input = await body(c, routes.createSpace.request);
-    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name, input.visibility) });
+    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name) });
   });
 
   app.post('/v1/spaces/:spaceId/rename', async (c) => {
     const { spaceId } = parseWith(routes.renameSpace.params, c.req.param());
     const input = await body(c, routes.renameSpace.request);
     return reply(c, routes.renameSpace.response, { space: await service.renameSpace(actor(c), spaceId, input) });
+  });
+
+  app.post(routes.setSpaceGraph.path, async (c) => {
+    const { spaceId } = parseWith(routes.setSpaceGraph.params, c.req.param());
+    const input = await body(c, routes.setSpaceGraph.request);
+    return reply(c, routes.setSpaceGraph.response, { space: await service.setSpaceGraph(actor(c), spaceId, input) });
+  });
+  app.get(routes.getSpaceGraph.path, async (c) => {
+    const { spaceId } = parseWith(routes.getSpaceGraph.params, c.req.param());
+    const q = parseWith(routes.getSpaceGraph.query, {
+      ...(c.req.query('about') !== undefined ? { about: c.req.query('about') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.getSpaceGraph.response, await service.getSpaceGraph(actor(c), spaceId, q));
+  });
+  app.post(routes.archiveSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.archiveSpace.params, c.req.param());
+    const input = await body(c, routes.archiveSpace.request);
+    return reply(c, routes.archiveSpace.response, { space: await service.archiveSpace(actor(c), spaceId, input) });
+  });
+
+  app.delete(routes.deleteSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.deleteSpace.params, c.req.param());
+    await service.deleteSpace(actor(c), spaceId);
+    return reply(c, routes.deleteSpace.response, { deleted: true });
+  });
+
+  app.post(routes.removeMember.path, async (c) => {
+    const { spaceId, memberId } = parseWith(routes.removeMember.params, c.req.param());
+    const input = await body(c, routes.removeMember.request);
+    return reply(c, routes.removeMember.response, await service.removeMember(actor(c), spaceId, memberId, input));
+  });
+
+  app.post(routes.unarchiveSpace.path, async (c) => {
+    const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
+    const input = await body(c, routes.unarchiveSpace.request);
+    return reply(c, routes.unarchiveSpace.response, { space: await service.unarchiveSpace(actor(c), spaceId, input) });
   });
 
   app.post(routes.openDirect.path, async (c) => {
@@ -161,8 +348,21 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
   });
 
-  app.get(routes.listOrgMembers.path, async (c) => {
-    return reply(c, routes.listOrgMembers.response, { members: await service.listOrgMembers(actor(c)) });
+  app.put(routes.setAgentAccess.path, async (c) => {
+    const { spaceId, agentId } = parseWith(routes.setAgentAccess.params, c.req.param());
+    const input = await body(c, routes.setAgentAccess.request);
+    return reply(c, routes.setAgentAccess.response, { membership: await service.setAgentAccess(actor(c), spaceId, agentId, input) });
+  });
+
+  app.post(routes.setSpaceRole.path, async (c) => {
+    const { spaceId, memberId } = parseWith(routes.setSpaceRole.params, c.req.param());
+    const input = await body(c, routes.setSpaceRole.request);
+    return reply(c, routes.setSpaceRole.response, { membership: await service.setSpaceRole(actor(c), spaceId, memberId, input) });
+  });
+
+  app.get(routes.listContacts.path, async (c) => {
+    const members = await service.listContacts(actor(c));
+    return reply(c, routes.listContacts.response, { members, online: service.onlineAgents(members), onlinePeople: service.onlinePeople(members) });
   });
 
   app.post('/v1/spaces/:spaceId/leave', async (c) => {
@@ -255,8 +455,167 @@ export function buildHttpApp(deps: {
         kind: input.kind,
         connection: input.connection,
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
+        ...(input.instance !== undefined ? { instance: input.instance } : {}),
+        ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
+  });
+
+  // Managed agents (spec §8 Maritime, 2026-10-26): created on the platform Rowboat's own account runs.
+  app.get(routes.managedAgentKinds.path, async (c) => reply(c, routes.managedAgentKinds.response, await service.managedAgentKinds(actor(c))));
+
+  app.post(routes.createManagedAgent.path, async (c) => {
+    const input = await body(c, routes.createManagedAgent.request);
+    return reply(
+      c,
+      routes.createManagedAgent.response,
+      await service.createManagedAgent(actor(c), {
+        displayName: input.displayName,
+        kind: input.kind,
+        ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
+        ...(input.env !== undefined ? { env: input.env } : {}),
+        ...(input.request !== undefined ? { request: input.request } : {}),
+      }),
+    );
+  });
+
+  app.delete(routes.deleteAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteAgent.params, c.req.param());
+    return reply(c, routes.deleteAgent.response, await service.deleteAgent(actor(c), agentId));
+  });
+  app.delete(routes.deleteManagedAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteManagedAgent.params, c.req.param());
+    return reply(c, routes.deleteManagedAgent.response, { hosting: await service.deleteManagedAgent(actor(c), agentId) });
+  });
+
+  // Managing a managed agent's VM (the management area, 2026-10-27).
+  app.get(routes.getHosting.path, async (c) => {
+    const { agentId } = parseWith(routes.getHosting.params, c.req.param());
+    return reply(c, routes.getHosting.response, await service.getHosting(actor(c), agentId));
+  });
+  app.put(routes.setHostingLlm.path, async (c) => {
+    const { agentId } = parseWith(routes.setHostingLlm.params, c.req.param());
+    const input = await body(c, routes.setHostingLlm.request);
+    return reply(c, routes.setHostingLlm.response, { hosting: await service.setHostingLlm(actor(c), agentId, input) });
+  });
+  app.put(routes.setHostingEnv.path, async (c) => {
+    const { agentId, key } = parseWith(routes.setHostingEnv.params, c.req.param());
+    const input = await body(c, routes.setHostingEnv.request);
+    return reply(c, routes.setHostingEnv.response, { env: await service.setHostingEnv(actor(c), agentId, key, input.value, input.secret ?? false) });
+  });
+  app.delete(routes.deleteHostingEnv.path, async (c) => {
+    const { agentId, key } = parseWith(routes.deleteHostingEnv.params, c.req.param());
+    return reply(c, routes.deleteHostingEnv.response, { env: await service.deleteHostingEnv(actor(c), agentId, key) });
+  });
+  app.post(routes.hostingPower.path, async (c) => {
+    const { agentId } = parseWith(routes.hostingPower.params, c.req.param());
+    const input = await body(c, routes.hostingPower.request);
+    return reply(c, routes.hostingPower.response, { machine: await service.hostingPower(actor(c), agentId, input.action) });
+  });
+  app.get(routes.getHostingSize.path, async (c) => {
+    const { agentId } = parseWith(routes.getHostingSize.params, c.req.param());
+    return reply(c, routes.getHostingSize.response, { size: await service.getHostingSize(actor(c), agentId) });
+  });
+  app.put(routes.setHostingSize.path, async (c) => {
+    const { agentId } = parseWith(routes.setHostingSize.params, c.req.param());
+    const input = await body(c, routes.setHostingSize.request);
+    return reply(c, routes.setHostingSize.response, { size: await service.setHostingSize(actor(c), agentId, input) });
+  });
+  app.post(routes.runHostingCommand.path, async (c) => {
+    const { agentId } = parseWith(routes.runHostingCommand.params, c.req.param());
+    const input = await body(c, routes.runHostingCommand.request);
+    return reply(c, routes.runHostingCommand.response, { execution: await service.runHostingCommand(actor(c), agentId, input.command, input.timeoutSeconds) });
+  });
+  app.get(routes.getHostingCommand.path, async (c) => {
+    const { agentId, executionId } = parseWith(routes.getHostingCommand.params, c.req.param());
+    return reply(c, routes.getHostingCommand.response, { execution: await service.getHostingCommand(actor(c), agentId, executionId) });
+  });
+  app.delete(routes.cancelHostingCommand.path, async (c) => {
+    const { agentId, executionId } = parseWith(routes.cancelHostingCommand.params, c.req.param());
+    return reply(c, routes.cancelHostingCommand.response, { execution: await service.cancelHostingCommand(actor(c), agentId, executionId) });
+  });
+  app.post(routes.openHostingConsole.path, async (c) => {
+    const { agentId } = parseWith(routes.openHostingConsole.params, c.req.param());
+    return reply(c, routes.openHostingConsole.response, { console: await service.openHostingConsole(actor(c), agentId) });
+  });
+  app.post(routes.checkHostingSignIn.path, async (c) => {
+    const { agentId } = parseWith(routes.checkHostingSignIn.params, c.req.param());
+    return reply(c, routes.checkHostingSignIn.response, await service.checkHostingSignIn(actor(c), agentId));
+  });
+  app.delete(routes.revokeHostingSignIn.path, async (c) => {
+    const { agentId } = parseWith(routes.revokeHostingSignIn.params, c.req.param());
+    return reply(c, routes.revokeHostingSignIn.response, { hosting: await service.revokeHostingSignIn(actor(c), agentId) });
+  });
+  app.get(routes.getHostingLogs.path, async (c) => {
+    const { agentId } = parseWith(routes.getHostingLogs.params, c.req.param());
+    const q = parseWith(routes.getHostingLogs.query, c.req.query());
+    return reply(c, routes.getHostingLogs.response, await service.getHostingLogs(actor(c), agentId, q));
+  });
+  app.get(routes.listHostingFiles.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingFiles.params, c.req.param());
+    const q = parseWith(routes.listHostingFiles.query, c.req.query());
+    return reply(c, routes.listHostingFiles.response, await service.listHostingFiles(actor(c), agentId, q.path ?? '/'));
+  });
+  app.get(routes.readHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.readHostingFile.params, c.req.param());
+    const q = parseWith(routes.readHostingFile.query, c.req.query());
+    return reply(c, routes.readHostingFile.response, await service.readHostingFile(actor(c), agentId, q.path));
+  });
+  app.put(routes.writeHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.writeHostingFile.params, c.req.param());
+    const input = await body(c, routes.writeHostingFile.request);
+    await service.writeHostingFile(actor(c), agentId, input.path, input.content);
+    return reply(c, routes.writeHostingFile.response, { ok: true });
+  });
+  app.post(routes.makeHostingDir.path, async (c) => {
+    const { agentId } = parseWith(routes.makeHostingDir.params, c.req.param());
+    const input = await body(c, routes.makeHostingDir.request);
+    await service.makeHostingDir(actor(c), agentId, input.path);
+    return reply(c, routes.makeHostingDir.response, { ok: true });
+  });
+  app.post(routes.moveHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.moveHostingFile.params, c.req.param());
+    const input = await body(c, routes.moveHostingFile.request);
+    await service.moveHostingFile(actor(c), agentId, input.from, input.to);
+    return reply(c, routes.moveHostingFile.response, { ok: true });
+  });
+  app.delete(routes.deleteHostingFile.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteHostingFile.params, c.req.param());
+    const q = parseWith(routes.deleteHostingFile.query, c.req.query());
+    await service.deleteHostingFile(actor(c), agentId, q.path);
+    return reply(c, routes.deleteHostingFile.response, { ok: true });
+  });
+  app.get(routes.listHostingSkills.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingSkills.params, c.req.param());
+    const q = parseWith(routes.listHostingSkills.query, c.req.query());
+    return reply(c, routes.listHostingSkills.response, { skills: await service.listHostingSkills(actor(c), agentId, q.q) });
+  });
+  app.post(routes.installHostingSkill.path, async (c) => {
+    const { agentId } = parseWith(routes.installHostingSkill.params, c.req.param());
+    const input = await body(c, routes.installHostingSkill.request);
+    return reply(c, routes.installHostingSkill.response, { skills: await service.installHostingSkill(actor(c), agentId, input.name) });
+  });
+  app.delete(routes.removeHostingSkill.path, async (c) => {
+    const { agentId, name } = parseWith(routes.removeHostingSkill.params, c.req.param());
+    return reply(c, routes.removeHostingSkill.response, { skills: await service.removeHostingSkill(actor(c), agentId, name) });
+  });
+  app.get(routes.listHostingTriggers.path, async (c) => {
+    const { agentId } = parseWith(routes.listHostingTriggers.params, c.req.param());
+    return reply(c, routes.listHostingTriggers.response, { triggers: await service.listHostingTriggers(actor(c), agentId) });
+  });
+  app.post(routes.createHostingTrigger.path, async (c) => {
+    const { agentId } = parseWith(routes.createHostingTrigger.params, c.req.param());
+    const input = await body(c, routes.createHostingTrigger.request);
+    return reply(c, routes.createHostingTrigger.response, { triggers: await service.createHostingTrigger(actor(c), agentId, input) });
+  });
+  app.put(routes.updateHostingTrigger.path, async (c) => {
+    const { agentId, triggerId } = parseWith(routes.updateHostingTrigger.params, c.req.param());
+    const input = await body(c, routes.updateHostingTrigger.request);
+    return reply(c, routes.updateHostingTrigger.response, { triggers: await service.updateHostingTrigger(actor(c), agentId, triggerId, input) });
+  });
+  app.delete(routes.deleteHostingTrigger.path, async (c) => {
+    const { agentId, triggerId } = parseWith(routes.deleteHostingTrigger.params, c.req.param());
+    return reply(c, routes.deleteHostingTrigger.response, { triggers: await service.deleteHostingTrigger(actor(c), agentId, triggerId) });
   });
 
   app.put(routes.setAgentCredential.path, async (c) => {
@@ -265,10 +624,67 @@ export function buildHttpApp(deps: {
     return reply(c, routes.setAgentCredential.response, { credential: await service.setAgentCredential(actor(c), agentId, input.secret) });
   });
 
+  app.put(routes.renameAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.renameAgent.params, c.req.param());
+    const input = await body(c, routes.renameAgent.request);
+    return reply(c, routes.renameAgent.response, { agent: await service.renameAgent(actor(c), agentId, input) });
+  });
+
+  app.put(routes.setAgentProfile.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentProfile.params, c.req.param());
+    const input = await body(c, routes.setAgentProfile.request);
+    return reply(c, routes.setAgentProfile.response, { agent: await service.setAgentProfile(actor(c), agentId, input) });
+  });
+
+  app.post(routes.listSetupInstances.path, async (c) => {
+    const { connection } = parseWith(routes.listSetupInstances.params, c.req.param());
+    const { key } = await body(c, routes.listSetupInstances.request);
+    return reply(c, routes.listSetupInstances.response, { instances: await service.listSetupInstances(actor(c), connection, key) });
+  });
+
+  app.post(routes.createSetupInstance.path, async (c) => {
+    const { connection } = parseWith(routes.createSetupInstance.params, c.req.param());
+    const input = await body(c, routes.createSetupInstance.request);
+    return reply(c, routes.createSetupInstance.response, { instance: await service.createSetupInstance(actor(c), connection, input) });
+  });
+
+  app.put(routes.setAgentSuper.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentSuper.params, c.req.param());
+    const input = await body(c, routes.setAgentSuper.request);
+    return reply(c, routes.setAgentSuper.response, { agent: await service.setAgentSuper(actor(c), agentId, input) });
+  });
+
   app.put(routes.setAgentOptionDefaults.path, async (c) => {
     const { agentId } = parseWith(routes.setAgentOptionDefaults.params, c.req.param());
     const input = await body(c, routes.setAgentOptionDefaults.request);
     return reply(c, routes.setAgentOptionDefaults.response, { defaults: await service.setAgentOptionDefaults(actor(c), agentId, input.defaults) });
+  });
+
+  app.put(routes.setAgentHook.path, async (c) => {
+    const { agentId } = parseWith(routes.setAgentHook.params, c.req.param());
+    const input = await body(c, routes.setAgentHook.request);
+    const { hook, token } = await service.setAgentHook(actor(c), agentId, input.spaceId);
+    return reply(c, routes.setAgentHook.response, { hook, url: `${publicOrigin(c)}/v1/hooks/${agentId}/${token}` });
+  });
+
+  app.delete(routes.clearAgentHook.path, async (c) => {
+    const { agentId } = parseWith(routes.clearAgentHook.params, c.req.param());
+    await service.clearAgentHook(actor(c), agentId);
+    return reply(c, routes.clearAgentHook.response, {});
+  });
+
+  app.post(routes.receiveAgentHook.path, async (c) => {
+    const { agentId, token } = parseWith(routes.receiveAgentHook.params, c.req.param());
+    if (Number(c.req.header('content-length') ?? '0') > MAX_HOOK_BYTES) throw new HarborError('payload_too_large', `alerts are limited to ${MAX_HOOK_BYTES} bytes`);
+    const text = await c.req.text();
+    if (text.length > MAX_HOOK_BYTES) throw new HarborError('payload_too_large', `alerts are limited to ${MAX_HOOK_BYTES} bytes`);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new HarborError('invalid_request', 'an alert is a JSON body');
+    }
+    return reply(c, routes.receiveAgentHook.response, { posted: await service.receiveAgentHook(agentId, token, payload) });
   });
 
   app.post(routes.createAgentKey.path, async (c) => {
@@ -291,7 +707,7 @@ export function buildHttpApp(deps: {
 
   app.post(routes.createInvite.path, async (c) => {
     const input = await body(c, routes.createInvite.request);
-    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input.spaceId, input.expiresInHours));
+    return reply(c, routes.createInvite.response, await service.createInvite(actor(c), input));
   });
 
   app.post(routes.resolveInvite.path, async (c) => {
@@ -310,9 +726,33 @@ export function buildHttpApp(deps: {
     return reply(c, routes.acceptInvite.response, result);
   });
 
+  // Where a browser-opened link goes. The web app, when this Harbor names one
+  // (2026-11-09: most people opening a link have no desktop app, and a browser
+  // cannot tell whether one is installed, so the page used to dead-end them on
+  // a launch that did nothing); its /open takes the deep link's query
+  // unchanged, so it resolves the link the way the desktop does (the
+  // renderer's parseSpacesLink). Without a web app, the hand-off page of
+  // 2026-10-13: the desktop app launched at once, and its download.
+  const openers = (query: string): Openers => ({
+    deep: `rowboat://open?${query}`,
+    ...(deps.webAppUrl ? { web: `${deps.webAppUrl.replace(/\/$/, '')}/open?${query}` } : {}),
+  });
+  /**
+   * The web app when there is one, else the hand-off page. A phone's browser
+   * (by user agent) gets the hand-off page even then (2026-11-09, evening):
+   * the app it may have is the phone app, which the page offers along with
+   * the App Store and the browser; the web app is built for a desktop. The
+   * phone page launches nothing by itself — a scheme the phone has no app
+   * for is an error dialog on iOS.
+   */
+  const handOff = (c: Context, o: Openers, page: (phone: boolean) => string) => {
+    const phone = /iPhone|iPad|iPod|Android/i.test(c.req.header('user-agent') ?? '');
+    return o.web && !phone ? c.redirect(o.web, 302) : c.html(page(phone));
+  };
+
   // The invite link's landing (2026-09-15): a browser-opened /join/<token>
-  // hands the invite into the app as rowboat://open?type=spaces&org=…&invite=…
-  // — the same deep-link grammar as the org link landings below, the org
+  // hands the invite into the app as rowboat://open?type=spaces&server=…&invite=…
+  // — the same deep-link grammar as the link landings below, the server
   // named by its address — and shows what is being joined meanwhile (invite
   // resolution is pre-auth by design, spec §4). A dead invite says so and
   // launches nothing.
@@ -320,34 +760,45 @@ export function buildHttpApp(deps: {
     const token = c.req.param('token');
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
-    const deep = `rowboat://open?type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', space: resolved.space.name, org: resolved.org.name, invitedBy: resolved.invitedBy, deep }));
+    const query = `type=spaces&server=${encodeURIComponent(service.server.address)}&invite=${encodeURIComponent(token)}`;
+    const o = openers(query);
+    return handOff(c, o, (phone) => invitePage({ state: 'ok', phone, ...(resolved.space ? { space: resolved.space.name } : {}), ...(resolved.direct ? { person: resolved.direct.displayName } : {}), server: service.server.name, invitedBy: resolved.invitedBy, ...o }));
   });
 
+  // Apple's site association (2026-11-09): with it, and the domain declared in
+  // the phone app, iOS opens a link on this server in the app directly when
+  // it is installed, and in the browser otherwise — no page in between. The
+  // app id is the team and the bundle; the paths are the links the app can
+  // open: an invite, a space (and anything under it), a person.
+  const siteAssociation = (c: Context) =>
+    c.json({
+      applinks: {
+        details: [{ appIDs: ['9526N79222.com.rowboatlabs.spaces'], components: [{ '/': '/join/*' }, { '/': '/s/*' }, { '/': '/u/*' }] }],
+      },
+    });
+  app.get('/.well-known/apple-app-site-association', siteAssociation);
+  app.get('/apple-app-site-association', siteAssociation);
+
   // --- link landings ---------------------------------------------------------
-  // Every org link (ids.ts grammar) opened in a browser lands here and is
-  // handed into the app as a rowboat:// deep link, the org named by its
-  // address. Nothing is looked up and nothing is rendered about the target,
-  // so a link says nothing to someone who cannot open it. The app itself
-  // intercepts these URLs before they ever reach a browser.
-  const landing = (target: URLSearchParams) => {
-    target.set('org', service.org.address);
-    const deep = `rowboat://open?type=spaces&${target.toString()}`;
-    return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Open in Rowboat</title>` +
-      `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
-      `main{text-align:center;padding:2rem}a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}</style>` +
-      `<main><p>This link opens in Rowboat.</p><a class="b" href="${deep}">Open in Rowboat</a></main>` +
-      `<script>location.replace(${JSON.stringify(deep)})</script>`;
+  // Every Spaces link (ids.ts grammar) opened in a browser lands here and is
+  // handed on, the server named by its address. Nothing is looked up and nothing
+  // is rendered about the target, so a link says nothing to someone who
+  // cannot open it. The app itself intercepts these URLs before they ever
+  // reach a browser.
+  const landing = (c: Context, target: URLSearchParams) => {
+    target.set('server', service.server.address);
+    const o = openers(`type=spaces&${target.toString()}`);
+    return handOff(c, o, (phone) => landingPage({ ...o, phone }));
   };
-  app.get('/', (c) => c.html(landing(new URLSearchParams())));
-  app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
+  app.get('/', (c) => landing(c, new URLSearchParams()));
+  app.get('/s/:spaceId', (c) => landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId') })));
   app.get('/s/:spaceId/m/:messageId', (c) =>
-    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') }))),
+    landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') })),
   );
   app.get('/s/:spaceId/a/:assetId', (c) =>
-    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), assetId: c.req.param('assetId') }))),
+    landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId'), assetId: c.req.param('assetId') })),
   );
-  app.get('/u/:memberId', (c) => c.html(landing(new URLSearchParams({ memberId: c.req.param('memberId') }))));
+  app.get('/u/:memberId', (c) => landing(c, new URLSearchParams({ memberId: c.req.param('memberId') })));
 
   // --- assets ----------------------------------------------------------------
 
@@ -455,21 +906,36 @@ export function buildHttpApp(deps: {
     const { spaceId, hash } = parseWith(routes.getBlob.params, c.req.param());
     const q = parseWith(routes.getBlob.query, {
       ...(c.req.query('name') !== undefined ? { name: c.req.query('name') } : {}),
+      ...(c.req.query('download') !== undefined ? { download: c.req.query('download') } : {}),
     });
-    const result = await service.downloadBlob(actor(c), spaceId, hash, q.name);
+    const result = await service.downloadBlob(actor(c), spaceId, hash, q.name, {
+      inline: c.get('viaSession') === true,
+      attachment: q.download === '1',
+    });
     if (result.url) {
       // Do not cache the redirect itself beyond the presign window.
       c.header('cache-control', 'private, max-age=240');
       return c.redirect(result.url, 302);
     }
     c.header('content-type', result.blob.mime);
-    c.header('content-length', String(result.blob.size));
     c.header('content-disposition', result.disposition);
     c.header('cache-control', 'private, max-age=31536000, immutable');
     c.header('x-content-type-options', 'nosniff');
     c.header('content-security-policy', "default-src 'none'");
-    const bytes = result.bytes!;
-    return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    c.header('accept-ranges', 'bytes');
+    const size = result.blob.size;
+    const range = parseByteRange(c.req.header('range'), size);
+    if (range === 'unsatisfiable') {
+      c.header('content-range', `bytes */${size}`);
+      return c.body(null, 416);
+    }
+    if (range) {
+      c.header('content-range', `bytes ${range.start}-${range.end}/${size}`);
+      c.header('content-length', String(range.end - range.start + 1));
+      return c.body(sliceBody(bodyOf(result), range.start, range.end), 206);
+    }
+    c.header('content-length', String(size));
+    return c.body(bodyOf(result));
   });
 
   // --- feed ------------------------------------------------------------------
@@ -483,6 +949,20 @@ export function buildHttpApp(deps: {
     });
     const topics = await service.listTopics(actor(c), spaceId, q.includeArchived ?? false);
     return reply(c, routes.listTopics.response, { topics });
+  });
+
+  app.get(routes.searchAll.path, async (c) => {
+    const q = parseWith(routes.searchAll.query, {
+      q: c.req.query('q'),
+      ...(c.req.query('spaceId') !== undefined ? { spaceId: c.req.query('spaceId') } : {}),
+      ...(c.req.query('kinds') !== undefined ? { kinds: c.req.query('kinds') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    const results = await service.search(actor(c), q.spaceId, q.q, {
+      ...(q.kinds !== undefined ? { kinds: q.kinds } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    });
+    return reply(c, routes.searchAll.response, results);
   });
 
   app.get('/v1/spaces/:spaceId/search', async (c) => {
@@ -506,6 +986,7 @@ export function buildHttpApp(deps: {
       ...(c.req.query('afterOffset') !== undefined ? { afterOffset: c.req.query('afterOffset') } : {}),
       ...(c.req.query('aroundOffset') !== undefined ? { aroundOffset: c.req.query('aroundOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+      ...(c.req.query('replies') !== undefined ? { replies: c.req.query('replies') } : {}),
     });
     return reply(c, routes.listStream.response, await service.listStream(actor(c), spaceId, q));
   });
@@ -536,6 +1017,16 @@ export function buildHttpApp(deps: {
     const { spaceId } = parseWith(routes.postMessage.params, c.req.param());
     const input = await body(c, routes.postMessage.request);
     return reply(c, routes.postMessage.response, await service.postMessage(actor(c), spaceId, input));
+  });
+
+  // A secret goes to its recipient as text, never cached (2026-11-04): `curl` puts it straight where it is used.
+  app.get('/v1/spaces/:spaceId/messages/:messageId/secrets/:name', async (c) => {
+    const { spaceId, messageId, name } = parseWith(routes.readMessageSecret.params, c.req.param());
+    const value = await service.readMessageSecret(actor(c), spaceId, messageId, name);
+    c.header('content-type', 'text/plain; charset=utf-8');
+    c.header('cache-control', 'no-store');
+    c.header('x-content-type-options', 'nosniff');
+    return c.body(value);
   });
 
   app.post('/v1/spaces/:spaceId/messages/:messageId/delete', async (c) => {
@@ -580,6 +1071,23 @@ export function buildHttpApp(deps: {
     return reply(c, routes.manageTopic.response, { topic });
   });
 
+  app.post('/v1/spaces/:spaceId/threads/:rootMessageId/archive', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.archiveThread.params, c.req.param());
+    const input = await body(c, routes.archiveThread.request);
+    return reply(c, routes.archiveThread.response, { root: await service.archiveThread(actor(c), spaceId, rootMessageId, input) });
+  });
+
+  app.post('/v1/spaces/:spaceId/threads/:rootMessageId/session', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.setSession.params, c.req.param());
+    const input = await body(c, routes.setSession.request);
+    return reply(c, routes.setSession.response, { root: await service.setSession(actor(c), spaceId, rootMessageId, input) });
+  });
+
+  app.get('/v1/spaces/:spaceId/archived-threads', async (c) => {
+    const { spaceId } = parseWith(routes.listArchivedThreads.params, c.req.param());
+    return reply(c, routes.listArchivedThreads.response, { threads: await service.listArchivedThreads(actor(c), spaceId) });
+  });
+
   // --- read state ------------------------------------------------------------
 
   app.post('/v1/spaces/:spaceId/read', async (c) => {
@@ -599,6 +1107,10 @@ export function buildHttpApp(deps: {
   });
 
   app.get(routes.unread.path, async (c) => reply(c, routes.unread.response, await service.unread(actor(c))));
+  app.get(routes.myThreads.path, async (c) => {
+    const q = parseWith(routes.myThreads.query, { ...(c.req.query('archived') !== undefined ? { archived: c.req.query('archived') } : {}) });
+    return reply(c, routes.myThreads.response, { threads: await service.myThreads(actor(c), q) });
+  });
 
   app.get(routes.activity.path, async (c) => {
     const q = parseWith(routes.activity.query, {
@@ -628,28 +1140,67 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 }
 
+const PAGE_HEAD = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
+const PAGE_STYLE =
+  `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
+  `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
+  `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
+  `.s{margin-top:1.25rem;font-size:13px;color:#666}.s+.s{margin-top:.25rem}.s a{color:inherit}</style>`;
+
+/** The app's deep link, and the web app's address for the same link when the Harbor names one. */
+interface Openers {
+  deep: string;
+  web?: string;
+  /** A phone's browser: offer the phone app and the store, launch nothing. */
+  phone?: boolean;
+}
+
+/** The phone app, on the App Store (2026-11-09); the one listing serves iPhone and iPad. */
+const APP_STORE_URL = 'https://apps.apple.com/app/id6818016444';
+
+/** Launch the desktop app at once; offer the download, and the web app. On a phone: the app, the store, the browser. */
+function openerLinks(o: Openers): string {
+  if (o.phone) {
+    return (
+      `<a class="b" href="${escapeHtml(o.deep)}">Open in the Rowboat app</a>` +
+      `<p class="s">Don't have it? <a href="${APP_STORE_URL}">Get it on the App Store</a>, then open this link again.</p>` +
+      (o.web ? `<p class="s">Or <a href="${escapeHtml(o.web)}">continue in your browser</a>.</p>` : '')
+    );
+  }
+  return (
+    `<a class="b" href="${escapeHtml(o.deep)}">Open in Rowboat</a>` +
+    `<p class="s">Don't have the app? <a href="${DOWNLOAD_URL}">Download Rowboat</a>, then open this link again.</p>` +
+    (o.web ? `<p class="s">You can also <a href="${escapeHtml(o.web)}">open this link in your browser</a>.</p>` : '') +
+    `<script>location.replace(${JSON.stringify(o.deep)})</script>`
+  );
+}
+
+/** A link's landing. */
+function landingPage(o: Openers): string {
+  return `${PAGE_HEAD}<title>Open in Rowboat</title>${PAGE_STYLE}<main><h1>This link opens in Rowboat</h1>${openerLinks(o)}</main>`;
+}
+
 type InvitePage =
-  | { state: 'ok'; space: string; org: string; invitedBy?: string; deep: string }
+  | ({ state: 'ok'; space?: string; person?: string; server: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
+
 
 /** The /join landing: launch the app with the invite, or say why not. */
 function invitePage(page: InvitePage): string {
-  const style =
-    `<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;color:#222;background:#fafafa}` +
-    `main{text-align:center;padding:2rem;max-width:26rem}h1{font-size:1.25rem;margin:0 0 .25rem}p{margin:.25rem 0}.m{color:#666}` +
-    `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
-    `.s{margin-top:1.25rem;font-size:13px;color:#666}.s a{color:inherit}</style>`;
-  const head = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">`;
   if (page.state !== 'ok') {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
-    return `${head}<title>Invite ${page.state}</title>${style}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
+    return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
-  const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
+  // The space, or the person, is the headline (2026-11-09: an invite is to one space, or it is someone's link).
+  const headline = page.space
+    ? `You're invited to ${escapeHtml(page.space)}`
+    : page.person
+      ? `${escapeHtml(page.person)} invited you to message them`
+      : `You're invited to ${escapeHtml(page.server)}`;
+  const by = page.space && page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${head}<title>Join ${escapeHtml(page.space)} on ${escapeHtml(page.org)}</title>${style}<main>` +
-    `<h1>You're invited to ${escapeHtml(page.space)}</h1><p class="m">on ${escapeHtml(page.org)}</p>${by}` +
-    `<a class="b" href="${page.deep}">Open in Rowboat</a>` +
-    `<p class="s">Don't have Rowboat? <a href="${DOWNLOAD_URL}">Download it</a>, then open this link again.</p></main>` +
-    `<script>location.replace(${JSON.stringify(page.deep)})</script>`
+    `${PAGE_HEAD}<title>${escapeHtml(page.space ? `Join ${page.space}` : page.person ? `Message ${page.person}` : `Join ${page.server}`)}</title>${PAGE_STYLE}<main>` +
+    `<h1>${headline}</h1>${by}` +
+    `${openerLinks(page)}</main>`
   );
 }

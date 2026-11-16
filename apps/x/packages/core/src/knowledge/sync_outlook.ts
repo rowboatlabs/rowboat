@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { WorkDir } from '../config/config.js';
 import { getMaxEmails } from '../config/gmail_sync_config.js';
 import { OutlookClientFactory, GraphError } from './outlook-client-factory.js';
+import { outlookCooldownInfo, outlookQuotaTight, outlookRateLimitCooldownMs } from './outlook-rate-limit.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import { formatTimestampForModel } from '@x/shared/dist/time.js';
@@ -1055,9 +1056,44 @@ async function sweepUnclassifiedSnapshots(llmBudget: number = 15): Promise<void>
     }
 }
 
-async function performSync(): Promise<void> {
+// One Sync Activity notice per rate-limit episode, deduped on the lockout
+// deadline — without it the cooldown silences the feed mid-lockout, which
+// reads as sync having given up.
+let lastCooldownNoticeUntil = 0;
+async function logRateLimitCooldownNotice(cooldownMs: number): Promise<void> {
+    const until = Date.now() + cooldownMs;
+    if (Math.abs(until - lastCooldownNoticeUntil) < 5_000) return;
+    lastCooldownNoticeUntil = until;
+    const at = new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const info = outlookCooldownInfo();
+    try {
+        await serviceLogger.log({
+            type: 'progress',
+            service: 'outlook',
+            runId: 'outlook_rate_limit_notice',
+            level: 'warn',
+            message: `Rate limited by Microsoft Graph — next sync attempt at ${at}`,
+            details: { source: info?.source ?? 'default', until: new Date(until).toISOString() },
+        });
+    } catch {
+        // Best-effort: the caller's console log still records the skip.
+    }
+}
+
+export function resetCooldownNoticeForTests(): void {
+    lastCooldownNoticeUntil = 0;
+}
+
+export async function performSync(): Promise<void> {
     if (!fs.existsSync(SYNC_DIR)) fs.mkdirSync(SYNC_DIR, { recursive: true });
     if (!fs.existsSync(ATTACHMENTS_DIR)) fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+
+    const cooldownMs = outlookRateLimitCooldownMs();
+    if (cooldownMs > 0) {
+        console.log(`[Outlook] rate-limit cooldown active — skipping sync for another ${Math.ceil(cooldownMs / 1000)}s`);
+        await logRateLimitCooldownNotice(cooldownMs);
+        return;
+    }
 
     try {
         const state = loadState();
@@ -1079,8 +1115,12 @@ async function performSync(): Promise<void> {
             await deltaSync(state.deltaLink);
         }
 
-        await pruneInboxCache();
-        await sweepUnclassifiedSnapshots();
+        // Quota-tight: keep heavy maintenance passes paused during a cooldown
+        // or the 60s grace right after one.
+        if (!outlookQuotaTight()) {
+            await pruneInboxCache();
+            await sweepUnclassifiedSnapshots();
+        }
 
         console.log('[Outlook] Sync completed.');
     } catch (error) {
@@ -1697,7 +1737,13 @@ export async function init() {
             console.error('[Outlook] Error in main loop:', error);
         }
 
-        await interruptibleSleep(SYNC_INTERVAL_MS);
+        // An active rate-limit cooldown stretches the sleep to Microsoft Graph's
+        // own deadline (or our ladder wait) — without it the loop wakes every 30s
+        // mid-lockout, repeatedly slamming Graph and prolonging the lockout.
+        const cooldownMs = outlookRateLimitCooldownMs();
+        if (cooldownMs > 0) await logRateLimitCooldownNotice(cooldownMs);
+        const sleepMs = Math.max(SYNC_INTERVAL_MS, cooldownMs > 0 ? cooldownMs + 1_000 : 0);
+        await interruptibleSleep(sleepMs);
     }
 }
 

@@ -1,0 +1,128 @@
+/* 2026-10-06: outside markers and explicit block spacing preserve the
+   hierarchy in agent responses, including wrapped and multi-paragraph items. */
+.spaces-message-prose {
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.spaces-message-prose .space-markdown-body {
+  max-width: 100ch;
+  overflow-wrap: anywhere;
+}
+
+.spaces-message-prose .space-markdown-body > * {
+  margin-block: 0;
+}
+
+.spaces-message-prose .space-markdown-body > * + * {
+  margin-block-start: 0.75em;
+}
+
+.spaces-message-prose :where(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.spaces-message-prose h1 { font-size: 1.4em; }
+.spaces-message-prose h2 { font-size: 1.2em; }
+.spaces-message-prose h3 { font-size: 1.067em; }
+
+.spaces-message-prose .space-markdown-body > :where(h1, h2, h3, h4, h5, h6):not(:first-child) {
+  margin-block-start: 1.25em;
+}
+
+.spaces-message-prose :where(ul, ol) {
+  padding-inline-start: 1.75em;
+  list-style-position: outside;
+}
+
+.spaces-message-prose li {
+  padding-block: 0;
+  padding-inline-start: 0.25em;
+}
+
+.spaces-message-prose li + li { margin-block-start: 0.4em; }
+.spaces-message-prose li:has(> ul, > ol) + li { margin-block-start: 1em; }
+
+.spaces-message-prose li > p {
+  display: block;
+  margin-block: 0;
+}
+
+.spaces-message-prose li > :not(:first-child) { margin-block-start: 0.5em; }
+.spaces-message-prose li > :where(ul, ol) { margin-block: 0.5em; }
+.spaces-message-prose li > :last-child { margin-block-end: 0; }
+
+.spaces-message-prose .task-list-item { list-style: none; }
+.spaces-message-prose .task-list-item > input[type="checkbox"],
+.spaces-message-prose .task-list-item > p > input[type="checkbox"] {
+  margin-inline: -1.5em 0.5em;
+  accent-color: var(--primary);
+  vertical-align: baseline;
+}
+
+.spaces-message-prose blockquote {
+  padding-inline-start: 1em;
+  border-inline-start: 3px solid var(--border);
+  color: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  font-style: normal;
+}
+
+.spaces-message-prose blockquote > * { margin-block: 0; }
+.spaces-message-prose blockquote > * + * { margin-block-start: 0.75em; }
+
+.spaces-message-prose [data-streamdown="inline-code"] {
+  padding: 0.1em 0.3em;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.875em;
+  line-height: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* 2026-10-06: retain Streamdown's single code card and copy controls;
+   long commands scroll inside the card without widening the conversation. */
+.spaces-message-prose [data-streamdown="code-block"] {
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 8px;
+  overflow-wrap: normal;
+}
+
+.spaces-message-prose [data-streamdown="code-block-header"] { padding: 6px 10px; }
+.spaces-message-prose [data-streamdown="code-block-body"] {
+  padding: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.spaces-message-prose div[data-streamdown="table-wrapper"] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.spaces-message-prose table {
+  width: max-content;
+  min-width: 100%;
+  overflow-wrap: normal;
+}
+
+.spaces-message-prose :where(th, td) {
+  min-width: 8ch;
+  max-width: 36ch;
+  padding: 8px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  vertical-align: top;
+}
+
+.spaces-message-prose [data-streamdown="table-body"] { background: transparent; }
+.spaces-message-prose .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25em;
+}

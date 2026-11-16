@@ -1,8 +1,11 @@
+import { onServer } from '@x/shared/dist/spaces.js'
+import { useSpaceAccess } from '@/lib/spaces-access'
 import { FileConflictNotice, useSpaceFileSave, type SavedSpaceFile } from './file-conflict'
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import type { spaces } from '@x/shared'
 import { BlobPreview } from '@/components/spaces/blob-preview'
-import { Streamdown } from 'streamdown'
+import { getViewerType } from '@/lib/file-types'
+import { Streamdown } from '@/components/streamdown'
 import { Eye, FileDown, FilePlus2, FileText, Loader2, MessageSquare, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
@@ -33,6 +36,7 @@ import {
     rewriteFileLinks,
     rewriteMentionLinks,
     separateImageParagraphs,
+    isBlobAppUrl,
     HERE_APP_URL,
     ROWBOAT_APP_URL,
     type SpaceRefs,
@@ -106,6 +110,7 @@ export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, onO
 
 /** Attachments preview on tap; saving to space files keeps the original link intact. */
 function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }) {
+    const { writable } = useSpaceAccess()
     const parsed = parseBlobAppUrl(href)
     const openAttachment = useContext(AttachmentNavContext)
     const [saveOpen, setSaveOpen] = useState(false)
@@ -144,13 +149,56 @@ function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }
                     <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="truncate">{children}</span>
                 </button>
-                <button type="button" onClick={() => setSaveOpen(true)} title="Save to space files" aria-label="Save to space files" className="shrink-0 p-2 hover:bg-accent"><FilePlus2 className="size-3.5" /></button>
+                <button type="button" disabled={!writable} onClick={() => setSaveOpen(true)} title="Save to space files" aria-label="Save to space files" className="shrink-0 p-2 hover:bg-accent"><FilePlus2 className="size-3.5" /></button>
                 <button type="button" disabled={saving} onClick={() => void save()} title="Download" aria-label="Download" className="shrink-0 p-2 hover:bg-accent">
                     {saving ? <Loader2 className="size-3.5 animate-spin" /> : <FileDown className="size-3.5" />}
                 </button>
             </span>
-            {saveOpen && <SaveToSpaceDialog src={href} suggestedName={suggestedName} onClose={() => setSaveOpen(false)} />}
+            {writable && saveOpen && <SaveToSpaceDialog src={href} suggestedName={suggestedName} onClose={() => setSaveOpen(false)} />}
         </>
+    )
+}
+
+/** A blob link's file name: the link's ?name, else its text. */
+function blobLinkName(href: string, label?: string): string | undefined {
+    try {
+        const name = new URL(href).searchParams.get('name')
+        if (name) return name
+    } catch {
+        // fall through to the link text
+    }
+    return label || undefined
+}
+
+/** Whether a blob link names a video the page can play: by its file name, since the link carries no mime. */
+function isVideoBlobLink(href: string, label?: string): boolean {
+    const name = blobLinkName(href, label)
+    return !!name && getViewerType(name) === 'video'
+}
+
+/**
+ * A video shared in a message plays where it is (2026-11-04, Arjun: a
+ * screen recording had to be downloaded to watch), with the file's card
+ * under it for preview, save and download. A video the browser can't decode
+ * leaves only the card.
+ */
+function BlobVideo({ src, name }: { src: string; name: string }) {
+    const [failed, setFailed] = useState(false)
+    return (
+        <span className="my-1 flex max-w-xl flex-col items-start gap-1">
+            {!failed && (
+                <video
+                    src={src}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    aria-label={name}
+                    onError={() => setFailed(true)}
+                    className="max-h-[360px] w-full rounded-lg bg-black"
+                />
+            )}
+            <BlobLinkCard href={src}>{name}</BlobLinkCard>
+        </span>
     )
 }
 
@@ -189,6 +237,7 @@ function MessageImageGallery({ children }: { children: ReactNode }) {
 
 /** Source-specific actions always follow the currently selected image. */
 function SpaceImageActions({ src }: { src: string }) {
+    const { writable } = useSpaceAccess()
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [saveOpen, setSaveOpen] = useState(false)
@@ -217,12 +266,12 @@ function SpaceImageActions({ src }: { src: string }) {
                 {saving ? 'Saving…' : 'Download'}
             </button>
             {parsed ? (
-                <button type="button" onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">Save to space files</button>
+                <button type="button" disabled={!writable} onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">Save to space files</button>
             ) : (
                 <a href={src} target="_blank" rel="noreferrer" className="text-white/80 hover:text-white hover:underline">Open original</a>
             )}
             {error && <p role="alert" className="absolute right-0 top-full mt-2 w-72 rounded-md bg-background p-3 text-xs text-destructive shadow-lg">{error}</p>}
-            {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
+            {writable && saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
         </>
     )
 }
@@ -327,6 +376,7 @@ function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: stri
 }
 
 export function BlobImage({ src, alt }: { src: string; alt: string }) {
+    const { writable } = useSpaceAccess()
     const imageRef = useRef<HTMLImageElement>(null)
     const openGallery = useContext(MessageImageGalleryContext)
     const preview = () => {
@@ -399,7 +449,7 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                     </ContextMenuItem>
                     {parsed && (
                         <>
-                            <ContextMenuItem onSelect={() => setSaveOpen(true)}>
+                            <ContextMenuItem disabled={!writable} onSelect={() => setSaveOpen(true)}>
                                 <FilePlus2 className="size-3.5 mr-2" /> Save to space files…
                             </ContextMenuItem>
                             <ContextMenuItem onSelect={() => void save()}>
@@ -409,12 +459,12 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                     )}
                 </ContextMenuContent>
             </ContextMenu>
-            {parsed && <button type="button" title="Save to space files" aria-label={`Save ${alt || 'image'} to space files`} onClick={() => setSaveOpen(true)} className="absolute bottom-3 right-3 rounded-md border border-border bg-background p-1.5 text-foreground shadow-sm hover:bg-accent"><FilePlus2 className="size-3.5" /></button>}
+            {writable && parsed && <button type="button" title="Save to space files" aria-label={`Save ${alt || 'image'} to space files`} onClick={() => setSaveOpen(true)} className="absolute bottom-3 right-3 rounded-md border border-border bg-background p-1.5 text-foreground shadow-sm hover:bg-accent"><FilePlus2 className="size-3.5" /></button>}
             </span>
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
                 <SpaceImageActions src={src} />
             </ImageLightbox>
-            {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
+            {writable && saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
         </>
     )
 }
@@ -583,7 +633,8 @@ type StreamdownComponents = NonNullable<ComponentProps<typeof Streamdown>['compo
 const spaceComponents: StreamdownComponents = {
     img: ({ src, alt }) => {
         const url = typeof src === 'string' ? src : ''
-        if (url.startsWith('app://space-blob/')) {
+        if (isBlobAppUrl(url)) {
+            if (isVideoBlobLink(url, alt)) return <BlobVideo src={url} name={blobLinkName(url, alt)!} />
             return <BlobImage src={url} alt={alt ?? ''} />
         }
         return <ExternalImage src={url} alt={alt ?? ''} />
@@ -631,7 +682,7 @@ function SpaceChip({ spaceId, orgAddress, fallback }: { spaceId: string; orgAddr
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
     const { orgs } = useSpacesOrgs()
-    const org = orgAddress !== undefined ? orgs.find((o) => o.address === orgAddress) : orgs.find((o) => o.id === refs?.orgId)
+    const org = orgAddress !== undefined ? orgs.find((o) => onServer(orgAddress, o.address)) : orgs.find((o) => o.id === refs?.orgId)
     const space = org ? findSpace(org, spaceId) : undefined
     if (!org || !space) {
         // A bare canonical URL is its own label; anything else reads as a #name.
@@ -659,7 +710,7 @@ function PersonLinkChip({ orgAddress, memberId, fallback }: { orgAddress: string
     const names = useMemberNames()
     // A bare pasted URL is its own label — never a name; the id stands in.
     const hint = /^https:\/\//.test(fallback) ? memberId : fallback.replace(/^@/, '')
-    const orgId = orgAddress === refs?.orgAddress ? refs.orgId : (nav?.resolveOrg?.(orgAddress) ?? null)
+    const orgId = refs && onServer(orgAddress, refs.orgAddress) ? refs.orgId : (nav?.resolveOrg?.(orgAddress) ?? null)
     if (!orgId) return <span title="Not available to you" className="text-muted-foreground">{`@${hint}`}</span>
     const name = `@${names.get(memberId) ?? hint}`
     if (!nav?.onOpenDirect) return <strong className={CHIP_CLASS}>{name}</strong>
@@ -674,7 +725,7 @@ function PersonLinkChip({ orgAddress, memberId, fallback }: { orgAddress: string
 function MessageLinkChip({ orgAddress, spaceId, messageId, children }: { orgAddress: string; spaceId: string; messageId: string; children?: ReactNode }) {
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
-    const orgId = orgAddress === refs?.orgAddress && spaceId === refs.spaceId ? refs.orgId : (nav?.resolveSpace?.(orgAddress, spaceId) ?? null)
+    const orgId = refs && onServer(orgAddress, refs.orgAddress) && spaceId === refs.spaceId ? refs.orgId : (nav?.resolveSpace?.(orgAddress, spaceId) ?? null)
     const label = plainLabel(children)
     const text = label && !/^https:\/\//.test(label) ? label : 'message'
     if (!orgId || !nav?.onOpenMessage) {
@@ -719,7 +770,7 @@ function fileLinkTarget(url: string, refs: SpaceRefs | null, assets: SpaceAssets
     }
     const wire = parseAssetWireUrl(url)
     if (wire) {
-        if (refs && wire.orgAddress === refs.orgAddress && wire.spaceId === refs.spaceId) return byId(wire.assetId)
+        if (refs && onServer(wire.orgAddress, refs.orgAddress) && wire.spaceId === refs.spaceId) return byId(wire.assetId)
         const orgId = nav?.resolveSpace?.(wire.orgAddress, wire.spaceId) ?? null
         return orgId ? { kind: 'elsewhere', orgId, spaceId: wire.spaceId, assetId: wire.assetId } : { kind: 'muted', title: 'Not available to you' }
     }
@@ -731,7 +782,59 @@ function fileLinkTarget(url: string, refs: SpaceRefs | null, assets: SpaceAssets
     return relative ? byPath(relative) : null
 }
 
-function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
+/** A file named inside a sentence: an inline chip at text size, icon then name. */
+const FILE_CHIP_CLASS = 'inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted/40 px-1.5 py-0.5 align-middle font-medium no-underline transition-colors'
+
+/** What kind of file a name is, for the card's second line. */
+function fileKind(name: string): string {
+    const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase()
+    if (!ext || ext === 'md' || ext === 'markdown') return 'Document'
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'Image'
+    if (ext === 'pdf') return 'PDF'
+    if (['csv', 'tsv', 'xlsx'].includes(ext)) return 'Spreadsheet'
+    return `${ext.toUpperCase()} file`
+}
+
+/**
+ * A file shared on its own (2026-10-28): the link is the whole message line,
+ * so it gets a card — icon tile, name, and what it is and where it lives —
+ * the same weight as an attachment instead of a small inline link.
+ */
+function FileCard({ name, path, muted, title, onOpen }: { name: string; path?: string; muted?: boolean; title: string; onOpen?: () => void }) {
+    const folder = path && path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null
+    const detail = [fileKind(name), folder].filter(Boolean).join(' · ')
+    const body = (
+        <>
+            <FileText className="size-5 shrink-0 text-muted-foreground" />
+            <span className="flex min-w-0 flex-col text-left">
+                <span className={cn('truncate text-sm font-medium', muted ? 'text-muted-foreground' : 'text-foreground')}>{name}</span>
+                <span className="truncate text-xs text-muted-foreground">{muted ? title : detail}</span>
+            </span>
+        </>
+    )
+    const frame = 'my-1 flex w-fit min-w-[300px] max-w-md items-center gap-3 rounded-xl border border-border bg-muted/50 px-3 py-2.5 no-underline dark:border-white/10 dark:bg-white/[0.04]'
+    return onOpen ? (
+        <button type="button" onClick={onOpen} title={title} className={cn(frame, 'transition-colors hover:bg-accent dark:hover:bg-white/[0.08]')}>{body}</button>
+    ) : (
+        <span title={title} className={frame}>{body}</span>
+    )
+}
+
+/**
+ * A file link alone on its line is shared as a file (2026-10-28) — a card,
+ * whatever its label (the phone sends [name](link)). The line is marked by
+ * this link title before rendering, since the anchor can't see its line.
+ */
+const FILE_CARD_TITLE = 'rowboat:file-card'
+const FILE_LINE_RE = /^(\s*)\[([^\]\n]+)\]\((https:\/\/[^\s/?#)]+\/s\/[^\s/?#)]+\/a\/[^\s)?#]+|app:\/\/space-file\/[^\s)]+)\)\s*$/gm
+function markFileCards(body: string): string {
+    return body
+        .split(/(```[\s\S]*?(?:```|$))/g)
+        .map((part, i) => (i % 2 === 1 ? part : part.replace(FILE_LINE_RE, (_m, lead: string, text: string, url: string) => `${lead}[${text}](${url} "${FILE_CARD_TITLE}")`)))
+        .join('')
+}
+
+function SpaceAnchor({ href, title, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
     const assets = useContext(SpaceAssetsContext)
@@ -758,7 +861,9 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
             </button>
         )
     }
-    if (url.startsWith('app://space-blob/')) {
+    if (isBlobAppUrl(url)) {
+        const label = plainLabel(children) ?? undefined
+        if (isVideoBlobLink(url, label)) return <BlobVideo src={url} name={blobLinkName(url, label)!} />
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }
     const target = fileLinkTarget(url, refs, assets, nav)
@@ -768,12 +873,21 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     if (!target && plainLabel(children) === url && isDirectImageUrl(url)) {
         return <ExternalImage src={url} alt="" />
     }
+    // A file link reads as the file (2026-10-28): a chip with its name. A bare
+    // link (pasted, or written by an agent) has only the URL as its text, so
+    // the name comes from the space's listing instead.
+    const bare = plainLabel(children) === url
+    const asCard = bare || title === FILE_CARD_TITLE
+    const filePath = target?.kind === 'open' ? assets.byId.get(target.assetId)?.path : undefined
+    const fileName = filePath?.split('/').pop() ?? (target?.kind === 'elsewhere' ? 'File in another space' : 'File')
+    const fileLabel = (): ReactNode => (bare ? fileName : children)
     if (target?.kind === 'muted' || (target && target.kind === 'elsewhere' && !nav?.onOpenSpaceFile) || (target?.kind === 'open' && !nav)) {
         const title = target.kind === 'muted' ? target.title : 'Not available here'
+        if (asCard) return <FileCard name={bare ? fileName : plainLabel(children) ?? fileName} path={filePath} muted title={title} />
         return (
-            <span title={title} className="inline-flex max-w-full items-baseline gap-1 align-baseline text-muted-foreground underline decoration-dotted underline-offset-2">
-                <FileText className="size-3 shrink-0 self-center" />
-                <span className="truncate">{children}</span>
+            <span title={title} className={cn(FILE_CHIP_CLASS, 'text-muted-foreground')}>
+                <FileText className="size-4 shrink-0" />
+                <span className="truncate">{fileLabel()}</span>
             </span>
         )
     }
@@ -781,15 +895,17 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
         const open = target.kind === 'open'
             ? () => nav.onOpenFile(target.assetId)
             : () => nav.onOpenSpaceFile?.(target.orgId, target.spaceId, target.assetId)
+        const title = target.kind === 'open' ? target.title : 'Open in its space'
+        if (asCard) return <FileCard name={bare ? fileName : plainLabel(children) ?? fileName} path={filePath} title={title} onOpen={open} />
         return (
             <button
                 type="button"
                 onClick={open}
                 title={target.kind === 'open' ? target.title : 'Open in its space'}
-                className="inline-flex max-w-full items-baseline gap-1 align-baseline text-primary underline underline-offset-2 hover:opacity-80"
+                className={cn(FILE_CHIP_CLASS, 'text-foreground hover:bg-accent')}
             >
-                <FileText className="size-3 shrink-0 self-center" />
-                <span className="truncate">{children}</span>
+                <FileText className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">{fileLabel()}</span>
             </button>
         )
     }
@@ -810,7 +926,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
         // Pre-separator messages joined text and images in one paragraph —
         // normalize so every message gets text above, a clean tile row below.
         // Mentions last: their app links must never look like file links.
-        return rewriteMentionLinks(separateImageParagraphs(withFiles))
+        return rewriteMentionLinks(separateImageParagraphs(markFileCards(withFiles)))
     }, [body, refs, assets])
     return (
         <div className={cn(className)}>
@@ -819,7 +935,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
                     write them that way), so a single newline inside a
                     paragraph has to render as one — remarkBreaks, same as
                     every other typed-message surface. */}
-                <Streamdown components={spaceComponents} remarkPlugins={userMessageRemarkPlugins}>{text}</Streamdown>
+                <Streamdown className="space-markdown-body" components={spaceComponents} remarkPlugins={userMessageRemarkPlugins}>{text}</Streamdown>
             </MessageImageGallery>
         </div>
     )
@@ -828,6 +944,7 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
 
 /** Attachment content occupies the same document column as saved space files. */
 export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onDismiss: () => void; onSaved: (saved: SavedSpaceFile) => void }) {
+    const { writable } = useSpaceAccess()
     const name = new URL(src).searchParams.get('name') || 'Attachment'
     const [saveOpen, setSaveOpen] = useState(false)
     const [downloading, setDownloading] = useState(false)
@@ -845,12 +962,12 @@ export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onD
         <section aria-label="Attachment preview" className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
                 <span className="min-w-0 flex-1 truncate font-mono text-foreground/80" title={name}>{name}</span>
-                <button type="button" onClick={() => setSaveOpen(true)} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FilePlus2 className="size-3" /> Save to space files</button>
+                <button type="button" disabled={!writable} onClick={() => setSaveOpen(true)} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FilePlus2 className="size-3" /> Save to space files</button>
                 <button type="button" disabled={downloading} onClick={() => void download()} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FileDown className="size-3" /> Download</button>
                 <button type="button" aria-label="Close attachment preview" onClick={onDismiss} className="rounded p-1 hover:bg-accent hover:text-foreground"><X className="size-3.5" /></button>
             </div>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"><BlobPreview src={src} name={name} /></div>
-            {saveOpen && <SaveToSpaceDialog src={src} suggestedName={name} onSaved={onSaved} onClose={() => setSaveOpen(false)} />}
+            {writable && saveOpen && <SaveToSpaceDialog src={src} suggestedName={name} onSaved={onSaved} onClose={() => setSaveOpen(false)} />}
         </section>
     )
 }

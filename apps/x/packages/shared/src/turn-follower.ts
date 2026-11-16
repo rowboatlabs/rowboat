@@ -40,6 +40,8 @@ export interface TurnFollower {
   // if the turn reached a terminal event while the feed was down, no later
   // event for it ever arrives, so the offset-gap detection can't fire — the
   // consumer must call this on reconnect to re-converge.
+  // 2026-10-22: coalesce calls during a fetch into a fresh follow-up, since
+  // the in-flight snapshot may predate the missed terminal event.
   refetch: () => void
 }
 
@@ -52,6 +54,7 @@ export function followTurn(turnId: string, deps: TurnFollowerDeps): TurnFollower
   let events: Array<z.infer<typeof TurnEvent>> | null = null
   let pending: TurnBusEvent[] = []
   let fetching = false
+  let refetchRequested = false
   let retries = 0
   let retryTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -81,6 +84,10 @@ export function followTurn(turnId: string, deps: TurnFollowerDeps): TurnFollower
 
   const resync = () => {
     events = null
+    if (fetching) {
+      refetchRequested = true
+      return
+    }
     void fetchSnapshot()
   }
 
@@ -89,21 +96,20 @@ export function followTurn(turnId: string, deps: TurnFollowerDeps): TurnFollower
     fetching = true
     try {
       const turn = await deps.fetchTurn(turnId)
-      if (!alive) return
+      if (!alive || refetchRequested) return
       retries = 0
       events = turn.events
       const buffered = pending
       pending = []
       for (const e of buffered) {
         if (!apply(e)) {
-          fetching = false
           resync()
           return
         }
       }
       publish()
     } catch (err) {
-      if (!alive) return
+      if (!alive || refetchRequested) return
       // Turn file may not exist yet (subscription raced creation) or the
       // fetch failed transiently.
       events = null
@@ -115,6 +121,10 @@ export function followTurn(turnId: string, deps: TurnFollowerDeps): TurnFollower
       }
     } finally {
       fetching = false
+      if (refetchRequested) {
+        refetchRequested = false
+        void fetchSnapshot()
+      }
     }
   }
 

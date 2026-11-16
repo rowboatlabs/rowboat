@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SpaceKind } from './core.js';
+import { SecretName, SpaceKind } from './core.js';
 import { MemberId, MessageId, SpaceId } from './ids.js';
 
 // The agent contracts (spec §8 Invoking agent members, 2026-09-30). Every
@@ -56,6 +56,15 @@ export type InvocationOption = z.infer<typeof InvocationOption>;
 export const InvocationOptionValues = z.record(InvocationOptionKey, z.union([z.string().max(256), z.boolean()]));
 export type InvocationOptionValues = z.infer<typeof InvocationOptionValues>;
 
+// A committed progress line, identified across snapshots and live frames (2026-11-01).
+export const InvocationActivity = z.object({
+  id: z.string(),
+  at: z.iso.datetime(),
+  state: z.enum(['working', 'waiting']),
+  activity: z.string().max(200),
+});
+export type InvocationActivity = z.infer<typeof InvocationActivity>;
+
 export const Invocation = z.object({
   id: InvocationId,
   /** The agent member invoked. */
@@ -63,18 +72,34 @@ export const Invocation = z.object({
   /** The conversation: a thread. Each connector maps it to one session of its own. */
   conversation: z.object({ spaceId: SpaceId, threadRootId: MessageId }),
   /** The message that invoked the agent. Its author is the invoker. */
-  trigger: z.object({ messageId: MessageId, authorId: MemberId, body: z.string() }),
+  trigger: z.object({
+    messageId: MessageId,
+    authorId: MemberId,
+    body: z.string(),
+    /** The secrets the message hands this agent among its readers, by name (2026-11-04): it reads each with readMessageSecret. */
+    secrets: z.array(SecretName).optional(),
+  }),
   /** Where it happened. A DM's name is a placeholder: label it by the other member. */
   where: z.object({ spaceKind: SpaceKind, spaceName: z.string() }),
   /** Agent hand-offs that led here: 0 for a person's mention. Harbor refuses past its limit. */
   depth: z.number().int().nonnegative(),
   /** The values the invoker picked for the connector's declared options. */
   options: InvocationOptionValues.optional(),
+  /**
+   * The agent's instructions from its owner (Member.instructions, 2026-10-29),
+   * as they are when the invocation reaches its connector: only on what the
+   * connector receives (its live frame and its listing), never on what a
+   * space sees. A connector gives them to its agent as best it can: a system
+   * prompt where the agent takes one, else ahead of the request.
+   */
+  instructions: z.string().optional(),
   /** Set when this invocation is a person's answer to one that is waiting in the same conversation. */
   answers: InvocationId.optional(),
   state: InvocationState,
   /** One ephemeral line: what it is doing ("Running tests"), or what it waits for. */
   activity: z.string().max(200).optional(),
+  // Only on people's snapshots: Harbor memory, never stored with the invocation (2026-11-01).
+  activityHistory: z.array(InvocationActivity).optional(),
   /** The connector's own view of the run ("Open in Replicas"). Harbor keeps no traces. */
   link: z.string().url().optional(),
   error: z.string().max(1000).optional(),

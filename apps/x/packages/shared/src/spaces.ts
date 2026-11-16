@@ -1,8 +1,33 @@
+export { blobDownloadName } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
-import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
+import { addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
+export { Availability, NotificationSchedule, currentStatus, notificationsPaused } from '@rowboat/spaces-protocol';
+export { LLM_PROVIDERS, ownerSetsUp } from '@rowboat/spaces-protocol';
+// The space graph (harbor spec §8 Space graph, 2026-11-12): the one computation of an edge's weight, so the app and the server agree.
+export { weighGraph, GRAPH_HALF_LIFE_DAYS } from '@rowboat/spaces-protocol';
+export type { SpaceGraph, GraphThread, GraphEntity, GraphEdge, GraphThreadKind, GraphEntityKind, GraphRelation, WeighedEdge, GraphWeightOptions } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
   AgentCredential,
+  AgentHook,
+  AgentHosting,
+  PlatformInstance,
+  HostingEnvVar,
+  HostingConsole,
+  HostingExecution,
+  HostingFileEntry,
+  HostingLogLine,
+  HostingMachine,
+  HostingPowerAction,
+  HostingSkill,
+  HostingTrigger,
+  HostingFunding,
+  HostingLlm,
+  HostingSpend,
+  HostingUsage,
+  HostingSize,
+  HostingTrial,
+  LlmProvider,
   AgentKey,
   AgentKeySecret,
   AgentListing,
@@ -12,6 +37,7 @@ import type {
   ApprovalChoice,
   ApprovalState,
   Invocation,
+  InvocationActivity,
   InvocationOption,
   InvocationOptionValues,
   InvocationState,
@@ -26,6 +52,7 @@ import type {
   Member,
   Membership,
   MembershipEvent,
+  SpaceMember,
   Message,
   Poll,
   PollAnswer,
@@ -47,6 +74,8 @@ import type {
   Space,
   Topic,
   TopicListing,
+  ThreadListing,
+  ThreadStatus,
   UnreadSnapshot,
   UnreadSpace,
   ActivityItem,
@@ -64,6 +93,25 @@ import type {
 export type {
   AcceptInviteResult,
   AgentCredential,
+  AgentHook,
+  AgentHosting,
+  PlatformInstance,
+  HostingEnvVar,
+  HostingConsole,
+  HostingExecution,
+  HostingFileEntry,
+  HostingLogLine,
+  HostingMachine,
+  HostingPowerAction,
+  HostingSkill,
+  HostingTrigger,
+  HostingFunding,
+  HostingLlm,
+  HostingSpend,
+  HostingUsage,
+  HostingSize,
+  HostingTrial,
+  LlmProvider,
   AgentKey,
   AgentKeySecret,
   AgentListing,
@@ -73,6 +121,7 @@ export type {
   ApprovalChoice,
   ApprovalState,
   Invocation,
+  InvocationActivity,
   InvocationOption,
   InvocationOptionValues,
   InvocationState,
@@ -87,6 +136,7 @@ export type {
   Member,
   Membership,
   MembershipEvent,
+  SpaceMember,
   Message,
   Poll,
   PollAnswer,
@@ -108,6 +158,8 @@ export type {
   Space,
   Topic,
   TopicListing,
+  ThreadListing,
+  ThreadStatus,
 };
 
 /** The unread snapshot (read state, 2026-09-09): org-owned cursors in offsets. */
@@ -133,17 +185,17 @@ export interface SpacesNewPollInput {
   allowMultiselect?: boolean;
 }
 
-/** An org this install is signed into — the renderer's view (auth details stay in core). */
+/** The server this install is signed into — the renderer's view (auth details stay in core). One since 2026-11-09; `id` is core's SPACES_SERVER_ID. */
 export const SpacesOrgSummary = z.object({
   id: z.string(),
   name: z.string(),
   address: z.string(),
   baseUrl: z.string(),
-  /** Who we are on this org (org-scoped identity, spec §4). */
+  /** Who we are on this server (spec §4). */
   memberId: z.string(),
-  /** `session` = a managed org riding the Rowboat account session (one session, two uses — 2026-09-14). */
+  /** `session` = Rowboat's server riding the Rowboat account session (one session, two uses — 2026-09-14). */
   authKind: z.enum(['dev', 'oauth', 'session']),
-  /** Present = the org needs a re-login (refresh dead, or no Rowboat session). Visible and gentle, never silent. */
+  /** Present = the server needs a re-login (refresh dead, or no Rowboat session). Visible and gentle, never silent. */
   authError: z.string().optional(),
 });
 export type SpacesOrgSummary = z.infer<typeof SpacesOrgSummary>;
@@ -160,10 +212,12 @@ export interface SpacesAssetEntry {
   state?: 'deleted';
 }
 
-/** A stream page: roots only, plus the topic rows annotating this page's roots. */
+/** A stream page: roots (and every reply, in the inline view), plus the topic rows annotating this page's threads. */
 export interface SpacesStreamPage {
   messages: Message[];
   topics: Topic[];
+  /** The roots this page's replies belong to and it does not hold (2026-10-25); absent from an older org. */
+  threadRoots?: Message[];
   /** Older roots exist below the returned window (listStream is windowed, newest-first). */
   hasMore: boolean;
   /** Newer roots exist above it — only after an around / after page; absent on an older org. */
@@ -246,6 +300,25 @@ export interface SpaceAgentActivity {
   sessionId: string;
   /** The live turn, when running. */
   turnId?: string;
+}
+
+/**
+ * A local agent this computer runs (Harbor spec §4 Agent members, 2026-10-28):
+ * its owner's Claude Code or Codex, as a Spaces agent. Its key, folder and
+ * approval policy stay on this computer (core/spaces/local-agents.ts); this
+ * is what the app shows, without the key.
+ */
+export interface SpacesLocalAgent {
+  orgId: string;
+  agentId: string;
+  kind: 'claude-code' | 'codex';
+  /** Where it works. */
+  cwd: string;
+  /** How it answers its own tool calls: code mode's policies. */
+  policy: 'ask' | 'auto-approve-reads' | 'yolo';
+  /** This computer's connection for it. */
+  status: 'connecting' | 'online' | 'offline' | 'error';
+  error?: string;
 }
 
 // What rides 'spaces:events': the org's live frames (per-space subscription
@@ -351,19 +424,59 @@ export {
   parseMentions,
   relabelMentions,
   MENTION_TOKEN_RE,
-  // The org link grammar (protocol ids.ts): builders and the one parser.
-  orgUrl,
+  // The Spaces link grammar (protocol ids.ts): builders and the one parser.
+  serverUrl,
   spaceUrl,
   assetUrl,
   messageUrl,
   memberUrl,
-  parseOrgUrl,
+  parseSpacesUrl,
+  onServer,
 } from '@rowboat/spaces-protocol';
-export type { MentionRef, MentionStamps, OrgLink } from '@rowboat/spaces-protocol';
+export type { MentionRef, MentionStamps, SpacesLink } from '@rowboat/spaces-protocol';
 
 /** Does the body deliberately address @rowboat — a token, never the bare word (spec §8)? */
 export function containsRowboatAddress(body: string): boolean {
   return addressesRowboat(body);
+}
+
+/** Does the body mention anyone: a member, @here or Rowboat? A reply that does follows up no agent (Harbor spec §8, 2026-10-27). */
+export function mentionsAnyone(body: string): boolean {
+  const stamps = parseMentions(body);
+  return stamps.members.length > 0 || stamps.here || stamps.rowboat;
+}
+
+/**
+ * The agent a person's reply in this thread goes to when it mentions nobody
+ * (Harbor spec §8, 2026-10-27): the one they most recently invoked there, a
+ * refused invocation aside. Harbor decides; the composer shows the same
+ * answer so the person can see it and send to people only instead. Amended
+ * 2026-11-05 ("reply ux" in Main): only while that conversation is the
+ * thread's latest, so `thread` (its messages oldest first, root included)
+ * must end in the agent's message or the person's to it. (Ro's cc lines, once
+ * skipped here, went with the orgs, 2026-11-09.)
+ */
+export function followUpAgentId(
+  invocations: Iterable<Invocation>,
+  threadRootId: string,
+  memberId: string,
+  thread: ReadonlyArray<{ id: string; author: { memberId: string } }>,
+): string | undefined {
+  const mine: Invocation[] = [];
+  let latest: Invocation | undefined;
+  for (const i of invocations) {
+    if (i.conversation.threadRootId !== threadRootId || i.trigger.authorId !== memberId) continue;
+    mine.push(i);
+    if (i.state === 'refused') continue;
+    if (!latest || i.createdAt > latest.createdAt) latest = i;
+  }
+  if (!latest) return undefined;
+  const agentId = latest.agentId;
+  const previous = thread[thread.length - 1];
+  if (!previous) return undefined;
+  if (previous.author.memberId === agentId) return agentId;
+  const toAgent = previous.author.memberId === memberId && mine.some((i) => i.agentId === agentId && i.trigger.messageId === previous.id);
+  return toAgent ? agentId : undefined;
 }
 
 /**

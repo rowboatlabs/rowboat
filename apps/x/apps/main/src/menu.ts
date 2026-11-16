@@ -24,10 +24,9 @@ import { zoomIn, zoomOut, zoomReset } from "./zoom.js";
  * (tray.ts): a static template rebuilt whenever dynamic state changes —
  * recording on/off, quick-ask chord rebinds, updater transitions.
  *
- * Commands land in the renderer over two channels: `menu:command` (one
- * discriminated payload for everything the renderer owns) and
- * `menu:toggleSidebar` (its own channel — the handler must live inside the
- * SidebarProvider). Go-menu navigation instead rides the existing deep-link
+ * Commands land in the renderer over `menu:command` (one discriminated
+ * payload for everything the renderer owns; Toggle Sidebar and its own
+ * channel went with the collapsible sidebar, 2026-11-06). Go-menu navigation instead rides the existing deep-link
  * pipeline (dispatchDeepLink → app:openUrl / pending-link drain), which
  * already parks URLs while the renderer loads and covers every section.
  *
@@ -71,7 +70,7 @@ export function setMenuRecordingState(isRecording: boolean): void {
  * app menu is reachable with no window at all). A still-loading renderer gets
  * it after did-finish-load — same pattern as the meeting popup in main.ts.
  */
-function sendToRenderer(channel: "menu:command" | "menu:toggleSidebar", payload: MenuCommand | null): void {
+function sendToRenderer(channel: "menu:command", payload: MenuCommand | null): void {
   if (!actions) return;
   actions.openApp();
   const win = actions.getMainWindow();
@@ -136,16 +135,18 @@ function updateMenuItem(): MenuItemConstructorOptions {
   }
 }
 
-/** Ordered as the dock is. Number keys cover its nine primary destinations. */
+/** Ordered as the sidebar is, top to bottom; ⌘1–⌘9 count down it
+ *  (renumbered 2026-10-21 to follow the redesigned sidebar). */
 const GO_ITEMS: ReadonlyArray<{ label: string; type: string; accelerator?: string }> = [
-  { label: "Todo", type: "home", accelerator: "CmdOrCtrl+1" },
-  { label: "Spaces", type: "spaces", accelerator: "CmdOrCtrl+2" },
-  { label: "Email", type: "email", accelerator: "CmdOrCtrl+3" },
-  { label: "Meetings", type: "meetings", accelerator: "CmdOrCtrl+5" },
-  { label: "Brain", type: "knowledge-view", accelerator: "CmdOrCtrl+6" },
-  { label: "Apps", type: "apps", accelerator: "CmdOrCtrl+7" },
-  { label: "Background Agents", type: "bg-tasks", accelerator: "CmdOrCtrl+8" },
-  { label: "Projects", type: "workspace", accelerator: "CmdOrCtrl+9" },
+  { label: "Assistant", type: "chat", accelerator: "CmdOrCtrl+1" },
+  { label: "Email", type: "email", accelerator: "CmdOrCtrl+2" },
+  { label: "Meetings", type: "meetings", accelerator: "CmdOrCtrl+3" },
+  { label: "Todo", type: "home", accelerator: "CmdOrCtrl+4" },
+  { label: "Brain", type: "knowledge-view", accelerator: "CmdOrCtrl+5" },
+  { label: "Projects", type: "workspace", accelerator: "CmdOrCtrl+6" },
+  { label: "Background Agents", type: "bg-tasks", accelerator: "CmdOrCtrl+7" },
+  { label: "Apps", type: "apps", accelerator: "CmdOrCtrl+8" },
+  { label: "Spaces", type: "spaces", accelerator: "CmdOrCtrl+9" },
   { label: "Chat History", type: "chat-history" },
   { label: "Live Notes", type: "live-notes" },
   { label: "Graph", type: "graph" },
@@ -263,11 +264,6 @@ function rebuildMenu(): void {
         click: () => sendCommand({ command: "open-search" }),
       },
       { type: "separator" },
-      {
-        label: "Toggle Sidebar",
-        accelerator: "CmdOrCtrl+\\",
-        click: () => sendToRenderer("menu:toggleSidebar", null),
-      },
       {
         label: "Toggle Browser",
         click: () => sendCommand({ command: "toggle-browser" }),
