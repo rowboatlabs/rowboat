@@ -920,6 +920,7 @@ export const agentOnlyMcpToolNames: ReadonlySet<string> = new Set([createAgent.n
 
 /** Tool names whose only effect is reading — no event is appended, nothing is written. */
 export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
+  previewSlackImport.name,
   whoami.name,
   listMembers.name,
   listContacts.name,
