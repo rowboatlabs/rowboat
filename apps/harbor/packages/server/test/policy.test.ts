@@ -11,6 +11,7 @@ import {
   canAccessSpace,
   isAdmin,
   canArchiveSpace,
+  canSetSpaceGraph,
   canDeleteSpace,
   canRemoveFromSpace,
   canSetRole,
@@ -46,8 +47,8 @@ import {
 // prove the service ASKS.
 
 const NOW = '2026-09-21T10:00:00.000Z';
-const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', archived: false };
-const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', participants: ['a', 'b'], archived: false };
+const shared: Space = { id: 'S', name: 'Roadboard', createdAt: NOW, kind: 'shared', archived: false, graph: false };
+const direct: Space = { id: 'D', name: 'Direct message', createdAt: NOW, kind: 'direct', participants: ['a', 'b'], archived: false, graph: false };
 const membership: Membership = { spaceId: 'S', memberId: 'a', joinedAt: NOW, role: 'member' };
 const adminRow: Membership = { ...membership, role: 'admin' };
 const person = (id: string): Member => ({ id, displayName: id, kind: 'human' });
@@ -72,6 +73,14 @@ describe('policy', () => {
     expect(isAdmin(adminRow)).toBe(true);
     expect(isAdmin(membership)).toBe(false);
     expect(isAdmin(undefined)).toBe(false);
+  });
+
+  it('the space graph: an admin of the space turns it on or off; a DM has none (2026-11-12)', () => {
+    expect(canSetSpaceGraph(adminRow, shared)).toBeNull();
+    expect(canSetSpaceGraph(adminRow, { ...shared, archived: true })).toBeNull();
+    expect(canSetSpaceGraph(membership, shared)).toMatchObject({ code: 'forbidden' });
+    expect(canSetSpaceGraph(undefined, shared)).toMatchObject({ code: 'forbidden' });
+    expect(canSetSpaceGraph(adminRow, direct)).toMatchObject({ code: 'invalid_request' });
   });
 
   it('archive, unarchive and delete: an admin of the space; a DM never (2026-10-13/14; the row’s bit since 2026-11-09)', () => {

@@ -119,6 +119,18 @@ describe('AgentsView', () => {
         expect(await screen.findByText('Herald Prime')).toBeInTheDocument()
     })
 
+    it('deletes the owner’s agent from its ⋯ menu once its name is typed (2026-11-13)', async () => {
+        show()
+        await screen.findByText('Herald')
+        openMenu('Herald')
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete agent' }))
+        const confirm = await screen.findByRole('button', { name: 'Delete Herald' })
+        expect(confirm).toBeDisabled()
+        fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Herald' } })
+        fireEvent.click(confirm)
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:deleteAgent', { orgId: org.id, agentId: 'hermes' }))
+    })
+
     it('offers no options on someone else’s agent: nothing stands above the owner (2026-11-09)', async () => {
         show()
         await screen.findByText('Scout')

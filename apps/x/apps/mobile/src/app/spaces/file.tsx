@@ -1,5 +1,5 @@
 import { reportMobileActivity } from '../../lib/spaces/activity';
-import { Stack, useLocalSearchParams, useNavigation } from 'expo-router';
+import { Stack, router, useLocalSearchParams, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
@@ -25,6 +25,8 @@ import { useColors } from '@/theme/colors';
 // Text files can be edited: Save proposes a change on the version that was
 // read; the server applies it, merges it with edits made meanwhile, or reports a
 // conflict (then nothing is saved and the user can reload).
+// The header's sheet also renames, opens the history, and trashes (2026-11-13);
+// a rename or a restore arrives as a change on this id and reloads it.
 const PLAIN_TEXT_EXTENSIONS = new Set([
   'json', 'jsonl', 'csv', 'tsv', 'yaml', 'yml', 'toml', 'xml', 'html', 'css', 'log', 'env', 'ini', 'sql', 'sh',
   'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'h', 'cpp', 'cs', 'php',
@@ -173,7 +175,7 @@ export default function SpaceFileScreen() {
             headerButton('Save', () => void save(), true)
           ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
-              <Pressable hitSlop={10} accessibilityLabel="Share file" onPress={() => setSheetOpen(true)}>
+              <Pressable hitSlop={10} accessibilityLabel="File actions" onPress={() => setSheetOpen(true)}>
                 <SymbolImage source="sf:square.and.arrow.up" style={{ width: 19, height: 22 }} contentFit="contain" tintColor={colors.label} />
               </Pressable>
               {content !== null ? headerButton('Edit', () => setDraft(content)) : null}
@@ -227,7 +229,14 @@ export default function SpaceFileScreen() {
           </Text>
         )
       ) : null}
-      <FileActionSheet file={sheetOpen ? { assetId, name, path } : null} client={client} org={org} space={space} onClose={() => setSheetOpen(false)} />
+      <FileActionSheet
+        file={sheetOpen ? { assetId, name, path, version: version ?? undefined } : null}
+        client={client}
+        org={org}
+        space={space}
+        onClose={() => setSheetOpen(false)}
+        onDeleted={() => router.back()}
+      />
     </ScrollView>
   );
 }

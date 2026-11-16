@@ -1,3 +1,5 @@
+import type { GraphOptions } from './core/graph.js';
+import { jevFromEnv, type JevApi } from './jev.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type ServerAuth } from './auth.js';
@@ -44,6 +46,8 @@ export interface RuntimeInput {
   hosting?: { provider: HostingProvider; tickMs?: number; trialMs?: number; billing?: BillingAccounts; settleEveryMs?: number };
   /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
   agentPresenceGraceMs?: number;
+  /** The space graph (spec §8 Space graph, 2026-11-12): a stand-in Jev and faster clocks in tests; absent = from HARBOR_JEV_OPENROUTER_KEY. */
+  graph?: { jev: JevApi } & GraphOptions;
 }
 
 /** The managed-hosting provider the deployment's own Maritime key makes, or none. */
@@ -114,6 +118,13 @@ export async function buildRuntime(input: RuntimeInput): Promise<Runtime> {
   }
   await connectors.startAll();
   if (provider) service.startHosting(input.hosting?.tickMs);
+  // The space graph (spec §8 Space graph, 2026-11-12): judged with Jev, when the deployment has its key.
+  const jev = input.graph?.jev ?? jevFromEnv();
+  if (jev) {
+    const { jev: _stand, ...graphOptions } = input.graph ?? { jev };
+    service.attachGraph(jev, graphOptions);
+    service.startGraph();
+  }
   const auth = bindAuth(input.auth, store);
   const issuer = input.auth.metadata?.()?.authorizationServers[0];
   const render = getRequestListener(
@@ -140,6 +151,7 @@ export async function buildRuntime(input: RuntimeInput): Promise<Runtime> {
     close: async () => {
       service.closePresence();
       await service.stopHosting();
+      await service.stopGraph();
       await connectors.stopAll();
     },
   };

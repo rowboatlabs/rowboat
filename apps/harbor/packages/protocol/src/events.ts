@@ -165,6 +165,16 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     by: Attribution,
   }),
   /**
+   * An admin turned the space graph on or off (api.ts setSpaceGraph,
+   * 2026-11-12): the full row plus who did it, so every member's client
+   * shows or hides the graph and the feed can say who chose it.
+   */
+  z.object({
+    type: z.literal('space_graph_changed'),
+    space: Space,
+    by: Attribution,
+  }),
+  /**
    * A member's admin bit in this space changed (spec §4 Roles, 2026-11-09):
    * the membership row as it now stands, plus who acted — an admin giving or
    * taking it, or, when the last admin left, the departing member, whose

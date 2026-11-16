@@ -11,6 +11,8 @@ export type ShortcutKeys = readonly string[]
 export const SHORTCUTS = {
     newChat: ['mod', 'N'],
     search: ['mod', 'K'],
+    // The open view's sidebar, Spaces or Local (hooks/use-sidebar-shortcut.ts, 2026-11-13).
+    toggleSidebar: ['mod', 'B'],
     settings: ['mod', ','],
     // Go menu (menu.ts GO_ITEMS): the sidebar's order, top to bottom.
     assistant: ['mod', '1'],

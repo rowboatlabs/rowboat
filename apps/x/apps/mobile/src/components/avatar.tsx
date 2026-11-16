@@ -47,14 +47,18 @@ export function hueOf(id: string): number {
   return HUES[h % HUES.length]!;
 }
 
-/** A person: their photo when they have one, else their initial on a soft tint of their own hue. */
-export function Avatar({ id, name, size, url }: { id: string; name: string; size: number; url?: string }) {
+/**
+ * A person: their photo when they have one, else their initial on a soft tint of their own hue.
+ * `radius` makes a rounded square instead of a circle (the stream's reply row, 2026-11-13).
+ */
+export function Avatar({ id, name, size, url, radius }: { id: string; name: string; size: number; url?: string; radius?: number }) {
   const colors = useColors();
   const hue = hueOf(id);
   return (
     <View
       style={{
-        width: size, height: size, borderRadius: size / 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+        width: size, height: size, borderRadius: radius ?? size / 2, borderCurve: radius !== undefined ? 'continuous' : undefined,
+        overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
         backgroundColor: colors.isDark ? `hsl(${hue}, 32%, 26%)` : `hsl(${hue}, 62%, 90%)`,
       }}
     >

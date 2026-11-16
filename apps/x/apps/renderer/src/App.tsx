@@ -18,6 +18,8 @@ import { CheckIcon, LoaderIcon, ChevronLeftIcon, ChevronRightIcon, Plus, History
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { useFullScreen } from '@/hooks/use-full-screen';
+import { useSidebarShortcut } from '@/hooks/use-sidebar-shortcut';
+import { useTitlebarTabsClearance } from '@/hooks/use-titlebar-tabs-clearance';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { AssistantWorkspace } from './components/assistant/assistant-workspace';
 import { ASSISTANT_LAYOUT_KEY, chatLocation, defaultWindowSize, restoreAssistantLayout, useAssistantLayout, type ChatLocation } from './lib/assistant-layout';
@@ -844,13 +846,20 @@ function AppModeTabs({ mode, onSelect }: { mode: AppMode; onSelect: (mode: AppMo
     </button>
   )
   return (
-    <div className="fixed left-1/2 top-0 z-50 flex h-10 -translate-x-1/2 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div data-app-mode-tabs className="fixed left-1/2 top-0 z-50 flex h-10 -translate-x-1/2 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div role="tablist" aria-label="Spaces or local" className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
         {tab('spaces', 'Spaces')}
         {tab('local', 'Local')}
       </div>
     </div>
   )
+}
+
+/** A header title that stops short of the centred Spaces | Local tabs. */
+function ClearedTitle({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLSpanElement | null>(null)
+  useTitlebarTabsClearance(ref)
+  return <span ref={ref} className="truncate text-sm font-medium text-foreground/80">{children}</span>
 }
 
 /** Main content header. Expanded, the panel absorbs the fixed toggle cluster
@@ -956,6 +965,14 @@ function App() {
   // effect below confirms the space once they have.
   const [initialSpace] = useState(() => SPACES_ENABLED ? lastSpaceLocation() : null)
   const [isSpacesOpen, setIsSpacesOpen] = useState(SPACES_ENABLED)
+  // Local's sidebar closes with ⌘B (2026-11-13), remembered across launches.
+  const [localSidebarOpen, setLocalSidebarOpen] = useState(() => localStorage.getItem('local:sidebarOpen') !== '0')
+  const toggleLocalSidebar = useCallback(() => {
+    setLocalSidebarOpen((open) => {
+      localStorage.setItem('local:sidebarOpen', open ? '0' : '1')
+      return !open
+    })
+  }, [])
   // The space open in the Spaces view (org + space); the sidebar highlights it.
   const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(() =>
     initialSpace ? { orgId: initialSpace.orgId, spaceId: initialSpace.spaceId, ...(initialSpace.view ? { view: initialSpace.view } : {}) } : null)
@@ -5537,6 +5554,8 @@ function App() {
   // Spaces | Local (2026-11-06). Local returns to the last view that wasn't
   // Spaces, so switching back and forth keeps both places.
   const appMode: AppMode = SPACES_ENABLED && isSpacesOpen ? 'spaces' : 'local'
+  // Spaces owns ⌘B for its own rail (SpacesView); here it is Local's sidebar.
+  useSidebarShortcut(appMode === 'local', toggleLocalSidebar)
   const lastLocalViewRef = useRef<ViewState>({ type: 'chat', runId: null })
   useEffect(() => {
     if (currentViewState.type !== 'spaces') lastLocalViewRef.current = currentViewState
@@ -7325,7 +7344,7 @@ function App() {
               the one sidebar — the thin Rowboat rail beside it went on
               2026-11-09, its logo and account folded into that sidebar. */}
           <SidebarProvider
-            open={appMode === 'local'}
+            open={appMode === 'local' && localSidebarOpen}
             onOpenChange={() => {}}
           >
             {/* Kept mounted in Spaces, closed off-canvas, so its state survives. */}
@@ -7385,9 +7404,7 @@ function App() {
                   />
                 ) : (
                   <div className="flex min-w-0 flex-1 items-center self-center">
-                    <span className="truncate text-sm font-medium text-foreground/80">
-                      {currentViewTitle}
-                    </span>
+                    <ClearedTitle>{currentViewTitle}</ClearedTitle>
                   </div>
                 )}
                 {selectedPath && selectedPath.endsWith('.md') && (
@@ -8152,7 +8169,7 @@ function App() {
             <div
               aria-hidden="true"
               className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
-              style={{ width: appMode === 'local' ? 'var(--sidebar-width)' : 0 }}
+              style={{ width: appMode === 'local' && localSidebarOpen ? 'var(--sidebar-width)' : 0 }}
             />
             {/* Rendered last so their no-drag regions paint over the drag regions. */}
             <TitlebarControls

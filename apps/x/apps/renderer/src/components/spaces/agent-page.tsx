@@ -1,22 +1,21 @@
 import { useEffect, useState, type ReactNode, useMemo } from 'react'
-import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, ScrollText, SlidersHorizontal, Sparkles, SquareTerminal, Terminal, Trash2, TriangleAlert } from 'lucide-react'
+import { Bell, Clock, Folder, KeyRound, LayoutDashboard, ListChecks, Loader2, ScrollText, SlidersHorizontal, Sparkles, SquareTerminal, Terminal } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { CommandsScreen, EnvScreen, FilesScreen, HostingDangerRows, LogsScreen, MachineBlock, SizeBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
+import { CommandsScreen, EnvScreen, FilesScreen, LogsScreen, MachineBlock, SizeBlock, SkillsScreen, TriggersScreen } from '@/components/spaces/agent-hosting'
 import { HOME, useHostingState, type HostingState } from '@/components/spaces/agent-hosting-state'
 import { TerminalScreen } from '@/components/spaces/agent-terminal'
 import { SeatChoice, type Seat } from '@/components/spaces/agent-access'
 import { ConnectAgent, CopyField } from '@/components/spaces/agent-setup'
-import { AgentTabs, ConfirmButton, DangerRow, DangerZone, Empty, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
+import { AgentTabs, ConfirmButton, Empty, Sections, FormCard, Row, Rows, ScreenHeader, Tag, type AgentTab } from '@/components/spaces/agent-tabs'
 import { refreshAgentCapabilities } from '@/hooks/use-space-invocations'
-import { refreshMembers, refreshOrgRoster, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
+import { refreshMembers, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import { LocalAgentSection } from '@/components/spaces/local-agent'
 import { PersonalitySection } from '@/components/spaces/agent-personality'
 import { SuperAgentSection } from '@/components/spaces/agent-super'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, LLM_PROVIDER_INFO, LLM_PROVIDERS_FOR_KIND, LOCAL_CONNECTION, PLATFORMS, setupFor } from '@/lib/agent-kinds'
-import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { toast } from '@/lib/toast'
 
 // One agent's page in the Agents dialog (2026-10-01; tabs 2026-10-27): a rail
@@ -34,9 +33,9 @@ import { toast } from '@/lib/toast'
 // the VM (agent-hosting.tsx). Who pays for its model comes first on Overview
 // (2026-10-27): a new Hermes or Codex is on Rowboat's trial credit, there to
 // try it, and the one thing to do is add your own key, which ends the trial
-// for good; Claude Code runs on the owner's key from the start. Whatever
-// cannot be undone, on any agent, is on the Danger zone tab and asks once
-// more.
+// for good; Claude Code runs on the owner's key from the start. A delete
+// sits beside what it deletes and asks once more; deleting the agent is on
+// its card's ⋯ menu (2026-11-13, the Danger zone tab removed).
 //
 // Who can use it (2026-10-27): Overview says whether it is a channel or a
 // personal agent, and its owner switches it there, either way, any time.
@@ -56,10 +55,7 @@ function when(iso: string | undefined): string {
 function Section({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
     return (
         <section className="flex min-w-0 flex-col gap-2">
-            <div>
-                <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-                {note && <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{note}</p>}
-            </div>
+            <ScreenHeader title={title} note={note} />
             {children}
         </section>
     )
@@ -142,8 +138,9 @@ export function AgentPage({ org, listing, onChanged }: {
             id: 'overview',
             label: 'Overview',
             icon: <LayoutDashboard />,
+            // One section style, divided by hairlines (2026-11-13): every heading the same size, every gap the same.
             content: (
-                <>
+                <Sections>
                     {hosting && <HostingOverview orgId={org.id} agent={agent} hosting={hosting} canManage={canManage} state={hostingState} onChanged={onChanged} />}
                     {/* Keyed on the saved values: a save elsewhere resets the form to them. */}
                     {agent.ownerId && <PersonalitySection key={`${agent.title ?? ''}|${agent.instructions ?? ''}`} orgId={org.id} agent={agent} canEdit={mine} onSaved={onChanged} />}
@@ -151,10 +148,7 @@ export function AgentPage({ org, listing, onChanged }: {
                     {agent.ownerId && <SeatsSection org={org} agent={agent} mine={mine} ownerName={ownerName} />}
                     {agent.ownerId && <SuperAgentSection orgId={org.id} agent={agent} canSwitch={mine} ownerName={ownerName} onChanged={onChanged} />}
                     {isLocal && (
-                        <div className="flex flex-col gap-0.5">
-                            <h3 className="text-sm font-semibold text-foreground">Who can use it</h3>
-                            <p className="text-xs leading-snug text-muted-foreground">Personal: it runs on {mine ? 'your' : `${ownerName}’s`} computer, so only {mine ? 'you' : ownerName} can mention it or DM it. Everyone sees it and its replies.</p>
-                        </div>
+                        <ScreenHeader title="Who can use it" note={`Personal: it runs on ${mine ? 'your' : `${ownerName}’s`} computer, so only ${mine ? 'you' : ownerName} can mention it or DM it. Everyone sees it and its replies.`} />
                     )}
                     <div className="flex flex-col gap-2">
                         <ScreenHeader
@@ -168,7 +162,7 @@ export function AgentPage({ org, listing, onChanged }: {
                             }
                             action={
                                 mine && !isLocal && (
-                                    <Button size="sm" variant={hosting ? 'outline' : 'default'} disabled={busy} onClick={() => void newKey()}>
+                                    <Button size="sm" variant="outline" disabled={busy} onClick={() => void newKey()}>
                                         {busy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} New key
                                     </Button>
                                 )
@@ -196,7 +190,7 @@ export function AgentPage({ org, listing, onChanged }: {
                         )}
                     </div>
                     <DefaultsSection orgId={org.id} agent={agent} canEdit={mine} />
-                </>
+                </Sections>
             ),
         },
     ]
@@ -218,7 +212,7 @@ export function AgentPage({ org, listing, onChanged }: {
                         action={
                             mine &&
                             !secret && (
-                                <Button size="sm" disabled={busy} onClick={() => void newKey()}>
+                                <Button size="sm" variant="outline" disabled={busy} onClick={() => void newKey()}>
                                     {busy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} New key
                                 </Button>
                             )
@@ -255,39 +249,6 @@ export function AgentPage({ org, listing, onChanged }: {
         })
     }
 
-    const danger: ReactNode[] = []
-    if (hosting && ready && canManage) danger.push(<HostingDangerRows key="vm" orgId={org.id} agent={agent} hermes={hermes} state={hostingState} />)
-    if (setup.alerts && hook && canManage) {
-        danger.push(
-            <AlertsOffRow
-                key="alerts"
-                orgId={org.id}
-                agent={agent}
-                onCleared={async () => {
-                    setHookUrl(null)
-                    await onChanged()
-                }}
-            />,
-        )
-    }
-    if (hosting && ready && canManage && hosting.llm?.provider === 'chatgpt') danger.push(<SignOutRow key="sign-out" orgId={org.id} agent={agent} onChanged={onChanged} />)
-    // Any agent its owner made can be deleted (2026-11-13), not only a managed one.
-    if (canManage && !gone && !agent.deactivatedAt) danger.push(<DeleteAgentRow key="agent" orgId={org.id} agent={agent} hosted={Boolean(hosting)} local={isLocal} onChanged={onChanged} />)
-    if (danger.length > 0) {
-        tabs.push({
-            id: 'danger',
-            label: 'Danger zone',
-            icon: <TriangleAlert />,
-            danger: true,
-            content: (
-                <>
-                    <ScreenHeader title="Danger zone" note="Nothing here can be undone. Each action asks once more before it runs." />
-                    <DangerZone>{danger}</DangerZone>
-                </>
-            ),
-        })
-    }
-
     return <AgentTabs tabs={tabs} value={tab} onChange={setTab} />
 }
 
@@ -320,12 +281,11 @@ function SeatsSection({ org, agent, mine, ownerName }: { org: OrgWithSpaces; age
     }
     return (
         <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold text-foreground">Where it works</h3>
             {seats.length === 0 ? (
-                <p className="text-xs leading-snug text-muted-foreground">
-                    {mine ? 'Not in any of your spaces yet. Add it from a space’s member list, or mention it there.' : `In none of the spaces you share with ${ownerName}.`}
-                </p>
+                <ScreenHeader title="Where it works" note={mine ? 'Not in any of your spaces yet. Add it from a space’s member list, or mention it there.' : `In none of the spaces you share with ${ownerName}.`} />
             ) : (
+                <>
+                <ScreenHeader title="Where it works" />
                 <ul className="flex flex-col gap-2">
                     {seats.map(({ space, row }) => (
                         <li key={space.id} className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2">
@@ -340,6 +300,7 @@ function SeatsSection({ org, agent, mine, ownerName }: { org: OrgWithSpaces; age
                         </li>
                     ))}
                 </ul>
+                </>
             )}
         </div>
     )
@@ -379,7 +340,7 @@ function hostingLine(hosting: spaces.AgentHosting): string {
         case 'ready':
             return `Running on Rowboat's Maritime account since ${when(hosting.updatedAt)}. It sleeps between turns and wakes when mentioned.`
         case 'failed':
-            return `Could not be set up: ${hosting.error ?? 'Maritime gave no reason'}. Delete it from the Danger zone and create it again.`
+            return `Could not be set up: ${hosting.error ?? 'Maritime gave no reason'}. Delete it from its ⋯ menu on the Agents page and create it again.`
         case 'deleting':
             return 'Removing from Maritime… its keys are revoked, it has left every space, and its DMs are read-only.'
         case 'deleted':
@@ -556,6 +517,7 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
                             {plan ? 'Use a key instead' : llm ? 'Replace key' : 'Add your API key'}
                         </Button>
                     )}
+                    {canManage && !editing && plan && ready && <SignOutButton orgId={orgId} agent={agent} onChanged={onChanged} />}
                     {!canManage && !llm && <Tag tone="warn">owner needed</Tag>}
                 </div>
                 {form}
@@ -615,8 +577,8 @@ function FundingBlock({ orgId, agent, hosting, state, canManage, onChanged }: {
     )
 }
 
-/** Sign a Codex out of its owner's ChatGPT plan, on the Danger zone: it answers nothing until a key or a new sign-in. */
-function SignOutRow({ orgId, agent, onChanged }: { orgId: string; agent: spaces.Member; onChanged: () => Promise<void> }) {
+/** Sign a Codex out of its owner's ChatGPT plan (codex logout on the VM): it answers nothing until a key or a new sign-in. */
+function SignOutButton({ orgId, agent, onChanged }: { orgId: string; agent: spaces.Member; onChanged: () => Promise<void> }) {
     const [busy, setBusy] = useState(false)
     const signOut = async () => {
         if (busy) return
@@ -631,76 +593,7 @@ function SignOutRow({ orgId, agent, onChanged }: { orgId: string; agent: spaces.
             setBusy(false)
         }
     }
-    return (
-        <DangerRow title="Sign out of ChatGPT" note={`Runs codex logout on the VM. ${agent.displayName} answers nothing until you sign in again from the Terminal tab or add an API key.`}>
-            <ConfirmButton label="Sign out" confirmLabel="Confirm sign out" busy={busy} onConfirm={() => void signOut()} />
-        </DangerRow>
-    )
-}
-
-/** Delete the agent, on the Danger zone: the person types its name first. A managed one leaves Maritime too. */
-function DeleteAgentRow({ orgId, agent, hosted, local, onChanged }: { orgId: string; agent: spaces.Member; hosted: boolean; local: boolean; onChanged: () => Promise<void> }) {
-    const [confirming, setConfirming] = useState(false)
-    const [name, setName] = useState('')
-    const [busy, setBusy] = useState(false)
-    const matches = name.trim() === agent.displayName
-    const remove = async () => {
-        if (busy || !matches) return
-        setBusy(true)
-        try {
-            await window.ipc.invoke('spaces:deleteAgent', { orgId, agentId: agent.id })
-            // A local agent's key and folder live on this computer: they go with it.
-            if (local && LOCAL_RUNTIME) await window.ipc.invoke('spaces:forgetLocalAgent', { orgId, agentId: agent.id }).catch(() => {})
-            refreshOrgRoster(orgId)
-            await onChanged()
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not delete the agent', 'error')
-        } finally {
-            setBusy(false)
-            setConfirming(false)
-        }
-    }
-    return (
-        <DangerRow
-            title={hosted ? `Delete ${agent.displayName} from Maritime` : `Delete ${agent.displayName}`}
-            note={
-                hosted
-                    ? 'Deletes the Maritime VM and its volume, revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages stay.'
-                    : local
-                      ? 'Stops it on this computer, revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages and your folder stay.'
-                      : 'Revokes every key, removes the agent from all spaces and makes its DMs read-only. Its messages stay.'
-            }
-            below={
-                confirming && (
-                    <form
-                        className="flex flex-wrap items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 p-2"
-                        onSubmit={(e) => {
-                            e.preventDefault()
-                            void remove()
-                        }}
-                    >
-                        <span className="text-[11px] text-muted-foreground">
-                            Type <b className="font-semibold text-foreground">{agent.displayName}</b> to confirm.
-                        </span>
-                        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={agent.displayName} aria-label="Agent name" className="h-8 w-44 text-xs" autoComplete="off" autoFocus />
-                        <Button type="submit" size="sm" variant="destructive" disabled={!matches || busy}>
-                            {busy && <Loader2 className="size-3.5 animate-spin" />}
-                            Delete {agent.displayName}
-                        </Button>
-                        <Button type="button" size="sm" variant="ghost" onClick={() => (setConfirming(false), setName(''))}>
-                            Cancel
-                        </Button>
-                    </form>
-                )
-            }
-        >
-            {!confirming && (
-                <Button size="sm" variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setConfirming(true)}>
-                    <Trash2 className="size-3.5" /> Delete agent
-                </Button>
-            )}
-        </DangerRow>
-    )
+    return <ConfirmButton label="Sign out" confirmLabel="Confirm sign out" busy={busy} onConfirm={() => void signOut()} />
 }
 
 /**
@@ -789,7 +682,7 @@ function DefaultsSection({ orgId, agent, canEdit }: { orgId: string; agent: spac
  * Where the service's alerts land (Harbor spec §8 Alerts, 2026-10-03): its
  * owner picks a space the agent is in and gets a secret address, shown this
  * once, to paste into the service's webhook settings. Getting a new one stops
- * the old; turning alerts off is on the Danger zone.
+ * the old; Turn alerts off stops it.
  */
 function AlertsScreen({ org, agent, hook, note, canSet, url, onUrl, onChanged }: {
     org: OrgWithSpaces
@@ -798,10 +691,25 @@ function AlertsScreen({ org, agent, hook, note, canSet, url, onUrl, onChanged }:
     note: string
     canSet: boolean
     url: string | null
-    onUrl: (url: string) => void
+    onUrl: (url: string | null) => void
     onChanged: () => Promise<void>
 }) {
     const [spaceId, setSpaceId] = useState(hook?.spaceId ?? '')
+    const [clearing, setClearing] = useState(false)
+    const clear = async () => {
+        if (clearing) return
+        setClearing(true)
+        try {
+            await window.ipc.invoke('spaces:clearAgentHook', { orgId: org.id, agentId: agent.id })
+            onUrl(null)
+            toast('Alerts turned off', 'success')
+            await onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not turn alerts off', 'error')
+        } finally {
+            setClearing(false)
+        }
+    }
     const [busy, setBusy] = useState(false)
     const spaceName = (id: string) => org.spaces.find((s) => s.id === id)?.name ?? 'a space'
 
@@ -846,31 +754,10 @@ function AlertsScreen({ org, agent, hook, note, canSet, url, onUrl, onChanged }:
                         {busy && <Loader2 className="size-3 animate-spin" />}
                         {hook ? 'New address' : 'Get address'}
                     </Button>
+                    {hook && <ConfirmButton label="Turn alerts off" confirmLabel="Confirm turn off" busy={clearing} onConfirm={() => void clear()} />}
                 </div>
             )}
         </>
-    )
-}
-
-function AlertsOffRow({ orgId, agent, onCleared }: { orgId: string; agent: spaces.Member; onCleared: () => Promise<void> }) {
-    const [busy, setBusy] = useState(false)
-    const clear = async () => {
-        if (busy) return
-        setBusy(true)
-        try {
-            await window.ipc.invoke('spaces:clearAgentHook', { orgId, agentId: agent.id })
-            toast('Alerts turned off', 'success')
-            await onCleared()
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not turn alerts off', 'error')
-        } finally {
-            setBusy(false)
-        }
-    }
-    return (
-        <DangerRow title="Turn alerts off" note={`The address stops working at once. ${agent.displayName} can get a new one on the Alerts tab.`}>
-            <ConfirmButton label="Turn alerts off" confirmLabel="Confirm turn off" busy={busy} onConfirm={() => void clear()} />
-        </DangerRow>
     )
 }
 

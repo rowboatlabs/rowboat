@@ -248,7 +248,13 @@ export default function AccountScreen() {
 
       {/* Billing is not done on the phone: a plain note, no link (App Store 3.1.1). */}
       <Group footer="To manage billing, use Rowboat on your desktop or go to app.x.rowboatlabs.com.">
-        <Row first onPress={() => router.push('/spaces/notifications')}>
+        {/* Status & availability (2026-11-13): away, custom status, pause and working hours, saved on the server. */}
+        <Row first onPress={() => router.push('/spaces/availability')}>
+          <Image source="sf:face.smiling" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
+          <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>Status & availability</Text>
+          <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />
+        </Row>
+        <Row onPress={() => router.push('/spaces/notifications')}>
           <Image source="sf:bell" style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
           <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>Notifications</Text>
           <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />

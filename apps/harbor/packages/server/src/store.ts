@@ -25,6 +25,8 @@ import type {
   Topic,
 } from '@rowboat/spaces-protocol';
 import type { SearchQuery } from './search.js';
+import type { GraphTopicCategory } from '@rowboat/spaces-protocol';
+import type { ThreadJudgment } from './graph/questions.js';
 
 // Data-access boundary. The stub implements it in memory (memory-store.ts); the
 // real Harbor's Postgres driver replaces that one file. The service core owns
@@ -47,6 +49,32 @@ import type { SearchQuery } from './search.js';
  * `limit` rows. Both exclusive. The service composes an "around" window
  * from one of each.
  */
+/** One judged thread of a space graph: Jev's judgment and the thread's edges, as of `fingerprint`. */
+
+export interface StoredGraphThread {
+  spaceId: string;
+  rootMessageId: string;
+  /** What was judged: the thread's live messages and the candidates found in them. A different value means judge again. */
+  fingerprint: string;
+  /** The offset of the thread's newest message when it was judged: a cheap "is this stale" for reads. */
+  lastOffset: number;
+  judgedAt: string;
+  judgment: ThreadJudgment;
+}
+
+/** A candidate topic Jev has judged. `real` under the bar = refused, kept so it is not asked about again. */
+export interface StoredGraphTopic {
+  spaceId: string;
+  key: string;
+  label: string;
+  category: GraphTopicCategory;
+  real: number;
+  /** Threads it occurred in when judged. */
+  threads: number;
+  /** Jev judged it the same thing as this topic, which carries its edges. */
+  aliasOf?: string;
+}
+
 export interface MessageWindow {
   beforeOffset?: number;
   afterOffset?: number;
@@ -621,6 +649,18 @@ export interface Store {
   // content runs exactly once per server, not on every boot
   backfillDone(id: string): Promise<boolean>;
   markBackfillDone(id: string, at: string): Promise<void>;
+
+  // the space graph (spec §8 Space graph, 2026-11-12): derived rows, rewritten whole, never part of the log
+  listGraphThreads(spaceId: string): Promise<StoredGraphThread[]>;
+  putGraphThread(thread: StoredGraphThread): Promise<void>;
+  deleteGraphThread(spaceId: string, rootMessageId: string): Promise<void>;
+  listGraphTopics(spaceId: string): Promise<StoredGraphTopic[]>;
+  putGraphTopic(topic: StoredGraphTopic): Promise<void>;
+  /** How many live messages the space had when its vocabulary was last judged. */
+  getGraphVocabulary(spaceId: string): Promise<{ messages: number } | undefined>;
+  putGraphVocabulary(spaceId: string, messages: number, at: string): Promise<void>;
+  /** Everything derived for the space: turning the graph off deletes it. */
+  clearGraph(spaceId: string): Promise<void>;
 
   // atomicity
   withSpaceLock<T>(spaceId: string, fn: () => Promise<T>): Promise<T>;

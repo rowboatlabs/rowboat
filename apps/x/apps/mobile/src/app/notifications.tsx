@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useState } from 'react';
@@ -10,7 +11,10 @@ import { useSpacesAccount } from '@/lib/spaces/account';
 import { PUSH_LEVELS, getPushLevel, getPushToken, registerWithHarbor, registerWithMac, setPushLevel, type PushLevel } from '@/lib/push';
 import { useColors } from '@/theme/colors';
 
-// Notification preferences: one global level, enforced by the Mac's watcher.
+// Notification preferences: one level per member, sent with the device token
+// to the server (Harbor's push.ts gates on it). Pausing and working hours live
+// on the Status & availability screen (2026-11-13) — the member's
+// availability, which Harbor's notify.ts honours for push and desktop alike.
 export default function NotificationsScreen() {
   const colors = useColors();
   const { rpc } = useConnection();
@@ -70,6 +74,22 @@ export default function NotificationsScreen() {
           ) : null}
         </Pressable>
       ))}
+      {account.orgs?.length ? (
+        <Pressable
+          onPress={() => router.push('/spaces/availability')}
+          style={({ pressed }) => ({
+            flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, marginTop: 12,
+            marginHorizontal: 8, paddingHorizontal: 8, borderRadius: 10, borderCurve: 'continuous',
+            backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+          })}
+        >
+          <View style={{ flex: 1, gap: 1 }}>
+            <Text style={{ fontSize: 16, color: colors.label }}>Pause and working hours</Text>
+            <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>Take a break, or only hear from people during work hours</Text>
+          </View>
+          <Image source="sf:chevron.right" style={{ width: 8, height: 13 }} tintColor={colors.tertiaryLabel} />
+        </Pressable>
+      ) : null}
       {state ? (
         <Text style={{ fontSize: 13, lineHeight: 18, color: colors.secondaryLabel, paddingHorizontal: 16, paddingTop: 12 }}>
           {state}

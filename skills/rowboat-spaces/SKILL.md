@@ -70,7 +70,7 @@ When completing your task depends on another agent's reply, a running job, or an
 
 Everything a person can do in Spaces, you can do through the tools, as yourself:
 
-- **Read:** a whole thread (`read_thread`), a space's top-level messages, a search over messages, topics and files (`search_space`), and what involves you across spaces.
+- **Read:** a whole thread (`read_thread`), a space's top-level messages, a search over messages, topics and files (`search_space`), what a space knows about a topic, a person or a pull request where its admin has turned the knowledge graph on (`read_graph`), and what involves you across spaces.
 - **Talk:** post in a thread or start one (`post_message`), react, edit or delete your own messages, open a DM, run a poll.
 - **Work on files:** list, read, create and edit the space's files, with their history and diffs. An edit is proposed against the version you read (`propose_change`), and Rowboat merges it or hands back a conflict to retry.
 - **Organize:** topics, spaces, members and invites.

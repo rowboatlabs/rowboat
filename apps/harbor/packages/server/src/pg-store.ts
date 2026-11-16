@@ -1,5 +1,7 @@
 import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
 import type { ActivityQuery, ActivityRow } from './store.js';
+import type { GraphTopicCategory } from '@rowboat/spaces-protocol';
+import type { ThreadJudgment } from './graph/questions.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   AgentKey,
@@ -47,6 +49,8 @@ import {
   type StoredImage,
   type ThreadReadMark,
   type UnreadThreadRow,
+  type StoredGraphThread,
+  type StoredGraphTopic,
 } from './store.js';
 
 // The real Harbor's storage: mergeable text lives inline in Postgres (≤1MB,
@@ -230,6 +234,7 @@ interface SpaceRow {
   kind: Space['kind'];
   direct_key: string | null;
   archived: boolean;
+  graph: boolean;
 }
 
 function rowToSpace(r: SpaceRow): Space {
@@ -239,6 +244,7 @@ function rowToSpace(r: SpaceRow): Space {
     createdAt: r.created_at,
     kind: r.kind,
     archived: r.archived,
+    graph: r.graph,
     ...(r.kind === 'direct' && r.direct_key !== null ? { participants: JSON.parse(r.direct_key) as string[] } : {}),
   };
 }
@@ -612,21 +618,21 @@ export class PgStore implements Store {
     // raises — the service treats that as "lost the race, re-read". Name and
     // archive change; kind never does.
     await this.sql.query(
-      `insert into spaces (id, name, created_at, kind, direct_key, archived) values ($1, $2, $3, $4, $5, $6)
-       on conflict (id) do update set name = excluded.name, archived = excluded.archived`,
-      [space.id, space.name, space.createdAt, space.kind, space.kind === 'direct' ? directKeyFor(space.participants ?? []) : null, space.archived]);
+      `insert into spaces (id, name, created_at, kind, direct_key, archived, graph) values ($1, $2, $3, $4, $5, $6, $7)
+       on conflict (id) do update set name = excluded.name, archived = excluded.archived, graph = excluded.graph`,
+      [space.id, space.name, space.createdAt, space.kind, space.kind === 'direct' ? directKeyFor(space.participants ?? []) : null, space.archived, space.graph === true]);
   }
 
   async getSpace(id: string): Promise<Space | undefined> {
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, direct_key, archived from spaces where id = $1',
+      'select id, name, created_at, kind, direct_key, archived, graph from spaces where id = $1',
       [id]);
     return rows[0] ? rowToSpace(rows[0]) : undefined;
   }
 
   async listSpacesFor(memberId: string, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      `select s.id, s.name, s.created_at, s.kind, s.direct_key, s.archived from spaces s
+      `select s.id, s.name, s.created_at, s.kind, s.direct_key, s.archived, s.graph from spaces s
        join memberships m on m.space_id = s.id
        where m.member_id = $1 and ($2::boolean or s.kind <> 'direct')
        order by s.created_at, s.id`,
@@ -636,14 +642,14 @@ export class PgStore implements Store {
 
   async listAllSpaces(): Promise<Space[]> {
     const rows = await this.sql.query<SpaceRow>(
-      'select id, name, created_at, kind, direct_key, archived from spaces order by created_at, id',
+      'select id, name, created_at, kind, direct_key, archived, graph from spaces order by created_at, id',
       []);
     return rows.map(rowToSpace);
   }
 
   async getDirectSpace(directKey: string): Promise<Space | undefined> {
     const rows = await this.sql.query<SpaceRow>(
-      `select id, name, created_at, kind, direct_key, archived from spaces
+      `select id, name, created_at, kind, direct_key, archived, graph from spaces
        where kind = 'direct' and direct_key = $1`,
       [directKey]);
     return rows[0] ? rowToSpace(rows[0]) : undefined;
@@ -1075,6 +1081,58 @@ export class PgStore implements Store {
       [spaceId],
     );
     return rows.map(rowToMessage);
+  }
+
+  // --- the space graph ----------------------------------------------------------
+
+  async listGraphThreads(spaceId: string): Promise<StoredGraphThread[]> {
+    const rows = await this.sql.query<{ root_message_id: string; fingerprint: string; last_offset: string | number; judged_at: string; judgment: ThreadJudgment }>(
+      'select root_message_id, fingerprint, last_offset, judged_at, judgment from graph_threads where space_id = $1 order by root_message_id',
+      [spaceId]);
+    return rows.map((r) => ({ spaceId, rootMessageId: r.root_message_id, fingerprint: r.fingerprint, lastOffset: Number(r.last_offset), judgedAt: r.judged_at, judgment: r.judgment }));
+  }
+
+  async putGraphThread(thread: StoredGraphThread): Promise<void> {
+    await this.sql.query(
+      `insert into graph_threads (space_id, root_message_id, fingerprint, last_offset, judged_at, judgment) values ($1, $2, $3, $4, $5, $6)
+       on conflict (space_id, root_message_id) do update set fingerprint = excluded.fingerprint, last_offset = excluded.last_offset, judged_at = excluded.judged_at, judgment = excluded.judgment`,
+      [thread.spaceId, thread.rootMessageId, thread.fingerprint, thread.lastOffset, thread.judgedAt, JSON.stringify(thread.judgment)]);
+  }
+
+  async deleteGraphThread(spaceId: string, rootMessageId: string): Promise<void> {
+    await this.sql.query('delete from graph_threads where space_id = $1 and root_message_id = $2', [spaceId, rootMessageId]);
+  }
+
+  async listGraphTopics(spaceId: string): Promise<StoredGraphTopic[]> {
+    const rows = await this.sql.query<{ key: string; label: string; category: GraphTopicCategory; real: number; threads: number; alias_of: string | null }>(
+      'select key, label, category, real, threads, alias_of from graph_topics where space_id = $1 order by key',
+      [spaceId]);
+    return rows.map((r) => ({ spaceId, key: r.key, label: r.label, category: r.category, real: Number(r.real), threads: Number(r.threads), ...(r.alias_of !== null ? { aliasOf: r.alias_of } : {}) }));
+  }
+
+  async putGraphTopic(topic: StoredGraphTopic): Promise<void> {
+    await this.sql.query(
+      `insert into graph_topics (space_id, key, label, category, real, threads, alias_of) values ($1, $2, $3, $4, $5, $6, $7)
+       on conflict (space_id, key) do update set label = excluded.label, category = excluded.category, real = excluded.real, threads = excluded.threads, alias_of = excluded.alias_of`,
+      [topic.spaceId, topic.key, topic.label, topic.category, topic.real, topic.threads, topic.aliasOf ?? null]);
+  }
+
+  async getGraphVocabulary(spaceId: string): Promise<{ messages: number } | undefined> {
+    const rows = await this.sql.query<{ messages: number }>('select messages from graph_vocabulary where space_id = $1', [spaceId]);
+    return rows[0] ? { messages: Number(rows[0].messages) } : undefined;
+  }
+
+  async putGraphVocabulary(spaceId: string, messages: number, at: string): Promise<void> {
+    await this.sql.query(
+      `insert into graph_vocabulary (space_id, messages, judged_at) values ($1, $2, $3)
+       on conflict (space_id) do update set messages = excluded.messages, judged_at = excluded.judged_at`,
+      [spaceId, messages, at]);
+  }
+
+  async clearGraph(spaceId: string): Promise<void> {
+    await this.sql.query('delete from graph_threads where space_id = $1', [spaceId]);
+    await this.sql.query('delete from graph_topics where space_id = $1', [spaceId]);
+    await this.sql.query('delete from graph_vocabulary where space_id = $1', [spaceId]);
   }
 
   // --- search ----------------------------------------------------------------
