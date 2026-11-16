@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SlackImportPreview, SlackPreviewInput } from './slack-import.js';
 import { MENTION_GRAMMAR } from './mentions.js';
 import { ActivityKind, NewPoll, ThreadListing } from './api.js';
 import {
@@ -153,6 +154,13 @@ export const listAssets = tool({
   description: 'List files in a readable space, including an open space you have not joined. Returns asset IDs for read_asset, asset_history and diff. Set includeDeleted to also list trashed files.',
   input: z.object({ spaceId: SpaceId, includeDeleted: z.boolean().optional() }),
   output: z.object({ entries: z.array(Asset) }),
+});
+
+export const previewSlackImport = tool({
+  name: 'preview_slack_import',
+  description: 'Preview a Slack JSON export ZIP supplied as base64 (maximum 25 MiB). Returns channel summaries and warnings; creates no spaces, memberships or messages and does not retain the archive.',
+  input: SlackPreviewInput,
+  output: SlackImportPreview,
 });
 
 export const createSpace = tool({
@@ -826,6 +834,7 @@ export const deleteAgent = tool({
 });
 
 export const mcpTools = [
+  previewSlackImport,
   whoami,
   updateProfile,
   listMembers,

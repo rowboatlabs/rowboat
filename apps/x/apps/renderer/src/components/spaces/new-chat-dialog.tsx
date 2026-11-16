@@ -1,3 +1,4 @@
+import { SlackImportPreviewPanel } from './slack-import-preview'
 import { useEffect, useState } from 'react'
 import { ArrowRight, Bot, Hash, Link as LinkIcon, Loader2, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -14,7 +15,7 @@ import * as analytics from '@/lib/analytics'
 // of your agents, a new agent, or a space you were sent a link to. It opens
 // where the result is; `start` opens it straight on a screen.
 
-type Screen = 'menu' | 'group'
+type Screen = 'menu' | 'group' | 'slack'
 export type NewChatStart = Screen | 'message'
 
 export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenSpace, onOpenAgents }: {
@@ -32,7 +33,7 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
     const [busy, setBusy] = useState(false)
     useEffect(() => {
         if (!open) return
-        setScreen(start === 'group' ? 'group' : 'menu')
+        setScreen(start === 'group' || start === 'slack' ? start : 'menu')
         setMessaging(start === 'message')
     }, [open, start])
     const close = (next: boolean) => {
@@ -71,7 +72,7 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
     )
     return <>
         <Dialog open={open && !messaging} onOpenChange={close}>
-            <DialogContent className="max-w-md">
+            <DialogContent className={screen === 'slack' ? 'max-w-2xl max-h-[90vh] overflow-y-auto' : 'max-w-md'}>
                 {screen === 'menu' ? <>
                     <DialogHeader>
                         <DialogTitle>New chat</DialogTitle>
@@ -79,15 +80,21 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
                     </DialogHeader>
                     <div className="grid gap-2 pt-1">
                         {option(<Hash className="size-4" />, 'New space', 'Name it, add people and agents, and share its link.', () => setScreen('group'))}
+                        {option(<Hash className="size-4" />, 'Import from Slack', 'Preview channels from a Slack export ZIP.', () => setScreen('slack'))}
                         {option(<MessageSquare className="size-4" />, 'New message', 'Someone you share a space with, or one of your agents.', () => setMessaging(true))}
                         {onOpenAgents && option(<Bot className="size-4" />, 'Add an agent', 'Claude Code, Codex, Hermes and more — it becomes yours to bring into groups.', () => { close(false); onOpenAgents(org.id) })}
                         {option(<LinkIcon className="size-4" />, 'Join with a link', 'Paste the link someone sent you.', () => { close(false); openServerDialog({ kind: 'join' }) })}
                     </div>
+                </> : screen === 'slack' ? <>
+                    <DialogHeader><DialogTitle>Slack export preview</DialogTitle><DialogDescription>Review channels before migrating to Rowboat.</DialogDescription></DialogHeader>
+                    <SlackImportPreviewPanel orgId={org.id} />
+                    <Button variant="ghost" onClick={() => setScreen('group')}>Back to new space</Button>
                 </> : <>
                     <DialogHeader>
                         <DialogTitle>New space</DialogTitle>
                         <DialogDescription>You are its first admin. Add people and agents once it exists, or share its invite link.</DialogDescription>
                     </DialogHeader>
+                    <Button variant="outline" onClick={() => setScreen('slack')}>Import from Slack</Button>
                     <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void createGroup() }}>
                         <Input autoFocus maxLength={128} value={name} onChange={(event) => setName(event.target.value)} placeholder="Space name" aria-label="Space name" />
                         <div className="flex items-center justify-between">

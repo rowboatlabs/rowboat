@@ -1,3 +1,4 @@
+import { MAX_SLACK_ZIP_BYTES } from '@rowboat/spaces-protocol';
 import { crc32 } from 'node:zlib';
 import { fromBuffer, type ZipFile, type Entry } from 'yauzl';
 
@@ -23,7 +24,7 @@ export interface SlackPreview {
 export interface SlackLimits { zipBytes: number; entries: number; expandedBytes: number; entryBytes: number; records: number; warnings: number }
 // Conservative parser limits, not subscription entitlements. Reject rather than truncate.
 export const SLACK_PREVIEW_LIMITS: Readonly<SlackLimits> = Object.freeze({
-  zipBytes: 25 * 1024 * 1024, entries: 10_000, expandedBytes: 100 * 1024 * 1024,
+  zipBytes: MAX_SLACK_ZIP_BYTES, entries: 10_000, expandedBytes: 100 * 1024 * 1024,
   entryBytes: 10 * 1024 * 1024, records: 100_000, warnings: 10_000,
 });
 export class SlackExportError extends Error {

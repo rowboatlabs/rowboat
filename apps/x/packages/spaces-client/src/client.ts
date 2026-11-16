@@ -361,6 +361,10 @@ export class SpacesClient {
   }
 
   /** A new group; its creator is its admin (api.ts createSpace; spec §4 Roles, 2026-11-09). */
+  async previewSlackImport(bytes: Uint8Array) {
+    return this.putBytes(routes.previewSlackImport.path, routes.previewSlackImport.response, bytes, { 'content-type': 'application/zip' });
+  }
+
   async createSpace(name: string): Promise<Space> {
     return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
   }

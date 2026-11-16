@@ -1,3 +1,4 @@
+import { NewChatDialog } from './new-chat-dialog'
 import { useState } from 'react'
 import { Hash, Loader2, NotebookPen, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -19,6 +20,7 @@ export function StartHere({ org, onOpenSpace, onOpenAgents }: {
     onOpenSpace: (orgId: string, spaceId: string) => void
     onOpenAgents?: (orgId: string) => void
 }) {
+    const [importOpen, setImportOpen] = useState(false)
     const [naming, setNaming] = useState(false)
     const [name, setName] = useState('')
     const [busy, setBusy] = useState<'group' | 'self' | null>(null)
@@ -87,6 +89,8 @@ export function StartHere({ org, onOpenSpace, onOpenAgents }: {
                     'A place only you and your agents can see: drafts, links, files for later.',
                     <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void messageSelf()}>{busy === 'self' ? 'Opening…' : 'Message yourself'}</Button>)}
             </div>
+            <Button variant="outline" className="self-start" onClick={() => setImportOpen(true)}>Import from Slack</Button>
+            <NewChatDialog org={org} open={importOpen} start="slack" onOpenChange={setImportOpen} onOpenSpace={onOpenSpace} />
             {/* Your personal link: how anyone outside your spaces reaches you. */}
             <div className="rounded-xl border border-dashed border-border p-2">
                 <InviteLinkPanel orgId={org.id} direct />

@@ -17,6 +17,7 @@ type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
   | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
+  | 'spaces:previewSlackImport'
   | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:renameSpace'
   | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
   | 'spaces:removeMember' | 'spaces:setMemberRole' | 'spaces:setAgentAccess'
@@ -60,6 +61,7 @@ export interface HarborChannelDeps {
 
 export function harborChannelHandlers({ getClient, getLive, subscriptions, emit, isActive }: HarborChannelDeps): HarborChannelHandlers {
   return {
+    'spaces:previewSlackImport': args => getClient(args.orgId).previewSlackImport(Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0))),
     'spaces:getProfile': (args) => getClient(args.orgId).me(),
     'spaces:updateProfile': async ({ orgId, ...input }) => ({ member: await getClient(orgId).updateProfile(input) }),
     'spaces:setAvatar': async (args) => ({ member: await getClient(args.orgId).setAvatar({ bytes: Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0)), mime: args.mime }) }),

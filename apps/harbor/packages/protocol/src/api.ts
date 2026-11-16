@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SlackImportPreview } from './slack-import.js';
 import { BlobInfo } from './blob.js';
 import {
   Asset,
@@ -392,6 +393,12 @@ export const routes = {
     path: '/v1/push/unregister',
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
+  },
+  previewSlackImport: {
+    method: 'PUT',
+    path: '/v1/imports/slack/preview',
+    // Raw ZIP body; no persistent upload or import job is created.
+    response: SlackImportPreview,
   },
   createSpace: {
     method: 'POST',
