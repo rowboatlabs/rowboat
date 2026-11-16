@@ -4,6 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
+import { TextInputWrapper, type PasteEventPayload } from 'expo-paste-input';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import type { Member } from '@rowboat/spaces-protocol';
@@ -36,6 +37,12 @@ const FIXED: MentionPick[] = [
   { label: 'here', id: 'here' },
   { label: 'rowboat', id: 'rowboat' },
 ];
+
+/** File extension of a pasted image (expo-paste-input names the temp file by its type) → upload mime. */
+const PASTE_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', heic: 'image/heic', heif: 'image/heif', tiff: 'image/tiff',
+};
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -101,9 +108,11 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   // wire markdown joins the body only on send.
   const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean; file?: string }[]>([]);
 
-  // "+" → photos and videos, any file, or an image on the clipboard
-  // (2026-10-07: a text field can't take an image paste, so the menu does),
-  // and a poll (2026-11-13, the desktop composer's poll button).
+  // "+" → photos and videos, any file, or an image on the clipboard, and a
+  // poll (2026-11-13, the desktop composer's poll button). 2026-11-13: the
+  // field itself now takes an image paste (long-press → Paste, ⌘V; see
+  // TextInputWrapper below); "Paste image" stays here because people don't
+  // know a chat box accepts images until they see it offered.
   const openAttachMenu = async () => {
     if (!onPickMedia || uploading) return;
     if (process.env.EXPO_OS !== 'ios') {
@@ -142,6 +151,28 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
       file.write(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
       const md = await onPickMedia({ uri: file.uri, mime: 'image/png', name: 'pasted-image.png' });
       setAttachments((prev) => [...prev, { key: `${Date.now()}`, uri: file.uri, md, video: false }]);
+    } catch (err) {
+      Alert.alert("Couldn't paste the image", err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Images pasted straight into the field (2026-11-13). expo-paste-input
+  // stops the native paste, writes each image to a temp file and hands us the
+  // file URIs; they go up one by one through the same path as "Paste image".
+  // Text pastes are left to the TextInput, so they need nothing here.
+  const onPaste = async (payload: PasteEventPayload) => {
+    if (payload.type !== 'images' || payload.uris.length === 0) return;
+    if (!onPickMedia || uploading) return;
+    setUploading(true);
+    try {
+      for (const [i, uri] of payload.uris.entries()) {
+        const ext = (uri.match(/\.(\w+)$/)?.[1] ?? 'png').toLowerCase();
+        const mime = PASTE_MIME[ext] ?? 'image/png';
+        const md = await onPickMedia({ uri, mime, name: `pasted-image.${ext}` });
+        setAttachments((prev) => [...prev, { key: `${Date.now()}-${i}`, uri, md, video: false }]);
+      }
     } catch (err) {
       Alert.alert("Couldn't paste the image", err instanceof Error ? err.message : String(err));
     } finally {
@@ -436,18 +467,21 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
             ))}
           </ScrollView>
         ) : null}
-        <TextInput
-          ref={inputRef}
-          key={inputKey}
-          style={{ minHeight: 40, maxHeight: 140, fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
-          placeholder={placeholder}
-          placeholderTextColor={colors.tertiaryLabel}
-          onChangeText={setText}
-          onSelectionChange={(e) => setCursor(e.nativeEvent.selection.end)}
-          multiline
-        >
-          {styled}
-        </TextInput>
+        {/* The wrapper finds the TextInput inside it again after each inputKey remount. */}
+        <TextInputWrapper onPaste={(p) => void onPaste(p)}>
+          <TextInput
+            ref={inputRef}
+            key={inputKey}
+            style={{ minHeight: 40, maxHeight: 140, fontSize: 16, lineHeight: 22, color: colors.label, paddingVertical: 8 }}
+            placeholder={placeholder}
+            placeholderTextColor={colors.tertiaryLabel}
+            onChangeText={setText}
+            onSelectionChange={(e) => setCursor(e.nativeEvent.selection.end)}
+            multiline
+          >
+            {styled}
+          </TextInput>
+        </TextInputWrapper>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, paddingTop: 2 }}>
           {onPickMedia ? (
             <Pressable

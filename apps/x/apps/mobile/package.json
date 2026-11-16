@@ -27,6 +27,7 @@
     "expo-image-picker": "~57.0.17",
     "expo-linking": "~57.0.9",
     "expo-notifications": "~57.0.17",
+    "expo-paste-input": "0.2.2",
     "expo-router": "~57.0.18",
     "expo-secure-store": "~57.0.3",
     "expo-sharing": "~57.0.22",
