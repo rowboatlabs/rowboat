@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import { routes } from '@rowboat/spaces-protocol';
+import { MAX_SLACK_ZIP_BYTES, routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
@@ -283,6 +283,30 @@ export function buildHttpApp(deps: {
   app.post(routes.joinSpace.path, async (c) => {
     const { spaceId } = parseWith(routes.joinSpace.params, c.req.param());
     return reply(c, routes.joinSpace.response, await service.joinSpace(actor(c), spaceId));
+  });
+
+  app.put(routes.previewSlackImport.path, async (c) => {
+    if (Number(c.req.header('content-length') ?? '0') > MAX_SLACK_ZIP_BYTES) {
+      throw new HarborError('payload_too_large', 'ZIP exceeds the 25 MiB preview limit');
+    }
+    const reader = c.req.raw.body?.getReader();
+    if (!reader) throw new HarborError('invalid_request', 'ZIP body is required');
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > MAX_SLACK_ZIP_BYTES) {
+          await reader.cancel();
+          throw new HarborError('payload_too_large', 'ZIP exceeds the 25 MiB preview limit');
+        }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    c.header('Cache-Control', 'no-store');
+    return reply(c, routes.previewSlackImport.response, await service.previewSlackImport(actor(c), Buffer.concat(chunks)));
   });
 
   app.post(routes.createSpace.path, async (c) => {

@@ -175,10 +175,8 @@ async function dispatch(
       const a = args as { spaceId: string; includeDeleted?: boolean };
       return { entries: await service.listAssets(ctx, a.spaceId, a.includeDeleted) };
     }
-    case 'browse_spaces':
-      return { spaces: await service.browseSpaces(ctx) };
-    case 'join_space':
-      return service.joinSpace(ctx, (args as { spaceId: string }).spaceId);
+    case 'preview_slack_import':
+      return service.previewSlackImport(ctx, Buffer.from((args as { bytes: string }).bytes, 'base64'));
     case 'create_space': {
       const a = args as { name: string; visibility?: 'private' | 'open' };
       return { space: await service.createSpace(ctx, a.name, a.visibility) };

@@ -1,3 +1,4 @@
+export { MAX_SLACK_ZIP_BYTES, type SlackImportPreview } from '@rowboat/spaces-protocol';
 export { blobDownloadName } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { JEV_KIND, addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';

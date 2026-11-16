@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SlackImportPreview, SlackPreviewInput } from './slack-import.js';
 import { MENTION_GRAMMAR } from './mentions.js';
 import { ActivityKind, NewPoll, ThreadListing } from './api.js';
 import {
@@ -149,18 +150,11 @@ export const listAssets = tool({
   output: z.object({ entries: z.array(Asset) }),
 });
 
-export const browseSpaces = tool({
-  name: 'browse_spaces',
-  description: 'Browse this org’s shared open spaces, including those already joined. Read any result without joining; call join_space before posting or other actions. Private spaces and DMs are never listed.',
-  input: z.object({}),
-  output: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
-});
-
-export const joinSpace = tool({
-  name: 'join_space',
-  description: 'Join a shared open space as your person before posting or other actions. Repeated joins are a no-op. Private spaces and DMs cannot be self-joined.',
-  input: z.object({ spaceId: SpaceId }),
-  output: z.object({ space: Space, membership: Membership }),
+export const previewSlackImport = tool({
+  name: 'preview_slack_import',
+  description: 'Preview a Slack JSON export ZIP supplied as base64 (maximum 25 MiB). Returns channel summaries and warnings; creates no spaces, memberships or messages and does not retain the archive.',
+  input: SlackPreviewInput,
+  output: SlackImportPreview,
 });
 
 export const createSpace = tool({
@@ -896,6 +890,7 @@ export const deleteAgent = tool({
 });
 
 export const mcpTools = [
+  previewSlackImport,
   whoami,
   updateProfile,
   listMembers,

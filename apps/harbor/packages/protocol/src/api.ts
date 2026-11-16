@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SlackImportPreview } from './slack-import.js';
 import { BlobInfo } from './blob.js';
 import {
   Asset,
@@ -415,16 +416,11 @@ export const routes = {
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
   },
-  browseSpaces: {
-    method: 'GET',
-    path: '/v1/spaces/browse',
-    response: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
-  },
-  joinSpace: {
-    method: 'POST',
-    path: '/v1/spaces/:spaceId/join',
-    params: z.object({ spaceId: SpaceId }),
-    response: z.object({ space: Space, membership: Membership }),
+  previewSlackImport: {
+    method: 'PUT',
+    path: '/v1/imports/slack/preview',
+    // Raw ZIP body; no persistent upload or import job is created.
+    response: SlackImportPreview,
   },
   createSpace: {
     method: 'POST',

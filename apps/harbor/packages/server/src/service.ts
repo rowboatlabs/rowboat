@@ -1,6 +1,4 @@
-import { Graph, type GraphOptions, type SetSpaceGraphInput } from './core/graph.js';
-import type { JevApi } from './jev.js';
-import type { SpaceGraph } from '@rowboat/spaces-protocol';
+import { Imports } from './core/imports.js';
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
@@ -88,6 +86,7 @@ export type { ActingMode };
 
 export class HarborService {
   private readonly k: Kernel;
+  private readonly imports: Imports;
   private readonly spaces: Spaces;
   private readonly assets: Assets;
   private readonly images: Images;
@@ -112,7 +111,8 @@ export class HarborService {
     /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
     options: { presenceGraceMs?: number } = {},
   ) {
-    this.k = new Kernel(store, hub, org);
+    this.k = new Kernel(store, hub, server);
+    this.imports = new Imports(this.k);
     this.spaces = new Spaces(this.k, blobs);
     this.assets = new Assets(this.k, blobs);
     this.images = new Images(this.k, blobs);
@@ -418,14 +418,12 @@ export class HarborService {
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
   }
-  browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
-    return this.spaces.browseSpaces(ctx);
+  previewSlackImport(ctx: ActorCtx, bytes: Uint8Array) {
+    return this.imports.previewSlack(ctx, bytes);
   }
-  joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
-    return this.spaces.joinSpace(ctx, spaceId);
-  }
-  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private', opts: { isDefault?: boolean } = {}): Promise<Space> {
-    return this.spaces.createSpace(ctx, name, visibility, opts);
+
+  createSpace(ctx: ActorCtx, name: string): Promise<Space> {
+    return this.spaces.createSpace(ctx, name);
   }
   renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     return this.spaces.renameSpace(ctx, spaceId, input);

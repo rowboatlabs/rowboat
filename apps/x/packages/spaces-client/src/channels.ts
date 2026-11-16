@@ -17,10 +17,11 @@ type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
   | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
-  | 'spaces:listSpaces' | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:createSpace' | 'spaces:renameSpace'
-  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace' | 'spaces:setSpaceVisibility' | 'spaces:setDefaultSpace'
-  | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy' | 'spaces:deleteAgent'
-  | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
+  | 'spaces:previewSlackImport'
+  | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:renameSpace'
+  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
+  | 'spaces:removeMember' | 'spaces:setMemberRole' | 'spaces:setAgentAccess'
+  | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listContacts'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
@@ -61,6 +62,7 @@ export interface HarborChannelDeps {
 
 export function harborChannelHandlers({ getClient, getLive, subscriptions, emit, isActive }: HarborChannelDeps): HarborChannelHandlers {
   return {
+    'spaces:previewSlackImport': args => getClient(args.orgId).previewSlackImport(Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0))),
     'spaces:getProfile': (args) => getClient(args.orgId).me(),
     'spaces:updateProfile': async ({ orgId, ...input }) => ({ member: await getClient(orgId).updateProfile(input) }),
     'spaces:setAvatar': async (args) => ({ member: await getClient(args.orgId).setAvatar({ bytes: Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0)), mime: args.mime }) }),
