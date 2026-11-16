@@ -86,8 +86,8 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
                         {option(<LinkIcon className="size-4" />, 'Join with a link', 'Paste the link someone sent you.', () => { close(false); openServerDialog({ kind: 'join' }) })}
                     </div>
                 </> : screen === 'slack' ? <>
-                    <DialogHeader><DialogTitle>Slack export preview</DialogTitle><DialogDescription>Review channels before migrating to Rowboat.</DialogDescription></DialogHeader>
-                    <SlackImportPreviewPanel orgId={org.id} />
+                    <DialogHeader><DialogTitle>Import from Slack</DialogTitle><DialogDescription>Review channels before migrating to Rowboat.</DialogDescription></DialogHeader>
+                    <SlackImportPreviewPanel orgId={org.id} onOpenSpace={spaceId => { close(false); onOpenSpace(org.id, spaceId) }} />
                     <Button variant="ghost" onClick={() => setScreen('group')}>Back to new space</Button>
                 </> : <>
                     <DialogHeader>

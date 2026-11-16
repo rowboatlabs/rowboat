@@ -25,9 +25,9 @@ DM files and ancillary data produce `unsupported_file` warnings and are not pars
 
 ## Resource and archive rules
 
-Defaults: 25 MiB compressed, 100 MiB expanded, 10 MiB per entry, 10,000 entries, 100,000 parsed array records (including metadata), and 10,000 warnings. These are conservative local-preview limits, not Slack subscription limits or production upload entitlements. Programmatic callers can supply positive integer overrides; an eventual endpoint must keep limits server-controlled.
+Defaults: 25 MiB compressed, 100 MiB expanded, 10 MiB per entry, 10,000 entries, 100,000 parsed array records (including metadata), and 10,000 warnings. These are conservative local-preview limits, not Slack subscription limits or production upload entitlements. Programmatic callers can supply positive integer overrides; the endpoints keep limits server-controlled.
 
-Entries are read sequentially, with both declared and actual expansion checks and CRC verification. Absolute/traversal/backslash paths, duplicate paths, symbolic links, encrypted entries, malformed JSON, ambiguous channel IDs/names, and corrupt ZIPs fail the entire preview. No paths are extracted and no embedded URL is fetched. Normalized results are held in memory within these limits; a production upload route/background worker is a separate implementation.
+Entries are read sequentially, with both declared and actual expansion checks and CRC verification. Absolute/traversal/backslash paths, duplicate paths, symbolic links, encrypted entries, malformed JSON, ambiguous channel IDs/names, and corrupt ZIPs fail the entire preview. No paths are extracted and no embedded URL is fetched. Normalized results are held in memory within these limits; the core import worker persists selected normalized records; the parser itself does not write.
 
 ## Verification fixtures
 
@@ -35,4 +35,4 @@ Entries are read sequentially, with both declared and actual expansion checks an
 
 The regression cases additionally permute nested edit/deletion ordering, cover conversation-ID folders and alias collisions, validate unknown-to-bot identity promotion, reject invalid parent chains, and check record accounting. The shape reference is [Slack’s export guide](https://slack.com/help/articles/220556107-How-to-read-Slack-data-exports), checked 2026-11-13. These remain synthetic tests; no sanitized customer export was available during this review.
 
-Web preview (2026-11-16): `PUT /v1/imports/slack/preview` and MCP `preview_slack_import` expose a summary-only view through `core/imports.ts`. The local CLI still exposes no writes. The HTTP face enforces the compressed upload cap while reading; the core allows two concurrent parses, and retains no archive or summary between requests. The shared protocol owns the compressed byte cap. See CONTRACT.md for wire behavior.
+Web preview (2026-11-16): `PUT /v1/imports/slack/preview` and MCP `preview_slack_import` expose a summary-only view through `core/imports.ts`. The local CLI still exposes no writes. The HTTP face enforces the compressed upload cap while reading; the core allows two concurrent parses, and retains no archive or summary for previews. Confirmed imports persist job data through the worker. The shared protocol owns the compressed byte cap. See CONTRACT.md for wire behavior.

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SlackImportPreview, SlackPreviewInput } from './slack-import.js';
+import { StartSlackImportInput, SlackImportJob, SlackImportPreview, SlackPreviewInput } from './slack-import.js';
 import { MENTION_GRAMMAR } from './mentions.js';
 import { ActivityKind, NewPoll, ThreadListing } from './api.js';
 import {
@@ -156,6 +156,11 @@ export const listAssets = tool({
   input: z.object({ spaceId: SpaceId, includeDeleted: z.boolean().optional() }),
   output: z.object({ entries: z.array(Asset) }),
 });
+
+export const startSlackImport = tool({ name: 'start_slack_import', description: 'Import selected channels from a Slack ZIP as new private spaces, initially accessible only to you. Supply the same workspace domain on repeat imports. Historical authors grant no membership. Returns a durable job; poll get_slack_import. Already imported channels are skipped, not updated.', input: StartSlackImportInput, output: SlackImportJob });
+export const listSlackImports = tool({ name: 'list_slack_imports', description: 'List your most recent Slack import jobs.', input: z.object({}), output: z.object({ jobs: z.array(SlackImportJob) }) });
+export const getSlackImport = tool({ name: 'get_slack_import', description: 'Read progress and destinations of your Slack import job.', input: z.object({ jobId: z.string() }), output: SlackImportJob });
+export const retrySlackImport = tool({ name: 'retry_slack_import', description: 'Retry a failed Slack import job, retaining already completed channels.', input: z.object({ jobId: z.string() }), output: SlackImportJob });
 
 export const previewSlackImport = tool({
   name: 'preview_slack_import',
@@ -858,6 +863,7 @@ export const deleteAgent = tool({
 });
 
 export const mcpTools = [
+  startSlackImport, listSlackImports, getSlackImport, retrySlackImport,
   previewSlackImport,
   whoami,
   updateProfile,
@@ -920,6 +926,7 @@ export const agentOnlyMcpToolNames: ReadonlySet<string> = new Set([createAgent.n
 
 /** Tool names whose only effect is reading — no event is appended, nothing is written. */
 export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
+  listSlackImports.name, getSlackImport.name,
   previewSlackImport.name,
   whoami.name,
   listMembers.name,

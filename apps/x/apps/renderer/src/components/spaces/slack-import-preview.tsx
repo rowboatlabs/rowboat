@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { refreshSpacesOrgs } from '@/hooks/use-spaces'
 
 function readBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -17,8 +18,44 @@ function date(ts?: string) {
     return Number.isNaN(value.getTime()) ? '—' : value.toISOString().slice(0, 10)
 }
 
-// 2026-11-16: one ephemeral preview in creation and settings; no import writes yet.
-export function SlackImportPreviewPanel({ orgId }: { orgId: string }) {
+// 2026-11-16: preview first, then explicit durable import; shared by creation and settings.
+export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string; onOpenSpace?: (spaceId: string) => void }) {
+    const [bytes, setBytes] = useState('')
+    const [workspace, setWorkspace] = useState('')
+    const [jobs, setJobs] = useState<spaces.SlackImportJob[]>([])
+    const [starting, setStarting] = useState(false)
+    useEffect(() => {
+        let disposed = false
+        let timer: ReturnType<typeof setTimeout>
+        let lastProgress = ''
+        const poll = async () => {
+            try {
+                const result = await window.ipc.invoke('spaces:listSlackImports', { orgId })
+                if (!disposed) {
+                    setJobs(result.jobs)
+                    const progress = result.jobs.map(j => `${j.id}:${j.status}:${j.channels.map(c => c.status).join('/')}`).join(',')
+                    if (progress !== lastProgress && result.jobs.some(j => j.channels.some(c => c.status === 'imported'))) void refreshSpacesOrgs()
+                    lastProgress = progress
+                }
+            } catch (err) { if (!disposed) setError(err instanceof Error ? err.message : 'Could not load import jobs.') }
+            finally { if (!disposed) timer = setTimeout(poll, 2000) }
+        }
+        void poll()
+        return () => { disposed = true; clearTimeout(timer) }
+    }, [orgId])
+    const start = async () => {
+        setStarting(true); setError('')
+        try {
+            const job = await window.ipc.invoke('spaces:startSlackImport', { orgId, bytes, workspace: workspace.trim().toLowerCase(), channelIds: [...selected] })
+            setJobs(current => [job, ...current.filter(j => j.id !== job.id)])
+            setBytes(''); setPreview(null); setSelected(new Set())
+        } catch (err) { setError(err instanceof Error ? err.message : 'Could not start import.') }
+        finally { setStarting(false) }
+    }
+    const retry = async (jobId: string) => {
+        try { const job = await window.ipc.invoke('spaces:retrySlackImport', { orgId, jobId }); setJobs(current => current.map(j => j.id === job.id ? job : j)) }
+        catch (err) { setError(err instanceof Error ? err.message : 'Could not retry import.') }
+    }
     const [preview, setPreview] = useState<spaces.SlackImportPreview | null>(null)
     const [selected, setSelected] = useState<Set<string>>(new Set())
     const [busy, setBusy] = useState(false)
@@ -30,7 +67,7 @@ export function SlackImportPreviewPanel({ orgId }: { orgId: string }) {
     useEffect(() => () => { generation.current++ }, [orgId])
     const upload = async (file?: File) => {
         const request = ++generation.current
-        setPreview(null); setSelected(new Set()); setError(''); setPage(0); setQuery(''); setFilename(file?.name ?? '')
+        setBytes(''); setPreview(null); setSelected(new Set()); setError(''); setPage(0); setQuery(''); setFilename(file?.name ?? '')
         if (!file) return
         if (!file.size || file.size > spaces.MAX_SLACK_ZIP_BYTES) {
             setError('Choose a non-empty Slack export ZIP up to 25 MiB.'); return
@@ -41,7 +78,7 @@ export function SlackImportPreviewPanel({ orgId }: { orgId: string }) {
             if (request !== generation.current) return
             const result = await window.ipc.invoke('spaces:previewSlackImport', { orgId, bytes })
             if (request !== generation.current) return
-            setPreview(result)
+            setPreview(result); setBytes(bytes)
         } catch (err) {
             if (request === generation.current) setError(err instanceof Error ? err.message : 'Could not preview this export.')
         } finally {
@@ -58,9 +95,9 @@ export function SlackImportPreviewPanel({ orgId }: { orgId: string }) {
     return <section className="space-y-4 py-4">
         <div><h2 className="text-base font-medium">Import from Slack</h2>
             <p className="mt-1 text-sm text-muted-foreground">Upload a Slack JSON export ZIP to review its channels. Each selected channel will become a separate new space.</p></div>
-        <p className="rounded-lg bg-muted p-3 text-sm">Preview only: importing history is not available yet. Your archive and channel selection are not saved when you leave this screen.</p>
+        <p className="rounded-lg bg-muted p-3 text-sm">Imports continue after you leave. Each space initially contains only you; Slack profiles do not grant access. Existing imported channels are skipped, not updated. Text, threads and historical file links/reaction counts are preserved; rich Slack formatting and profile linking are not available yet.</p>
         <label className="block text-sm">Slack export ZIP (up to 25 MiB)
-            <Input type="file" accept=".zip,application/zip" disabled={busy} className="mt-2" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void upload(file) }} />
+            <Input type="file" accept=".zip,application/zip" disabled={busy || starting} className="mt-2" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void upload(file) }} />
         </label>
         {busy && <p role="status" className="text-sm">Uploading and checking {filename}…</p>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -76,7 +113,19 @@ export function SlackImportPreviewPanel({ orgId }: { orgId: string }) {
                 {channels.length > 50 && <div className="flex items-center gap-3"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Button><span className="text-xs">Page {page + 1} of {Math.ceil(channels.length / 50)}</span><Button variant="outline" size="sm" disabled={(page + 1) * 50 >= channels.length} onClick={() => setPage(page + 1)}>Next</Button></div>}
                 <p className="text-sm" aria-live="polite">{chosen.length} channels selected · {chosen.reduce((n, c) => n + c.messages, 0)} messages · {chosen.reduce((n, c) => n + c.replies, 0)} replies</p>
             </>}
+            {chosen.length > 0 && <div className="space-y-2">
+                <label className="block text-sm">Slack workspace domain<Input value={workspace} onChange={e => setWorkspace(e.target.value)} placeholder="team.slack.com" /></label>
+                <p className="text-xs text-muted-foreground">Use the same domain on future imports to prevent duplicate channels. Up to 100 channels per job.</p>
+                <Button disabled={starting || chosen.length > 100 || !workspace.trim() || jobs.some(j => j.status === 'queued' || j.status === 'running')} onClick={() => void start()}>{starting ? 'Starting import…' : `Import ${chosen.length} channels as new spaces`}</Button>
+            </div>}
             {preview.warnings.length > 0 && <details><summary className="cursor-pointer text-sm">{preview.warnings.length} warnings — review before importing</summary><ul className="mt-2 max-h-48 space-y-2 overflow-auto text-xs">{preview.warnings.slice(0, 100).map((w, i) => <li key={i} className="break-words"><strong>{w.code}</strong>: {w.path}{w.record !== undefined ? ` (record ${w.record})` : ''} — {w.detail}</li>)}</ul>{preview.warnings.length > 100 && <p className="text-xs">Showing the first 100 warnings.</p>}</details>}
         </>}
+        {jobs.length > 0 && <div className="space-y-3"><h3 className="text-sm font-medium">Recent imports</h3>{jobs.map(job => <div key={job.id} className="rounded-lg border p-3 text-sm">
+            <p>{job.workspace} · {job.status} · {job.channels.filter(c => c.status !== 'pending').length}/{job.channels.length} channels</p>
+            {job.warnings?.length > 0 && <details><summary>{job.warnings.length} import warnings</summary><ul className="max-h-48 overflow-auto text-xs">{job.warnings.slice(0, 100).map((w, i) => <li key={i}>{w.path}: {w.detail}</li>)}</ul>{job.warnings.length > 100 && <p>Showing the first 100 warnings.</p>}</details>}
+            {job.error && <p role="alert">{job.error}</p>}
+            {job.status === 'failed' && <Button variant="outline" size="sm" onClick={() => void retry(job.id)}>Retry remaining channels</Button>}
+            <ul>{job.channels.map(c => <li key={c.id}>#{c.name} · {c.status}{c.status !== 'pending' && onOpenSpace && <Button variant="link" size="sm" onClick={() => onOpenSpace(c.spaceId)}>Open space</Button>}</li>)}</ul>
+        </div>)}</div>}
     </section>
 }

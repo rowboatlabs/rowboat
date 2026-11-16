@@ -276,7 +276,20 @@ export interface UnreadThreadRow {
   unreadMentions: number;
 }
 
+export interface StoredSlackJob {
+  ownerId: string;
+  key: string;
+  job: import('@rowboat/spaces-protocol').SlackImportJob;
+  payload: import('./imports/slack.js').SlackPreview | null;
+}
+
 export interface Store {
+  getSlackJobByKey(key: string): Promise<StoredSlackJob | undefined>;
+  putSlackJob(record: StoredSlackJob): Promise<void>;
+  getSlackJob(id: string): Promise<StoredSlackJob | undefined>;
+  listSlackJobs(ownerId?: string): Promise<StoredSlackJob[]>;
+  getSlackSource(ownerId: string, workspace: string, channelId: string): Promise<string | undefined>;
+  putSlackSource(ownerId: string, workspace: string, channelId: string, spaceId: string): Promise<void>;
   // members (server-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;

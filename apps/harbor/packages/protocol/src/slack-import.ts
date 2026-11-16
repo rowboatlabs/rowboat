@@ -18,3 +18,18 @@ export const SlackImportPreview = z.object({
   records: z.object({ read: Count, accepted: Count, skipped: Count, superseded: Count }),
 });
 export type SlackImportPreview = z.infer<typeof SlackImportPreview>;
+
+export const SlackImportSelection = z.object({
+  workspace: z.string().trim().toLowerCase().min(1).max(128).regex(/^[a-z0-9][a-z0-9.-]*$/, 'Use the Slack workspace domain, e.g. team.slack.com'),
+  channelIds: z.array(z.string().min(1).max(128)).min(1).max(100).refine(ids => new Set(ids).size === ids.length, 'Select each channel once'),
+});
+export type SlackImportSelection = z.infer<typeof SlackImportSelection>;
+export const StartSlackImportInput = SlackPreviewInput.extend(SlackImportSelection.shape);
+export const SlackImportJob = z.object({
+  id: z.string(), workspace: z.string(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
+  status: z.enum(['queued', 'running', 'completed', 'failed']),
+  channels: z.array(z.object({ id: z.string(), name: z.string(), spaceId: z.string(), messages: Count, source: z.object({ private: z.boolean(), archived: z.boolean(), topic: z.string(), purpose: z.string(), memberIds: z.array(z.string()) }), status: z.enum(['pending', 'imported', 'skipped']) })),
+  warnings: SlackImportPreview.shape.warnings,
+  error: z.string().optional(),
+});
+export type SlackImportJob = z.infer<typeof SlackImportJob>;

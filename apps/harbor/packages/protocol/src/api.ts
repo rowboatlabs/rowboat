@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SlackImportPreview } from './slack-import.js';
+import { StartSlackImportInput, SlackImportJob, SlackImportPreview } from './slack-import.js';
 import { BlobInfo } from './blob.js';
 import {
   Asset,
@@ -398,6 +398,10 @@ export const routes = {
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
   },
+  startSlackImport: { method: 'POST', path: '/v1/imports/slack/jobs', request: StartSlackImportInput, response: SlackImportJob },
+  listSlackImports: { method: 'GET', path: '/v1/imports/slack/jobs', response: z.object({ jobs: z.array(SlackImportJob) }) },
+  getSlackImport: { method: 'GET', path: '/v1/imports/slack/jobs/:jobId', params: z.object({ jobId: z.string() }), response: SlackImportJob },
+  retrySlackImport: { method: 'POST', path: '/v1/imports/slack/jobs/:jobId/retry', params: z.object({ jobId: z.string() }), response: SlackImportJob },
   previewSlackImport: {
     method: 'PUT',
     path: '/v1/imports/slack/preview',

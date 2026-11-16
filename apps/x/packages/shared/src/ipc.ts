@@ -1,4 +1,4 @@
-import { SlackImportPreview, SlackPreviewInput, Availability } from '@rowboat/spaces-protocol';
+import { StartSlackImportInput, SlackImportJob, SlackImportPreview, SlackPreviewInput, Availability } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
 import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
@@ -3897,6 +3897,10 @@ export const ipcSchemas = {
     res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
   },
   // A new group: its creator is its admin (spec §4 Roles, 2026-11-09).
+  'spaces:startSlackImport': { req: StartSlackImportInput.extend({ orgId: z.string() }), res: SlackImportJob },
+  'spaces:listSlackImports': { req: z.object({ orgId: z.string() }), res: z.object({ jobs: z.array(SlackImportJob) }) },
+  'spaces:getSlackImport': { req: z.object({ orgId: z.string(), jobId: z.string() }), res: SlackImportJob },
+  'spaces:retrySlackImport': { req: z.object({ orgId: z.string(), jobId: z.string() }), res: SlackImportJob },
   'spaces:previewSlackImport': {
     req: SlackPreviewInput.extend({ orgId: z.string() }),
     res: SlackImportPreview,

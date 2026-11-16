@@ -417,3 +417,8 @@ export function canStopInvocation(actor: Membership | undefined, invocation: Inv
   if (!stopDeclared) return { code: 'invalid_request', message: 'this agent can’t be stopped from Spaces; open it in its own app' };
   return null;
 }
+
+/** 2026-11-16: an upload and its job belong only to the importing member. */
+export function canManageSlackImport(memberId: string, ownerId: string | undefined): Decision {
+  return memberId === ownerId ? null : { code: 'not_found', message: 'No such Slack import' };
+}
