@@ -430,6 +430,31 @@ interface AssetRow {
 export const DEFAULT_ORG_ID = 'org-default';
 
 export class PgStore implements Store {
+  async getSlackJobByKey(key: string): Promise<import('./store.js').StoredSlackJob | undefined> {
+    const rows = await this.sql.query<{id:string}>('select id from slack_import_jobs where dedupe_key=$1', [key]);
+    return rows[0] ? this.getSlackJob(rows[0].id) : undefined;
+  }
+  async putSlackJob(r: import('./store.js').StoredSlackJob): Promise<void> {
+    await this.sql.query(`insert into slack_import_jobs(id, owner_id, dedupe_key, job, payload) values ($1,$2,$3,$4::jsonb,$5::jsonb)
+      on conflict(id) do update set job=excluded.job, payload=excluded.payload`, [r.job.id, r.ownerId, r.key, JSON.stringify(r.job), r.payload ? JSON.stringify(r.payload) : null]);
+  }
+  async getSlackJob(id: string): Promise<import('./store.js').StoredSlackJob | undefined> {
+    const rows = await this.sql.query<{owner_id:string;dedupe_key:string;job:import('@rowboat/spaces-protocol').SlackImportJob;payload:import('./imports/slack.js').SlackPreview|null}>('select * from slack_import_jobs where id=$1',[id]);
+    const r=rows[0]; return r ? {ownerId:r.owner_id,key:r.dedupe_key,job:r.job,payload:r.payload} : undefined;
+  }
+  async listSlackJobs(ownerId?: string): Promise<import('./store.js').StoredSlackJob[]> {
+    const rows = await this.sql.query<{owner_id:string;dedupe_key:string;job:import('@rowboat/spaces-protocol').SlackImportJob}>(ownerId === undefined
+      ? `select owner_id,dedupe_key,job from slack_import_jobs where job->>'status' in ('queued','running') order by job->>'createdAt' limit 20`
+      : `select owner_id,dedupe_key,job from slack_import_jobs where owner_id=$1 order by (job->>'status' in ('queued','running')) desc, job->>'createdAt' desc limit 100`, ownerId === undefined ? [] : [ownerId]);
+    return rows.map(r=>({ownerId:r.owner_id,key:r.dedupe_key,job:r.job,payload:null}));
+  }
+  async getSlackSource(ownerId:string, workspace:string, channelId:string): Promise<string|undefined> {
+    return (await this.sql.query<{space_id:string}>('select space_id from slack_import_sources where owner_id=$1 and workspace=$2 and channel_id=$3',[ownerId,workspace,channelId]))[0]?.space_id;
+  }
+  async putSlackSource(ownerId:string, workspace:string, channelId:string, spaceId:string): Promise<void> {
+    await this.sql.query('insert into slack_import_sources(owner_id,workspace,channel_id,space_id) values($1,$2,$3,$4)',[ownerId,workspace,channelId,spaceId]);
+  }
+
   private readonly als = new AsyncLocalStorage<SqlExecutor>();
 
   /**
@@ -1313,8 +1338,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only, secrets, session_title)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18, $19::jsonb, $20)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only, secrets, session_title, edited_at, deleted_at)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18, $19::jsonb, $20, $21, $22)`,
       [
         message.id,
         message.spaceId,
@@ -1336,6 +1361,8 @@ export class PgStore implements Store {
         message.peopleOnly === true,
         message.secrets ? JSON.stringify(message.secrets) : null,
         message.session?.title ?? null,
+        message.editedAt ?? null,
+        message.deletedAt ?? null,
       ],
     );
   }

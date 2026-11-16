@@ -74,7 +74,7 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
         setSending(true)
         try {
             const cross = picked.orgId !== org.id || picked.spaceId !== space.id
-            const authorName = memberNames.get(message.author.memberId) ?? message.author.memberId
+            const authorName = message.author.slack?.name ?? memberNames.get(message.author.memberId) ?? message.author.memberId
             let text = resolveMentions(message.body, memberNames, spaceNames).trim()
             let stripped = false
             if (cross) {

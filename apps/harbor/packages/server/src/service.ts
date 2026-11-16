@@ -418,6 +418,12 @@ export class HarborService {
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
   }
+  startImports() { this.imports.startWorker(); }
+  stopImports() { return this.imports.stopWorker(); }
+  startSlackImport(ctx: ActorCtx, input: import('@rowboat/spaces-protocol').SlackImportSelection & { bytes: string }) { return this.imports.start(ctx, Buffer.from(input.bytes, 'base64'), input); }
+  listSlackImports(ctx: ActorCtx) { return this.imports.list(ctx); }
+  getSlackImport(ctx: ActorCtx, id: string) { return this.imports.get(ctx, id); }
+  retrySlackImport(ctx: ActorCtx, id: string) { return this.imports.retry(ctx, id); }
   previewSlackImport(ctx: ActorCtx, bytes: Uint8Array) {
     return this.imports.previewSlack(ctx, bytes);
   }

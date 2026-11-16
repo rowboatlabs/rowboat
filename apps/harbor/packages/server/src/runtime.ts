@@ -123,6 +123,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     );
   }
   await connectors.startAll();
+  service.startImports();
   if (provider) service.startHosting(input.hosting?.tickMs);
   // The space graph (spec §8 Space graph, 2026-11-12): judged with Jev, when the deployment has its key.
   const jev = input.graph?.jev ?? jevFromEnv();
@@ -156,6 +157,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     },
     live: { service, hub, auth, webOrigins: new Set(input.webOrigins ?? []) },
     close: async () => {
+      await service.stopImports();
       service.closePresence();
       await service.stopHosting();
       await service.stopGraph();
