@@ -8,12 +8,15 @@ import { useCreditsState } from "@/hooks/use-credits-state"
 import { formatCreditsAsDollars } from "@x/shared/dist/credits.js"
 
 /**
- * "Have an invite code?" entry: redeem another user's referral code — both
- * sides earn credits (the backend enforces one lifetime claim per account,
- * new accounts only). Self-gating: renders nothing unless the credit-rewards
- * feature is on, the user is eligible (signed-in, free tier), and this
- * account hasn't already redeemed a code. Shown in onboarding and in
- * settings → Account.
+ * "Have a code?" entry. Takes two kinds of code (2026-11-17, hackathon promo
+ * codes), and the backend decides which one was typed:
+ *  - a shared promo code — credits for this account, once per code;
+ *  - another user's referral code — both sides earn credits (one lifetime
+ *    claim per account, new accounts only).
+ * Self-gating: renders nothing unless the credit-rewards feature is on and
+ * the user is eligible (signed-in, free tier). It stays up after an invite
+ * code has been redeemed, because a promo code can still be applied. Shown
+ * in onboarding and in settings → Account.
  */
 export function InviteCodeClaim() {
   const state = useCreditsState()
@@ -22,10 +25,10 @@ export function InviteCodeClaim() {
   const [error, setError] = useState<string | null>(null)
   const [granted, setGranted] = useState<number | null>(null)
 
-  // referral state doubles as the claimed-by-me source; without it we can't
-  // tell whether the entry still applies, so stay hidden
-  if (!state || !state.enabled || !state.eligible || !state.referral) return null
-  if (state.referral.claimedByMe && granted === null) return null
+  if (!state || !state.enabled || !state.eligible) return null
+  // the friend's-code offer applies only while this account can still redeem
+  // an invite code; without referral state we can't tell, so don't promise it
+  const inviteOffer = state.referral && !state.referral.claimedByMe ? state.referral : null
 
   const submit = async () => {
     if (!code.trim() || submitting) return
@@ -39,8 +42,8 @@ export function InviteCodeClaim() {
         setError(result.message)
       }
     } catch (err) {
-      console.error("Failed to claim invite code:", err)
-      setError("Could not apply the invite code. Please try again.")
+      console.error("Failed to apply code:", err)
+      setError("Could not apply the code. Please try again.")
     } finally {
       setSubmitting(false)
     }
@@ -51,7 +54,7 @@ export function InviteCodeClaim() {
       <div className="flex items-center gap-2 rounded-lg border bg-emerald-500/5 px-4 py-3">
         <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
         <p className="text-sm">
-          Invite code applied — {formatCreditsAsDollars(granted)} in credits added to your account.
+          Code applied — {formatCreditsAsDollars(granted)} in credits added to your account.
         </p>
       </div>
     )
@@ -61,7 +64,7 @@ export function InviteCodeClaim() {
     <div className="rounded-lg border px-4 py-3">
       <div className="mb-2 flex items-center gap-2">
         <Ticket className="size-4 text-muted-foreground" />
-        <p className="text-sm font-medium">Have an invite code?</p>
+        <p className="text-sm font-medium">{inviteOffer ? "Have an invite or promo code?" : "Have a promo code?"}</p>
       </div>
       <div className="flex items-center gap-2">
         <Input
@@ -73,17 +76,19 @@ export function InviteCodeClaim() {
           onKeyDown={(e) => {
             if (e.key === "Enter") submit()
           }}
-          placeholder="ABC-DEF-GHJ"
-          className="h-8 font-mono text-sm uppercase"
-          maxLength={16}
+          placeholder={inviteOffer ? "ABC-DEF-GHJ" : "Promo code"}
+          className="h-8 font-mono text-sm uppercase placeholder:normal-case"
+          maxLength={40}
         />
         <Button size="sm" onClick={submit} disabled={!code.trim() || submitting}>
           {submitting ? <Loader2 className="size-4 animate-spin" /> : "Apply"}
         </Button>
       </div>
-      <p className="mt-1.5 text-xs text-muted-foreground">
-        Enter a friend&apos;s code and you both earn {formatCreditsAsDollars(state.referral.refereeCredits)} in credits.
-      </p>
+      {inviteOffer && (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Enter a friend&apos;s code and you both earn {formatCreditsAsDollars(inviteOffer.refereeCredits)} in credits.
+        </p>
+      )}
       {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
     </div>
   )

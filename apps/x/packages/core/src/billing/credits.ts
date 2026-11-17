@@ -88,6 +88,9 @@ async function hasPaidPlan(userId: string): Promise<boolean> {
 // store holds the pseudo-code below marking that this account has redeemed
 // someone's invite code (the backend allows one lifetime claim per account).
 const REFERRAL_CLAIMED_KEY = 'referral_claimed';
+// event code for a redeemed promo code; never written to the claimed store —
+// the backend alone decides whether a given promo code was already used
+const PROMO_REDEEMED_KEY = 'promo_redeemed';
 
 interface ClaimedStore {
   [userId: string]: {
@@ -132,7 +135,7 @@ function userIdFromToken(accessToken: string): string | null {
 }
 
 export interface CreditActivationSuccess {
-  code: CreditActivityCode | typeof REFERRAL_CLAIMED_KEY;
+  code: CreditActivityCode | typeof REFERRAL_CLAIMED_KEY | typeof PROMO_REDEEMED_KEY;
   title: string;
   // granted amount as confirmed by the backend
   credits: number;
@@ -276,15 +279,51 @@ async function fetchReferralStatus(accessToken: string, userId: string): Promise
   }
 }
 
+type PromoRedeemOutcome =
+  | { kind: 'redeemed'; creditsGranted: number }
+  | { kind: 'not_a_promo_code' }
+  | { kind: 'rejected'; message?: string };
+
 /**
- * Redeem another user's invite code (POST /v1/referral/claims); the backend
- * grants both sides credits in one transaction and enforces all the rules
- * (one lifetime claim per account, new accounts only, per-code cap, no
- * self-claims). Failure messages are user-presentable — the backend's own
- * copy where it provided one.
+ * Try the code as a shared promo code (POST /v1/billing/promo-codes/redemptions,
+ * rowboatx-backend#54). A 404 means it is not a promo code — also what a
+ * backend without the route answers — so the caller goes on to treat it as an
+ * invite code. Any other refusal (already redeemed, expired, fully used) is
+ * final for this code.
+ */
+async function redeemPromoCode(accessToken: string, code: string): Promise<PromoRedeemOutcome> {
+  const response = await fetch(`${API_URL}/v1/billing/promo-codes/redemptions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code }),
+  });
+  if (response.status === 404) return { kind: 'not_a_promo_code' };
+  const body = await response.json().catch(() => null) as { creditsGranted?: number; error?: string } | null;
+  if (response.ok) {
+    if (typeof body?.creditsGranted !== 'number') {
+      console.warn('[Credits] Promo redemption returned an unexpected body');
+      return { kind: 'rejected' };
+    }
+    return { kind: 'redeemed', creditsGranted: body.creditsGranted };
+  }
+  return { kind: 'rejected', ...(typeof body?.error === 'string' ? { message: body.error } : {}) };
+}
+
+/**
+ * Apply a code typed into the "Have a code?" entry. The one field takes two
+ * kinds of code (2026-11-17, hackathon promo codes), and the backend decides
+ * which it is: a shared promo code is tried first, and anything it does not
+ * know is redeemed as another user's invite code (POST /v1/referral/claims).
+ * For invite codes the backend grants both sides credits in one transaction
+ * and enforces all the rules (one lifetime claim per account, new accounts
+ * only, per-code cap, no self-claims). Failure messages are user-presentable
+ * — the backend's own copy where it provided one.
  */
 export async function claimReferralCode(rawCode: string): Promise<ReferralClaimResult> {
-  const fallback: ReferralClaimResult = { ok: false, message: 'Could not apply the invite code. Please try again.' };
+  const fallback: ReferralClaimResult = { ok: false, message: 'Could not apply the code. Please try again.' };
   try {
     const code = rawCode.trim();
     if (!code) return { ok: false, message: 'Enter an invite code.' };
@@ -292,10 +331,23 @@ export async function claimReferralCode(rawCode: string): Promise<ReferralClaimR
     const accessToken = await getAccessToken();
     const userId = userIdFromToken(accessToken);
     if (!userId) return { ok: false, message: 'Sign in to Rowboat to use an invite code.' };
+    if (!(await isCreditsEnabled())) return { ok: false, message: 'Invite codes are not available right now.' };
+
+    // promo first: it has no once-per-account rule across codes, so it must
+    // run before the local "already used an invite code" refusal below
+    const promo = await redeemPromoCode(accessToken, code);
+    if (promo.kind === 'redeemed') {
+      console.log(`[Credits] Promo code redeemed: +${promo.creditsGranted} credits`);
+      notifyActivation({ code: PROMO_REDEEMED_KEY, title: 'Promo code applied', credits: promo.creditsGranted });
+      return { ok: true, creditsGranted: promo.creditsGranted };
+    }
+    if (promo.kind === 'rejected') {
+      return { ok: false, message: promo.message ?? fallback.message };
+    }
+
     if (readClaimedStore()[userId]?.[REFERRAL_CLAIMED_KEY]) {
       return { ok: false, message: 'This account has already used an invite code.' };
     }
-    if (!(await isCreditsEnabled())) return { ok: false, message: 'Invite codes are not available right now.' };
 
     const response = await fetch(`${API_URL}/v1/referral/claims`, {
       method: 'POST',

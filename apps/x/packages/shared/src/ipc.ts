@@ -3709,7 +3709,8 @@ export const ipcSchemas = {
     req: CreditActivatedEventSchema,
     res: z.null(),
   },
-  // Redeem another user's invite (referral) code — both sides earn credits.
+  // Apply a code from the "Have a code?" entry: a shared promo code, or
+  // another user's invite (referral) code — both sides earn credits.
   'referral:claim': {
     req: z.object({ code: z.string() }),
     res: ReferralClaimResultSchema,

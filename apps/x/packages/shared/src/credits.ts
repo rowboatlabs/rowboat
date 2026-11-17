@@ -56,7 +56,7 @@ export const ReferralStateSchema = z.object({
 });
 export type ReferralState = z.infer<typeof ReferralStateSchema>;
 
-// Result of redeeming an invite code (`referral:claim`). Failure messages are
+// Result of applying an invite or promo code (`referral:claim`). Failure messages are
 // already user-presentable (the backend's own copy where available).
 export const ReferralClaimResultSchema = z.union([
   z.object({ ok: z.literal(true), creditsGranted: z.number() }),
@@ -80,9 +80,10 @@ export type CreditsState = z.infer<typeof CreditsStateSchema>;
 
 // Payload of the main → renderer `credits:didActivate` event, emitted after
 // the backend confirms a grant — either a first-time-action activation or a
-// redeemed invite code (`referral_claimed`).
+// redeemed invite code (`referral_claimed`), or a redeemed promo code
+// (`promo_redeemed`).
 export const CreditActivatedEventSchema = z.object({
-  code: z.union([CreditActivityCodeSchema, z.literal('referral_claimed')]),
+  code: z.union([CreditActivityCodeSchema, z.literal('referral_claimed'), z.literal('promo_redeemed')]),
   title: z.string(),
   // actual granted amount, from the backend response
   credits: z.number(),

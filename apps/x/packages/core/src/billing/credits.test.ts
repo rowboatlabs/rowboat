@@ -210,11 +210,19 @@ const REFERRAL_STATUS = {
   refereeCredits: 500,
 };
 
-// route fetches by URL: GET /v1/referral -> status, POST /v1/referral/claims -> claim
-function mockReferralApi(claim: () => Response, status: () => Response = () => new Response(JSON.stringify(REFERRAL_STATUS), { status: 200 })) {
+const NOT_A_PROMO_CODE = () => new Response(JSON.stringify({ error: "Unknown promo code" }), { status: 404 });
+
+// route fetches by URL: GET /v1/referral -> status, POST /v1/referral/claims -> claim,
+// POST /v1/billing/promo-codes/redemptions -> promo (by default: not a promo code)
+function mockReferralApi(
+  claim: () => Response,
+  status: () => Response = () => new Response(JSON.stringify(REFERRAL_STATUS), { status: 200 }),
+  promo: () => Response = NOT_A_PROMO_CODE,
+) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (String(url).endsWith("/v1/referral")) return status();
     if (String(url).endsWith("/v1/referral/claims") && init?.method === "POST") return claim();
+    if (String(url).endsWith("/v1/billing/promo-codes/redemptions") && init?.method === "POST") return promo();
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
@@ -251,11 +259,14 @@ describe("referrals", () => {
     const state = await credits.getCreditsState();
     expect(state.referral?.claimedByMe).toBe(true);
 
-    // a second attempt is refused locally, without a network call
-    const fetchCalls = fetchMock.mock.calls.length;
+    // a second attempt is checked as a promo code, then refused locally
+    // without another claim request
+    const claimCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/v1/referral/claims")).length;
+    const before = claimCalls();
     const second = await credits.claimReferralCode("XYZ-XYZ-XYZ");
-    expect(second.ok).toBe(false);
-    expect(fetchMock.mock.calls.length).toBe(fetchCalls);
+    expect(second).toEqual({ ok: false, message: "This account has already used an invite code." });
+    expect(claimCalls()).toBe(before);
   });
 
   it("surfaces backend claim errors and stays retryable", async () => {
@@ -280,5 +291,55 @@ describe("referrals", () => {
     expect(result.ok).toBe(false);
     const state = await credits.getCreditsState();
     expect(state.referral?.claimedByMe).toBe(true);
+  });
+});
+
+describe("promo codes", () => {
+  const claimCalls = () =>
+    fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/v1/referral/claims")).length;
+
+  it("redeems a promo code without spending the account's invite claim", async () => {
+    mockReferralApi(
+      () => new Response(JSON.stringify({ creditsGranted: 500 }), { status: 200 }),
+      undefined,
+      () => new Response(JSON.stringify({ creditsGranted: 5000, expiresAt: "2026-12-17T00:00:00.000Z" }), { status: 200 }),
+    );
+    const credits = await loadCredits();
+    const seen: unknown[] = [];
+    credits.subscribeCreditActivations((event) => seen.push(event));
+
+    const result = await credits.claimReferralCode(" hack-2026 ");
+    expect(result).toEqual({ ok: true, creditsGranted: 5000 });
+    expect(seen).toEqual([{ code: "promo_redeemed", title: "Promo code applied", credits: 5000 }]);
+    expect(claimCalls()).toBe(0);
+
+    const state = await credits.getCreditsState();
+    expect(state.referral?.claimedByMe).toBe(false);
+  });
+
+  it("still redeems a promo code after an invite code was used", async () => {
+    let promo = NOT_A_PROMO_CODE;
+    mockReferralApi(
+      () => new Response(JSON.stringify({ creditsGranted: 500 }), { status: 200 }),
+      undefined,
+      () => promo(),
+    );
+    const credits = await loadCredits();
+    expect((await credits.claimReferralCode("ABC-DEF-GHJ")).ok).toBe(true);
+
+    promo = () => new Response(JSON.stringify({ creditsGranted: 5000, expiresAt: null }), { status: 200 });
+    expect(await credits.claimReferralCode("HACK2026")).toEqual({ ok: true, creditsGranted: 5000 });
+  });
+
+  it("surfaces a promo refusal without trying the code as an invite code", async () => {
+    mockReferralApi(
+      () => new Response(JSON.stringify({ creditsGranted: 500 }), { status: 200 }),
+      undefined,
+      () => new Response(JSON.stringify({ error: "This promo code has expired" }), { status: 410 }),
+    );
+    const credits = await loadCredits();
+
+    expect(await credits.claimReferralCode("HACK2026")).toEqual({ ok: false, message: "This promo code has expired" });
+    expect(claimCalls()).toBe(0);
   });
 });
