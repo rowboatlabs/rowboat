@@ -1,5 +1,6 @@
 import { SlackReactions } from './slack-reactions'
 import { SlackMessageBody } from './slack-message-body'
+import { useSlackSender } from '@/hooks/use-slack-sender'
 import { SlackProfile } from './slack-profile'
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { SessionPill } from '@/components/spaces/session-status'
@@ -240,7 +241,11 @@ function MessageRowImpl({
         onRemovePollVote = undefined
         onEndPoll = undefined
     }
-    const name = message.author.slack?.name ?? memberNames.get(message.author.memberId) ?? message.author.memberId
+    const mappedSender = useSlackSender(orgId, message)
+    const displayMemberId = mappedSender ?? message.author.memberId
+    const name = message.author.slack
+        ? (mappedSender ? memberNames.get(mappedSender) ?? 'Rowboat member' : message.author.slack.name)
+        : memberNames.get(displayMemberId) ?? displayMemberId
     const viaAgent = message.author.actingMode !== 'direct'
     const avatarSize = 'xl'
     const gutter = 'w-9'
@@ -348,10 +353,10 @@ function MessageRowImpl({
                 <span title={formatFullTimestamp(message.postedAt)} className={cn('shrink-0 pt-1 text-right text-[11px] leading-[22px] tabular-nums text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
                     {formatFeedTime(message.postedAt).replace(/^Yesterday /, '')}
                 </span>
-            ) : message.author.slack ? <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm" title="Imported Slack profile">{name.slice(0, 1)}</span> : (
-                <MemberProfilePopover id={message.author.memberId}>
+            ) : message.author.slack && !mappedSender ? <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm" title="Imported Slack profile">{name.slice(0, 1)}</span> : (
+                <MemberProfilePopover id={displayMemberId}>
                     <button type="button" aria-label={`${name}’s profile`} className="mt-0.5 shrink-0 cursor-pointer rounded-full">
-                        <MemberAvatar id={message.author.memberId} name={name} size={avatarSize} />
+                        <MemberAvatar id={displayMemberId} name={name} size={avatarSize} orgId={orgId} />
                     </button>
                 </MemberProfilePopover>
             )}
@@ -366,7 +371,7 @@ function MessageRowImpl({
                 )}
                 {!continuation && (
                     <div className="flex flex-wrap items-baseline gap-x-2 text-xs">
-                        {message.author.slack ? <SlackProfile message={message} orgId={orgId} selfMemberId={selfMemberId} /> : <MemberProfilePopover id={message.author.memberId}>
+                        {message.author.slack ? <SlackProfile message={message} orgId={orgId} selfMemberId={selfMemberId} mappedMemberId={mappedSender} mappedName={name} /> : <MemberProfilePopover id={message.author.memberId}>
                             <button type="button" className="cursor-pointer text-[15px] font-bold leading-[22px] text-foreground hover:underline">{name}</button>
                         </MemberProfilePopover>}
                         {!message.author.slack && <AgentMark id={message.author.memberId} />}
