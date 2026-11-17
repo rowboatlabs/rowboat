@@ -544,10 +544,11 @@ export async function listArchived(limit = 30, now: Date = new Date()): Promise<
     const out: ArchivedTodo[] = [];
     for (const month of months) {
         const raw = await fs.readFile(path.join(ARCHIVE_DIR, `${month}.md`), 'utf-8').catch(() => '');
-        if (raw) out.push(...parseArchive(month, raw));
+        // 2026-11-13: reverse each append-only month independently so the
+        // previous month never jumps ahead of current-month entries.
+        if (raw) out.push(...parseArchive(month, raw).reverse());
     }
-    // File order is chronological (appends); newest first for display.
-    return out.reverse().slice(0, limit);
+    return out.slice(0, limit);
 }
 
 /** Permanently remove an archived item. The one true delete in the system —
