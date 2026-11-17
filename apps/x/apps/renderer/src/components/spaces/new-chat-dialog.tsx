@@ -1,3 +1,4 @@
+import { SlackIcon } from '@/components/onboarding/provider-icons'
 import { SlackImportPreviewPanel } from './slack-import-preview'
 import { useEffect, useState } from 'react'
 import { ArrowRight, Bot, Hash, Link as LinkIcon, Loader2, MessageSquare } from 'lucide-react'
@@ -80,7 +81,7 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
                     </DialogHeader>
                     <div className="grid gap-2 pt-1">
                         {option(<Hash className="size-4" />, 'New space', 'Name it, add people and agents, and share its link.', () => setScreen('group'))}
-                        {option(<Hash className="size-4" />, 'Import from Slack', 'Preview channels from a Slack export ZIP.', () => setScreen('slack'))}
+                        {option(<SlackIcon className="size-5" />, 'Import from Slack', 'Preview channels from a Slack export ZIP.', () => setScreen('slack'))}
                         {option(<MessageSquare className="size-4" />, 'New message', 'Someone you share a space with, or one of your agents.', () => setMessaging(true))}
                         {onOpenAgents && option(<Bot className="size-4" />, 'Add an agent', 'Claude Code, Codex, Hermes and more — it becomes yours to bring into groups.', () => { close(false); onOpenAgents(org.id) })}
                         {option(<LinkIcon className="size-4" />, 'Join with a link', 'Paste the link someone sent you.', () => { close(false); openServerDialog({ kind: 'join' }) })}
@@ -94,7 +95,8 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
                         <DialogTitle>New space</DialogTitle>
                         <DialogDescription>You are its first admin. Add people and agents once it exists, or share its invite link.</DialogDescription>
                     </DialogHeader>
-                    <Button variant="outline" onClick={() => setScreen('slack')}>Import from Slack</Button>
+                    {option(<SlackIcon className="size-5" />, 'Import from Slack', 'Bring your channels and conversation history into Rowboat.', () => setScreen('slack'))}
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground"><div className="h-px flex-1 bg-border" />or create a new space<div className="h-px flex-1 bg-border" /></div>
                     <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void createGroup() }}>
                         <Input autoFocus maxLength={128} value={name} onChange={(event) => setName(event.target.value)} placeholder="Space name" aria-label="Space name" />
                         <div className="flex items-center justify-between">

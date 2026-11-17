@@ -420,6 +420,8 @@ export class HarborService {
   }
   startImports() { this.imports.startWorker(); }
   stopImports() { return this.imports.stopWorker(); }
+  getSlackProfile(ctx: ActorCtx, spaceId: string, messageId: string) { return this.imports.getProfile(ctx, spaceId, messageId); }
+  linkSlackProfile(ctx: ActorCtx, spaceId: string, messageId: string, memberId: string | null) { return this.imports.linkProfile(ctx, spaceId, messageId, memberId); }
   startSlackImport(ctx: ActorCtx, input: import('@rowboat/spaces-protocol').SlackImportSelection & { bytes: string }) { return this.imports.start(ctx, Buffer.from(input.bytes, 'base64'), input); }
   listSlackImports(ctx: ActorCtx) { return this.imports.list(ctx); }
   getSlackImport(ctx: ActorCtx, id: string) { return this.imports.get(ctx, id); }

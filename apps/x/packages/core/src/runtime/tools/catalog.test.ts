@@ -219,6 +219,8 @@ const HISTORICAL_KEY_ORDER = [
     "spreadsheet-create",
     "spreadsheet-edit",
     "generate-image",
+    "get_slack_profile",
+    "link_slack_profile",
     "start_slack_import",
     "list_slack_imports",
     "get_slack_import",
@@ -371,6 +373,7 @@ describe("BuiltinTools permission audit", () => {
             // How every teammate sees your person: gated like any org write.
             update_profile: "prompt",
             open_direct: "prompt",
+            link_slack_profile: "prompt",
             start_slack_import: "prompt",
             retry_slack_import: "prompt",
             create_space: "prompt",

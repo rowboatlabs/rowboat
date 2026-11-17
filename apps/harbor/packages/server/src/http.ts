@@ -299,6 +299,17 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listSpaces.response, { spaces });
   });
 
+  app.get(routes.getSlackProfile.path, async c => {
+    c.header('Cache-Control', 'no-store');
+    const p = parseWith(routes.getSlackProfile.params, c.req.param());
+    return reply(c, routes.getSlackProfile.response, await service.getSlackProfile(actor(c), p.spaceId, p.messageId));
+  });
+  app.put(routes.linkSlackProfile.path, async c => {
+    c.header('Cache-Control', 'no-store');
+    const p = parseWith(routes.linkSlackProfile.params, c.req.param());
+    const input = await body(c, routes.linkSlackProfile.request);
+    return reply(c, routes.linkSlackProfile.response, await service.linkSlackProfile(actor(c), p.spaceId, p.messageId, input.memberId));
+  });
   app.post(routes.startSlackImport.path, async c => {
     c.header('Cache-Control', 'no-store');
     return reply(c, routes.startSlackImport.response, await service.startSlackImport(actor(c), await slackImportBody(c)));

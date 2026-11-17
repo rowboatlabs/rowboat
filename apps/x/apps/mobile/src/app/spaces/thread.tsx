@@ -740,7 +740,7 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
   invocationLines?: ReactNode;
 }) {
   const colors = useColors();
-  const name = member ? memberLabel(member) : message.author.memberId;
+  const name = message.author.slack?.name ?? (member ? memberLabel(member) : message.author.memberId);
   const body = nameFileLinks(chipMentions(message.body, memberNames), fileNames);
   // Same authed blob-image rule the chat rows use — the default renderer
   // can't fetch Harbor blobs.
@@ -773,10 +773,10 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
           }}
         >
           <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{(name[0] ?? '?').toUpperCase()}</Text>
-          {member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 40, height: 40 }} /> : null}
+          {!message.author.slack && member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 40, height: 40 }} /> : null}
         </View>
         <View>
-          <Text style={{ fontSize: 16, fontWeight: '700', color: colors.label }}>{name}</Text>
+          <Text style={{ fontSize: 16, fontWeight: '700', color: colors.label }}>{name}{message.author.slack ? ' · Slack' : ''}</Text>
           <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>{stamp}</Text>
         </View>
       </View>
@@ -786,7 +786,7 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
         <PollCard message={message} poll={message.poll} me={me} onVote={onVote} onRemoveVote={onRemoveVote} onEndPoll={onEndPoll} />
       ) : (
         <>
-          <MessageBody
+          {message.author.slack ? <Text style={{ color: colors.label, fontSize: 15 }}>{message.body}{message.author.slack.reactions?.map(r => `\n:${r.name}: × ${r.count} (Slack)`).join('')}</Text> : <MessageBody
             body={body}
             fileNames={fileNames}
             rules={imageRule}
@@ -801,8 +801,8 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
               onOpenAsset(link);
               return false;
             }}
-          />
-          <MessageLinkPreviews body={message.body} />
+          />}
+          {!message.author.slack && <MessageLinkPreviews body={message.body} />}
         </>
       )}
       {invocationLines}

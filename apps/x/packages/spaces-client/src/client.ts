@@ -362,6 +362,12 @@ export class SpacesClient {
   }
 
   /** A new group; its creator is its admin (api.ts createSpace; spec §4 Roles, 2026-11-09). */
+  getSlackProfile(spaceId: string, messageId: string) {
+    return this.request('GET', this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/slack-profile`), routes.getSlackProfile.response);
+  }
+  linkSlackProfile(spaceId: string, messageId: string, memberId: string | null) {
+    return this.request('PUT', this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/slack-profile`), routes.linkSlackProfile.response, { memberId });
+  }
   startSlackImport(input: import('@rowboat/spaces-protocol').SlackImportSelection & { bytes: string }) {
     return this.request('POST', routes.startSlackImport.path, routes.startSlackImport.response, input);
   }

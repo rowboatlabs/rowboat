@@ -1570,6 +1570,12 @@ export const MIGRATIONS: Migration[] = [
       `create table slack_import_sources (owner_id text not null references members(id) on delete cascade, workspace text not null, channel_id text not null, space_id text not null references spaces(id) on delete cascade, primary key(owner_id, workspace, channel_id))`,
     ],
   },
+  {
+    id: '068-slack-profile-links',
+    statements: [
+      `create table slack_profile_links (space_id text not null references spaces(id) on delete cascade, workspace text not null, user_id text not null, member_id text not null references members(id) on delete cascade, primary key(space_id,workspace,user_id))`,
+    ],
+  },
 ];
 
 /**

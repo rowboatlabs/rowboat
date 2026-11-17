@@ -1,3 +1,4 @@
+import { SlackIcon } from '@/components/onboarding/provider-icons'
 import { useEffect, useRef, useState } from 'react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ function date(ts?: string) {
 export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string; onOpenSpace?: (spaceId: string) => void }) {
     const [bytes, setBytes] = useState('')
     const [workspace, setWorkspace] = useState('')
+    const [append, setAppend] = useState(false)
     const [jobs, setJobs] = useState<spaces.SlackImportJob[]>([])
     const [starting, setStarting] = useState(false)
     useEffect(() => {
@@ -46,7 +48,7 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
     const start = async () => {
         setStarting(true); setError('')
         try {
-            const job = await window.ipc.invoke('spaces:startSlackImport', { orgId, bytes, workspace: workspace.trim().toLowerCase(), channelIds: [...selected] })
+            const job = await window.ipc.invoke('spaces:startSlackImport', { orgId, bytes, workspace: workspace.trim().toLowerCase(), channelIds: [...selected], existingChannels: append ? 'append' : 'skip' })
             setJobs(current => [job, ...current.filter(j => j.id !== job.id)])
             setBytes(''); setPreview(null); setSelected(new Set())
         } catch (err) { setError(err instanceof Error ? err.message : 'Could not start import.') }
@@ -93,9 +95,9 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
         return next
     })
     return <section className="space-y-4 py-4">
-        <div><h2 className="text-base font-medium">Import from Slack</h2>
+        <div><h2 className="flex items-center gap-2.5 text-base font-medium"><SlackIcon className="size-5 shrink-0" />Import from Slack</h2>
             <p className="mt-1 text-sm text-muted-foreground">Upload a Slack JSON export ZIP to review its channels. Each selected channel will become a separate new space.</p></div>
-        <p className="rounded-lg bg-muted p-3 text-sm">Imports continue after you leave. Each space initially contains only you; Slack profiles do not grant access. Existing imported channels are skipped, not updated. Text, threads and historical file links/reaction counts are preserved; rich Slack formatting and profile linking are not available yet.</p>
+        <p className="rounded-lg bg-muted p-3 text-sm">Imports continue after you leave. Each space initially contains only you; Slack profiles do not grant access. Existing imported channels are skipped unless you choose to append new messages. Text, threads and historical file links/reaction counts are preserved; admins can optionally link legacy authors to existing space members by opening their Slack profile. Basic Slack formatting and readable user mentions are supported.</p>
         <label className="block text-sm">Slack export ZIP (up to 25 MiB)
             <Input type="file" accept=".zip,application/zip" disabled={busy || starting} className="mt-2" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void upload(file) }} />
         </label>
@@ -116,7 +118,9 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
             {chosen.length > 0 && <div className="space-y-2">
                 <label className="block text-sm">Slack workspace domain<Input value={workspace} onChange={e => setWorkspace(e.target.value)} placeholder="team.slack.com" /></label>
                 <p className="text-xs text-muted-foreground">Use the same domain on future imports to prevent duplicate channels. Up to 100 channels per job.</p>
-                <Button disabled={starting || chosen.length > 100 || !workspace.trim() || jobs.some(j => j.status === 'queued' || j.status === 'running')} onClick={() => void start()}>{starting ? 'Starting import…' : `Import ${chosen.length} channels as new spaces`}</Button>
+                <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={append} onChange={e => setAppend(e.target.checked)} />Append new messages to channels I previously imported</label>
+                {append && <p className="text-xs text-muted-foreground">Requires admin access to each destination. Existing messages, edits and deletions stay unchanged; only unseen Slack timestamps are added.</p>}
+                <Button disabled={starting || chosen.length > 100 || !workspace.trim() || jobs.some(j => j.status === 'queued' || j.status === 'running')} onClick={() => void start()}>{starting ? 'Starting import…' : append ? `Import or update ${chosen.length} channels` : `Import ${chosen.length} channels as new spaces`}</Button>
             </div>}
             {preview.warnings.length > 0 && <details><summary className="cursor-pointer text-sm">{preview.warnings.length} warnings — review before importing</summary><ul className="mt-2 max-h-48 space-y-2 overflow-auto text-xs">{preview.warnings.slice(0, 100).map((w, i) => <li key={i} className="break-words"><strong>{w.code}</strong>: {w.path}{w.record !== undefined ? ` (record ${w.record})` : ''} — {w.detail}</li>)}</ul>{preview.warnings.length > 100 && <p className="text-xs">Showing the first 100 warnings.</p>}</details>}
         </>}

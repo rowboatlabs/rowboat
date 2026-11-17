@@ -431,6 +431,13 @@ interface AssetRow {
 }
 
 export class PgStore implements Store {
+  async getSlackProfileLink(spaceId: string, workspace: string, userId: string): Promise<string | undefined> {
+    return (await this.sql.query<{member_id: string}>('select member_id from slack_profile_links where space_id=$1 and workspace=$2 and user_id=$3', [spaceId, workspace, userId]))[0]?.member_id;
+  }
+  async putSlackProfileLink(spaceId: string, workspace: string, userId: string, memberId: string | null): Promise<void> {
+    if (memberId === null) { await this.sql.query('delete from slack_profile_links where space_id=$1 and workspace=$2 and user_id=$3', [spaceId, workspace, userId]); return; }
+    await this.sql.query('insert into slack_profile_links(space_id,workspace,user_id,member_id) values($1,$2,$3,$4) on conflict(space_id,workspace,user_id) do update set member_id=excluded.member_id', [spaceId,workspace,userId,memberId]);
+  }
   async getSlackJobByKey(key: string): Promise<import('./store.js').StoredSlackJob | undefined> {
     const rows = await this.sql.query<{id:string}>('select id from slack_import_jobs where dedupe_key=$1', [key]);
     return rows[0] ? this.getSlackJob(rows[0].id) : undefined;

@@ -1,3 +1,6 @@
+import { SlackReactions } from './slack-reactions'
+import { SlackMessageBody } from './slack-message-body'
+import { SlackProfile } from './slack-profile'
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { SessionPill } from '@/components/spaces/session-status'
 import { useReactionReadMark } from '@/hooks/use-reaction-read-mark'
@@ -363,7 +366,7 @@ function MessageRowImpl({
                 )}
                 {!continuation && (
                     <div className="flex flex-wrap items-baseline gap-x-2 text-xs">
-                        {message.author.slack ? <span className="text-[15px] font-bold">{name} <span className="text-xs font-normal text-muted-foreground">· Slack</span></span> : <MemberProfilePopover id={message.author.memberId}>
+                        {message.author.slack ? <SlackProfile message={message} orgId={orgId} selfMemberId={selfMemberId} /> : <MemberProfilePopover id={message.author.memberId}>
                             <button type="button" className="cursor-pointer text-[15px] font-bold leading-[22px] text-foreground hover:underline">{name}</button>
                         </MemberProfilePopover>}
                         {!message.author.slack && <AgentMark id={message.author.memberId} />}
@@ -449,11 +452,11 @@ function MessageRowImpl({
                         ) : null}
                         {collapsed && !message.summary ? (
                             <div data-clamped className="relative max-h-[13.5rem] overflow-hidden">
-                                {message.author.slack ? <div className="whitespace-pre-wrap break-words">{message.body}</div> : <SpaceMarkdown body={message.body} />}
+                                {message.author.slack ? <SlackMessageBody body={message.body} /> : <SpaceMarkdown body={message.body} />}
                                 <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent" />
                             </div>
                         ) : !collapsed ? (
-                            message.author.slack ? <div className="whitespace-pre-wrap break-words">{message.body}</div> : <SpaceMarkdown body={message.body} />
+                            message.author.slack ? <SlackMessageBody body={message.body} /> : <SpaceMarkdown body={message.body} />
                         ) : null}
                         {long && (
                             <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}
@@ -483,6 +486,7 @@ function MessageRowImpl({
                         )}
                     </div>
                 )}
+                {!deleted && message.author.slack?.reactions?.length ? <SlackReactions message={message} onReact={onReact} /> : null}
                 {!deleted && !unconfirmed && <InvocationLines messageId={message.id} />}
                 {!deleted && !unconfirmed && (
                     <ReactionChips

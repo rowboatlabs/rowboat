@@ -17,7 +17,7 @@ export const Attribution = z.object({
   /** Display-only agent label, e.g. "Rowboat", "Claude Code". Never an identity. */
   agentName: z.string().max(64).optional(),
   // 2026-11-16: memberId accounts for the import; Slack provenance is not a Rowboat identity.
-  slack: z.object({ workspace: z.string(), channelId: z.string(), userId: z.string(), name: z.string(), timestamp: z.string() }).optional(),
+  slack: z.object({ workspace: z.string(), channelId: z.string(), userId: z.string(), name: z.string(), timestamp: z.string(), reactions: z.array(z.object({ name: z.string(), count: z.number().int().nonnegative(), users: z.array(z.object({ id: z.string(), name: z.string() })) })).optional() }).optional(),
 });
 export type Attribution = z.infer<typeof Attribution>;
 
