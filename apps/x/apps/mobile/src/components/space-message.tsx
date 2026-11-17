@@ -252,6 +252,43 @@ export function replyTimeLabel(iso: string, now = new Date()): string {
   return `${day} at ${time}`;
 }
 
+/** Local calendar day of a timestamp, to tell when a day header is due. */
+export function dayKey(iso: string): string {
+  const at = new Date(iso);
+  return `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}`;
+}
+
+function ordinal(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
+
+/** "Today", "Yesterday", "Oct 7th", and "Oct 7th, 2025" once it isn't this year — as Slack's day headers. */
+export function dayLabel(iso: string, now = new Date()): string {
+  const at = new Date(iso);
+  if (at.toDateString() === now.toDateString()) return 'Today';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (at.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  const day = `${at.toLocaleDateString([], { month: 'short' })} ${ordinal(at.getDate())}`;
+  return at.getFullYear() === now.getFullYear() ? day : `${day}, ${at.getFullYear()}`;
+}
+
+/**
+ * A day's header over its first message (2026-11-17, Arjun: the phone showed
+ * only times, the web has day dividers): bold date, hairline under, as Slack's.
+ */
+export function DayHeader({ iso }: { iso: string }) {
+  const colors = useColors();
+  return (
+    <View style={{ marginTop: 10, marginBottom: 4, paddingHorizontal: 16 }}>
+      <Text style={{ fontSize: 15, fontWeight: '700', color: colors.label, paddingBottom: 6 }}>{dayLabel(iso)}</Text>
+      <View style={{ height: 0.5, backgroundColor: colors.separator }} />
+    </View>
+  );
+}
+
 /**
  * Slack's reply row under a root in the stream (2026-11-13): who replied (the
  * first few, rounded squares), "N replies" in link blue, then when the last one
