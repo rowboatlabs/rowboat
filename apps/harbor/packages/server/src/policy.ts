@@ -466,3 +466,11 @@ export function canStopInvocation(actor: Member, invocation: Invocation, stopDec
 export function canManageSlackImport(memberId: string, ownerId: string | undefined): Decision {
   return memberId === ownerId ? null : { code: 'not_found', message: 'No such Slack import' };
 }
+
+export function canLinkSlackProfile(membership: Membership | undefined): Decision {
+  return isAdmin(membership) ? null : { code: 'forbidden', message: 'Only space admins can link Slack profiles' };
+}
+
+export function canAppendSlackImport(membership: Membership | undefined): Decision {
+  return isAdmin(membership) ? null : { code: 'forbidden', message: 'Only space admins can append imported history' };
+}

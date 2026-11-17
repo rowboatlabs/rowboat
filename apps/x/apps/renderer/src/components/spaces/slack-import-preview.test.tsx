@@ -51,6 +51,6 @@ it('starts only selected channels after explicit confirmation and shows durable 
     fireEvent.change(screen.getByLabelText('Slack workspace domain'), { target: { value: 'team.slack.com' } })
     fireEvent.click(screen.getByRole('button', { name: 'Import 1 channels as new spaces' }))
     await screen.findByText('team.slack.com · queued · 0/1 channels')
-    expect(invoke).toHaveBeenCalledWith('spaces:startSlackImport', { orgId: 'server', bytes: 'emlw', workspace: 'team.slack.com', channelIds: ['C1'] })
+    expect(invoke).toHaveBeenCalledWith('spaces:startSlackImport', { orgId: 'server', bytes: 'emlw', workspace: 'team.slack.com', channelIds: ['C1'], existingChannels: 'skip' })
     expect(screen.queryByLabelText('Select general')).toBeNull()
 })

@@ -280,6 +280,8 @@ export interface StoredSlackJob {
 }
 
 export interface Store {
+  getSlackProfileLink(spaceId: string, workspace: string, userId: string): Promise<string | undefined>;
+  putSlackProfileLink(spaceId: string, workspace: string, userId: string, memberId: string | null): Promise<void>;
   getSlackJobByKey(key: string): Promise<StoredSlackJob | undefined>;
   putSlackJob(record: StoredSlackJob): Promise<void>;
   getSlackJob(id: string): Promise<StoredSlackJob | undefined>;

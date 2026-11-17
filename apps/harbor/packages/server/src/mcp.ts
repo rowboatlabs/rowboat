@@ -175,6 +175,14 @@ async function dispatch(
       const a = args as { spaceId: string; includeDeleted?: boolean };
       return { entries: await service.listAssets(ctx, a.spaceId, a.includeDeleted) };
     }
+    case 'get_slack_profile': {
+      const p = args as { spaceId: string; messageId: string };
+      return service.getSlackProfile(ctx, p.spaceId, p.messageId);
+    }
+    case 'link_slack_profile': {
+      const p = args as { spaceId: string; messageId: string; memberId: string | null };
+      return service.linkSlackProfile(ctx, p.spaceId, p.messageId, p.memberId);
+    }
     case 'start_slack_import':
       return service.startSlackImport(ctx, args as import('@rowboat/spaces-protocol').SlackImportSelection & { bytes: string });
     case 'list_slack_imports': return service.listSlackImports(ctx);
