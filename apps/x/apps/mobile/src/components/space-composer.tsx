@@ -191,6 +191,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [failed, setFailed] = useState(false);
   /** The saved unsent copy this box last wrote or restored — the only one it may clear. */
   const ownedUnsent = useRef<string | undefined>(undefined);
+  /** Sends not yet answered: the saved copy is theirs until they settle. */
+  const [pending, setPending] = useState(0);
 
   useImperativeHandle(
     ref,
@@ -275,9 +277,11 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     setPicked(new Map());
     setAttachments([]);
     setInputKey((k) => k + 1);
+    setPending((n) => n + 1);
     const settled = Promise.resolve(editingId && onEdit ? onEdit(editingId, body) : onSend(body))
       .catch(() => false)
       .then((ok) => {
+        setPending((n) => n - 1);
         if (ok !== false) {
           if (draftKey && unsentId) clearUnsent(draftKey, unsentId);
           return;
@@ -298,7 +302,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     if (draftKey && unsentId) trackSend(draftKey, settled);
   };
 
-  // A send that failed after you left this chat comes back on the next open.
+  // A send that failed after you left this chat, or text you typed and left,
+  // comes back on the next open.
   const boxRef = useRef({ text, attachments });
   boxRef.current = { text, attachments };
   useEffect(() => {
@@ -313,7 +318,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
       setPicked(new Map(draft.picked));
       setAttachments(draft.attachments);
       ownedUnsent.current = draft.id;
-      setFailed(true);
+      setFailed(!draft.typed);
       setInputKey((k) => k + 1);
     });
     return () => {
@@ -321,18 +326,19 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     };
   }, [draftKey]);
 
-  // While the box holds a "Not sent" draft, the saved copy follows it: leave
-  // again and it still comes back; clear the box and it's gone.
+  // The saved copy follows the box: leave and it comes back; clear the box
+  // and it's gone. While a send is in flight the slot holds that send, so
+  // typing waits until it settles (2026-11-17).
   useEffect(() => {
-    if (!draftKey || !failed || editing) return;
+    if (!draftKey || editing || pending > 0) return;
     if (text.trim() || attachments.length > 0) {
       const id = newUnsentId();
-      saveUnsent(draftKey, { id, text, picked: [...picked], attachments });
+      saveUnsent(draftKey, { id, text, picked: [...picked], attachments, ...(failed ? {} : { typed: true }) });
       ownedUnsent.current = id;
     } else if (ownedUnsent.current) {
       clearUnsent(draftKey, ownedUnsent.current);
     }
-  }, [draftKey, failed, editing, text, picked, attachments]);
+  }, [draftKey, failed, editing, pending, text, picked, attachments]);
 
   // Picked mentions read as pills: bold spans inside the field.
   const styled = useMemo(() => {
