@@ -2,7 +2,7 @@ import { reportMobileActivity } from '../../lib/spaces/activity';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +16,7 @@ import { spaces } from '@x/shared';
 import { ChatMarkdown } from '@/components/markdown';
 import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage, parseBlobLink } from '@/components/space-blob-image';
-import { MessageActionSheet, MessageBody, MessageRow, applyReaction, chipMentions, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
+import { DayHeader, MessageActionSheet, MessageBody, MessageRow, dayKey, applyReaction, chipMentions, fileLinkRule, nameFileLinks, parseAssetLink } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { PollCard, applyPollVote } from '@/components/poll-card';
 import { ApprovalCard } from '@/components/approval-card';
@@ -630,10 +630,14 @@ export default function SpaceThreadScreen() {
           ) : null}
           {/* Root painted from the stream; replies still on their way. */}
           {rootMessage && replies === null && !error ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
-          {visibleReplies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} fileNames={fileNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
-              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll}
-              approvalCard={cardFor(m)} invocationLines={linesFor(m)} />
+          {/* A reply on a later day than the one before it (the root's, first) gets its day's header (2026-11-17). */}
+          {visibleReplies?.map((m, i) => (
+            <Fragment key={m.id}>
+              {dayKey((i === 0 ? rootMessage : visibleReplies[i - 1])?.postedAt ?? m.postedAt) !== dayKey(m.postedAt) ? <DayHeader iso={m.postedAt} /> : null}
+              <MessageRow message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} fileNames={fileNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
+                onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll}
+                approvalCard={cardFor(m)} invocationLines={linesFor(m)} />
+            </Fragment>
           ))}
         </ScrollView>
       )}

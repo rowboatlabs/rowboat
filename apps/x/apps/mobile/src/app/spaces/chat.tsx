@@ -3,7 +3,7 @@ import { reportMobileActivity } from '../../lib/spaces/activity';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { Image } from '@/components/sf-image';
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +13,7 @@ import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import { onServer, type Approval, type Invocation, type Member, type Message, type Space } from '@rowboat/spaces-protocol';
 import { spaces } from '@x/shared';
 
-import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
+import { DayHeader, MessageActionSheet, MessageRow, applyReaction, dayKey } from '@/components/space-message';
 import { SpaceComposer, type SpaceComposerHandle } from '@/components/space-composer';
 import { SpaceHeaderMenu } from '@/components/space-header-menu';
 import { applyPollVote } from '@/components/poll-card';
@@ -662,26 +662,28 @@ export default function SpaceChatScreen() {
           onScroll={onScroll}
           scrollEventThrottle={100}
         >
-          {visible.map((m) => (
-            <MessageRow
-              key={m.id}
-              message={m}
-              member={profiles.get(m.author.memberId)}
-              memberNames={memberNames} fileNames={fileNames}
-              members={profiles}
-              me={me}
-              onToggleReaction={toggleReaction}
-              onOpenThread={openThread}
-              onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
-              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }}
-              onVote={vote}
-              onRemoveVote={removeVote}
-              onEndPoll={endPoll}
-              onOpenAsset={openAssetLink}
-              onOpenBlob={openBlobLink}
-              approvalCard={cardFor(m)}
-              invocationLines={linesFor(m)}
-            />
+          {visible.map((m, i) => (
+            <Fragment key={m.id}>
+              {i === 0 || dayKey(visible[i - 1]!.postedAt) !== dayKey(m.postedAt) ? <DayHeader iso={m.postedAt} /> : null}
+              <MessageRow
+                message={m}
+                member={profiles.get(m.author.memberId)}
+                memberNames={memberNames} fileNames={fileNames}
+                members={profiles}
+                me={me}
+                onToggleReaction={toggleReaction}
+                onOpenThread={openThread}
+                onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
+                onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }}
+                onVote={vote}
+                onRemoveVote={removeVote}
+                onEndPoll={endPoll}
+                onOpenAsset={openAssetLink}
+                onOpenBlob={openBlobLink}
+                approvalCard={cardFor(m)}
+                invocationLines={linesFor(m)}
+              />
+            </Fragment>
           ))}
         </ScrollView>
       )}
