@@ -48,7 +48,7 @@ export class FakeMaritime {
   /** Directories made through the files API, so an empty one lists. */
   readonly dirs = new Set<string>();
   readonly executions = new Map<string, FakeExecution>();
-  agent = { id: AGENT_ID, name: 'Scout', framework: 'hermes', templateId: 'hermes' as string | null, status: 'sleeping' };
+  agent: { id: string; name: string; framework: string; templateId: string | null; status: string; imageName?: string } = { id: AGENT_ID, name: 'Scout', framework: 'hermes', templateId: 'hermes', status: 'sleeping' };
   /** Agents created through the end-user route (managed agents), by id; each deploys for two reads, then sleeps. */
   readonly created = new Map<string, { id: string; name: string; framework: string; templateId: string | null; status: string; reads: number; endUser: string }>();
   /** The management area (2026-10-27), per agent id: environment variables, skills, triggers; logs are canned. */

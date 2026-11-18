@@ -4,8 +4,8 @@ import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { HOME, fail, type HostingState } from '@/components/spaces/agent-hosting-state'
-import { ConfirmButton, DangerRow, Empty, FormCard, Row, RowAction, Rows, ScreenHeader, Subhead, Tag } from '@/components/spaces/agent-tabs'
+import { fail, type HostingState } from '@/components/spaces/agent-hosting-state'
+import { ConfirmButton, Empty, FormCard, Row, RowAction, Rows, ScreenHeader, Subhead, Tag } from '@/components/spaces/agent-tabs'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -15,13 +15,11 @@ import { cn } from '@/lib/utils'
 // its power, environment variables (a secret's value is never read back),
 // one shell command at a time with its output, the platform's logs, the VM's
 // files, and for Hermes the VM's skills and the platform's triggers. Each is
-// a tab on the agent page; what cannot be undone (deleting a variable, a
-// path, a skill, an automation, the agent itself) is on the Danger zone tab
-// and asks once more. The page (agent-page.tsx) composes the tabs; the state
+// a tab on the agent page; a delete (a variable, a path, a skill, an
+// automation) sits on its own row and asks once more (2026-11-13). The page (agent-page.tsx) composes the tabs; the state
 // they share is in agent-hosting-state.ts.
 
 const COMMAND_POLL_MS = 1_000
-const SELECT = 'h-8 max-w-[14rem] min-w-0 rounded-md border border-border bg-background px-2 font-mono text-xs disabled:opacity-60'
 
 /** The machine as Maritime sees it, with a lamp, and its power: wake or sleep, restart, reload the environment. */
 export function MachineBlock({ orgId, agentId, state }: { orgId: string; agentId: string; state: HostingState }) {
@@ -161,6 +159,18 @@ export function EnvScreen({ orgId, agentId, state }: { orgId: string; agentId: s
     const [secret, setSecret] = useState(true)
     const [busy, setBusy] = useState(false)
     const [reloading, setReloading] = useState(false)
+    const [deleting, setDeleting] = useState<string | null>(null)
+    const remove = async (name: string) => {
+        setDeleting(name)
+        try {
+            setEnv((await window.ipc.invoke('spaces:deleteHostingEnv', { orgId, agentId, key: name })).env)
+            toast(`${name} deleted`, 'success')
+        } catch (err) {
+            fail(err, 'Could not delete the variable')
+        } finally {
+            setDeleting(null)
+        }
+    }
     const valueField = useRef<HTMLInputElement>(null)
     const valid = /^[A-Z_][A-Z0-9_]{0,255}$/.test(key)
     const replacing = env?.some((v) => v.key === key) === true
@@ -237,6 +247,7 @@ export function EnvScreen({ orgId, agentId, state }: { orgId: string; agentId: s
                             >
                                 Replace
                             </RowAction>
+                            <ConfirmButton look="text" label="Delete" confirmLabel="Confirm delete" disabled={busy} busy={deleting === v.key} onConfirm={() => void remove(v.key)} />
                         </Row>
                     ))}
                 </Rows>
@@ -414,7 +425,7 @@ export function LogsScreen({ orgId, agentId }: { orgId: string; agentId: string 
     )
 }
 
-/** The VM's files: a directory at a time; a text file opens to edit; new folder, rename. Delete is on the Danger zone. */
+/** The VM's files: a directory at a time; a text file opens to edit; new folder, rename, delete. */
 export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: string; home: string }) {
     const [path, setPath] = useState(home)
     const [entries, setEntries] = useState<spaces.HostingFileEntry[] | null>(null)
@@ -544,7 +555,14 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
                                     <Button type="button" size="xs" variant="ghost" onClick={() => setRenaming(null)}>Cancel</Button>
                                 </form>
                             ) : (
-                                <RowAction disabled={busy} onClick={() => setRenaming({ from: e.path, to: e.path })}>Rename</RowAction>
+                                <>
+                                    <RowAction disabled={busy} onClick={() => setRenaming({ from: e.path, to: e.path })}>Rename</RowAction>
+                                    <ConfirmButton look="text" label="Delete" confirmLabel="Confirm delete" disabled={busy} onConfirm={() => void act(async () => {
+                                        await window.ipc.invoke('spaces:deleteHostingFile', { orgId, agentId, path: e.path })
+                                        if (open?.path === e.path) setOpen(null)
+                                        toast(`${e.name} deleted`, 'success')
+                                    }, 'Could not delete it')} />
+                                </>
                             )}
                         </Row>
                     ))}
@@ -568,7 +586,7 @@ export function FilesScreen({ orgId, agentId, home }: { orgId: string; agentId: 
     )
 }
 
-/** Skills on a Hermes VM, and the platform catalog's matches to install. Removing one is on the Danger zone. */
+/** Skills on a Hermes VM, and the platform catalog's matches to install; each installed one has its Remove. */
 export function SkillsScreen({ orgId, agentId, state }: { orgId: string; agentId: string; state: HostingState }) {
     const { skills, setSkills, loadSkills } = state
     const [q, setQ] = useState('')
@@ -600,6 +618,18 @@ export function SkillsScreen({ orgId, agentId, state }: { orgId: string; agentId
             setBusy(false)
         }
     }
+    const remove = async (name: string) => {
+        setBusy(true)
+        try {
+            setSkills((await window.ipc.invoke('spaces:removeHostingSkill', { orgId, agentId, name })).skills)
+            setFound((f) => f?.map((s) => (s.name === name ? { ...s, installed: false } : s)) ?? f)
+            toast(`${name} removed`, 'success')
+        } catch (err) {
+            fail(err, 'Could not remove the skill')
+        } finally {
+            setBusy(false)
+        }
+    }
     return (
         <>
             <ScreenHeader title="Skills" note="What Hermes can do on this VM. Rowboat installs rowboat-spaces itself; the rest comes from Maritime's catalog." />
@@ -616,6 +646,7 @@ export function SkillsScreen({ orgId, agentId, state }: { orgId: string; agentId
                                 <span className="shrink-0 font-medium text-foreground">{s.name}</span>
                                 {s.version && <Tag>{s.version}</Tag>}
                                 <span className="min-w-0 flex-1 truncate text-muted-foreground">{s.description}</span>
+                                <ConfirmButton look="text" label="Remove" confirmLabel="Confirm remove" disabled={busy} onConfirm={() => void remove(s.name)} />
                             </Row>
                         ))}
                     </Rows>
@@ -643,7 +674,7 @@ export function SkillsScreen({ orgId, agentId, state }: { orgId: string; agentId
     )
 }
 
-/** Triggers the platform fires on a Hermes agent: a cron schedule and the prompt it sends. Deleting one is on the Danger zone. */
+/** Triggers the platform fires on a Hermes agent: a cron schedule and the prompt it sends; each row turns off or deletes. */
 export function TriggersScreen({ orgId, agentId, state }: { orgId: string; agentId: string; state: HostingState }) {
     const { triggers, setTriggers, loadTriggers } = state
     const [schedule, setSchedule] = useState('')
@@ -675,6 +706,17 @@ export function TriggersScreen({ orgId, agentId, state }: { orgId: string; agent
             setBusy(false)
         }
     }
+    const remove = async (t: spaces.HostingTrigger) => {
+        setBusy(true)
+        try {
+            setTriggers((await window.ipc.invoke('spaces:deleteHostingTrigger', { orgId, agentId, triggerId: t.id })).triggers)
+            toast('Automation deleted', 'success')
+        } catch (err) {
+            fail(err, 'Could not delete the automation')
+        } finally {
+            setBusy(false)
+        }
+    }
     return (
         <>
             <ScreenHeader title="Automations" note="Maritime runs the prompt on the schedule, inside the VM. The agent's reply goes where the prompt says, through its Spaces tools; name the space. Times are UTC." />
@@ -698,6 +740,7 @@ export function TriggersScreen({ orgId, agentId, state }: { orgId: string; agent
                             <RowAction disabled={busy} pressed={t.enabled} onClick={() => void toggle(t)}>
                                 {t.enabled ? 'On' : 'Off'}
                             </RowAction>
+                            <ConfirmButton look="text" label="Delete" confirmLabel="Confirm delete" disabled={busy} onConfirm={() => void remove(t)} />
                         </Row>
                     ))}
                 </Rows>
@@ -710,134 +753,3 @@ function triggerText(v: unknown): string {
     return typeof v === 'string' ? v : v === undefined ? '' : JSON.stringify(v)
 }
 
-/** The Danger zone's rows for the VM: delete a variable, a path, and for Hermes a skill or an automation. */
-export function HostingDangerRows({ orgId, agent, hermes, state }: { orgId: string; agent: spaces.Member; hermes: boolean; state: HostingState }) {
-    const agentId = agent.id
-    const { env, setEnv, skills, setSkills, loadSkills, triggers, setTriggers, loadTriggers, bumpFiles } = state
-    const [variable, setVariable] = useState('')
-    const [path, setPath] = useState('')
-    const [skill, setSkill] = useState('')
-    const [trigger, setTrigger] = useState('')
-    const [busy, setBusy] = useState<string | null>(null)
-    useEffect(() => {
-        if (hermes && skills === null) void loadSkills()
-        if (hermes && triggers === null) void loadTriggers()
-    }, [hermes, skills, loadSkills, triggers, loadTriggers])
-
-    const chosenVariable = variable || env?.[0]?.key || ''
-    const chosenSkill = skill || skills?.[0]?.name || ''
-    const chosenTrigger = trigger || triggers?.[0]?.id || ''
-    const home = HOME[agent.agentKind ?? ''] ?? '/'
-
-    const run = async (what: string, go: () => Promise<void>, fallback: string) => {
-        setBusy(what)
-        try {
-            await go()
-        } catch (err) {
-            fail(err, fallback)
-        } finally {
-            setBusy(null)
-        }
-    }
-    return (
-        <>
-            <DangerRow title="Delete an environment variable" note="The agent keeps the old value until the environment is reloaded. A secret cannot be recovered.">
-                <select aria-label="Variable" value={chosenVariable} disabled={!env?.length || busy !== null} onChange={(e) => setVariable(e.target.value)} className={SELECT}>
-                    {(env ?? []).map((v) => (
-                        <option key={v.key} value={v.key}>{v.key}</option>
-                    ))}
-                </select>
-                <ConfirmButton
-                    label="Delete variable"
-                    confirmLabel={`Confirm delete ${chosenVariable}`}
-                    disabled={!chosenVariable}
-                    busy={busy === 'env'}
-                    onConfirm={() =>
-                        void run(
-                            'env',
-                            async () => {
-                                setEnv((await window.ipc.invoke('spaces:deleteHostingEnv', { orgId, agentId, key: chosenVariable })).env)
-                                setVariable('')
-                                toast(`${chosenVariable} deleted`, 'success')
-                            },
-                            'Could not delete the variable',
-                        )
-                    }
-                />
-            </DangerRow>
-            <DangerRow title="Delete a file or folder" note="From the VM's volume. A folder goes with everything in it.">
-                <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder={`${home}/…`} aria-label="Path" className="h-8 w-60 max-w-full font-mono text-xs" spellCheck={false} />
-                <ConfirmButton
-                    label="Delete path"
-                    confirmLabel="Confirm delete"
-                    disabled={!path.trim()}
-                    busy={busy === 'path'}
-                    onConfirm={() =>
-                        void run(
-                            'path',
-                            async () => {
-                                await window.ipc.invoke('spaces:deleteHostingFile', { orgId, agentId, path: path.trim() })
-                                toast(`${path.trim()} deleted`, 'success')
-                                setPath('')
-                                bumpFiles()
-                            },
-                            'Could not delete it',
-                        )
-                    }
-                />
-            </DangerRow>
-            {hermes && (
-                <DangerRow title="Remove a skill" note="Hermes loses it on its next turn. Installing it again from the catalog brings it back.">
-                    <select aria-label="Skill" value={chosenSkill} disabled={!skills?.length || busy !== null} onChange={(e) => setSkill(e.target.value)} className={SELECT}>
-                        {(skills ?? []).map((s) => (
-                            <option key={s.name} value={s.name}>{s.name}</option>
-                        ))}
-                    </select>
-                    <ConfirmButton
-                        label="Remove skill"
-                        confirmLabel={`Confirm remove ${chosenSkill}`}
-                        disabled={!chosenSkill}
-                        busy={busy === 'skill'}
-                        onConfirm={() =>
-                            void run(
-                                'skill',
-                                async () => {
-                                    setSkills((await window.ipc.invoke('spaces:removeHostingSkill', { orgId, agentId, name: chosenSkill })).skills)
-                                    setSkill('')
-                                    toast(`${chosenSkill} removed`, 'success')
-                                },
-                                'Could not remove the skill',
-                            )
-                        }
-                    />
-                </DangerRow>
-            )}
-            {hermes && (
-                <DangerRow title="Delete an automation" note="Turning one off on the Automations tab keeps it. Deleting drops the schedule and its prompt.">
-                    <select aria-label="Automation" value={chosenTrigger} disabled={!triggers?.length || busy !== null} onChange={(e) => setTrigger(e.target.value)} className={SELECT}>
-                        {(triggers ?? []).map((t) => (
-                            <option key={t.id} value={t.id}>{`${triggerText(t.config.schedule) || t.type} · ${triggerText(t.config.prompt).slice(0, 40)}`}</option>
-                        ))}
-                    </select>
-                    <ConfirmButton
-                        label="Delete automation"
-                        confirmLabel="Confirm delete"
-                        disabled={!chosenTrigger}
-                        busy={busy === 'trigger'}
-                        onConfirm={() =>
-                            void run(
-                                'trigger',
-                                async () => {
-                                    setTriggers((await window.ipc.invoke('spaces:deleteHostingTrigger', { orgId, agentId, triggerId: chosenTrigger })).triggers)
-                                    setTrigger('')
-                                    toast('Automation deleted', 'success')
-                                },
-                                'Could not delete the automation',
-                            )
-                        }
-                    />
-                </DangerRow>
-            )}
-        </>
-    )
-}

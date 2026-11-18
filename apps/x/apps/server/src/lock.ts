@@ -10,6 +10,21 @@ import process from 'node:process';
 
 const LOCK_FILE = 'server.lock';
 
+async function isRowboatServerProcess(pid: number): Promise<boolean> {
+  try {
+    const cmdline = await fs.readFile(`/proc/${pid}/cmdline`, 'utf8');
+    // Chromium/Electron helper processes (zygote, renderer, GPU, utility)
+    // always include --type= in their arguments.
+    if (cmdline.includes('--type=')) {
+      return false;
+    }
+    // A legitimate rowboat-server host entrypoint contains 'rowboat-server' or 'standalone'.
+    return cmdline.includes('rowboat-server') || cmdline.includes('standalone');
+  } catch {
+    return false;
+  }
+}
+
 export async function acquireWorkdirLock(workDir: string): Promise<() => Promise<void>> {
   const lockPath = path.join(workDir, LOCK_FILE);
   try {
@@ -17,19 +32,34 @@ export async function acquireWorkdirLock(workDir: string): Promise<() => Promise
     if (Number.isFinite(existing) && existing !== process.pid) {
       try {
         process.kill(existing, 0); // throws ESRCH if the pid is gone
-        throw new Error(
-          `another rowboat-server host (pid ${existing}) already owns ${workDir} — refusing to split-brain`,
-        );
+
+        // In containerized sandboxes like Flatpak, PID namespaces restart on every
+        // app launch. If a previous instance crashed, its PID may be reassigned to
+        // an unrelated process (e.g. Chromium helper) in a subsequent run.
+        // Only declare a split-brain under Flatpak if the holder is actually
+        // a rowboat-server host.
+        if (process.env.FLATPAK_ID && !(await isRowboatServerProcess(existing))) {
+          // Stale lock held by an unrelated process from a recycled PID namespace — take over.
+        } else {
+          throw new Error(
+            `another rowboat-server host (pid ${existing}) already owns ${workDir} — refusing to split-brain`,
+          );
+        }
       } catch (err) {
         // ESRCH = no such process (stale lock, take over). EPERM = the pid
         // exists but belongs to another user — still a live holder.
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'EPERM') {
-          throw new Error(
-            `another rowboat-server host (pid ${existing}) already owns ${workDir} — refusing to split-brain`,
-          );
+          if (process.env.FLATPAK_ID && !(await isRowboatServerProcess(existing))) {
+            // Stale lock from a recycled PID namespace — take over.
+          } else {
+            throw new Error(
+              `another rowboat-server host (pid ${existing}) already owns ${workDir} — refusing to split-brain`,
+            );
+          }
+        } else if (code !== 'ESRCH') {
+          throw err;
         }
-        if (code !== 'ESRCH') throw err;
       }
     }
   } catch (err) {

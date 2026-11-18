@@ -7,10 +7,17 @@ import { loadValue, peekValue, removeValue, saveValue } from '@/lib/spaces/cache
 // under its chat first and removed only when the server confirms it; the next
 // open of that chat puts it back in the box as "Not sent". Same rule as
 // Slack/WhatsApp drafts. Stored in the spaces cache, so sign-out wipes it.
+//
+// Typed text shares the slot (2026-11-17): a thread screen unmounts on back,
+// so a half-written reply was lost on leaving. The composer now saves what's
+// in the box as you type; it comes back on the next open as a plain draft,
+// without the "Not sent" warning.
 
 export interface UnsentDraft {
   /** Which send wrote this slot: a send that confirms late clears only its own. */
   id: string;
+  /** Typed but never sent: restored without the "Not sent" warning. */
+  typed?: boolean;
   text: string;
   picked: [string, { label: string; id: string }][];
   attachments: { key: string; uri: string; md: string; video: boolean; file?: string }[];

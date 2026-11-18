@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
-import { BotIcon, ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
+import { ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -9,15 +9,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { AgentPage } from '@/components/spaces/agent-page'
 import { InstancePicker, type InstanceChoice } from '@/components/spaces/agent-instance-picker'
 import { MaritimeAgentPicker } from '@/components/spaces/agent-maritime-picker'
-import { AccessChoice, accessLabel } from '@/components/spaces/agent-access'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { EngineCard, LocalAgentFields, useLocalAgents, useLocalEngine } from '@/components/spaces/local-agent'
 import { PersonalityFields, saveAgentProfile } from '@/components/spaces/agent-personality'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
+import { applyProfileUpdate, refreshMembers, refreshOrgRoster, useOrgRoster } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { isGroupChat } from '@/lib/spaces-navigation'
 import { AGENT_SETUPS, KINDS, MANAGED_KINDS, PLATFORMS, agentLabel, agentSetup, instanceLabel, isBot, kindInfo, personalAgentName, setupFor, type AgentSetup, type Logo } from '@/lib/agent-kinds'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -52,7 +50,7 @@ import { cn } from '@/lib/utils'
 // as "<your first name>'s <kind>".
 //
 // Local agents (2026-10-28): "On this computer" adds your own Claude Code or
-// Codex, which this app runs. Always personal; Add asks where it works and
+// Codex, which this app runs. Its seats are the owner's alone; Add asks where it works and
 // how it approves instead of a key, and there is nothing to connect, so it
 // goes straight to its page. Desktop only.
 
@@ -72,22 +70,26 @@ function billingNote(kind: string): string {
 }
 function Header({ title, description, icon, onBack, large = false }: { title: string; description: string; icon?: ReactNode; onBack?: () => void; large?: boolean }) {
     return (
-        <DialogHeader className={cn('gap-1 px-5 pt-5 text-left', large ? 'pb-1' : 'border-b border-border pb-4')}>
-            <div className="flex min-w-0 items-center gap-2 pr-8">
+        <DialogHeader className={cn('px-5 pt-5 text-left', large ? 'pb-1' : 'border-b border-border pb-4')}>
+            {/* Back, then the icon with the title and its line stacked beside it (2026-11-13):
+                the line sat under the back arrow, not under the name. */}
+            <div className="flex min-w-0 items-center gap-2.5 pr-8">
                 {onBack && (
                     <button
                         type="button"
                         aria-label="Back"
                         onClick={onBack}
-                        className="-ml-1 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="-ml-1.5 shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
                         <ArrowLeft className="size-4" />
                     </button>
                 )}
                 {icon}
-                <DialogTitle className={cn('truncate', large ? 'text-lg font-semibold tracking-[-0.01em]' : 'text-sm')}>{title}</DialogTitle>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                    <DialogTitle className={cn('truncate', large ? 'text-lg font-semibold tracking-[-0.01em]' : 'text-sm font-semibold')}>{title}</DialogTitle>
+                    <DialogDescription className={cn('truncate', large ? 'text-[13px]' : 'text-xs')}>{description}</DialogDescription>
+                </div>
             </div>
-            <DialogDescription className={large ? 'text-[13px]' : 'text-xs'}>{description}</DialogDescription>
         </DialogHeader>
     )
 }
@@ -208,13 +210,14 @@ function parseEnv(text: string): { env: Array<{ key: string; value: string }> } 
  * all by default, each one a tick. `direct` null hides the DM row (a setup that
  * opens the DM itself).
  */
-function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange, personal = false }: {
+function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange, ownerOnly = false }: {
     spaces: spaces.Space[]
     skipped: ReadonlySet<string>
     onChange: (skipped: ReadonlySet<string>) => void
     direct: boolean | null
     onDirectChange: (on: boolean) => void
-    personal?: boolean
+    /** A local agent: its seats are the owner's alone (2026-11-09). */
+    ownerOnly?: boolean
 }) {
     if (list.length === 0 && direct === null) return null
     const allIn = skipped.size === 0
@@ -252,10 +255,10 @@ function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange, 
                 })}
             </ul>
             <span className="text-[11px] text-muted-foreground">
-                {personal
-                    ? 'Everyone in these spaces sees it and its replies; only you can mention it or DM it.'
-                    : 'Anyone in these spaces can mention it, or DM it.'}
-                {' '}You can add it to more later from its page.
+                {ownerOnly
+                    ? 'Everyone in these spaces sees it and its replies; only you can ask it.'
+                    : 'Anyone in these spaces can mention it; you can narrow that per space from the member list.'}
+                {' '}You can add it to more later from any group’s member list.
             </span>
         </div>
     )
@@ -319,8 +322,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const spaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
     const roster = useOrgRoster(org.id, spaceIds)
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
-    const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const [agents, setAgents] = useState<spaces.AgentListing[] | null>(null)
+    const activeAgents = agents?.filter(({ agent, hosting }) => !agent.deactivatedAt && !agent.removedAt && hosting?.status !== 'deleting' && hosting?.status !== 'deleted') ?? null
     const [screen, setScreen] = useState<Screen>({ name: 'list' })
     const [busy, setBusy] = useState(false)
     const [chosen, setChosen] = useState<string | null>(null)
@@ -333,7 +336,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     // The spaces a new agent joins on Add: every one of yours unless unticked (2026-10-08).
     const [skippedSpaces, setSkippedSpaces] = useState<ReadonlySet<string>>(new Set())
     const [withDirect, setWithDirect] = useState(true)
-    const [personal, setPersonal] = useState(false)
     const [progress, setProgress] = useState<string | null>(null)
     // The super agent's setup card this completes, when the card opened the form (2026-11-02).
     const [request, setRequest] = useState<{ id: string; connection?: string } | null>(null)
@@ -362,11 +364,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     // An agent that is one platform instance (Agent37) runs whatever its instance runs.
     const kind = setup.bindsInstance ? instance?.kind ?? setup.kinds[0]! : chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
     // The name suggests the setup's own, or the kind's, until the person types
-    // one; a personal one's is yours ("Gagan's Claude Code", 2026-10-26).
+    // one; a local one's is yours ("Gagan's Claude Code", 2026-10-26).
     const baseName = setup.defaultName || kindInfo(kind).label
     const ownName = roster.find((m) => m.id === org.memberId)?.displayName
-    // A local agent is always personal: it runs on your computer.
-    const isPersonal = personal || setup.local === true
+    // A local agent runs on your computer: its seats are yours alone, and its name says whose it is.
+    const isPersonal = setup.local === true
     const shownName = nameEdited ? name : isPersonal ? personalAgentName(ownName, baseName) : baseName
     const shownCwd = localCwd || local?.defaultCwd || ''
     // Its engine: Add installs it when it isn't on this computer yet (2026-10-28), so nobody leaves for Settings.
@@ -379,7 +381,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
 
     const load = useCallback(async () => {
         try {
-            setAgents((await window.ipc.invoke('spaces:listAgents', { orgId: org.id })).agents)
+            const { agents: listing } = await window.ipc.invoke('spaces:listAgents', { orgId: org.id })
+            setAgents(listing)
+            for (const { agent } of listing) {
+                if (agent.deactivatedAt || agent.removedAt) applyProfileUpdate(org.id, agent)
+            }
         } catch (err) {
             setAgents([])
             toast(err instanceof Error ? err.message : 'Could not load agents', 'error')
@@ -396,7 +402,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setAddError(null)
         setSkippedSpaces(new Set())
         setWithDirect(true)
-        setPersonal(false)
         setProfileTitle('')
         setProfileInstructions('')
         setLocalCwd('')
@@ -414,7 +419,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setAddError(null)
         setSkippedSpaces(new Set())
         setWithDirect(true)
-        setPersonal(false)
         setProfileTitle('')
         setProfileInstructions('')
         setScreen({ name: 'create' })
@@ -482,7 +486,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
 
     const offeredKinds = MANAGED_KINDS.filter((m) => managedKinds.includes(m.kind))
     const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
-    const createName = nameEdited ? name : personal ? personalAgentName(ownName, kindInfo(chosenManaged).label) : kindInfo(chosenManaged).label
+    const createName = nameEdited ? name : kindInfo(chosenManaged).label
     const parsedEnv = parseEnv(envText)
     const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && !('bad' in parsedEnv)
 
@@ -496,7 +500,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         const missed = into.filter((_, i) => joined[i]!.status === 'rejected').map((space) => `#${space.name}`)
         // Your DM with it, in the sidebar like any DM (Hermes's setup opens it as its home channel anyway).
         // DMs are off while the server is one group chat (2026-10-07): no DM to open then.
-        if (withDirect && !homeChannel && !isGroupChat(org)) {
+        if (withDirect && !homeChannel) {
             await window.ipc.invoke('spaces:openDirect', { orgId: org.id, memberId: agent.id }).catch(() => missed.push('your direct messages'))
         }
         if (missed.length > 0) toast(`Couldn't add ${agent.displayName} to ${missed.join(', ')}`, 'error')
@@ -520,7 +524,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 kind: chosenManaged,
                 ...(chosenManaged === 'claude-code' ? { anthropicApiKey: anthropicKey.trim() } : {}),
                 ...(parsedEnv.env.length > 0 ? { env: parsedEnv.env } : {}),
-                ...(personal ? { personal: true } : {}),
                 ...(request ? { request: request.id } : {}),
             })
             setAnthropicKey('')
@@ -588,7 +591,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 connection: setup.connection,
                 ...(setup.credential ? { credential: credential.trim() } : {}),
                 ...(instanceId ? { instance: instanceId } : {}),
-                ...(personal ? { personal: true } : {}),
                 ...(request ? { request: request.id } : {}),
             })
             setCredential('')
@@ -615,12 +617,12 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             description="Agents work things out for themselves; bots run a service's commands. Each is a member with its own key: add one, connect it, then add it to spaces."
                         />
                         <Body>
-                            {agents === null ? (
+                            {activeAgents === null ? (
                                 <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading agents…</div>
-                            ) : agents.length === 0 ? (
+                            ) : activeAgents.length === 0 ? (
                                 <div className="flex flex-col items-center gap-2 py-8 text-center">
                                     <Bot className="size-6 text-muted-foreground" />
-                                    <div className="text-sm font-medium">{isAdmin ? 'No agents or bots in this server yet' : 'You have no agents or bots yet'}</div>
+                                    <div className="text-sm font-medium">You have no agents or bots yet</div>
                                     <div className="max-w-xs text-xs text-muted-foreground">
                                         {offeredKinds.length > 0 ? 'Create an agent and Rowboat runs it for you, or add one you run: ' : 'Add an agent to connect '}
                                         Hermes, a coding agent in Replicas or Conductor, or anything that speaks the agent contract, or a bot for PostHog or Cal.com.
@@ -628,7 +630,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 </div>
                             ) : (
                                 <div className="flex flex-col gap-3">
-                                    {([['Agents', agents.filter((a) => !isBot(a.agent.agentKind))], ['Bots', agents.filter((a) => isBot(a.agent.agentKind))]] as const).map(([heading, group]) =>
+                                    {([['Agents', activeAgents.filter((a) => !isBot(a.agent.agentKind))], ['Bots', activeAgents.filter((a) => isBot(a.agent.agentKind))]] as const).map(([heading, group]) =>
                                         group.length === 0 ? null : (
                                             <section key={heading} aria-label={heading}>
                                                 <h3 className="mb-1 text-[11px] font-medium text-muted-foreground">{heading}</h3>
@@ -648,9 +650,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                                                         <div className="truncate text-sm font-medium">{agent.displayName}</div>
                                                                         <div className="truncate text-[11px] text-muted-foreground">
                                                                             {agentLabel(agent.agentKind, agent.agentConnection)}
-                                                                            {accessLabel(agent) && ` · ${accessLabel(agent)}`}
-                                                                            {' · '}
-                                                                            {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
+                                                                                            {' · '}
+                                                                            {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Built in'}
                                                                             {' · '}
                                                                             {live.length === 0 ? 'no active keys' : live.length === 1 ? '1 key' : `${live.length} keys`}
                                                                             {credential?.rejectedAt && <span className="text-destructive">{' · '}Key rejected</span>}
@@ -712,17 +713,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     onClick={() => startAdding(false)}
                                 />
                             </div>
-                            <button
-                                type="button"
-                                onClick={() => startAdding(true)}
-                                className="group mt-3 flex w-full items-center gap-4 rounded-lg px-4 py-2.5 text-left transition-colors hover:bg-accent/40"
-                            >
-                                <BotIcon className="size-5 shrink-0 text-muted-foreground" />
-                                <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-                                    <span className="font-medium text-foreground">Looking for a bot?</span> PostHog, Cal.com, Attio
-                                </span>
-                                <ChevronRight className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
-                            </button>
                         </Body>
                     </>
                 )}
@@ -766,12 +756,10 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     <EngineCard engine={localEngine} />
                                 </div>
                             )}
-                            {setup.local ? (
+                            {setup.local && (
                                 <p className="mt-4 text-[11px] leading-snug text-muted-foreground">
-                                    Personal: it runs on your computer, so only you can mention it or DM it. Others see it and its replies. It answers while Rowboat is open here.
+                                    It runs on your computer, so only you can ask it, wherever it is added. Others see it and its replies. It answers while Rowboat is open here.
                                 </p>
-                            ) : (
-                                <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
                             )}
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
@@ -819,9 +807,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 spaces={org.spaces}
                                 skipped={skippedSpaces}
                                 onChange={setSkippedSpaces}
-                                direct={setup.wantsHomeChannel || isGroupChat(org) ? null : withDirect}
+                                direct={setup.wantsHomeChannel ? null : withDirect}
                                 onDirectChange={setWithDirect}
-                                personal={isPersonal}
+                                ownerOnly={isPersonal}
                             />
                             {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
@@ -869,7 +857,6 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 ))}
                             </div>
                             {managedBilling && <p className="mt-2 text-[11px] text-muted-foreground">{billingNote(chosenManaged)}</p>}
-                            <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -942,9 +929,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 spaces={org.spaces}
                                 skipped={skippedSpaces}
                                 onChange={setSkippedSpaces}
-                                direct={isGroupChat(org) ? null : withDirect}
+                                direct={withDirect}
                                 onDirectChange={setWithDirect}
-                                personal={personal}
                             />
                             {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
@@ -993,17 +979,17 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                     const listing = agents?.find((a) => a.agent.id === screen.agentId)
                     if (!listing) return null
                     const { agent } = listing
-                    const owner = agent.ownerId === org.memberId ? 'Yours' : agent.ownerId ? `Owned by ${names.get(agent.ownerId) ?? 'another member'}` : 'Managed by admins'
+                    const owner = agent.ownerId === org.memberId ? 'Yours' : agent.ownerId ? `Owned by ${names.get(agent.ownerId) ?? 'another member'}` : 'Built in'
                     return (
                         <>
                             <Header
                                 title={agent.displayName}
-                                description={`${agentLabel(agent.agentKind, agent.agentConnection)}${accessLabel(agent) ? ` · ${accessLabel(agent)}` : ''} · ${owner}`}
-                                icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-5" />}
+                                description={`${agentLabel(agent.agentKind, agent.agentConnection)} · ${owner}`}
+                                icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-9 rounded-lg" />}
                                 onBack={back}
                             />
                             <Body>
-                                <AgentPage org={org} listing={listing} isAdmin={isAdmin} onChanged={load} />
+                                <AgentPage org={org} listing={listing} onChanged={load} />
                             </Body>
                             <Footer>
                                 <Button size="sm" onClick={back}>Done</Button>

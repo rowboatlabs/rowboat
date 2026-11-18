@@ -16,7 +16,7 @@ import { useColors } from '@/theme/colors';
 // out: typing "@" opens a picker over the roster (+ @here, @rowboat); a pick
 // writes "@Name" into the field and remembers name → id; on send every
 // remembered "@Name" (and a bare @here / @rowboat) becomes the wire token
-// `[@Name](#member:<id>)` — the only spelling the org stamps (mentions.ts).
+// `[@Name](#member:<id>)` — the only spelling the server stamps (mentions.ts).
 // A bare @word nobody picked stays prose, as the contract says it should.
 
 export interface SpaceComposerHandle {
@@ -85,7 +85,9 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   onDraftChange?: (body: string) => void;
   /** The chat this box posts to: an unsent message is saved under it until the server confirms (lib/spaces/unsent.ts). */
   draftKey?: string;
-}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit, onDraftChange, draftKey }, ref) {
+  /** Opens poll creation from the "+" menu (absent = no Poll item). */
+  onCreatePoll?: () => void;
+}>(function SpaceComposer({ placeholder, members, me, sending, onSend, onPickMedia, onEdit, onDraftChange, draftKey, onCreatePoll }, ref) {
   const colors = useColors();
   const inputRef = useRef<TextInput>(null);
   const [text, setText] = useState('');
@@ -100,19 +102,30 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [attachments, setAttachments] = useState<{ key: string; uri: string; md: string; video: boolean; file?: string }[]>([]);
 
   // "+" → photos and videos, any file, or an image on the clipboard
-  // (2026-10-07: a text field can't take an image paste, so the menu does).
+  // (2026-10-07: a text field can't take an image paste, so the menu does),
+  // and a poll (2026-11-13, the desktop composer's poll button).
   const openAttachMenu = async () => {
     if (!onPickMedia || uploading) return;
     if (process.env.EXPO_OS !== 'ios') {
-      void pickMedia();
+      if (!onCreatePoll) {
+        void pickMedia();
+        return;
+      }
+      Alert.alert('Add', undefined, [
+        { text: 'Photo or video', onPress: () => void pickMedia() },
+        { text: 'Poll', onPress: onCreatePoll },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
       return;
     }
     const clip = await Clipboard.hasImageAsync().catch(() => false);
-    const options = ['Photo or video', 'File', ...(clip ? ['Paste image'] : []), 'Cancel'];
+    const options = ['Photo or video', 'File', ...(clip ? ['Paste image'] : []), ...(onCreatePoll ? ['Poll'] : []), 'Cancel'];
     ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: options.length - 1 }, (i) => {
-      if (i === 0) void pickMedia();
-      else if (i === 1) void pickFile();
-      else if (clip && i === 2) void pasteImage();
+      const picked = options[i];
+      if (picked === 'Photo or video') void pickMedia();
+      else if (picked === 'File') void pickFile();
+      else if (picked === 'Paste image') void pasteImage();
+      else if (picked === 'Poll') onCreatePoll?.();
     });
   };
 
@@ -178,6 +191,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
   const [failed, setFailed] = useState(false);
   /** The saved unsent copy this box last wrote or restored — the only one it may clear. */
   const ownedUnsent = useRef<string | undefined>(undefined);
+  /** Sends not yet answered: the saved copy is theirs until they settle. */
+  const [pending, setPending] = useState(0);
 
   useImperativeHandle(
     ref,
@@ -262,9 +277,11 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     setPicked(new Map());
     setAttachments([]);
     setInputKey((k) => k + 1);
+    setPending((n) => n + 1);
     const settled = Promise.resolve(editingId && onEdit ? onEdit(editingId, body) : onSend(body))
       .catch(() => false)
       .then((ok) => {
+        setPending((n) => n - 1);
         if (ok !== false) {
           if (draftKey && unsentId) clearUnsent(draftKey, unsentId);
           return;
@@ -285,7 +302,8 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     if (draftKey && unsentId) trackSend(draftKey, settled);
   };
 
-  // A send that failed after you left this chat comes back on the next open.
+  // A send that failed after you left this chat, or text you typed and left,
+  // comes back on the next open.
   const boxRef = useRef({ text, attachments });
   boxRef.current = { text, attachments };
   useEffect(() => {
@@ -300,7 +318,7 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
       setPicked(new Map(draft.picked));
       setAttachments(draft.attachments);
       ownedUnsent.current = draft.id;
-      setFailed(true);
+      setFailed(!draft.typed);
       setInputKey((k) => k + 1);
     });
     return () => {
@@ -308,18 +326,19 @@ export const SpaceComposer = forwardRef<SpaceComposerHandle, {
     };
   }, [draftKey]);
 
-  // While the box holds a "Not sent" draft, the saved copy follows it: leave
-  // again and it still comes back; clear the box and it's gone.
+  // The saved copy follows the box: leave and it comes back; clear the box
+  // and it's gone. While a send is in flight the slot holds that send, so
+  // typing waits until it settles (2026-11-17).
   useEffect(() => {
-    if (!draftKey || !failed || editing) return;
+    if (!draftKey || editing || pending > 0) return;
     if (text.trim() || attachments.length > 0) {
       const id = newUnsentId();
-      saveUnsent(draftKey, { id, text, picked: [...picked], attachments });
+      saveUnsent(draftKey, { id, text, picked: [...picked], attachments, ...(failed ? {} : { typed: true }) });
       ownedUnsent.current = id;
     } else if (ownedUnsent.current) {
       clearUnsent(draftKey, ownedUnsent.current);
     }
-  }, [draftKey, failed, editing, text, picked, attachments]);
+  }, [draftKey, failed, editing, pending, text, picked, attachments]);
 
   // Picked mentions read as pills: bold spans inside the field.
   const styled = useMemo(() => {

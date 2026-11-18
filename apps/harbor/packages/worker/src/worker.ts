@@ -27,8 +27,8 @@ const MAX_ACTIVITY = 200;
 export interface WorkerOptions {
   baseUrl: string;
   key: string;
-  /** The org's address links are minted on: the host of `baseUrl` unless the org says otherwise. */
-  orgAddress?: string;
+  /** The host links are minted on: the host of `baseUrl` unless the server says otherwise. */
+  address?: string;
   cwd: string;
   runtime: Runtime;
   state: ThreadState;
@@ -66,11 +66,12 @@ export class Worker {
   private lastBusy = Date.now();
   private stopped = false;
   agentId = '';
-  private readonly orgAddress: string;
+  private agentName = '';
+  private readonly address: string;
 
   constructor(private readonly opts: WorkerOptions) {
     this.harbor = new HarborClient(opts.baseUrl, opts.key);
-    this.orgAddress = opts.orgAddress ?? new URL(opts.baseUrl).host;
+    this.address = opts.address ?? new URL(opts.baseUrl).host;
     this.live = new HarborLive({
       baseUrl: opts.baseUrl,
       key: opts.key,
@@ -89,6 +90,7 @@ export class Worker {
   async start(): Promise<void> {
     const me = await this.harbor.me();
     this.agentId = me.id;
+    this.agentName = me.displayName;
     this.opts.log(`running as ${me.displayName} (${me.id})`);
     await this.harbor.declareCapabilities({ stop: true, steer: this.opts.runtime.capabilities.steer, options: [] });
     this.live.start();
@@ -234,8 +236,9 @@ export class Worker {
       const built = await requestPrompt(this.harbor, {
         invocation,
         agentId: this.agentId,
-        orgAddress: this.orgAddress,
-        orgUrl: this.opts.baseUrl,
+        agentName: this.agentName,
+        address: this.address,
+        serverUrl: this.opts.baseUrl,
         deliveredOffset: record?.deliveredOffset,
         log: this.opts.log,
       });

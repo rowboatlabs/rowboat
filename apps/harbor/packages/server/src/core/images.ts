@@ -2,14 +2,14 @@ import type { BlobInfo, Member } from '@rowboat/spaces-protocol';
 import { blobHash, type BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
 import { imageDimensions, sniffMime } from '../mime.js';
-import { canSetOrgLogo, enforce } from '../policy.js';
 import { Kernel, type ActorCtx } from './kernel.js';
 
-// Profile images (2026-10-02): a member's avatar and the org's logo. Unlike a
-// space blob these are readable by every member of the org, so they get their
-// own registry (org_images) instead of riding space_blobs: the bytes still
-// live in the BlobStore under their sha256, and a hash is readable here only
-// while this org has registered it. Images only, small, sniffed — a client's
+// Profile images (2026-10-02): a member's avatar. Unlike a space blob these
+// are readable by every member of the server, so they get their own registry
+// (`images`; `org_images` until orgs were dissolved, 2026-11-09, when the
+// org's logo went too) instead of riding space_blobs: the bytes still live
+// in the BlobStore under their sha256, and a hash is readable here only
+// while the server has registered it. Images only, small, sniffed — a client's
 // content-type is never trusted, and nothing is resized server-side (clients
 // send a square of a few hundred pixels).
 
@@ -24,11 +24,11 @@ export class Images {
   ) {}
 
   private requireBlobStore(): BlobStore {
-    if (!this.blobs) throw new HarborError('internal', 'file uploads are not configured on this org');
+    if (!this.blobs) throw new HarborError('internal', 'file uploads are not configured on this server');
     return this.blobs;
   }
 
-  /** Sniff, bound, store the bytes and register the hash on this org. */
+  /** Sniff, bound, store the bytes and register the hash on the server. */
   private async register(ctx: ActorCtx, bytes: Uint8Array): Promise<string> {
     if (bytes.byteLength === 0) throw new HarborError('invalid_request', 'the image is empty');
     if (bytes.byteLength > MAX_PROFILE_IMAGE_BYTES) {
@@ -42,7 +42,7 @@ export class Images {
     const hash = blobHash(bytes);
     const dims = imageDimensions(bytes, mime);
     await blobs.put(bytes);
-    await this.k.store.putOrgImage({
+    await this.k.store.putImage({
       hash,
       size: bytes.byteLength,
       mime,
@@ -55,11 +55,11 @@ export class Images {
 
   private async requireSelf(ctx: ActorCtx): Promise<Member> {
     const member = await this.k.store.getMember(ctx.memberId);
-    if (!member) throw new HarborError('not_a_member', 'you are not a member of this org');
+    if (!member) throw new HarborError('not_a_member', 'you are not a member of this server');
     return member;
   }
 
-  /** Your own avatar. `origin` is the request's public origin: avatarUrl is an absolute URL on this org. */
+  /** Your own avatar. `origin` is the request's public origin: avatarUrl is an absolute URL on this server. */
   async setAvatar(ctx: ActorCtx, bytes: Uint8Array, origin: string): Promise<Member> {
     const member = await this.requireSelf(ctx);
     this.k.guardWrite();
@@ -81,37 +81,13 @@ export class Images {
     return rest;
   }
 
-  /** The org's logo: an admin's to set (policy.ts). */
-  async setOrgLogo(ctx: ActorCtx, bytes: Uint8Array, origin: string): Promise<{ logoUrl: string }> {
-    enforce(canSetOrgLogo(await this.requireSelf(ctx)));
-    this.k.guardWrite();
-    const hash = await this.register(ctx, bytes);
-    await this.k.store.setOrgLogo(hash, ctx.memberId, this.k.now());
-    return { logoUrl: imageUrl(origin, hash) };
-  }
-
-  async clearOrgLogo(ctx: ActorCtx): Promise<Record<string, never>> {
-    enforce(canSetOrgLogo(await this.requireSelf(ctx)));
-    if ((await this.k.store.getOrgLogo()) === undefined) return {}; // idempotent no-op: no write
-    this.k.guardWrite();
-    await this.k.store.setOrgLogo(null, ctx.memberId, this.k.now());
-    return {};
-  }
-
-  /** The org's logo as clients show it, or nothing. */
-  async orgLogoUrl(ctx: ActorCtx, origin: string): Promise<string | undefined> {
-    await this.k.requireOrgMember(ctx);
-    const hash = await this.k.store.getOrgLogo();
-    return hash ? imageUrl(origin, hash) : undefined;
-  }
-
-  /** The bytes back, to any member of the org: a presigned URL (S3-family) or the bytes (disk, memory). */
+  /** The bytes back, to any member of the server: a presigned URL (S3-family) or the bytes (disk, memory). */
   /** `inline`: through Harbor, not a redirect (core/assets.ts downloadBlob). */
   async getImage(ctx: ActorCtx, hash: string, opts: { inline?: boolean } = {}): Promise<{ blob: BlobInfo; url?: string; bytes?: Uint8Array; stream?: ReadableStream<Uint8Array> }> {
-    await this.k.requireOrgMember(ctx);
+    await this.k.requireActiveMember(ctx);
     const blobs = this.requireBlobStore();
-    const stored = await this.k.store.getOrgImage(hash);
-    if (!stored) throw new HarborError('not_found', 'no such image on this org');
+    const stored = await this.k.store.getImage(hash);
+    if (!stored) throw new HarborError('not_found', 'no such image on this server');
     const blob: BlobInfo = {
       hash: stored.hash,
       size: stored.size,
@@ -132,7 +108,7 @@ export class Images {
   }
 }
 
-/** Where an org image is served: the org's own origin, by hash. */
+/** Where an image is served: the server's own origin, by hash. */
 export function imageUrl(origin: string, hash: string): string {
   return `${origin}/v1/images/${hash}`;
 }

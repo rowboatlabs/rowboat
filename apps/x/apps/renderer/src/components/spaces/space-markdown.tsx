@@ -1,3 +1,4 @@
+import { onServer } from '@x/shared/dist/spaces.js'
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { FileConflictNotice, useSpaceFileSave, type SavedSpaceFile } from './file-conflict'
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
@@ -681,7 +682,7 @@ function SpaceChip({ spaceId, orgAddress, fallback }: { spaceId: string; orgAddr
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
     const { orgs } = useSpacesOrgs()
-    const org = orgAddress !== undefined ? orgs.find((o) => o.address === orgAddress) : orgs.find((o) => o.id === refs?.orgId)
+    const org = orgAddress !== undefined ? orgs.find((o) => onServer(orgAddress, o.address)) : orgs.find((o) => o.id === refs?.orgId)
     const space = org ? findSpace(org, spaceId) : undefined
     if (!org || !space) {
         // A bare canonical URL is its own label; anything else reads as a #name.
@@ -709,7 +710,7 @@ function PersonLinkChip({ orgAddress, memberId, fallback }: { orgAddress: string
     const names = useMemberNames()
     // A bare pasted URL is its own label — never a name; the id stands in.
     const hint = /^https:\/\//.test(fallback) ? memberId : fallback.replace(/^@/, '')
-    const orgId = orgAddress === refs?.orgAddress ? refs.orgId : (nav?.resolveOrg?.(orgAddress) ?? null)
+    const orgId = refs && onServer(orgAddress, refs.orgAddress) ? refs.orgId : (nav?.resolveOrg?.(orgAddress) ?? null)
     if (!orgId) return <span title="Not available to you" className="text-muted-foreground">{`@${hint}`}</span>
     const name = `@${names.get(memberId) ?? hint}`
     if (!nav?.onOpenDirect) return <strong className={CHIP_CLASS}>{name}</strong>
@@ -724,7 +725,7 @@ function PersonLinkChip({ orgAddress, memberId, fallback }: { orgAddress: string
 function MessageLinkChip({ orgAddress, spaceId, messageId, children }: { orgAddress: string; spaceId: string; messageId: string; children?: ReactNode }) {
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
-    const orgId = orgAddress === refs?.orgAddress && spaceId === refs.spaceId ? refs.orgId : (nav?.resolveSpace?.(orgAddress, spaceId) ?? null)
+    const orgId = refs && onServer(orgAddress, refs.orgAddress) && spaceId === refs.spaceId ? refs.orgId : (nav?.resolveSpace?.(orgAddress, spaceId) ?? null)
     const label = plainLabel(children)
     const text = label && !/^https:\/\//.test(label) ? label : 'message'
     if (!orgId || !nav?.onOpenMessage) {
@@ -769,7 +770,7 @@ function fileLinkTarget(url: string, refs: SpaceRefs | null, assets: SpaceAssets
     }
     const wire = parseAssetWireUrl(url)
     if (wire) {
-        if (refs && wire.orgAddress === refs.orgAddress && wire.spaceId === refs.spaceId) return byId(wire.assetId)
+        if (refs && onServer(wire.orgAddress, refs.orgAddress) && wire.spaceId === refs.spaceId) return byId(wire.assetId)
         const orgId = nav?.resolveSpace?.(wire.orgAddress, wire.spaceId) ?? null
         return orgId ? { kind: 'elsewhere', orgId, spaceId: wire.spaceId, assetId: wire.assetId } : { kind: 'muted', title: 'Not available to you' }
     }

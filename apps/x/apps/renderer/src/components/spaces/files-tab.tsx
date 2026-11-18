@@ -1,5 +1,6 @@
+import { onServer } from '@x/shared/dist/spaces.js'
 import { invokeSpace } from '@/lib/spaces-invoke'
-import { useSpaceAccess, canActInSpace } from '@/lib/spaces-access'
+import { useSpaceAccess } from '@/lib/spaces-access'
 import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { MarkdownEditor } from '@/components/markdown-editor'
@@ -489,13 +490,11 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     }, [crumbBack, editing])
 
     const beginEdit = () => {
-        if (!canActInSpace(org.id, space.id)) return
         if (!asset) return
         setDraft({ baseVersion: asset.version, text: asset.content, reason: '', conflict: null })
     }
 
     const apply = async () => {
-        if (!canActInSpace(org.id, space.id)) return
         if (!draft) return
         setApplying(true)
         try {
@@ -547,7 +546,6 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
     // The viewer reports the task's index in document order; toggleTaskAt maps
     // it back to the source line (skipping fenced code) and flips it.
     const toggleTask = async (index: number) => {
-        if (!canActInSpace(org.id, space.id)) return
         if (!asset) return
         const next = toggleTaskAt(asset.content, index)
         if (next === null) return
@@ -614,7 +612,7 @@ export function FileColumn({ org, space, assetId, entries = [], memberNames, ref
         }
         const wire = parseAssetWireUrl(href)
         if (wire) {
-            if (wire.orgAddress === org.address && wire.spaceId === space.id) onOpenFile?.(wire.assetId)
+            if (onServer(wire.orgAddress, org.address) && wire.spaceId === space.id) onOpenFile?.(wire.assetId)
             else onOpenSpaceFile?.(wire.orgAddress, wire.spaceId, wire.assetId)
             return true
         }

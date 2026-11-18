@@ -112,7 +112,7 @@ export class HarborClient {
   }
 
   async roster(): Promise<Member[]> {
-    return routes.listOrgMembers.response.parse(await this.request('GET', routes.listOrgMembers.path)).members;
+    return routes.listContacts.response.parse(await this.request('GET', routes.listContacts.path)).members;
   }
 
   /** A blob's type and size without its bytes (HEAD), for the download lines; undefined when it can't be read. */

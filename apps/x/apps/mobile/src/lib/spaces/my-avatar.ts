@@ -4,7 +4,7 @@ import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { loadValue, peekValue, saveValue } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
 
-// Your own avatar URL on an org, shared by every screen that draws "you"
+// Your own avatar URL on the server, shared by every screen that draws "you"
 // (Spaces footer, Settings, Account). Cached for an instant paint, refreshed
 // from GET /v1/me, and pushed to every mounted screen when you change it.
 

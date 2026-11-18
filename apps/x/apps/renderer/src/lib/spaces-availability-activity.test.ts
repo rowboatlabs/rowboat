@@ -1,0 +1,63 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { startActivityReporter } from './spaces-availability-activity'
+
+beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-11T12:00:00Z'))
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+})
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+
+it('stays online when switching apps, then goes away after ten minutes without input', () => {
+    const send = vi.fn()
+    const stop = startActivityReporter(() => ['org'], send)
+    expect(send).toHaveBeenLastCalledWith('org', true)
+    window.dispatchEvent(new Event('blur'))
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+    vi.advanceTimersByTime(9 * 60_000)
+    expect(send).toHaveBeenLastCalledWith('org', true)
+    vi.advanceTimersByTime(60_000)
+    expect(send).toHaveBeenLastCalledWith('org', false)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    window.dispatchEvent(new Event('focus'))
+    expect(send).toHaveBeenLastCalledWith('org', true)
+    stop()
+    expect(send).toHaveBeenLastCalledWith('org', false)
+    const count = send.mock.calls.length
+    vi.advanceTimersByTime(60_000)
+    window.dispatchEvent(new Event('pointermove'))
+    window.dispatchEvent(new Event('focus'))
+    expect(send).toHaveBeenCalledTimes(count)
+})
+
+it('renews recent activity and returns from away immediately on input', () => {
+    const send = vi.fn()
+    const stop = startActivityReporter(() => ['org'], send)
+    vi.advanceTimersByTime(9 * 60_000)
+    window.dispatchEvent(new Event('keydown'))
+    vi.advanceTimersByTime(9 * 60_000)
+    expect(send).toHaveBeenLastCalledWith('org', true)
+    vi.advanceTimersByTime(60_000)
+    expect(send).toHaveBeenLastCalledWith('org', false)
+    window.dispatchEvent(new Event('pointerdown'))
+    expect(send).toHaveBeenLastCalledWith('org', true)
+    window.dispatchEvent(new Event('pagehide'))
+    expect(send).toHaveBeenLastCalledWith('org', false)
+    vi.advanceTimersByTime(15_000)
+    expect(send).toHaveBeenLastCalledWith('org', false)
+    stop()
+})
+
+it('does not mark a newly opened background tab online before it is viewed', () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    const send = vi.fn()
+    const stop = startActivityReporter(() => ['org'], send)
+    expect(send).toHaveBeenLastCalledWith('org', false)
+    vi.advanceTimersByTime(15_000)
+    expect(send).toHaveBeenLastCalledWith('org', false)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(send).toHaveBeenLastCalledWith('org', true)
+    stop()
+})

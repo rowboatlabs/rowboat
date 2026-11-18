@@ -11,7 +11,7 @@ import type { Message, Space } from '@rowboat/spaces-protocol';
 // registration — against the store with a mocked Expo endpoint.
 
 const space = (kind: 'shared' | 'direct'): Space =>
-  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind, visibility: 'private', archived: false }) as Space;
+  ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind, archived: false }) as Space;
 
 const msg = (author = 'harsh'): Message =>
   ({
@@ -51,8 +51,8 @@ describe('PushSender.send', () => {
     const s = space('shared');
     await store.putSpace(s);
     for (const id of ['harsh', 'gagan']) {
-      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), role: 'member', kind: 'human' });
-      await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString() });
+      await store.putMember({ id, displayName: id[0]!.toUpperCase() + id.slice(1), kind: 'human' });
+      await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString(), role: 'member' });
     }
     await store.putPushToken('gagan', 'ExponentPushToken[g1]', new Date().toISOString());
     await store.putPushToken('gagan', 'ExponentPushToken[g2]', new Date().toISOString());
@@ -64,7 +64,7 @@ describe('PushSender.send', () => {
       calls.push(...batch);
       return { json: async () => ({ data: batch.map(() => ({ status: 'ok', id: 't' })) }) } as any;
     }) as typeof fetch;
-    const sender = new PushSender(store, 'org1', { fetchImpl, receiptDelayMs: 0 });
+    const sender = new PushSender(store, { fetchImpl, receiptDelayMs: 0 });
     return { store, s, sender, calls };
   }
 
@@ -75,7 +75,7 @@ describe('PushSender.send', () => {
     await sender.send(s, msg('harsh'), [row('gagan', 'mention')]);
     expect(calls.map((c) => c.to).sort()).toEqual(['ExponentPushToken[g1]', 'ExponentPushToken[g2]']);
     expect(calls[0]).toMatchObject({ title: 't:mention', body: 'note', sound: 'default' });
-    expect(calls[0].data).toMatchObject({ kind: 'space', orgId: 'org1', spaceId: s.id, threadRootId: '01HYYYYYYYYYYYYYYYYYYYYYYY' });
+    expect(calls[0].data).toMatchObject({ kind: 'space', spaceId: s.id, threadRootId: '01HYYYYYYYYYYYYYYYYYYYYYYY' });
   });
 
   it("level 'all' pushes plain messages; 'off' silences mentions", async () => {
@@ -91,13 +91,13 @@ describe('PushSender.send', () => {
     const store = (await freshStore()).store;
     const s = space('shared');
     await store.putSpace(s);
-    await store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'member', kind: 'human' });
-    await store.putMembership({ spaceId: s.id, memberId: 'gagan', joinedAt: new Date().toISOString() });
+    await store.putMember({ id: 'gagan', displayName: 'Gagan', kind: 'human' });
+    await store.putMembership({ spaceId: s.id, memberId: 'gagan', joinedAt: new Date().toISOString(), role: 'member' });
     await store.putPushToken('gagan', 'ExponentPushToken[dead]', new Date().toISOString());
     await store.setPushLevel('gagan', 'all');
     const fetchImpl = (async () =>
       ({ json: async () => ({ data: [{ status: 'error', details: { error: 'DeviceNotRegistered' } }] }) }) as any) as typeof fetch;
-    const sender = new PushSender(store, 'org1', { fetchImpl, receiptDelayMs: 0 });
+    const sender = new PushSender(store, { fetchImpl, receiptDelayMs: 0 });
     await sender.send(s, msg('harsh'), [row('gagan', 'message')]);
     expect(await store.listPushTokens('gagan')).toEqual([]);
   });
@@ -107,7 +107,7 @@ describe('wire registration', () => {
   let harbor: RunningHarbor;
   beforeAll(async () => {
     harbor = await startTestHarbor({
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [{ id: 'gagan', displayName: 'Gagan' }],
     });
   });

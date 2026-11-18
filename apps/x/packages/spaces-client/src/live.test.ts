@@ -182,7 +182,7 @@ describe('SpacesLive recovery', () => {
     await settle();
     const first = FakeWebSocket.instances[0];
     first.open();
-    expect(JSON.parse(first.sent[0])).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID });
+    expect(first.sent.map(s => JSON.parse(s)).find(f => f.kind === 'subscribe')).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID });
     first.emit('message', { data: JSON.stringify({ kind: 'subscribed', spaceId: SPACE_ULID, fromOffset: 41 }) });
     // Nothing happens in the space; then the socket drops.
     first.close();
@@ -191,7 +191,7 @@ describe('SpacesLive recovery', () => {
     expect(second).not.toBe(first);
     second.open();
     // Replay from the head we went live at — the gap comes back.
-    expect(JSON.parse(second.sent[0])).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID, afterOffset: 41 });
+    expect(second.sent.map(s => JSON.parse(s)).find(f => f.kind === 'subscribe')).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID, afterOffset: 41 });
     live.close();
   });
 
@@ -202,7 +202,7 @@ describe('SpacesLive recovery', () => {
     await settle();
     const first = FakeWebSocket.instances[0];
     first.open();
-    expect(JSON.parse(first.sent[0])).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID, afterOffset: 5 });
+    expect(first.sent.map(s => JSON.parse(s)).find(f => f.kind === 'subscribe')).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID, afterOffset: 5 });
     first.emit('message', {
       data: JSON.stringify({
         kind: 'event',
@@ -225,7 +225,7 @@ describe('SpacesLive recovery', () => {
     const second = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
     expect(second).not.toBe(first);
     second.open();
-    expect(JSON.parse(second.sent[0])).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID, afterOffset: 6 });
+    expect(second.sent.map(s => JSON.parse(s)).find(f => f.kind === 'subscribe')).toEqual({ kind: 'subscribe', spaceId: SPACE_ULID, afterOffset: 6 });
     live.close();
   });
 });
@@ -237,7 +237,7 @@ it('delivers profile updates on the member channel without a space subscription'
   await settle();
   const socket = FakeWebSocket.instances[0]!;
   socket.open();
-  const frame = { kind: 'profile_updated', member: { id: 'person', displayName: 'Updated', title: 'Engineer', kind: 'human', role: 'member' }, at: '2026-10-22T00:00:00.000Z' };
+  const frame = { kind: 'profile_updated', member: { id: 'person', displayName: 'Updated', title: 'Engineer', kind: 'human' }, at: '2026-10-22T00:00:00.000Z' };
   socket.emit('message', { data: JSON.stringify(frame) });
   expect(handler).toHaveBeenCalledWith(frame);
   off();
@@ -257,3 +257,36 @@ it('delivers human presence without a space subscription', async () => {
   off();
   live.close();
 });
+
+it('reports activity on the connection without a space subscription', async () => {
+  const live = makeLive();
+  live.activity(true);
+  await settle();
+  const socket = FakeWebSocket.instances[0];
+  socket.open();
+  live.activity(true);
+  live.activity(false);
+  expect(socket.sent.map(s => JSON.parse(s)).filter(frame => frame.kind === 'activity')).toEqual([
+    { kind: 'activity', active: true }, { kind: 'activity', active: true }, { kind: 'activity', active: false },
+  ]);
+  live.close();
+});
+
+for (const active of [false, true]) {
+  it(`resends activity=${active} after connecting and reconnecting`, async () => {
+    const live = makeLive({ staleAfterMs: 60_000 });
+    live.onMemberFrame(() => {});
+    live.activity(active);
+    await settle();
+    const first = FakeWebSocket.instances[0];
+    first.open();
+    expect(first.sent.map(s => JSON.parse(s))).toContainEqual({ kind: 'activity', active });
+    first.close();
+    await vi.advanceTimersByTimeAsync(2000);
+    const next = FakeWebSocket.instances.at(-1)!;
+    expect(next).not.toBe(first);
+    next.open();
+    expect(next.sent.map(s => JSON.parse(s))).toContainEqual({ kind: 'activity', active });
+    live.close();
+  });
+}

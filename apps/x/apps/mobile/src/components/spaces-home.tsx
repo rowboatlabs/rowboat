@@ -6,26 +6,27 @@ import { ActionSheetIOS, ActivityIndicator, Alert, Pressable, RefreshControl, Sc
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
 import { SpacesClient } from '@/lib/spaces/client';
-import type { Member, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
+import type { Member, SearchResults, Space, UnreadSnapshot } from '@rowboat/spaces-protocol';
 import { Avatar, AuthedImage } from '@/components/avatar';
 import { StatusBanner } from '@/components/status-banner';
 import { friendlyError } from '@/lib/spaces/errors';
-import { isOthersPersonalAgent, memberLabel } from '@/lib/spaces/profiles';
+import { canMessageDirect, isDeparted, memberLabel } from '@/lib/spaces/profiles';
 import { useBlockedIds } from '@/lib/spaces/moderation';
 import { useMyAvatar } from '@/lib/spaces/my-avatar';
 import { useParentHeader } from '@/lib/use-parent-header';
 import { pickProfileImage } from '@/lib/spaces/profile-image';
 import { loadValue, peekValue, saveValue } from '@/lib/spaces/cache';
 import { isNetworkError } from '@/lib/spaces/errors';
-import { canInvite, takeSpacesChanged, useOrgSettings } from '@/lib/spaces/invites';
+import { takeSpacesChanged } from '@/lib/spaces/invites';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet } from '@/components/bottom-sheet';
+import { SearchHits, noHits, type HitSpace } from '@/components/search-results';
 import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
-// Spaces home: signed out → one sign-in button; signed in → the user's orgs as
-// inset-grouped cards (iOS Settings shape): org identity header, hairline-
-// separated space rows, account footer.
+// Spaces home: signed out → one sign-in button; signed in → the server as
+// inset-grouped cards (iOS Settings shape): your spaces, your direct
+// messages, your link. One server since 2026-11-09: no switcher.
 export type SpacesTabKey = 'home' | 'dms' | 'more' | 'search';
 
 export function SpacesTab({ tab }: { tab: SpacesTabKey }) {
@@ -147,20 +148,15 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
     setRefreshing(false);
   }, [account]);
 
-  // One org on screen at a time (Slack's workspace model); the header opens
-  // the switcher. The choice is remembered across launches.
-  const [selectedId, setSelectedId] = useState<string | null>(() => peekValue<string>('selectedOrg') ?? null);
-  const [switching, setSwitching] = useState(false);
-  useEffect(() => {
-    void loadValue<string>('selectedOrg').then((v) => v && setSelectedId((prev) => prev ?? v));
-  }, []);
-  const current = account.orgs?.find((o) => o.id === selectedId) ?? account.orgs?.[0];
-  const who = current?.displayName ?? account.orgs?.[0]?.displayName;
+  // The one server (2026-11-09).
+  const current = account.orgs?.[0];
+  const who = current?.displayName;
   const myAvatar = useMyAvatar(current);
 
 
   // One screen per tab of the Spaces bar ((tabs)/_layout.tsx): Home, DMs,
-  // More, and the search tab — a jump list over spaces and people.
+  // More, and the search tab — spaces and people by name, then messages,
+  // discussions and files across every space (2026-11-12).
   const [query, setQuery] = useState('');
   const TITLES: Record<SpacesTabKey, string> = { home: 'Spaces', dms: 'Direct messages', more: 'More', search: 'Search' };
   useParentHeader(TITLES[tab]);
@@ -185,7 +181,7 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
                 autoFocus
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Jump to a space or person"
+                placeholder="Search messages, files, spaces, people"
                 placeholderTextColor={colors.tertiaryLabel}
                 autoCorrect={false}
                 clearButtonMode="while-editing"
@@ -201,14 +197,42 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
                   <CardRow first onPress={() => router.push('/spaces/account')}>
                     <Avatar id={current?.memberId ?? who} name={who} size={28} url={myAvatar} />
                     <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{who}</Text>
+                    {/* One tap to your QR code (2026-11-11), for showing it to someone in person. */}
+                    {current ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Show your QR code"
+                        hitSlop={10}
+                        onPress={() => router.push({ pathname: '/spaces/invite', params: { org: current.address, qr: '1' } })}
+                        style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, paddingHorizontal: 4 })}
+                      >
+                        <Image source="sf:qrcode" style={{ width: 20, height: 20 }} tintColor={colors.secondaryLabel} />
+                      </Pressable>
+                    ) : null}
                     <Chevron />
                   </CardRow>
                 ) : null}
-                <CardRow first={!who} onPress={() => router.push('/spaces/settings')}>
+                {/* Your threads across every space (2026-11-13, the web's /threads page). */}
+                {current ? (
+                  <CardRow first={!who} onPress={() => router.push({ pathname: '/spaces/my-threads', params: { org: current.address, me: current.memberId } })}>
+                    <Glyph icon="sf:bubble.left.and.bubble.right" />
+                    <Text style={{ flex: 1, ...type.body, color: colors.label }}>Your threads</Text>
+                    <Chevron />
+                  </CardRow>
+                ) : null}
+                <CardRow first={!who && !current} onPress={() => router.push('/spaces/settings')}>
                   <Glyph icon="sf:gearshape" />
                   <Text style={{ flex: 1, ...type.body, color: colors.label }}>Settings</Text>
                   <Chevron />
                 </CardRow>
+                {/* Your agents (2026-11-13): list, create one Rowboat runs, and manage each. */}
+                {current ? (
+                  <CardRow onPress={() => router.push({ pathname: '/spaces/agents', params: { org: current.address, me: current.memberId } })}>
+                    <Glyph icon="sf:cpu" />
+                    <Text style={{ flex: 1, ...type.body, color: colors.label }}>Agents</Text>
+                    <Chevron />
+                  </CardRow>
+                ) : null}
               </Card>
               <Card>
                 <CardRow first onPress={() => router.push('/spaces/join')}>
@@ -227,7 +251,6 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
             <OrgCard
               key={current.id}
               org={current}
-              onSwitch={() => setSwitching(true)}
               mode={tab === 'dms' ? 'dms' : tab === 'search' ? 'search' : 'home'}
               query={tab === 'search' ? query : ''}
             />
@@ -238,9 +261,9 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
               <View style={{ width: 72, height: 72, borderRadius: 22, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
                 <Image source="sf:person.2" style={{ width: 32, height: 32 }} tintColor={colors.secondaryLabel} />
               </View>
-              <Text style={{ ...type.title, color: colors.label }}>No orgs yet</Text>
+              <Text style={{ ...type.title, color: colors.label }}>Spaces is unreachable</Text>
               <Text style={{ ...type.body, lineHeight: 22, textAlign: 'center', color: colors.secondaryLabel, paddingHorizontal: 24 }}>
-                Ask a teammate for an invite link to join their space.
+                Check your connection and pull to refresh, or open an invite link someone sent you.
               </Text>
               <Pressable
                 onPress={() => router.push('/spaces/join')}
@@ -251,62 +274,7 @@ function OrgList({ tab }: { tab: SpacesTabKey }) {
             </View>
           ) : null}
         </ScrollView>
-      <OrgSwitcher
-        visible={switching}
-        orgs={account.orgs ?? []}
-        currentId={current?.id}
-        onPick={(id) => {
-          setSelectedId(id);
-          saveValue('selectedOrg', id);
-          setSwitching(false);
-        }}
-        onClose={() => setSwitching(false)}
-      />
     </View>
-  );
-}
-
-/** Slack's workspace switcher: a bottom sheet of your orgs, a check on the current one. */
-function OrgSwitcher({ visible, orgs, currentId, onPick, onClose }: {
-  visible: boolean;
-  orgs: SpacesOrg[];
-  currentId?: string;
-  onPick: (id: string) => void;
-  onClose: () => void;
-}) {
-  const colors = useColors();
-  const insets = useSafeAreaInsets();
-  return (
-    <BottomSheet visible={visible} onClose={onClose}
-      style={{ paddingTop: 10, paddingHorizontal: 16, paddingBottom: insets.bottom + 12, gap: 12, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: colors.groupedBackground }}
-    >
-          <View style={{ alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: colors.separator }} />
-          <Text style={{ ...type.title, color: colors.label, paddingHorizontal: 4 }}>Your orgs</Text>
-          <Card>
-            {orgs.map((o, i) => (
-              <CardRow key={o.id} first={i === 0} onPress={() => onPick(o.id)}>
-                <OrgLogo org={o} size={28} readOnly />
-                <View style={{ flex: 1, paddingVertical: 8 }}>
-                  <Text numberOfLines={1} style={{ ...type.bodyStrong, color: colors.label }}>{o.name}</Text>
-                  <Text numberOfLines={1} style={{ ...type.caption, color: colors.tertiaryLabel }}>{o.address}</Text>
-                </View>
-                {o.id === currentId ? <Image source="sf:checkmark" style={{ width: 15, height: 15 }} tintColor="#0a84ff" /> : null}
-              </CardRow>
-            ))}
-          </Card>
-          <Card>
-            <CardRow
-              first
-              onPress={() => {
-                onClose();
-                router.push('/spaces/join');
-              }}
-            >
-              <Glyph icon="sf:plus" />
-              <Text style={{ flex: 1, ...type.body, color: colors.label }}>Join another org</Text>
-            </CardRow>
-          </Card>
-    </BottomSheet>
   );
 }
 
@@ -318,7 +286,7 @@ function orgTint(id: string, dark: boolean): string {
   return `hsl(${ORG_HUES[h % ORG_HUES.length]}, 50%, ${dark ? 34 : 40}%)`;
 }
 
-function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg; onSwitch: () => void; mode?: 'home' | 'dms' | 'search'; query?: string }) {
+function OrgCard({ org, mode = 'home', query = '' }: { org: SpacesOrg; mode?: 'home' | 'dms' | 'search'; query?: string }) {
   const account = useSpacesAccount();
   const colors = useColors();
   const dark = colors.isDark;
@@ -351,7 +319,7 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
       const all = await client.listSpaces({ includeDirect: true });
       apply(all);
       saveValue(spacesKey, all);
-      // Badges: the org's unread snapshot (read state is org-owned).
+      // Badges: the server's unread snapshot (read state is server-owned).
       client.unread().then(setUnread).catch(() => {});
       // Rosters per space — best-effort, rows render without them first.
       const loaded = await Promise.all(all.map(async (s) => [s.id, await client.listMembers(s.id).catch(() => [])] as const));
@@ -359,7 +327,7 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
       saveValue(membersKey, loaded);
       setError(null);
     } catch (err) {
-      // Offline is already said once at the top of the screen (the org list
+      // Offline is already said once at the top of the screen (the server record
       // refresh fails the same way) — cards keep their saved rows quietly.
       if (!isNetworkError(err)) setError(err instanceof Error ? err.message : String(err));
     }
@@ -373,7 +341,7 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
   // Coming back from a chat: the marks moved, so the badges must too.
   useFocusEffect(
     useCallback(() => {
-      // A new space, or one joined from Browse, reloads the list.
+      // A new space, or one joined by link, reloads the list.
       if (takeSpacesChanged(org.address)) void load();
       else if (spaces !== null) client.unread().then(setUnread).catch(() => {});
       // eslint-disable-next-line react-hooks/exhaustive-deps -- spaces !== null stands for spaces
@@ -404,7 +372,6 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
   );
 
   // Under an admins-only invite policy a member's invite is refused, so Invite hides.
-  const mayInvite = canInvite(useOrgSettings(client, org.address), org.role);
 
   const [openingDm, setOpeningDm] = useState<string | null>(null);
   const blockedIds = useBlockedIds(org.address);
@@ -460,8 +427,8 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
     for (const m of seen.values()) if (m.deactivatedAt && !talkedWith.has(m.id)) seen.delete(m.id);
     // People you blocked (2026-10-20) leave the list; unblock from Account.
     for (const id of blockedIds) seen.delete(id);
-    // Someone else's personal agent can't be messaged (2026-10-26).
-    for (const m of [...seen.values()]) if (isOthersPersonalAgent(m, org.memberId)) seen.delete(m.id);
+    // An agent that is not yours can't be messaged (2026-11-09, the reach rule).
+    for (const m of [...seen.values()]) if (!canMessageDirect(m, org.memberId)) seen.delete(m.id);
     // You first (the self-DM is your notes-to-self), then everyone by name.
     return [...seen.values()].sort((a, b) =>
       a.id === org.memberId ? -1 : b.id === org.memberId ? 1 : a.displayName.localeCompare(b.displayName),
@@ -473,11 +440,12 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
   // Collapsible sections (Slack): remembered per org; only on Home. A
   // collapsed section still says how much is waiting inside it.
   const collapseKey = `collapsed:${org.id}`;
-  const [collapsed, setCollapsed] = useState<{ spaces?: boolean; dms?: boolean }>(() => peekValue<{ spaces?: boolean; dms?: boolean }>(collapseKey) ?? {});
+  type Collapsed = { spaces?: boolean; dms?: boolean; agents?: boolean };
+  const [collapsed, setCollapsed] = useState<Collapsed>(() => peekValue<Collapsed>(collapseKey) ?? {});
   useEffect(() => {
-    void loadValue<{ spaces?: boolean; dms?: boolean }>(collapseKey).then((v) => v && setCollapsed(v));
+    void loadValue<Collapsed>(collapseKey).then((v) => v && setCollapsed(v));
   }, [collapseKey]);
-  const toggle = (section: 'spaces' | 'dms') => {
+  const toggle = (section: 'spaces' | 'dms' | 'agents') => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setCollapsed((prev) => {
       const next = { ...prev, [section]: !prev[section] };
@@ -488,42 +456,153 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
   const canCollapse = mode === 'home';
   const spacesClosed = canCollapse && Boolean(collapsed.spaces);
   const dmsClosed = canCollapse && Boolean(collapsed.dms);
+  const agentsClosed = canCollapse && Boolean(collapsed.agents);
   const sum = (badges: { unread: number; forYou: number }[]) =>
     badges.reduce((t, b) => ({ unread: t.unread + b.unread, forYou: t.forYou + b.forYou }), { unread: 0, forYou: 0 });
   const spacesWaiting = sum((spaces ?? []).map((sp) => badgeFor(sp.id, false)));
-  const dmsWaiting = sum(orgMembers.map((m) => { const dm = dmWith(m.id); return dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 }; }));
+  const waitingIn = (list: Member[]) => sum(list.map((m) => { const dm = dmWith(m.id); return dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 }; }));
 
-  // Search is a jump list: spaces and people whose names contain the query.
+  // Search: spaces and people whose names contain the query, then the
+  // server's search over every space you are in (GET /v1/search, 2026-11-12),
+  // what the web's ⌘K palette shows. Debounced, one request per pause.
   const q = query.trim().toLowerCase();
+  const [hits, setHits] = useState<SearchResults | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<unknown>(null);
+  useEffect(() => {
+    const text = query.trim();
+    if (mode !== 'search' || !text) {
+      setHits(null);
+      setSearching(false);
+      setSearchError(null);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      client
+        .search(undefined, { q: text, limit: 20 })
+        .then((r) => {
+          if (cancelled) return;
+          setHits(r);
+          setSearchError(null);
+        })
+        .catch((err) => {
+          // Offline is already said at the top of the screen; the name matches still show.
+          if (!cancelled) setSearchError(isNetworkError(err) ? null : err);
+        })
+        .finally(() => !cancelled && setSearching(false));
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [client, mode, query]);
+  // A hit opens in its space: a DM is titled by the other person, as its row is.
+  const spaceFor = useCallback(
+    (spaceId: string): HitSpace | undefined => {
+      const sp = spaces?.find((x) => x.id === spaceId);
+      if (sp) return { title: sp.name };
+      const dm = directs.find((x) => x.id === spaceId);
+      if (!dm) return undefined;
+      const otherId = dm.participants?.find((id) => id !== org.memberId) ?? org.memberId;
+      const other = members.get(dm.id)?.find((m) => m.id === otherId) ?? orgMembers.find((m) => m.id === otherId);
+      return { title: other ? (otherId === org.memberId ? `${other.displayName} (you)` : memberLabel(other)) : 'Direct message', kind: 'direct' };
+    },
+    [spaces, directs, members, orgMembers, org.memberId],
+  );
   const shownSpaces = mode === 'dms' ? null : mode === 'search' && q ? (spaces?.filter((s) => s.name.toLowerCase().includes(q)) ?? null) : spaces;
   const shownMembers = mode === 'search' && q ? orgMembers.filter((m) => m.displayName.toLowerCase().includes(q)) : orgMembers;
+  // People and your agents in their own sections (2026-11-09, as the desktop's sidebar has them).
+  const shownPeople = shownMembers.filter((m) => m.kind !== 'agent');
+  const shownAgents = shownMembers.filter((m) => m.kind === 'agent');
+  // Home's Agents section (2026-11-13). The desktop lists the agents you have a
+  // DM with; the phone has no per-DM activity time, so unread first, then those
+  // DMs, then by name, capped at five so Home stays short. "View all agents"
+  // reaches the rest.
+  const HOME_AGENTS = 5;
+  const agentRank = (m: Member) => {
+    const dm = dmWith(m.id);
+    return dm && badgeFor(dm.id, true).unread > 0 ? 0 : dm ? 1 : 2;
+  };
+  const homeAgents = [...shownAgents].sort((a, b) => agentRank(a) - agentRank(b) || a.displayName.localeCompare(b.displayName)).slice(0, HOME_AGENTS);
+  // Others' agents after yours, filling the five (2026-11-13, Gagan: "I only see
+  // my agents"): the ones in spaces you share, as the desktop Agents page finds
+  // them. Harbor refuses a DM with an agent you don't own (the reach rule,
+  // 2026-11-09), so they open their read-only page instead, under their owner's name.
+  const othersAgents = useMemo(() => {
+    const seen = new Map<string, Member>();
+    for (const list of members.values()) for (const m of list) if (m.kind === 'agent' && !seen.has(m.id) && !isDeparted(m) && !canMessageDirect(m, org.memberId)) seen.set(m.id, m);
+    for (const id of blockedIds) seen.delete(id);
+    return [...seen.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- blockedKey stands for blockedIds
+  }, [members, org.memberId, blockedKey]);
+  const ownerName = (m: Member) => {
+    if (!m.ownerId) return 'Built in';
+    for (const list of members.values()) {
+      const owner = list.find((x) => x.id === m.ownerId);
+      if (owner) return `${owner.displayName}’s`;
+    }
+    return 'Someone else’s';
+  };
+  const homeOthers = othersAgents.slice(0, Math.max(0, HOME_AGENTS - homeAgents.length));
+  const agentsLink = { org: org.address, me: org.memberId };
+
+  const memberRow = (m: Member, i: number) => {
+    const dm = dmWith(m.id);
+    const badge = dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 };
+    const self = m.id === org.memberId;
+    return (
+      <CardRow key={m.id} first={i === 0} disabled={openingDm !== null} dimmed={openingDm !== null && openingDm !== m.id} onPress={() => void openDm(m)}>
+        <Avatar id={m.id} name={m.displayName} size={28} url={m.avatarUrl} />
+        <Text numberOfLines={1} style={{ flex: 1, ...type.body, fontWeight: badge.unread > 0 ? '600' : '400', color: colors.label }}>
+          {m.displayName}
+          {self ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (you)</Text> : null}
+          {m.deactivatedAt ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (deactivated)</Text> : null}
+        </Text>
+        {openingDm === m.id ? <ActivityIndicator size="small" /> : badge.unread > 0 ? <UnreadBadge badge={badge} /> : null}
+      </CardRow>
+    );
+  };
+
+  const otherAgentRow = (m: Member, i: number) => (
+    <CardRow key={m.id} first={i === 0} onPress={() => router.push({ pathname: '/spaces/agent', params: { ...agentsLink, agent: m.id, title: m.displayName } })}>
+      <Avatar id={m.id} name={m.displayName} size={28} url={m.avatarUrl} />
+      <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>{m.displayName}</Text>
+      <Text numberOfLines={1} style={{ ...type.caption, color: colors.tertiaryLabel, maxWidth: '40%' }}>{ownerName(m)}</Text>
+      <Chevron />
+    </CardRow>
+  );
+
+  // People, then your agents: every member is one tap from a DM (a DM is a
+  // `direct` space — openDirect is get-or-create, idempotent). Your own row
+  // opens the self-DM: notes to self, on the server, for every device and your agent.
+  const memberSections = (sections: { key: 'dms' | 'agents'; text: string; list: Member[]; closed: boolean }[]) =>
+    sections.map(({ key, text, list, closed }) => list.length > 0 ? (
+      <View key={key} style={{ gap: 8 }}>
+        <SectionLabel text={text} collapsed={closed} onToggle={canCollapse ? () => toggle(key) : undefined} waiting={waitingIn(list)} />
+        {closed ? null : <Card>{list.map(memberRow)}</Card>}
+      </View>
+    ) : null);
 
   return (
     <View style={{ gap: 24 }}>
       {mode === 'home' ? (
         <>
-      {/* Org identity: a plain card — tile, name, one quiet line of facts. */}
-      <Card radius={32 /* near-concentric with the 44pt logo and its 14pt inset */}>
-        <Pressable
-          onPress={() => {
-            if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-            onSwitch();
-          }}
-          style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, backgroundColor: pressed ? colors.secondaryBackground : 'transparent' })}
-        >
-          <OrgLogo org={org} />
+      {/* Identity: a plain card — tile, name, one quiet line of facts. */}
+      <Card radius={32 /* near-concentric with the 44pt tile and its 14pt inset */}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
+          <OrgTile org={org} />
           <View style={{ flex: 1, gap: 1 }}>
             <Text numberOfLines={1} style={{ ...type.title, color: colors.label }}>{org.name}</Text>
             <Text style={{ ...type.caption, color: colors.secondaryLabel }}>
               {[
-                org.role === 'admin' ? 'Admin' : 'Member',
                 people > 0 ? `${people} ${people === 1 ? 'person' : 'people'}` : null,
                 spaces ? `${spaces.length} ${spaces.length === 1 ? 'space' : 'spaces'}` : null,
               ].filter(Boolean).join(' · ')}
             </Text>
           </View>
-          <Image source="sf:chevron.up.chevron.down" style={{ width: 11, height: 15 }} tintColor={colors.tertiaryLabel} />
-        </Pressable>
+        </View>
       </Card>
         </>
       ) : null}
@@ -552,152 +631,87 @@ function OrgCard({ org, onSwitch, mode = 'home', query = '' }: { org: SpacesOrg;
               );
             })}
             {shownSpaces.length === 0 && mode !== 'home' ? (
-              <Text style={{ ...type.body, color: colors.tertiaryLabel, padding: 14 }}>No spaces in this org yet.</Text>
+              <Text style={{ ...type.body, color: colors.tertiaryLabel, padding: 14 }}>No spaces yet.</Text>
             ) : null}
-            {/* New space and Browse (2026-11-02): last rows of the list, as Slack does. */}
+            {/* New group (2026-11-02): the last row of the list, as Slack does. Browse went with open spaces (2026-11-09). */}
             {mode === 'home' ? (
-              <>
-                <CardRow first={shownSpaces.length === 0} onPress={() => router.push({ pathname: '/spaces/new-space', params: { org: org.address, me: org.memberId } })}>
-                  <Glyph icon="sf:plus" />
-                  <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>New space</Text>
-                </CardRow>
-                <CardRow onPress={() => router.push({ pathname: '/spaces/browse', params: { org: org.address, me: org.memberId } })}>
-                  <Glyph icon="sf:safari" />
-                  <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>Browse spaces</Text>
-                </CardRow>
-              </>
+              <CardRow first={shownSpaces.length === 0} onPress={() => router.push({ pathname: '/spaces/new-space', params: { org: org.address, me: org.memberId } })}>
+                <Glyph icon="sf:plus" />
+                <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>New space</Text>
+              </CardRow>
             ) : null}
           </Card>
           )}
         </View>
       ) : null}
 
-      {/* Direct messages: every member is one tap from a DM (a DM is a
-          `direct` space — openDirect is get-or-create, idempotent). Your own
-          row opens the self-DM: notes to self, on the org, for every device
-          and your agent. */}
-      {shownMembers.length > 0 ? (
+      {/* On Home the agents get their own section below; elsewhere they follow People. */}
+      {memberSections([
+        { key: 'dms', text: 'People', list: shownPeople, closed: dmsClosed },
+        ...(mode === 'home' ? [] : [{ key: 'agents' as const, text: 'Agents', list: shownAgents, closed: agentsClosed }]),
+      ])}
+
+      {/* Agents last on Home (2026-11-13, Gagan: Spaces, People, then Agents on
+          the phone, not the desktop sidebar's Agents first): yours, then
+          others', then Add agent and View all agents. Shown even with none
+          yet, so Add agent is always one tap away. */}
+      {mode === 'home' && spaces !== null ? (
         <View style={{ gap: 8 }}>
-          <SectionLabel text="Direct messages" collapsed={dmsClosed} onToggle={canCollapse ? () => toggle('dms') : undefined} waiting={dmsWaiting} />
-          {dmsClosed ? null : (
+          <SectionLabel text="Agents" collapsed={agentsClosed} onToggle={() => toggle('agents')} waiting={waitingIn(shownAgents)} />
+          {agentsClosed ? null : (
           <Card>
-            {shownMembers.map((m, i) => {
-              const dm = dmWith(m.id);
-              const badge = dm ? badgeFor(dm.id, true) : { unread: 0, forYou: 0 };
-              const self = m.id === org.memberId;
-              return (
-                <CardRow key={m.id} first={i === 0} disabled={openingDm !== null} dimmed={openingDm !== null && openingDm !== m.id} onPress={() => void openDm(m)}>
-                  <Avatar id={m.id} name={m.displayName} size={28} url={m.avatarUrl} />
-                  <Text numberOfLines={1} style={{ flex: 1, ...type.body, fontWeight: badge.unread > 0 ? '600' : '400', color: colors.label }}>
-                    {m.displayName}
-                    {self ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (you)</Text> : null}
-                    {m.deactivatedAt ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}> (deactivated)</Text> : null}
-                  </Text>
-                  {openingDm === m.id ? <ActivityIndicator size="small" /> : badge.unread > 0 ? <UnreadBadge badge={badge} /> : null}
-                </CardRow>
-              );
-            })}
+            {homeAgents.map(memberRow)}
+            {homeOthers.map((m, i) => otherAgentRow(m, homeAgents.length + i))}
+            <CardRow first={homeAgents.length + homeOthers.length === 0} onPress={() => router.push({ pathname: '/spaces/new-agent', params: agentsLink })}>
+              <Glyph icon="sf:plus" />
+              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>Add agent</Text>
+            </CardRow>
+            <CardRow onPress={() => router.push({ pathname: '/spaces/agents', params: agentsLink })}>
+              <Glyph icon="sf:cpu" />
+              <Text style={{ flex: 1, ...type.body, color: colors.secondaryLabel }}>View all agents</Text>
+              <Chevron />
+            </CardRow>
           </Card>
           )}
         </View>
       ) : null}
-      {/* An invite is to the org (harbor, 2026-10-19), so it sits with the org, under everything. */}
-      {mode === 'home' && mayInvite ? (
+      {mode === 'search' && q ? (
+        <>
+          {searchError ? <StatusBanner error={searchError} /> : null}
+          {hits && !noHits(hits, spaceFor) ? (
+            <Card>
+              <View style={{ paddingVertical: 6 }}>
+                <SearchHits results={hits} org={org.address} me={org.memberId} spaceFor={spaceFor} showSpace />
+              </View>
+            </Card>
+          ) : null}
+          {searching ? <ActivityIndicator style={{ alignSelf: 'center' }} /> : null}
+        </>
+      ) : null}
+      {/* Your personal link (harbor spec §4 Invites, 2026-11-09): how someone outside your groups reaches you. Under everything. */}
+      {mode === 'home' ? (
         <Card>
           <CardRow first onPress={() => router.push({ pathname: '/spaces/invite', params: { org: org.address } })}>
-            <Glyph icon="sf:person.badge.plus" />
-            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>Invite people to {org.name}</Text>
+            <Glyph icon="sf:link" />
+            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>Share your link</Text>
             <Chevron />
           </CardRow>
         </Card>
       ) : null}
-      {mode === 'search' && q && (shownSpaces?.length ?? 0) === 0 && shownMembers.length === 0 ? (
-        <Text style={{ ...type.body, textAlign: 'center', color: colors.tertiaryLabel, paddingTop: 24 }}>No spaces or people match “{query.trim()}”</Text>
+      {mode === 'search' && q && !searching && !searchError && (shownSpaces?.length ?? 0) === 0 && shownMembers.length === 0 && (!hits || noHits(hits, spaceFor)) ? (
+        <Text style={{ ...type.body, textAlign: 'center', color: colors.tertiaryLabel, paddingTop: 24 }}>No results for “{query.trim()}”</Text>
       ) : null}
     </View>
   );
 }
 
-/**
- * The org's logo: a circle — the org's picture when it has one (GET
- * /v1/org/logo, shown to every member), else its initial on the org tint.
- * Admins tap it to choose or remove one; the org refuses anyone else.
- */
-function OrgLogo({ org, size = 44, readOnly }: { org: SpacesOrg; size?: number; readOnly?: boolean }) {
+/** The server's tile: its initial on a muted tint (the org logo went with the orgs, 2026-11-09). */
+function OrgTile({ org, size = 44 }: { org: SpacesOrg; size?: number }) {
   const colors = useColors();
-  const account = useSpacesAccount();
-  const key = `orgLogoUrl:${org.id}`;
-  const [logo, setLogo] = useState<string | null>(() => peekValue<string | null>(key) ?? null);
-  const [busy, setBusy] = useState(false);
-  const client = useMemo(
-    () => new SpacesClient({ baseUrl: `https://${org.address}`, token: (opts) => account.getAccessToken(opts) }),
-    [org.address, account],
-  );
-  const apply = useCallback(
-    (url: string | null) => {
-      setLogo(url);
-      saveValue<string | null>(key, url);
-    },
-    [key],
-  );
-  useEffect(() => {
-    let cancelled = false;
-    void loadValue<string | null>(key).then((v) => !cancelled && v && setLogo((prev) => prev ?? v));
-    // 404 on an org without the route: keep the initial, say nothing.
-    client.getOrgLogo().then((url) => !cancelled && apply(url ?? null)).catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [client, key, apply]);
-
-  const run = (work: () => Promise<void>) => {
-    setBusy(true);
-    work()
-      .catch((err) => Alert.alert("Couldn't update the logo", friendlyError(err)))
-      .finally(() => setBusy(false));
-  };
-  const choose = () =>
-    run(async () => {
-      const image = await pickProfileImage();
-      if (image) apply(await client.setOrgLogo(image));
-    });
-  const remove = () =>
-    run(async () => {
-      await client.clearOrgLogo();
-      apply(null);
-    });
-  const onPress = () => {
-    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-    const options = logo ? ['Choose photo', 'Remove logo', 'Cancel'] : ['Choose photo', 'Cancel'];
-    if (process.env.EXPO_OS !== 'ios') {
-      Alert.alert('Org logo', undefined, [
-        { text: 'Choose photo', onPress: choose },
-        ...(logo ? [{ text: 'Remove logo', style: 'destructive' as const, onPress: remove }] : []),
-        { text: 'Cancel', style: 'cancel' as const },
-      ]);
-      return;
-    }
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title: 'Org logo', message: 'Everyone in the org sees this.', options, cancelButtonIndex: options.length - 1, destructiveButtonIndex: logo ? 1 : undefined },
-      (i) => {
-        if (i === 0) choose();
-        else if (logo && i === 1) remove();
-      },
-    );
-  };
-
-  const face = (
-    <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: orgTint(org.id, colors.isDark), opacity: busy ? 0.5 : 1 }}>
-      <Text style={{ fontSize: size * 0.43, fontWeight: '700', color: '#ffffff' }}>{(org.name[0] ?? '?').toUpperCase()}</Text>
-      {logo ? <AuthedImage url={logo} style={{ position: 'absolute', top: 0, left: 0, width: size, height: size }} /> : null}
-    </View>
-  );
-  // Only admins can change it (Harbor policy.canSetOrgLogo).
-  if (readOnly || org.role !== 'admin') return face;
   return (
-    <Pressable disabled={busy} onPress={onPress} hitSlop={6} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
-      {face}
-    </Pressable>
+    <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: orgTint(org.id, colors.isDark) }}>
+      <Text style={{ fontSize: size * 0.43, fontWeight: '700', color: '#ffffff' }}>{(org.name[0] ?? '?').toUpperCase()}</Text>
+    </View>
   );
 }
 

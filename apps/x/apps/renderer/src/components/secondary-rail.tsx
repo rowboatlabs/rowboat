@@ -24,6 +24,8 @@ const EDGE_W = 10
 const WIDTH_DEFAULT = 280
 const WIDTH_MIN = 220
 const WIDTH_MAX = 480
+/** A floating rail's inset from the window's edge, as the main sidebar's (styles/sidebar.css). */
+const FLOAT_INSET = 8
 
 /** Lets a control outside the rail (the Spaces header's "Show sidebar"
  *  button, 2026-10-22) preview it the way hovering the edge does. */
@@ -40,7 +42,7 @@ export interface SecondaryRailContext {
     onMenuOpenChange: (open: boolean) => void
 }
 
-export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = false, edgeless = false, persistent, onWidthChange, peekRef, className, children }: {
+export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = false, edgeless = false, floating = false, persistent, onWidthChange, peekRef, className, children }: {
     /** Docked (in the flow, pushing the content). False = the edge sliver + hover drawer. */
     open: boolean
     /** The lock: docks a peeked rail, closes a docked one. */
@@ -58,6 +60,9 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
     /** No edge sliver while collapsed: an outside control (peekRef) is the
      *  only way in, so the two never compete (Spaces, 2026-10-22). */
     edgeless?: boolean
+    /** A rounded panel inset from the edge, like the main sidebar, instead of
+     *  a strip with a hairline (Spaces, 2026-11-13: matched to the local sidebar). */
+    floating?: boolean
     /** Filled with this rail's peek controls, for an outside trigger. */
     peekRef?: RefObject<SecondaryRailPeek | null>
     /** Extra classes for the aside — e.g. `border-r-0` when the neighboring
@@ -144,7 +149,7 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
     // eslint-disable-next-line react-hooks/refs
     const content = children({ togglePin, onMenuOpenChange })
     const body = (
-        <div style={{ width }} className={cn('flex h-full min-h-0 flex-col', resizingWidth && 'select-none')}>
+        <div style={{ width: floating ? width - FLOAT_INSET : width }} className={cn('flex h-full min-h-0 flex-col', resizingWidth && 'select-none')}>
             {content}
         </div>
     )
@@ -157,12 +162,13 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
             // No slide while the edge is being dragged — the width must track the cursor.
             style={{ width: open ? width : edgeless ? 0 : EDGE_W, transition: resizingWidth ? undefined : 'width 200ms cubic-bezier(0.2,0,0,1)' }}
             className={cn(
-                'relative flex min-h-0 shrink-0 flex-col border-r border-border',
+                'relative flex min-h-0 shrink-0 flex-col',
+                !floating && 'border-r border-border',
                 !open && edgeless && 'border-r-0',
                 // A step lighter than the main sidebar so the two rails read as
                 // distinct layers; at this subtle a shift the hairline to the
-                // canvas earns its place.
-                open ? 'z-10 overflow-hidden bg-[var(--rowboat-panel-soft)]' : 'overflow-visible bg-background',
+                // canvas earns its place. Floating, the panel inside carries it.
+                open ? cn('z-10 overflow-hidden', !floating && 'bg-[var(--rowboat-panel-soft)]') : 'overflow-visible bg-background',
                 // The drawer rides over the content's own sticky layers (z-20).
                 !open && (peek ? 'z-30' : 'z-10'),
                 className,
@@ -171,7 +177,7 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
             {persistent}
             {open ? (
                 <>
-                    {body}
+                    {floating ? <div className="rowboat-floating-rail my-2 ml-2 flex min-h-0 flex-1 overflow-hidden rounded-2xl bg-[var(--rowboat-panel-soft)]">{body}</div> : body}
                     {/* Docked: drag the right edge to resize. */}
                     <div
                         onMouseDown={startWidthResize}
@@ -197,12 +203,13 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
                     <div style={{ width: width + 50 }} className="pointer-events-none absolute inset-y-0 left-0 overflow-hidden">
                         <div
                             inert={!peek}
-                            style={{ width }}
+                            style={{ width: floating ? width - FLOAT_INSET : width }}
                             className={cn(
-                                'absolute bottom-1.5 left-0 top-1.5 overflow-hidden rounded-r-xl border border-border bg-[var(--rowboat-panel-soft)] transition-[translate,box-shadow] duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
+                                'absolute overflow-hidden bg-[var(--rowboat-panel-soft)] transition-[translate,box-shadow] duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
+                                floating ? 'bottom-2 left-2 top-2 rounded-2xl border border-border' : 'bottom-1.5 left-0 top-1.5 rounded-r-xl border border-border',
                                 // The shadow only while out (2026-10-22): hidden off the edge, it
                                 // still spilled ~50px onto the content as a grey band.
-                                peek ? 'pointer-events-auto translate-x-0 shadow-2xl' : '-translate-x-full shadow-none',
+                                peek ? 'pointer-events-auto translate-x-0 shadow-2xl' : cn(floating ? '-translate-x-[calc(100%+0.5rem)]' : '-translate-x-full', 'shadow-none'),
                             )}
                         >
                             {body}

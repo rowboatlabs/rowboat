@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startHarborDeployment, type RunningDeployment } from '../src/deployment.js';
 import type { RunningHarbor } from '../src/server.js';
 import { pgliteDb } from '../src/sql-pglite.js';
 import type { SqlDb } from '../src/sql.js';
@@ -63,72 +62,5 @@ describe('the render face', () => {
     const res = await preflight(`${closed.url}/v1/spaces`, WEB);
     expect(res.status).toBe(401);
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
-  });
-});
-
-describe('the apex', () => {
-  let db: SqlDb;
-  let as: FakeAs;
-  let dep: RunningDeployment;
-
-  beforeAll(async () => {
-    db = await pgliteDb();
-    as = await startFakeAs();
-    dep = await startHarborDeployment({ db, apexDomain: 'spaces.test', issuer: as.issuer, webOrigins: [WEB] });
-    await dep.createOrg({
-      name: 'Acme',
-      domains: ['acme.test'],
-      issuer: as.issuer,
-      firstAdmin: { iss: as.issuer, sub: 'sub-ram', displayName: 'Ramnique' },
-    });
-  });
-
-  afterAll(async () => {
-    await dep.close();
-    await new Promise<void>((resolve) => as.server.close(() => resolve()));
-  });
-
-  it('answers the preflight for my orgs, and marks the listing', async () => {
-    const res = await preflight(`${dep.url}/v1/orgs`, WEB, { 'x-forwarded-host': 'spaces.test' });
-    expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-origin')).toBe(WEB);
-
-    const token = await as.mint({ sub: 'sub-ram' });
-    const list = await fetch(`${dep.url}/v1/orgs`, {
-      headers: { origin: WEB, authorization: `Bearer ${token}`, 'x-forwarded-host': 'spaces.test' },
-    });
-    expect(list.status).toBe(200);
-    expect(list.headers.get('access-control-allow-origin')).toBe(WEB);
-  });
-
-  it('marks every org it serves', async () => {
-    const res = await preflight(`${dep.url}/v1/spaces`, WEB, { 'x-forwarded-host': 'acme.test' });
-    expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-origin')).toBe(WEB);
-  });
-
-  it('lets the web app preflight PATCH and turn Ro off and on', async () => {
-    const url = `${dep.url}/v1/org/settings`;
-    const res = await preflight(url, WEB, {
-      'x-forwarded-host': 'acme.test',
-      'access-control-request-method': 'PATCH',
-    });
-    expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-origin')).toBe(WEB);
-    expect(res.headers.get('access-control-allow-credentials')).toBe('true');
-    expect(res.headers.get('access-control-allow-methods')?.split(',')).toContain('PATCH');
-
-    const token = await as.mint({ sub: 'sub-ram' });
-    const headers = { origin: WEB, authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-forwarded-host': 'acme.test' };
-    for (const jevEnabled of [false, true]) {
-      const changed = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ jevEnabled }) });
-      expect(changed.status).toBe(200);
-      expect(changed.headers.get('access-control-allow-origin')).toBe(WEB);
-      expect(await changed.json()).toMatchObject({ settings: { jevEnabled } });
-
-      const saved = await fetch(url, { headers });
-      expect(saved.status).toBe(200);
-      expect(await saved.json()).toMatchObject({ settings: { jevEnabled } });
-    }
   });
 });
