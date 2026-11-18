@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, expect, it } from 'vitest';
-import { SlackImportPreview } from '@rowboat/spaces-protocol';
+import { MAX_SLACK_ZIP_BYTES, SlackImportPreview } from '@rowboat/spaces-protocol';
 import { readFileSync } from 'node:fs';
 import { startTestHarbor, restClient, agentClient } from './helpers.js';
 import type { RunningHarbor } from '../src/server.js';
@@ -39,9 +39,31 @@ it('returns actionable errors for corrupt and unsupported exports', async () => 
   expect(await response.json()).toMatchObject({ code: 'invalid_request' });
 });
 it('bounds a streamed upload without a content-length header', async () => {
-  const stream = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(25 * 1024 * 1024 + 1)); controller.close(); } });
+  let sent = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (sent > MAX_SLACK_ZIP_BYTES) { controller.close(); return; }
+      const size = Math.min(1024 * 1024, MAX_SLACK_ZIP_BYTES + 1 - sent);
+      controller.enqueue(new Uint8Array(size)); sent += size;
+    },
+  });
   const response = await fetch(`${harbor.url}/v1/imports/slack/preview`, {
     method: 'PUT', headers: { authorization: 'Bearer dev-previewer' }, body: stream, duplex: 'half',
   } as RequestInit);
   expect(response.status).toBe(413);
 });
+
+it('previews and queues an archive larger than the former 25 MiB cap', async () => {
+  const files = JSON.parse(readFileSync(new URL('./fixtures/slack/public.json', import.meta.url), 'utf8'));
+  // Stored padding exercises upload bytes without inflating message counts or entry limits.
+  for (let i = 0; i < 4; i++) files['padding-' + i + '.txt'] = ' '.repeat(7 * 1024 * 1024);
+  const large = zip(files);
+  expect(large.length).toBeGreaterThan(25 * 1024 * 1024);
+  expect((await upload(large)).status).toBe(200);
+  const response = await fetch(harbor.url + '/v1/imports/slack/jobs', {
+    method: 'POST', headers: { authorization: 'Bearer dev-previewer', 'content-type': 'application/json' },
+    body: JSON.stringify({ bytes: large.toString('base64'), workspace: 'large.slack.com', channelIds: ['C1'] }),
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ workspace: 'large.slack.com' });
+}, 30000);

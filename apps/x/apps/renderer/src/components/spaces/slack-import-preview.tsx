@@ -72,7 +72,7 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
         setBytes(''); setPreview(null); setSelected(new Set()); setError(''); setPage(0); setQuery(''); setFilename(file?.name ?? '')
         if (!file) return
         if (!file.size || file.size > spaces.MAX_SLACK_ZIP_BYTES) {
-            setError('Choose a non-empty Slack export ZIP up to 25 MiB.'); return
+            setError('Choose a non-empty Slack export ZIP up to 100 MiB.'); return
         }
         setBusy(true)
         try {
@@ -98,7 +98,7 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
         <div><h2 className="flex items-center gap-2.5 text-base font-medium"><SlackIcon className="size-5 shrink-0" />Import from Slack</h2>
             <p className="mt-1 text-sm text-muted-foreground">Upload a Slack JSON export ZIP to review its channels. Each selected channel will become a separate new space.</p></div>
         <p className="rounded-lg bg-muted p-3 text-sm">Imports continue after you leave. Each space initially contains only you; Slack profiles do not grant access. Existing imported channels are skipped unless you choose to append new messages. Text, threads and historical file links/reaction counts are preserved; admins can optionally link legacy authors to existing space members by opening their Slack profile. Basic Slack formatting and readable user mentions are supported.</p>
-        <label className="block text-sm">Slack export ZIP (up to 25 MiB)
+        <label className="block text-sm">Slack export ZIP (up to 100 MiB)
             <Input type="file" accept=".zip,application/zip" disabled={busy || starting} className="mt-2" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void upload(file) }} />
         </label>
         {busy && <p role="status" className="text-sm">Uploading and checking {filename}…</p>}

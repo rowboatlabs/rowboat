@@ -41,7 +41,7 @@ export default function SlackImportScreen() {
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, type: ['application/zip', 'application/x-zip-compressed'] });
       if (result.canceled) return;
       const file = new File(result.assets[0]!.uri);
-      if (!file.size || file.size > MAX_SLACK_ZIP_BYTES) throw new Error('Choose a ZIP up to 25 MiB.');
+      if (!file.size || file.size > MAX_SLACK_ZIP_BYTES) throw new Error('Choose a ZIP up to 100 MiB.');
       const data = await file.bytes();
       const summary = await client.previewSlackImport(data);
       setBytes(await file.base64()); setPreview(summary);

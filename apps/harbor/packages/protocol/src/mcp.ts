@@ -166,7 +166,7 @@ export const retrySlackImport = tool({ name: 'retry_slack_import', description: 
 
 export const previewSlackImport = tool({
   name: 'preview_slack_import',
-  description: 'Preview a Slack JSON export ZIP supplied as base64 (maximum 25 MiB). Returns channel summaries and warnings; creates no spaces, memberships or messages and does not retain the archive.',
+  description: 'Preview a Slack JSON export ZIP supplied as base64 (maximum 100 MiB). Returns channel summaries and warnings; creates no spaces, memberships or messages and does not retain the archive.',
   input: SlackPreviewInput,
   output: SlackImportPreview,
 });

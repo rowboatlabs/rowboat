@@ -25,7 +25,7 @@ DM files and ancillary data produce `unsupported_file` warnings and are not pars
 
 ## Resource and archive rules
 
-Defaults: 25 MiB compressed, 100 MiB expanded, 10 MiB per entry, 10,000 entries, 100,000 parsed array records (including metadata), and 10,000 warnings. These are conservative local-preview limits, not Slack subscription limits or production upload entitlements. Programmatic callers can supply positive integer overrides; the endpoints keep limits server-controlled.
+Defaults: 100 MiB compressed, 100 MiB expanded, 10 MiB per entry, 10,000 entries, 100,000 parsed array records (including metadata), and 10,000 warnings. These are conservative local-preview limits, not Slack subscription limits or production upload entitlements. Programmatic callers can supply positive integer overrides; the endpoints keep limits server-controlled.
 
 Entries are read sequentially, with both declared and actual expansion checks and CRC verification. Absolute/traversal/backslash paths, duplicate paths, symbolic links, encrypted entries, malformed JSON, ambiguous channel IDs/names, and corrupt ZIPs fail the entire preview. No paths are extracted and no embedded URL is fetched. Normalized results are held in memory within these limits; the core import worker persists selected normalized records; the parser itself does not write.
 
