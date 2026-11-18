@@ -10,7 +10,7 @@ const fixture = vi.hoisted(() => {
     return { space, org, orgs: [org], empty: [], map: new Map(), members: [{ id: 'me', displayName: 'Me', kind: 'human' }],
         feed: { topics: [], changeSets: [], loaded: true },
         stream: { messages, topicsByRoot: new Map(), ready: true, hasMore: false, loadingOlder: false },
-        presence: { working: new Map(), typing: new Map(), here: [] }, inline: false,
+        presence: { working: new Map(), typing: new Map(), here: [] as string[] }, online: new Set<string>(['me']), inline: false,
     }
 })
 vi.mock('@/hooks/use-spaces', () => ({
@@ -21,11 +21,9 @@ vi.mock('@/hooks/use-space-chat', () => ({
     useStream: () => fixture.stream, useSpacePresence: () => fixture.presence,
     useSpacesUnreadCounts: () => fixture.map, prefetchThread: vi.fn(), STREAM_READ_KEY: '__stream__',
 }))
-vi.mock('@/hooks/use-space-directory', () => ({ useSpaceDirectory: () => ({ entries: fixture.empty }) }))
-vi.mock('@/hooks/use-space-members', () => ({ useSpaceMembers: () => fixture.members, useOrgRoster: () => fixture.members, refreshMembers: vi.fn() }))
+vi.mock('@/hooks/use-space-members', () => ({ usePeopleOnline: () => fixture.online, useSpaceMembers: () => fixture.members, useOrgRoster: () => fixture.members, refreshMembers: vi.fn() }))
 vi.mock('@/hooks/use-space-invocations', () => ({ useSpaceInvocations: () => fixture.map }))
 vi.mock('@/hooks/use-space-boards', () => ({ noteListingFromEntries: vi.fn() }))
-vi.mock('@/hooks/use-org-settings', () => ({ useOrgSettings: () => ({}), canInvite: () => false }))
 vi.mock('@/lib/spaces-read-state', () => ({
     useStreamReadOffset: () => 0, useReadStateVersion: () => 0,
     streamBadge: () => ({ unread: 0, forYou: 0 }), threadsBadge: () => ({ unread: 0, forYou: 0 }), threadBadge: () => ({ unread: 0, forYou: 0 }),
@@ -37,21 +35,20 @@ vi.mock('@/components/spaces/thread-pane', () => ({ ThreadPane: ({ rootMessageId
     <div data-testid="thread" data-visible={visible}>{rootMessageId}<button onClick={onBack}>Back to list</button></div>,
 }))
 vi.mock('@/components/spaces/member-directory', () => ({ MemberDirectory: () => null }))
-vi.mock('@/components/spaces/space-browser', () => ({ SpaceBrowser: () => null }))
 vi.mock('@/components/spaces/agents-view', () => ({ AgentsView: () => null }))
 vi.mock('@/components/spaces/bookmarks', () => ({ BookmarksPanel: () => null }))
 vi.mock('@/components/spaces/files-tab', () => ({ FileColumn: () => null, TrashDialog: () => null, UploadFilesDialog: () => null }))
 vi.mock('@/components/spaces/scheduled-dialog', () => ({ ScheduledDialog: () => null }))
 vi.mock('@/components/spaces/add-members-dialog', () => ({ AddMembersDialog: () => null }))
-vi.mock('@/components/spaces/space-admin-dialogs', () => ({ ArchiveSpaceDialog: () => null, DeleteSpaceDialog: () => null, SpaceVisibilityDialog: () => null }))
+vi.mock('@/components/spaces/space-admin-dialogs', () => ({ ArchiveSpaceDialog: () => null, DeleteSpaceDialog: () => null }))
 vi.mock('@/components/spaces/invite-link', () => ({ InviteLinkPanel: () => null }))
 vi.mock('@/components/spaces/selection-copy', () => ({ SelectionCopy: () => null }))
-vi.mock('@/components/spaces/server-switcher', () => ({ ServerSwitcher: () => null }))
 vi.mock('@/components/spaces/activity-view', () => ({ ActivityView: () => null }))
-vi.mock('@/components/spaces/space-rail', () => ({ OrgRail: () => null, SpaceRail: () => null }))
+vi.mock('@/components/spaces/space-rail', () => ({ SpaceRail: () => <div data-testid="rail" /> }))
+vi.mock('@/components/spaces/start-here', () => ({ StartHere: () => <div data-testid="start-here" /> }))
 vi.mock('@/components/spaces/space-files-view', () => ({ SpaceFilesView: () => null }))
 vi.mock('@/components/spaces/space-search', () => ({ SpaceSearch: () => null }))
-vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null, OrgMonogram: () => null }))
+vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null }))
 vi.mock('@/components/spaces/member-admin', () => ({ MemberAdminProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('@/components/spaces/invocation-lines', () => ({ SpaceInvocationsProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('@/components/spaces/member-text', () => ({ SpaceMembersProvider: ({ children }: { children: ReactNode }) => children, SpaceProfilesProvider: ({ children }: { children: ReactNode }) => children }))
@@ -65,6 +62,8 @@ function App() {
 let width = 1200
 beforeEach(() => {
     fixture.inline = false
+    fixture.online = new Set(['me'])
+    fixture.presence.here = []
     width = 1200
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width)
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
@@ -76,7 +75,19 @@ beforeEach(() => {
     })
     Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke: vi.fn(async (channel: string) => channel === 'spaces:listArchivedThreads' ? { threads: [] } : { entries: [] }) } })
 })
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); fixture.orgs = [fixture.org] })
+
+// One server (2026-11-09): with no selection — the web app's "/" — the server is the place,
+// so the sidebar is there, and an account with nothing in it lands on Start here.
+describe('an empty account', () => {
+    it('gets the sidebar and Start here, never a dead end', () => {
+        fixture.orgs = [{ ...fixture.org, spaces: [], directs: [] } as typeof fixture.org]
+        render(<SpacesView selection={null} railSelection={{ kind: 'general' }} onRailSelect={vi.fn()} onSelect={vi.fn()} onSwitchSpace={vi.fn()} />)
+        expect(screen.getByTestId('rail')).toBeInTheDocument()
+        expect(screen.getByTestId('start-here')).toBeInTheDocument()
+        expect(screen.queryByText(/No chat to open/)).toBeNull()
+    })
+})
 
 describe('Threads list and pane navigation', () => {
     it.each([false, true])('keeps the filtered list mounted beside successive threads (inline=%s)', async (inline) => {
@@ -117,4 +128,16 @@ describe('Threads list and pane navigation', () => {
         expect(list.closest('.hidden')).toBeNull()
         expect(screen.queryByTestId('thread')).not.toBeInTheDocument()
     })
+})
+
+it('uses account online status in the member header even without space viewing presence', () => {
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'Members — 1, 1 online' })).toBeInTheDocument()
+})
+
+it('does not show an online dot just because a member is viewing the space', () => {
+    fixture.online = new Set()
+    fixture.presence.here = ['me']
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'Members — 1' })).toBeInTheDocument()
 })

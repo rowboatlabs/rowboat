@@ -5,8 +5,8 @@ import { createHash } from 'node:crypto';
 // plus hash keys shrink the whole contract to four methods — any object store
 // can implement it. Two drivers ship: disk (blobs-disk.ts, self-hosted
 // single-node) and S3-compatible (blobs-s3.ts, managed; also MinIO/R2/B2 via
-// endpoint + forcePathStyle). Dedup scope is per deployment prefix/directory —
-// per org, never global, when multi-org routing arrives.
+// endpoint + forcePathStyle). Dedup scope is the
+// deployment's one prefix/directory (flat since 2026-11-09).
 //
 // Wired (2026-08-24): uploadBlob/getBlob routes (http.ts) + proposeChange's
 // binary variant ride this primitive; space-level readability lives in the
@@ -42,7 +42,7 @@ export interface BlobStore {
    * When present, the serving route 302s to it and the bytes never transit
    * Harbor; when absent (disk, memory), the route streams via get(). The
    * response-* overrides ride inside the signed URL, so the redirect target
-   * still serves with the org's authoritative headers.
+   * still serves with the server's authoritative headers.
    */
   downloadUrl?(
     hash: string,

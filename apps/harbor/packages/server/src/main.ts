@@ -9,14 +9,12 @@ import { PgStore } from './pg-store.js';
 import { startHarbor } from './server.js';
 import { postgresDb } from './sql.js';
 
-// Dev entry: a seeded single-org Harbor for dogfooding. The seed is the
-// Roadboard slice from spec §11 — the team, the space, the roadmap.
-// PGlite in-memory by default — the Postgres store, in-process; restart =
-// clean slate — or durable Postgres with DATABASE_URL (seeding is idempotent
-// across restarts). Set AUTH_ISSUER
-// to a pinned AS issuer URL for real OAuth (dev tokens otherwise — never
-// expose those publicly). Until the invite ceremony lands, oidc members are
-// seeded by inserting (iss, sub) rows into member_identities directly.
+// The binary (spec §4, one server since 2026-11-09). Without HARBOR_ADDRESS it
+// is the seeded dev server: the Roadboard slice from spec §11 — the team, the
+// space, the roadmap — on PGlite in memory (restart = clean slate) or durable
+// Postgres with DATABASE_URL (seeding is idempotent across restarts), with dev
+// tokens unless AUTH_ISSUER names a pinned AS. With HARBOR_ADDRESS it is a
+// deployment: DATABASE_URL and AUTH_ISSUER required, no seed, no dev tokens.
 
 const TEAM = [
   { id: 'ramnique', displayName: 'Ramnique' },
@@ -51,107 +49,73 @@ const ROADBOARD_ROADMAP = `# Roadmap
 
 const port = Number(process.env.PORT ?? 4272);
 
-// Blob storage from env, either mode. Dedup scope is per org (spec §6), so the
-// deployment factory scopes every driver by orgId; the single-org dev path
-// passes orgId 'org-default'.
+// Blob storage from env:
 //   BLOBS_S3_BUCKET (+ BLOBS_S3_ENDPOINT/REGION/FORCE_PATH_STYLE,
 //     credentials via the AWS provider chain or BLOBS_S3_ACCESS_KEY_ID/SECRET)
 //   BLOBS_DIR — disk driver (self-hosted single-node)
-// Neither set: dev mode keeps blob bytes in memory (restart = clean slate);
-// deployment mode leaves uploads unconfigured and the routes refuse loudly.
-function blobStoreFactory(): ((orgId: string) => BlobStore) | undefined {
+// Neither set: in-memory (restart = clean slate). Until 2026-11-09 each org had
+// its own prefix under these; a deployment that carries bytes from then over
+// runs scripts/flatten-blobs.ts once before starting this build.
+function blobStore(): BlobStore | undefined {
   const bucket = process.env.BLOBS_S3_BUCKET;
   if (bucket) {
-    return (orgId) =>
-      new S3BlobStore({
-        bucket,
-        prefix: `blobs/${orgId}/`,
-        ...(process.env.BLOBS_S3_REGION ? { region: process.env.BLOBS_S3_REGION } : {}),
-        ...(process.env.BLOBS_S3_ENDPOINT ? { endpoint: process.env.BLOBS_S3_ENDPOINT } : {}),
-        ...(process.env.BLOBS_S3_FORCE_PATH_STYLE ? { forcePathStyle: true } : {}),
-        ...(process.env.BLOBS_S3_ACCESS_KEY_ID && process.env.BLOBS_S3_SECRET_ACCESS_KEY
-          ? {
-              credentials: {
-                accessKeyId: process.env.BLOBS_S3_ACCESS_KEY_ID,
-                secretAccessKey: process.env.BLOBS_S3_SECRET_ACCESS_KEY,
-              },
-            }
-          : {}),
-      });
+    return new S3BlobStore({
+      bucket,
+      ...(process.env.BLOBS_S3_REGION ? { region: process.env.BLOBS_S3_REGION } : {}),
+      ...(process.env.BLOBS_S3_ENDPOINT ? { endpoint: process.env.BLOBS_S3_ENDPOINT } : {}),
+      ...(process.env.BLOBS_S3_FORCE_PATH_STYLE ? { forcePathStyle: true } : {}),
+      ...(process.env.BLOBS_S3_ACCESS_KEY_ID && process.env.BLOBS_S3_SECRET_ACCESS_KEY
+        ? {
+            credentials: {
+              accessKeyId: process.env.BLOBS_S3_ACCESS_KEY_ID,
+              secretAccessKey: process.env.BLOBS_S3_SECRET_ACCESS_KEY,
+            },
+          }
+        : {}),
+    });
   }
   const dir = process.env.BLOBS_DIR;
-  if (dir) return (orgId) => new DiskBlobStore(path.join(dir, orgId));
+  if (dir) return new DiskBlobStore(dir);
   return undefined;
 }
 
 const maxBlobBytes = process.env.HARBOR_MAX_BLOB_BYTES ? Number(process.env.HARBOR_MAX_BLOB_BYTES) : undefined;
-// Postgres pool ceiling (sql.ts): pg's default of 10 is shared by every org on
-// a deployment; set DATABASE_POOL_MAX below the plan's connection limit.
+// Postgres pool ceiling (sql.ts): set DATABASE_POOL_MAX below the plan's connection limit.
 const poolOpts = process.env.DATABASE_POOL_MAX ? { max: Number(process.env.DATABASE_POOL_MAX) } : {};
 // The operator face (internal.ts): the live-load line lands in the log once
 // a minute whenever the binary runs; HARBOR_INTERNAL_KEY additionally enables
 // GET /internal/stats. Unset = the route does not exist, the line still prints.
 const internal = { internal: { log: true, ...(process.env.HARBOR_INTERNAL_KEY ? { key: process.env.HARBOR_INTERNAL_KEY } : {}) } };
-// Browser origins allowed to call the orgs and the apex cross-origin (cors.ts,
-// 2026-10-09): the Spaces web app's, comma-separated. Dev defaults to the web
-// app's dev server so a local pair works with no setup.
-const webOrigins = (process.env.HARBOR_WEB_ORIGINS ?? (process.env.HARBOR_MODE === 'deployment' ? '' : 'http://localhost:5174'))
+// A public address (HARBOR_ADDRESS, e.g. spaces.x.rowboatlabs.com) means a
+// deployment: no dev tokens, no seed, real OAuth, the web origins you list.
+// Without it this is the local dev server: seeded, dev tokens, the web app's
+// dev origin allowed.
+const address = process.env.HARBOR_ADDRESS?.trim() || undefined;
+const deployment = address !== undefined;
+// Browser origins allowed to call the server cross-origin (cors.ts, 2026-10-09): the Spaces web app's, comma-separated.
+const webOrigins = (process.env.HARBOR_WEB_ORIGINS ?? (deployment ? '' : 'http://localhost:5174'))
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
-// The web app the org link landings offer (http.ts, 2026-10-13): a link
-// opened in a browser with no desktop app goes on to <this>/open. Dev defaults
-// to the web app's dev server, like the origins above.
-const webAppUrl = process.env.HARBOR_WEB_APP_URL ?? (process.env.HARBOR_MODE === 'deployment' ? undefined : 'http://localhost:5174');
+// The web app the link landings offer (http.ts, 2026-10-13): a link opened in a browser with no desktop app goes on to <this>/open.
+const webAppUrl = process.env.HARBOR_WEB_APP_URL ?? (deployment ? undefined : 'http://localhost:5174');
 const web = { ...(webOrigins.length > 0 ? { webOrigins } : {}), ...(webAppUrl ? { webAppUrl } : {}) };
 
-// Deployment mode (the managed fleet / any multi-org host): HARBOR_MODE=deployment
-// + DATABASE_URL + APEX_DOMAIN + AUTH_ISSUER. No seeding, no dev tokens —
-// orgs are created self-serve on the apex face; members arrive via OAuth +
-// invite binds. Render sets PORT.
-if (process.env.HARBOR_MODE === 'deployment') {
-  const { startHarborDeployment } = await import('./deployment.js');
-  const required = ['DATABASE_URL', 'APEX_DOMAIN', 'AUTH_ISSUER'] as const;
-  for (const name of required) {
+if (deployment) {
+  for (const name of ['DATABASE_URL', 'AUTH_ISSUER'] as const) {
     if (!process.env[name]) {
-      console.error(`HARBOR_MODE=deployment requires ${name}`);
+      console.error(`HARBOR_ADDRESS requires ${name}`);
       process.exit(1);
     }
   }
-  const blobs = blobStoreFactory();
-  const deployment = await startHarborDeployment({
-    db: postgresDb(process.env.DATABASE_URL!, poolOpts),
-    port,
-    apexDomain: process.env.APEX_DOMAIN!,
-    issuer: process.env.AUTH_ISSUER!,
-    ...(process.env.AUTH_PUBLISHABLE_KEY ? { consentPublishableKey: process.env.AUTH_PUBLISHABLE_KEY } : {}),
-    ...(blobs ? { blobs } : {}),
-    ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
-    ...internal,
-    ...web,
-  });
-  console.log(`Harbor deployment (multi-org, Postgres)`);
-  console.log(``);
-  console.log(`  apex       https://${process.env.APEX_DOMAIN}  (create org, my orgs)`);
-  console.log(`  orgs       https://<slug>.${process.env.APEX_DOMAIN}  (render /v1/*, live /v1/live, agent /mcp)`);
-  console.log(`  issuer     ${process.env.AUTH_ISSUER}`);
-  console.log(
-    `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'UNCONFIGURED — uploads will be refused (set BLOBS_S3_BUCKET or BLOBS_DIR)'}`,
-  );
-  console.log(`  web        ${webOrigins.length > 0 ? webOrigins.join(', ') : 'no browser origins (set HARBOR_WEB_ORIGINS)'}`);
-  console.log(`  web app    ${webAppUrl ? `${webAppUrl} (links opened in a browser offer it)` : 'none — links opened in a browser offer only the desktop app (set HARBOR_WEB_APP_URL)'}`);
-  console.log(`  internal   ${process.env.HARBOR_INTERNAL_KEY ? 'GET /internal/stats (operator key set)' : 'off (set HARBOR_INTERNAL_KEY)'}`);
-  console.log(`  platforms  ${process.env.HARBOR_INTEGRATION_KEY ? 'Replicas, Agent37, Conductor, PostHog and Cal.com agents can be added (sealing key set)' : 'off — Replicas, Agent37, Conductor, PostHog and Cal.com agents need HARBOR_INTEGRATION_KEY'}`);
-  console.log(`  listening  :${deployment.port}`);
-  process.on('SIGTERM', () => void deployment.close().then(() => process.exit(0)));
-} else {
-  await startDevHarbor();
 }
 
-async function startDevHarbor(): Promise<void> {
+await start();
+
+async function start(): Promise<void> {
 // Durable Postgres via DATABASE_URL; otherwise the same store in-process on
 // PGlite (restart = clean slate). The WASM engine is loaded here and only
-// here — deployment mode never imports it.
+// here — a deployment never imports it.
 const db = process.env.DATABASE_URL
   ? postgresDb(process.env.DATABASE_URL, poolOpts)
   : await (await import('./sql-pglite.js')).pgliteDb();
@@ -166,12 +130,12 @@ if (process.env.AUTH_ISSUER) {
   });
 }
 
-const blobFactory = blobStoreFactory();
+const blobs = blobStore();
 
 const harbor = await startHarbor({
   port,
   store,
-  ...(blobFactory ? { blobs: blobFactory('org-default') } : {}),
+  ...(blobs ? { blobs } : {}),
   ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
   ...internal,
   ...web,
@@ -179,31 +143,34 @@ const harbor = await startHarbor({
   ...(auth && process.env.AUTH_PUBLISHABLE_KEY
     ? { consent: { publishableKey: process.env.AUTH_PUBLISHABLE_KEY } }
     : {}),
-  orgName: process.env.HARBOR_ORG ?? 'Rowboat Labs (dev)',
-  ...(process.env.HARBOR_ALLOWED_DOMAINS
-    ? { allowedEmailDomains: process.env.HARBOR_ALLOWED_DOMAINS.split(',').map((d) => d.trim()).filter(Boolean) }
-    : {}),
-  seedMembers: TEAM,
-  seedSpaces: [
-    {
-      name: 'Roadboard',
-      creator: 'ramnique',
-      assets: [
-        { path: 'README.md', content: ROADBOARD_README, reason: 'seed the space front page' },
-        { path: 'roadmap.md', content: ROADBOARD_ROADMAP, reason: 'seed the roadmap' },
-      ],
-    },
-  ],
+  name: process.env.HARBOR_NAME ?? 'Rowboat Spaces',
+  ...(address ? { address } : {}),
+  // The dev seed (spec §11's Roadboard): never on a deployment.
+  ...(deployment
+    ? {}
+    : {
+        seedMembers: TEAM,
+        seedSpaces: [
+          {
+            name: 'Roadboard',
+            creator: 'ramnique',
+            assets: [
+              { path: 'README.md', content: ROADBOARD_README, reason: 'seed the space front page' },
+              { path: 'roadmap.md', content: ROADBOARD_ROADMAP, reason: 'seed the roadmap' },
+            ],
+          },
+        ],
+      }),
 });
 
-const spaces = await harbor.service.listSpaces({ memberId: 'ramnique' });
+const spaces = deployment ? [] : await harbor.service.listSpaces({ memberId: 'ramnique' });
 
-console.log(`Harbor (single org, ${process.env.DATABASE_URL ? 'Postgres via DATABASE_URL' : 'PGlite in-memory — restart = clean slate'})`);
+console.log(`Harbor (${process.env.DATABASE_URL ? 'Postgres via DATABASE_URL' : 'PGlite in-memory — restart = clean slate'})`);
 console.log(
   `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'in-memory (set BLOBS_DIR or BLOBS_S3_BUCKET for durable uploads)'}`,
 );
 console.log(``);
-console.log(`  org        ${harbor.service.org.name}  @  ${harbor.address}`);
+console.log(`  server     ${harbor.service.server.name}  @  ${harbor.address}`);
 console.log(`  render     ${harbor.url}/v1/*`);
 console.log(`  live       ws://localhost:${harbor.port}/v1/live`);
 console.log(`  agent      ${harbor.mcpUrl}  (MCP streamable HTTP)`);
@@ -217,10 +184,13 @@ if (auth) {
   console.log(`  auth       Bearer dev-<memberId>   e.g. "Authorization: Bearer dev-ramnique"`);
   console.log(`             *** DEV AUTH — anyone can be anyone. NEVER expose this publicly. ***`);
 }
-console.log(`  members    ${TEAM.map((m) => m.id).join(', ')}`);
+if (!deployment) console.log(`  members    ${TEAM.map((m) => m.id).join(', ')}`);
 for (const s of spaces) {
   console.log(`  space      ${s.name}  ${s.id}`);
 }
 console.log(``);
-console.log(`  try        curl -H 'Authorization: Bearer dev-ramnique' ${harbor.url}/v1/spaces`);
+if (!deployment) console.log(`  try        curl -H 'Authorization: Bearer dev-ramnique' ${harbor.url}/v1/spaces`);
+console.log(`  web        ${webOrigins.length > 0 ? webOrigins.join(', ') : 'no browser origins (set HARBOR_WEB_ORIGINS)'}`);
+console.log(`  platforms  ${process.env.HARBOR_INTEGRATION_KEY ? 'Replicas, Agent37, Conductor, PostHog and Cal.com agents can be added (sealing key set)' : 'off — Replicas, Agent37, Conductor, PostHog and Cal.com agents need HARBOR_INTEGRATION_KEY'}`);
+process.on('SIGTERM', () => void harbor.close().then(() => process.exit(0)));
 }

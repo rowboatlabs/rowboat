@@ -96,7 +96,7 @@ export function saveRoster(org: string, space: string, members: Member[]): void 
 }
 
 
-// --- generic small values (a space's stream tail, an org's space list) -------
+// --- generic small values (a space's stream tail, the server's space list) -------
 
 const values = new Map<string, unknown>();
 const valueKey = (name: string) => `${PREFIX}v:${name}`;

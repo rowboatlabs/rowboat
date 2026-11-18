@@ -1,10 +1,9 @@
-import { canActInSpace } from '@/lib/spaces-access'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { toast } from '@/lib/toast'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
-import { applyReaction, mergeMessages, withArchived } from '@/lib/spaces-conventions'
+import { applyReaction, mergeMessages, withArchived, withSession } from '@/lib/spaces-conventions'
 import { applyPollVote } from '@/lib/spaces-poll'
 import { getStreamView, subscribeStreamView, useStreamView } from '@/lib/spaces-stream-view'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, isReconnect, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
@@ -634,6 +633,10 @@ function wireBus(): void {
             const { rootMessageId, action } = frame.event
             const root = state.messages.find((m) => m.id === rootMessageId)
             if (root) updateStreamMessage(event.orgId, frame.spaceId, withArchived(root, action === 'archived'))
+        } else if (frame.event.type === 'thread_session') {
+            const { rootMessageId, session } = frame.event
+            const root = state.messages.find((m) => m.id === rootMessageId)
+            if (root) updateStreamMessage(event.orgId, frame.spaceId, withSession(root, session))
         } else if (frame.event.type === 'reaction') {
             // Fold the toggle into the message in place (thread panes refetch on
             // their own tick; the stream keeps its messages live here). The
@@ -1032,7 +1035,6 @@ export function usePresenceSender(orgId: string, spaceId: string, threadRootId?:
 
     const send = useCallback(
         (state: 'viewing' | 'typing' | 'idle') => {
-            if (!canActInSpace(orgId, spaceId)) return
             void window.ipc.invoke('spaces:presence', { orgId, spaceId, state, ...(threadRootId ? { threadRootId } : {}) }).catch(() => {})
         },
         [orgId, spaceId, threadRootId],
@@ -1050,7 +1052,7 @@ export function usePresenceSender(orgId: string, spaceId: string, threadRootId?:
     }, [send, active])
 
     const onType = useCallback(() => {
-        if (!active || !canActInSpace(orgId, spaceId)) return
+        if (!active) return
         const now = Date.now()
         if (now - lastTypingRef.current > 4_000) {
             lastTypingRef.current = now

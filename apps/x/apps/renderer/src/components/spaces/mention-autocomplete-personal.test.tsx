@@ -6,9 +6,10 @@ import { composerExtensions } from './composer-editor'
 import { useMentionAutocomplete } from './mention-autocomplete'
 import { SpaceRefsProvider } from './space-markdown'
 
-// Personal agents (Harbor spec §4 Agent members, 2026-10-26): only the owner
-// can mention one, so the @ picker offers yours and leaves out everyone
-// else's, whether it is in this space or not. Its own file: the roster stores
+// An agent's seat (Harbor spec §4 Agent members, 2026-11-09): the @ picker
+// offers every agent in the space — the server refuses a mention the seat
+// does not allow, and the hint says so — and, beyond it, your own agents
+// only (your contacts hold no one else's). Its own file: the roster stores
 // are module-level, and the main picker test pins an exact roster.
 
 const HERE = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
@@ -28,19 +29,19 @@ vi.mock('@/hooks/use-spaces', async (importOriginal) => ({
 }))
 vi.mock('@/lib/spaces-feed', () => ({ subscribeSpacesFeed: () => () => {} }))
 
-const agent = (id: string, displayName: string, ownerId: string, personal?: boolean) =>
-    ({ id, displayName, role: 'member', kind: 'agent', agentKind: 'claude-code', agentConnection: 'contract', ownerId, ...(personal ? { personal } : {}) })
+const agent = (id: string, displayName: string, ownerId: string, invocableBy?: 'owner' | 'members') =>
+    ({ id, displayName, kind: 'agent', agentKind: 'claude-code', agentConnection: 'contract', ownerId, ...(invocableBy ? { invocableBy } : {}) })
 const here = [
-    { id: 'me', displayName: 'Gagan', role: 'member', kind: 'human' },
-    { id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' },
-    agent('mine', "Gagan's Claude Code", 'me', true),
-    agent('theirs', "Harsh's Claude Code", 'harsh', true),
-    agent('shared', 'Claude Scout', 'harsh'),
+    { id: 'me', displayName: 'Gagan', kind: 'human', role: 'member', joinedAt: '' },
+    { id: 'harsh', displayName: 'Harsh', kind: 'human', role: 'member', joinedAt: '' },
+    agent('mine', "Gagan's Claude Code", 'me', 'owner'),
+    agent('theirs', "Harsh's Claude Code", 'harsh', 'owner'),
+    agent('shared', 'Claude Scout', 'harsh', 'members'),
 ]
-const org = [...here, agent('elsewhere', "Ada's Claude Code", 'ada', true)]
+const contacts = [here[0], here[1], here[2], agent('elsewhere', "Gagan's Codex", 'me')]
 const invoke = vi.fn(async (channel: string) => {
     if (channel === 'spaces:listMembers') return { members: here }
-    if (channel === 'spaces:listOrgMembers') return { members: org }
+    if (channel === 'spaces:listContacts') return { members: contacts }
     if (channel === 'spaces:listAssets') return { entries: [] }
     throw new Error(`unexpected ${channel}`)
 })
@@ -54,17 +55,18 @@ afterEach(() => editor.destroy())
 
 const wrapper = ({ children }: { children: ReactNode }) => <SpaceRefsProvider refs={refs}>{children}</SpaceRefsProvider>
 
-describe('personal agents in the @ picker', () => {
-    it('offers your personal agent, marked, and leaves out everyone else’s', async () => {
+describe('agent seats in the @ picker', () => {
+    it('offers every agent here, saying which answer only their owner, and your own agents from outside', async () => {
         const { result } = renderHook(() => useMentionAutocomplete(editor), { wrapper })
-        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:listOrgMembers', expect.anything()))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:listContacts', expect.anything()))
         act(() => {
-            editor.chain().focus('end').insertContent('ask @claude').run()
+            editor.chain().focus('end').insertContent('ask @').run()
         })
-        await waitFor(() => expect(result.current.candidates.map((c) => c.id)).toEqual(expect.arrayContaining(['mine', 'shared'])))
-        const ids = result.current.candidates.map((c) => c.id)
-        expect(ids).not.toContain('theirs')
-        expect(ids).not.toContain('elsewhere')
-        expect(result.current.candidates.find((c) => c.id === 'mine')?.hint).toBe('Claude Code · personal')
+        await waitFor(() => expect(result.current.candidates.map((c) => c.id)).toEqual(expect.arrayContaining(['mine', 'theirs', 'shared', 'elsewhere'])))
+        const hint = (id: string) => result.current.candidates.find((c) => c.id === id)?.hint
+        expect(hint('mine')).toBe('Claude Code')
+        expect(hint('theirs')).toBe('Claude Code · answers only its owner here')
+        expect(hint('shared')).toBe('Claude Code')
+        expect(hint('elsewhere')).toBe('Claude Code · not in this space')
     })
 })

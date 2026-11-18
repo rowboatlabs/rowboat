@@ -53,7 +53,11 @@ export function failureOf(kind: string, events: AgentEvent[]): string | undefine
   const failed = payload.is_error === true || (str(payload.subtype) !== undefined && payload.subtype !== 'success');
   if (!failed) return undefined;
   const errors = Array.isArray(payload.errors) ? payload.errors.filter((e): e is string => typeof e === 'string') : [];
-  return errors.length > 0 ? oneLine(errors.join('; '), 900) : 'Claude Code stopped with an error';
+  if (errors.length > 0) return oneLine(errors.join('; '), 900);
+  // A failed turn with no `errors` puts its reason in `result` ("API Error: 401 …"): say it, not
+  // the bare fallback that hid why maritime turns failed (2026-11-13).
+  const said = str(payload.result)?.trim();
+  return said ? oneLine(said, 900) : 'Claude Code stopped with an error';
 }
 
 // --- Claude Code ------------------------------------------------------------------

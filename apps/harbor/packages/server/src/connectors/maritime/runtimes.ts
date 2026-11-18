@@ -16,8 +16,8 @@ import { activityOf, answerOf, failureOf, type AgentEvent } from '../common/agen
 // folder there, named by the invocation, so a restart finds them.
 
 export interface TurnInput {
-  /** The org's address with its scheme, and the agent's own Spaces key, for the runtime's MCP server and file downloads. */
-  orgUrl: string;
+  /** The server's address with its scheme, and the agent's own Spaces key, for the runtime's MCP server and file downloads. */
+  serverUrl: string;
   agentKey: string;
   /** The files for this turn, absolute on the VM: the request, the event stream, stderr, and the final message. */
   promptPath: string;
@@ -41,8 +41,15 @@ export interface TurnReading {
 }
 
 export interface Runtime {
-  /** The persistent volume's mount, where the files go. */
+  /** The persistent volume's mount, where the files go: the root Maritime's files API accepts. */
   root: string;
+  /**
+   * That root for a box of the given Maritime framework, when it differs (2026-11-11): Maritime roots its
+   * files API at /opt/data on its `hermes` framework and at /data on a `custom` box, and a Hermes on
+   * Rowboat's own image is the latter. The turn script's own paths are not affected: the image links
+   * /opt/data to /data.
+   */
+  rootFor?(framework: string): string;
   /** The `sh -c` script for one turn. */
   command(input: TurnInput): string;
   /** The session name a new thread gets, when the runtime names sessions rather than minting ids. */
@@ -53,10 +60,8 @@ export interface Runtime {
   activity(out: string): string | undefined;
   /** The composer's options: the runtime's own (Effort), and Model from the list the harness left on the VM, when there is a choice. */
   options(models: ModelChoice[]): InvocationOption[];
-  /** A separate, best-effort catalogue execution after the turn is settled (2026-11-01). */
+  /** A separate, best-effort catalogue execution after the turn is settled (2026-11-01); it leaves the list at `<root>/rowboat/models.json`. */
   modelsCommand(): string;
-  /** Where the catalogue execution leaves the harness's own model list. */
-  modelsPath: string;
   /** That file read into choices; nothing when it is not one. */
   models(text: string): ModelChoice[];
 }
@@ -90,6 +95,21 @@ function parse(text: string): unknown {
 
 /** Shell-quote one word. */
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+// 2026-11-11: Maritime's reload writes this root-readable shell environment;
+// exec retains the container's boot env (observed on the custom Hermes image).
+// Load it before dropping privileges or configuring MCP and model access.
+//
+// Maritime writes the file from bash with `export -p`, so its lines read
+// `declare -x NAME="value"`, and the turn runs under `sh`, which is dash on every
+// box and has no `declare`: sourced as is, the first line failed with 127 and,
+// under `set -e`, took every turn on every Maritime agent with it for two and a
+// half days (2026-11-11 10:04Z to 11-13; the thread said "Finished on Maritime.").
+// So the file is read line by line, each `declare -x` turned into `export`, and a line
+// is evaluated only after `sh -n` accepts it and its name is a valid one: in dash a syntax
+// error inside `eval` ends the shell (eval and export are special built-ins), `|| true` or not.
+export const MARITIME_ENV =
+  'if [ -r /etc/maritime-env ]; then while IFS= read -r l; do case "$l" in "declare -x "*) l="export ${l#declare -x }";; esac; case "$l" in "export "*) n="${l#export }"; n="${n%%=*}"; case "$n" in ""|*[!A-Za-z0-9_]*|[0-9]*) continue;; esac; if printf "%s\\n" "$l" | sh -n 2>/dev/null; then eval "$l" 2>/dev/null || true; fi;; esac; done < /etc/maritime-env; fi';
 
 /** Reasoning effort, the harness's own three levels (Codex's and Hermes's flag). */
 const EFFORTS = ['low', 'medium', 'high'].map((id) => ({ id, label: id[0]!.toUpperCase() + id.slice(1) }));
@@ -138,6 +158,13 @@ const stderrTail = (err: string | undefined) =>
     .slice(-3)
     .join(' ')
     .slice(0, 600);
+/**
+ * A failed turn that left no reason: the command's exit code is all there is. `stderrTail` is a
+ * string, so it must be joined with `||`, never `??`: an empty tail once read as success and the
+ * thread got "Finished on Maritime." for a turn that never ran (2026-11-13, five times in two days).
+ */
+const stoppedSilently = (who: string, code: number | null | undefined) =>
+  `${who} did not run: its command stopped with exit code ${code ?? 'unknown'} and wrote nothing. Mention me again to retry.`;
 /** The turn script's own line on a sign-in, first in the stderr file (Codex, 2026-10-30). */
 const SIGN_IN_MARK = 'rowboat-sign-in: ';
 const signInOf = (err: string | undefined): 'chatgpt' | 'none' | undefined => {
@@ -145,9 +172,12 @@ const signInOf = (err: string | undefined): 'chatgpt' | 'none' | undefined => {
   return found === 'chatgpt' || found === 'none' ? found : undefined;
 };
 
-/** The MCP server every runtime gets: Spaces, acting as this agent. */
-const mcpJson = (orgUrl: string) =>
-  JSON.stringify({ mcpServers: { rowboat: { type: 'http', url: `${orgUrl}/mcp`, headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } } } });
+/** 2026-11-11: billed VMs add Composio; configs hold references, never gateway credentials. */
+const mcpJson = (serverUrl: string, composio = false) =>
+  JSON.stringify({ mcpServers: {
+    rowboat: { type: 'http', url: `${serverUrl}/mcp`, headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } },
+    ...(composio ? { composio: { type: 'http', url: '${ROWBOAT_COMPOSIO_MCP_URL}', headers: { Authorization: 'Bearer ${ROWBOAT_GATEWAY_KEY}' } } } : {}),
+  } });
 
 // --- Hermes ---------------------------------------------------------------------------------
 
@@ -156,8 +186,21 @@ const GATEWAY_NOT_READY = 'Gateway (starting|draining): ';
 /** Tries five seconds apart: two minutes for the gateway to be ready. */
 const GATEWAY_RETRIES = 24;
 
+/**
+ * The image Rowboat runs Hermes from on Maritime (2026-11-11): Hermes packaged as a Maritime "custom"
+ * container, built from apps/harbor/images/hermes-maritime. Maritime's own `hermes` framework wrapper
+ * stops the gateway on every other snapshot restore of a current Hermes image and rewrites config.yaml
+ * on cold boots (measured 2026-11-10); under `custom` it does neither, and the image's shim keeps the
+ * gateway up itself. Maritime's template is Hermes 0.14, too old for `hermes chat --format stream-json`.
+ */
+export const HERMES_IMAGE_REPO = 'ghcr.io/rowboatlabs/hermes-maritime';
+export const HERMES_IMAGE = `${HERMES_IMAGE_REPO}:0.22.5-4`;
+/** The model Maritime's own Hermes template configures for its proxy: the trial's choice when nothing else named one. */
+const MARITIME_PROXY_MODEL = 'gpt-5.4';
+
 const hermes: Runtime = {
   root: '/opt/data',
+  rootFor: (framework) => (framework === 'custom' ? '/data' : '/opt/data'),
   sessionFor: (threadKey) => `rb-${threadKey}`,
   command(input) {
     const flags = [
@@ -165,28 +208,41 @@ const hermes: Runtime = {
       input.effort ? `--reasoning ${q(input.effort)}` : '',
     ].filter(Boolean).join(' ');
     // Maritime's init rewrites config.yaml on every boot of the Hermes framework (measured 2026-10-26),
-    // so the Spaces MCP server is put back before a turn whenever it is not Rowboat's. The `${…}`
+    // so the Spaces MCP server is put back before a turn whenever it is not Rowboat's. A box on Rowboat's
+    // own image (framework `custom`, 2026-11-11) gets no rewrite; the guard stays for the older boxes and
+    // costs a grep. The `${…}`
     // placeholders are Hermes's own, and the check is for the placeholders, never for a literal
     // address: a VM set up by hand or an earlier probe can carry a different Rowboat (seen live
-    // 2026-10-26, posting to the wrong org). Hermes 0.22 runs the turn through its gateway, which
+    // 2026-10-26, posting to the wrong server). Hermes 0.22 runs the turn through its gateway, which
     // fills the placeholders from the profile's `.env`, not from the turn's environment (the
     // first managed agent on prod, 2026-10-26: "not set in this profile's .env or secret source"),
     // so the two values are written there too, with `hermes config set`, whenever they differ.
     return [
       'set -e',
-      `export HERMES_HOME=/opt/data HOME=/opt/data ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      MARITIME_ENV,
+      `export HERMES_HOME=/opt/data HOME=/opt/data ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'export PATH="/command:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"',
       'mkdir -p /opt/data/rowboat /opt/data/workspace',
       // The gateway runs as the hermes user; a turn run as root would leave root-owned session files behind.
       'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then chown -R hermes:hermes /opt/data/rowboat 2>/dev/null || true; run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" ROWBOAT_URL="$ROWBOAT_URL" ROWBOAT_AGENT_KEY="$ROWBOAT_AGENT_KEY" "$@"; }; else run() { "$@"; }; fi',
-      `{ grep -q 'ROWBOAT_URL}/mcp' /opt/data/config.yaml && grep -q 'Bearer \${ROWBOAT_AGENT_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp' >/dev/null 2>&1 || true; run hermes config set mcp_servers.rowboat.headers.Authorization 'Bearer \${ROWBOAT_AGENT_KEY}' >/dev/null 2>&1 || true; }`,
       `{ grep -F ROWBOAT_URL /opt/data/.env | grep -qF "$ROWBOAT_URL" && grep -F ROWBOAT_AGENT_KEY /opt/data/.env | grep -qF "$ROWBOAT_AGENT_KEY"; } 2>/dev/null || { run hermes config set ROWBOAT_URL "$ROWBOAT_URL" >/dev/null 2>&1 || true; run hermes config set ROWBOAT_AGENT_KEY "$ROWBOAT_AGENT_KEY" >/dev/null 2>&1 || true; }`,
+      `{ grep -q 'ROWBOAT_URL}/mcp' /opt/data/config.yaml && grep -q 'Bearer \${ROWBOAT_AGENT_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.rowboat ${q(JSON.stringify({ url: '${ROWBOAT_URL}/mcp', headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } }))} >/dev/null 2>&1 || true; }`,
+      // 2026-11-11: the gateway reads profile secrets, not the turn's env. Keep
+      // Composio independent of the provider key. Publish each full server entry
+      // only after its profile secrets exist: the gateway watches config changes.
+      `if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then`,
+      `  { grep -F ROWBOAT_COMPOSIO_MCP_URL /opt/data/.env | grep -qF "$ROWBOAT_COMPOSIO_MCP_URL" && grep -F ROWBOAT_GATEWAY_KEY /opt/data/.env | grep -qF "$ROWBOAT_GATEWAY_KEY"; } 2>/dev/null || { run hermes config set ROWBOAT_COMPOSIO_MCP_URL "$ROWBOAT_COMPOSIO_MCP_URL" >/dev/null 2>&1; run hermes config set ROWBOAT_GATEWAY_KEY "$ROWBOAT_GATEWAY_KEY" >/dev/null 2>&1; }`,
+      `  { grep -qF '\${ROWBOAT_COMPOSIO_MCP_URL}' /opt/data/config.yaml && grep -qF 'Bearer \${ROWBOAT_GATEWAY_KEY}' /opt/data/config.yaml; } 2>/dev/null || { run hermes config set mcp_servers.composio ${q(JSON.stringify({ url: '${ROWBOAT_COMPOSIO_MCP_URL}', headers: { Authorization: 'Bearer ${ROWBOAT_GATEWAY_KEY}' } }))} >/dev/null 2>&1; }`,
+      'fi',
       // The owner's own key (2026-10-27): the platform's boot rewrite points Hermes at the platform's proxy, so the
       // provider, its address, the model and the key go back into Hermes's config and .env before the turn, whenever
       // they differ. ROWBOAT_LLM_PROVIDER and ROWBOAT_LLM_MODEL are set by Harbor with the key (provisioning.ts).
       // `rowboat` (2026-11-04) is Rowboat's LLM gateway on the owner's Rowboat credits: it speaks OpenRouter's API,
       // so Hermes takes it as its OpenRouter provider at the gateway's address, ROWBOAT_LLM_BASE_URL.
-      `if [ -n "$ROWBOAT_LLM_PROVIDER" ]; then HP="$ROWBOAT_LLM_PROVIDER"; case "$ROWBOAT_LLM_PROVIDER" in openai) LB=https://api.openai.com/v1; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY;; anthropic) LB=https://api.anthropic.com; LK="$ANTHROPIC_API_KEY"; LN=ANTHROPIC_API_KEY;; openrouter) LB=https://openrouter.ai/api/v1; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; rowboat) HP=openrouter; LB="$ROWBOAT_LLM_BASE_URL"; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; *) LB=; LK=; LN=;; esac; if [ -n "$LB" ]; then { grep -q "provider: \"$HP\"" /opt/data/config.yaml && grep -q "base_url: \"$LB\"" /opt/data/config.yaml; } 2>/dev/null || { run hermes config set model.provider "$HP" >/dev/null 2>&1 || true; run hermes config set model.base_url "$LB" >/dev/null 2>&1 || true; }; [ -z "$ROWBOAT_LLM_MODEL" ] || grep -q "default: \"$ROWBOAT_LLM_MODEL\"" /opt/data/config.yaml 2>/dev/null || run hermes config set model.default "$ROWBOAT_LLM_MODEL" >/dev/null 2>&1 || true; [ -z "$LK" ] || grep -F "$LN" /opt/data/.env 2>/dev/null | grep -qF "$LK" || run hermes config set "$LN" "$LK" >/dev/null 2>&1 || true; fi; fi`,
+      // The trial (no ROWBOAT_LLM_PROVIDER) runs on Maritime's proxy, which the platform names in OPENAI_BASE_URL and
+      // OPENAI_API_KEY. Maritime's Hermes wrapper used to write that into config.yaml at boot; Rowboat's own image
+      // (2026-11-11) gets no such rewrite, so the turn does it, with the template's model when none is set.
+      `HP="$ROWBOAT_LLM_PROVIDER"; MD="$ROWBOAT_LLM_MODEL"; case "$ROWBOAT_LLM_PROVIDER" in openai) LB=https://api.openai.com/v1; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY;; anthropic) LB=https://api.anthropic.com; LK="$ANTHROPIC_API_KEY"; LN=ANTHROPIC_API_KEY;; openrouter) LB=https://openrouter.ai/api/v1; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; rowboat) HP=openrouter; LB="$ROWBOAT_LLM_BASE_URL"; LK="$OPENROUTER_API_KEY"; LN=OPENROUTER_API_KEY;; "") if [ -n "$OPENAI_BASE_URL" ]; then HP=openai; LB="$OPENAI_BASE_URL"; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY; grep -q 'default: "' /opt/data/config.yaml 2>/dev/null || MD=${q(MARITIME_PROXY_MODEL)}; else LB=; LK=; LN=; fi;; *) LB=; LK=; LN=;; esac; if [ -n "$LB" ]; then { grep -q "provider: \"$HP\"" /opt/data/config.yaml && grep -q "base_url: \"$LB\"" /opt/data/config.yaml; } 2>/dev/null || { run hermes config set model.provider "$HP" >/dev/null 2>&1 || true; run hermes config set model.base_url "$LB" >/dev/null 2>&1 || true; }; [ -z "$MD" ] || grep -q "default: \"$MD\"" /opt/data/config.yaml 2>/dev/null || run hermes config set model.default "$MD" >/dev/null 2>&1 || true; [ -z "$LK" ] || grep -F "$LN" /opt/data/.env 2>/dev/null | grep -qF "$LK" || run hermes config set "$LN" "$LK" >/dev/null 2>&1 || true; fi`,
       // The rowboat-spaces skill, once: without it the first turn of every session fetches it from GitHub (seen on prod 2026-10-26).
       `{ [ -d /opt/data/skills/rowboat-spaces ] || ls -d /opt/data/skills/*/rowboat-spaces >/dev/null 2>&1; } || run hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes >/dev/null 2>&1 || true`,
       'cd /opt/data/workspace',
@@ -202,7 +258,10 @@ const hermes: Runtime = {
     const result = [...all].reverse().find((e) => e.type === 'result');
     const text = str(result?.text)?.trim();
     const failed = (typeof result?.exit_code === 'number' && result.exit_code !== 0) || (exitCode !== undefined && exitCode !== null && exitCode !== 0);
-    if (failed) return { ...(text ? { answer: text } : {}), failure: str(result?.error) ?? stderrTail(err) ?? 'Hermes stopped with an error' };
+    if (failed) {
+      const code = typeof result?.exit_code === 'number' ? result.exit_code : exitCode;
+      return { ...(text ? { answer: text } : {}), failure: str(result?.error) || stderrTail(err) || stoppedSilently('Hermes', code) };
+    }
     if (!result) return { failure: stderrTail(err) || 'Hermes ended without a result' };
     return text ? { answer: text } : {};
   },
@@ -217,12 +276,12 @@ const hermes: Runtime = {
   options: (models) => [...modelOption(models), { type: 'select', key: 'effort', label: 'Effort', choices: EFFORTS }],
   modelsCommand: () => [
     'set -e',
+    MARITIME_ENV,
     'export HERMES_HOME=/opt/data HOME=/opt/data',
     'export PATH="/command:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"',
     'if [ "$(id -u)" = 0 ] && [ -x /command/s6-setuidgid ]; then run() { /command/s6-setuidgid hermes env HERMES_HOME=/opt/data HOME=/opt/data PATH="$PATH" "$@"; }; else run() { "$@"; }; fi',
     `printf '%s\\n' ${q(HERMES_MODELS_PY)} > /opt/data/rowboat/models.py; run timeout 30 python /opt/data/rowboat/models.py > /opt/data/rowboat/models.json.tmp 2>/dev/null && mv /opt/data/rowboat/models.json.tmp /opt/data/rowboat/models.json || true`,
   ].join('\n'),
-  modelsPath: '/opt/data/rowboat/models.json',
   models(text) {
     const doc = obj(parse(text));
     const rows: unknown[] = Array.isArray(doc?.models) ? doc.models : [];
@@ -238,16 +297,20 @@ const codex: Runtime = {
     const flags = [
       input.model ? `-m ${q(input.model)}` : '',
       input.effort ? `-c ${q(`model_reasoning_effort="${input.effort}"`)}` : '',
-      `-c ${q(`mcp_servers.rowboat.url="${input.orgUrl}/mcp"`)}`,
+      `-c ${q(`mcp_servers.rowboat.url="${input.serverUrl}/mcp"`)}`,
       `-c ${q('mcp_servers.rowboat.bearer_token_env_var="ROWBOAT_AGENT_KEY"')}`,
     ].filter(Boolean).join(' ');
     // The template's own flags (its server.js, read 2026-10-26): the VM is the sandbox, the final message goes to -o.
     return [
       'set -e',
-      `export CODEX_HOME=/data/.codex ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      MARITIME_ENV,
+      `export CODEX_HOME=/data/.codex ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
+      // 2026-11-11: per-turn overrides reach both new and resumed sessions;
+      // the token remains in the environment when a model provider changes.
+      `set --; if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then set -- -c ${q('mcp_servers.composio.url="')}"$ROWBOAT_COMPOSIO_MCP_URL"${q('"')} -c ${q('mcp_servers.composio.bearer_token_env_var="ROWBOAT_GATEWAY_KEY"')}; fi`,
       // The owner's own key (2026-10-27): Codex's built-in openai provider on OPENAI_API_KEY and OPENAI_BASE_URL, which
       // Harbor set with the key, instead of the template's provider on the platform's proxy; the owner's model when the turn picked none.
       // The owner's ChatGPT sign-in (2026-10-30): Codex honours one on its built-in provider only, and the template's
@@ -255,7 +318,7 @@ const codex: Runtime = {
       // provider when it is, the proxy's address unset with it. Its answer goes first into the stderr file, for Harbor.
       `OWN=""; if [ "$ROWBOAT_LLM_PROVIDER" = openai ]; then OWN='-c model_provider="openai"'; elif codex login status 2>&1 | grep -q 'ChatGPT'; then OWN='-c model_provider="openai"'; unset OPENAI_BASE_URL; echo '${SIGN_IN_MARK}chatgpt' > ${q(input.errPath)}; else echo '${SIGN_IN_MARK}none' > ${q(input.errPath)}; fi`,
       `${input.model ? '' : '[ -z "$ROWBOAT_LLM_MODEL" ] || OWN="$OWN -m $ROWBOAT_LLM_MODEL"; '}true`,
-      `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} -- "$PROMPT" > ${q(input.outPath)} 2>> ${q(input.errPath)}`,
+      `codex exec ${input.session ? `resume ${q(input.session)}` : ''} --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -o ${q(input.lastPath)} $OWN ${flags} "$@" -- "$PROMPT" > ${q(input.outPath)} 2>> ${q(input.errPath)}`,
     ].join('\n');
   },
   read(out, last, err, exitCode) {
@@ -268,7 +331,7 @@ const codex: Runtime = {
     const signIn = signInOf(err);
     const seen = { ...(session ? { session } : {}), ...(signIn ? { signIn } : {}) };
     if (failed || (exitCode !== undefined && exitCode !== null && exitCode !== 0)) {
-      const reason = str(obj(failed?.error)?.message) ?? str(failed?.message) ?? stderrTail(err) ?? 'Codex stopped with an error';
+      const reason = str(obj(failed?.error)?.message) || str(failed?.message) || stderrTail(err) || stoppedSilently('Codex', exitCode);
       return { ...(answer ? { answer } : {}), failure: reason, ...seen };
     }
     return { ...(answer ? { answer } : {}), ...seen };
@@ -288,12 +351,12 @@ const codex: Runtime = {
   options: (models) => [...modelOption(models), { type: 'select', key: 'effort', label: 'Effort', choices: EFFORTS }],
   modelsCommand: () => [
     'set -e',
+    MARITIME_ENV,
     'export CODEX_HOME=/data/.codex',
     // Match the turn’s account routing (2026-11-01): a ChatGPT sign-in must not fall back to the platform proxy.
     'if [ "$ROWBOAT_LLM_PROVIDER" != openai ] && codex login status 2>&1 | grep -q ChatGPT; then unset OPENAI_BASE_URL; fi',
     `cp "$CODEX_HOME/models_cache.json" /data/rowboat/models.json 2>/dev/null || { [ -n "$OPENAI_BASE_URL" ] && curl -sf -m 15 "$OPENAI_BASE_URL/models" -H "Authorization: Bearer $OPENAI_API_KEY" > /data/rowboat/models.json.tmp && mv /data/rowboat/models.json.tmp /data/rowboat/models.json; } || true`,
   ].join('\n'),
-  modelsPath: '/data/rowboat/models.json',
   // Codex's catalog (`models`: slug, display_name, visibility, priority), or a plain models endpoint (`data`: id).
   models(text) {
     const doc = obj(parse(text));
@@ -311,6 +374,20 @@ const codex: Runtime = {
 
 // --- Claude Code ------------------------------------------------------------------------------
 
+// A current Claude Code on the volume (2026-11-13): the template's own CLI was 2.1.150, and the API
+// refuses newer models to it ("version 2.1.280 or newer is required"), so Opus 5.5 and Fable 5.2 failed.
+// The first turn installs it (falling back to the template's CLI when npm can't); the catalogue
+// refresh after a turn renews it daily in the background, staged and swapped in so a turn never
+// starts on a half-written install.
+const CLAUDE_CLI_DIR = '/data/rowboat/claude-code';
+const CLAUDE_CLI_BIN = `${CLAUDE_CLI_DIR}/node_modules/.bin/claude`;
+const CLAUDE_CLI_INSTALL = (prefix: string) => `npm install --prefix ${prefix} --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code@latest`;
+const CLAUDE_CLI_REFRESH = [
+  `if command -v npm >/dev/null 2>&1 && { [ ! -x ${CLAUDE_CLI_BIN} ] || [ -n "$(find ${CLAUDE_CLI_DIR}/.checked -mmin +1440 2>/dev/null)" ] || [ ! -e ${CLAUDE_CLI_DIR}/.checked ]; }; then`,
+  `  ( rm -rf ${CLAUDE_CLI_DIR}.new && ${CLAUDE_CLI_INSTALL(`${CLAUDE_CLI_DIR}.new`)} && [ -x ${CLAUDE_CLI_DIR}.new/node_modules/.bin/claude ] && touch ${CLAUDE_CLI_DIR}.new/.checked && rm -rf ${CLAUDE_CLI_DIR}.old && { [ ! -d ${CLAUDE_CLI_DIR} ] || mv ${CLAUDE_CLI_DIR} ${CLAUDE_CLI_DIR}.old; } && mv ${CLAUDE_CLI_DIR}.new ${CLAUDE_CLI_DIR} ) >/dev/null 2>&1 </dev/null &`,
+  'fi',
+].join('\n');
+
 const claudeCode: Runtime = {
   root: '/data',
   command(input) {
@@ -319,11 +396,14 @@ const claudeCode: Runtime = {
     // the CLI ships inside the Agent SDK the template installs, or on PATH in an image that installs it.
     return [
       'set -e',
-      `export IS_SANDBOX=1 CLAUDE_CONFIG_DIR=/data/.claude ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      MARITIME_ENV,
+      `export IS_SANDBOX=1 CLAUDE_CONFIG_DIR=/data/.claude ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
-      `printf '%s' ${q(mcpJson(input.orgUrl))} > /data/rowboat/mcp.json`,
-      'CLI="$(command -v claude 2>/dev/null || true)"',
+      `if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then printf '%s' ${q(mcpJson(input.serverUrl, true))}; else printf '%s' ${q(mcpJson(input.serverUrl))}; fi > /data/rowboat/mcp.json`,
+      `if [ ! -x ${CLAUDE_CLI_BIN} ] && command -v npm >/dev/null 2>&1; then ${CLAUDE_CLI_INSTALL(CLAUDE_CLI_DIR)} >/dev/null 2>&1 && touch ${CLAUDE_CLI_DIR}/.checked || true; fi`,
+      `CLI=""; if [ -x ${CLAUDE_CLI_BIN} ]; then CLI=${CLAUDE_CLI_BIN}; fi`,
+      '[ -n "$CLI" ] || CLI="$(command -v claude 2>/dev/null || true)"',
       '[ -n "$CLI" ] || for f in /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /app/node_modules/@anthropic-ai/claude-code/cli.js; do [ -f "$f" ] && CLI="node $f" && break; done',
       '[ -n "$CLI" ] || { echo "no Claude Code CLI found in this VM" >&2; exit 127; }',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
@@ -336,8 +416,11 @@ const claudeCode: Runtime = {
     const asEvents: AgentEvent[] = all.map((e) => ({ type: `claude-${str(e.type) ?? 'unknown'}`, payload: e }));
     const result = [...all].reverse().find((e) => e.type === 'result');
     const session = str(result?.session_id) ?? str(all.find((e) => str(e.session_id))?.session_id);
-    const answer = (str(result?.result) ?? answerOf('claude-code', asEvents) ?? '').trim();
-    const failure = failureOf('claude-code', asEvents) ?? (exitCode !== undefined && exitCode !== null && exitCode !== 0 ? stderrTail(err) || 'Claude Code stopped with an error' : undefined);
+    const failure = failureOf('claude-code', asEvents) ?? (exitCode !== undefined && exitCode !== null && exitCode !== 0 ? stderrTail(err) || stoppedSilently('Claude Code', exitCode) : undefined);
+    // A failed result's `result` is the error, now the failure's reason (2026-11-13): not an answer to post.
+    const said = ((failure ? undefined : str(result?.result)) ?? answerOf('claude-code', asEvents) ?? '').trim();
+    // Claude writes a failed call's error as its last message too: posting it would say the failure twice (2026-11-13).
+    const answer = failure && said === failure.trim() ? '' : said;
     return { ...(answer ? { answer } : {}), ...(failure ? { failure } : {}), ...(session ? { session } : {}) };
   },
   activity(out) {
@@ -350,9 +433,10 @@ const claudeCode: Runtime = {
   options: (models) => modelOption(models),
   modelsCommand: () => [
     'set -e',
+    MARITIME_ENV,
+    CLAUDE_CLI_REFRESH,
     `f=/data/rowboat/models.json; if [ -n "$ANTHROPIC_API_KEY" ] && { [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +1440 2>/dev/null)" ]; }; then curl -sf -m 15 "\${ANTHROPIC_BASE_URL:-https://api.anthropic.com}/v1/models?limit=100" -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" > "$f.tmp" && mv "$f.tmp" "$f" || true; fi`,
   ].join('\n'),
-  modelsPath: '/data/rowboat/models.json',
   models(text) {
     const doc = obj(parse(text));
     const rows: unknown[] = Array.isArray(doc?.data) ? doc.data : [];
@@ -366,10 +450,11 @@ const claudeCode: Runtime = {
 
 export const RUNTIMES: Record<string, Runtime> = { hermes, codex, 'claude-code': claudeCode };
 
-/** The kind a Maritime agent runs, from its record: by template, then by framework; undefined when it does not say. */
-export function kindOfAgent(agent: { framework: string; templateId: string | null }): string | undefined {
+/** The kind a Maritime agent runs, from its record: by template, then by framework, then by Rowboat's own Hermes image; undefined when it does not say. */
+export function kindOfAgent(agent: { framework: string; templateId: string | null; imageName?: string | null }): string | undefined {
   if (agent.templateId === 'claude_code') return 'claude-code';
   if (agent.templateId === 'codex') return 'codex';
   if (agent.templateId === 'hermes' || agent.framework === 'hermes') return 'hermes';
+  if (agent.imageName?.startsWith(`${HERMES_IMAGE_REPO}:`)) return 'hermes';
   return undefined;
 }

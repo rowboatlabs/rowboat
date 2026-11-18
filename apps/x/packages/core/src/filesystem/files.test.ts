@@ -252,6 +252,20 @@ describe("filesystem files", () => {
     await expect(fs.readFile(path.join(workspaceDir, "edit.txt"), "utf8")).resolves.toBe("ONE two ONE");
   });
 
+  it("writes editText's newString literally, including $ sequences", async () => {
+    const files = await loadFiles();
+    await fs.mkdir(workspaceDir, { recursive: true });
+    const newString = "echo $$ costs $& and $' or $`";
+    await fs.writeFile(path.join(workspaceDir, "one.sh"), "PRICE\n", "utf8");
+    await fs.writeFile(path.join(workspaceDir, "all.sh"), "PRICE PRICE\n", "utf8");
+
+    await expect(files.editText("one.sh", "PRICE", newString)).resolves.toMatchObject({ success: true });
+    await expect(files.editText("all.sh", "PRICE", newString, true)).resolves.toMatchObject({ success: true, replacements: 2 });
+
+    await expect(fs.readFile(path.join(workspaceDir, "one.sh"), "utf8")).resolves.toBe(`${newString}\n`);
+    await expect(fs.readFile(path.join(workspaceDir, "all.sh"), "utf8")).resolves.toBe(`${newString} ${newString}\n`);
+  });
+
   it("runs glob relative to the requested cwd", async () => {
     const files = await loadFiles();
     await fs.mkdir(path.join(workspaceDir, "src"), { recursive: true });

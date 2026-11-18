@@ -47,7 +47,7 @@ const PRAKHAR_LINE = '- 08-14 prakhar: docs revamp underway';
 
 async function start(): Promise<void> {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'arjun', displayName: 'Arjun' },

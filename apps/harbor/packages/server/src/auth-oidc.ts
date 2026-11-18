@@ -5,7 +5,7 @@ import { HarborError } from './errors.js';
 import type { Store } from './store.js';
 
 // The real auth driver (spec §4, spike-verified 2026-08-18): Harbor is only
-// ever a RESOURCE server. This driver pins one issuer per org, discovers its
+// ever a RESOURCE server. This driver pins the server's one issuer, discovers its
 // JWKS via RFC 8414 metadata, verifies bearers offline, and maps
 // (iss, sub) → member with NO auto-create — a valid token with no mapping is
 // `not_a_member`, the state the invite ceremony converts. The AS behind the
@@ -78,7 +78,7 @@ export class OidcAuthDriver implements AuthDriver {
   async resolveMember(store: Store, identity: AuthIdentity): Promise<Member> {
     const member = await store.getMemberByIdentity(identity.iss, identity.sub);
     if (!member) {
-      throw new HarborError('not_a_member', 'authenticated identity is not a member of this org');
+      throw new HarborError('not_a_member', 'authenticated identity is not a member of this server');
     }
     return member;
   }

@@ -23,13 +23,12 @@ export function searchTextFor(text: string): string {
 /**
  * One parsed query term: the typed word plus its alternatives — the ids of
  * members whose display name matches it. A term is satisfied by the word OR
- * any alternative; terms are AND-ed. `prefix` marks the final term (live
- * typing: "dep" should match "deploy").
+ * any alternative; terms are AND-ed. The word prefix-matches ("dep" finds
+ * "deploy"); an alternative is a whole id.
  */
 export interface SearchTerm {
   text: string;
   alts: string[];
-  prefix: boolean;
 }
 
 /**
@@ -44,9 +43,31 @@ export interface SearchGroup {
   terms: SearchTerm[];
 }
 
+/** What `has:` can ask of a message body. */
+export type HasKind = 'link' | 'image' | 'file';
+
+/**
+ * The filter grammar (2026-11-06, "search" in Main): `from:`, `mentions:`,
+ * `in:` and `has:` narrow message hits in the store, not on a page the client
+ * already holds, so a filter never silently misses older messages and a query
+ * of filters alone ("from:me has:link") is a search of its own. `from` and
+ * `mentions` are one list of candidate member ids per filter: any candidate
+ * satisfies it, every filter must be satisfied. An empty list matches nothing.
+ */
+export interface SearchFilters {
+  from: string[][];
+  mentions: string[][];
+  /** Fragments of the thread's title: its discussion's, or its session's. */
+  in: string[];
+  has: HasKind[];
+}
+
 export interface SearchQuery {
   terms: SearchTerm[];
   groups: SearchGroup[];
+  filters: SearchFilters;
+  /** Any filter present: the query is about messages only. */
+  filtered: boolean;
 }
 
 /**
@@ -65,6 +86,26 @@ function tokenize(chunk: string): string[] {
 /** AND-ing more words than this only ever yields nothing. */
 const MAX_TERMS = 8;
 
+/** A filter token: `from:harsh`, `has:link`. The value is one chunk, no spaces. */
+const FILTER_RE = /^(from|mentions|in|has):(.+)$/i;
+const HAS_KINDS = new Set<string>(['link', 'image', 'file']);
+
+/**
+ * The members a `from:` or `mentions:` value names: `me` is the searcher, an
+ * id names that member, anything else prefix-matches a word of a display name
+ * (the same rule as mention expansion below, so "from:harsh" and a search for
+ * "harsh" agree on who Harsh is).
+ */
+function membersNamed(value: string, members: readonly Member[], selfId: string | undefined): string[] {
+  const v = value.toLowerCase().replace(/^@/, '');
+  if (v === 'me') return selfId ? [selfId] : [];
+  const ids: string[] = [];
+  for (const m of members) {
+    if (m.id.toLowerCase() === v || m.displayName.toLowerCase().split(/\s+/).some((w) => w.startsWith(v))) ids.push(m.id);
+  }
+  return ids;
+}
+
 /**
  * Query-time mention expansion: a term that matches a word of a member's
  * display name (prefix match, case-insensitive) gains that member's id as an
@@ -72,11 +113,35 @@ const MAX_TERMS = 8;
  * (searchTextFor) and the simple tokenizer keeps the id as one lexeme, so the
  * id is already in the index — this is purely a read-side rewrite. Names resolve fresh on every query:
  * renames are correct instantly, and a name shared by two members ORs in both.
+ *
+ * Every term prefix-matches (2026-11-06, "search" in Main): the 'simple'
+ * index has no stemming, so with only the last term prefixed "deploy fail"
+ * missed "deployment failed". A word still has to start a word: "ploy" finds
+ * nothing.
  */
-export function parseSearchQuery(raw: string, members: readonly Member[]): SearchQuery {
+export function parseSearchQuery(raw: string, members: readonly Member[], selfId?: string): SearchQuery {
   const groups: SearchGroup[] = [];
+  const filters: SearchFilters = { from: [], mentions: [], in: [], has: [] };
   let count = 0;
   for (const chunk of raw.split(/\s+/)) {
+    const filter = FILTER_RE.exec(chunk);
+    if (filter) {
+      const key = filter[1]!.toLowerCase();
+      const value = filter[2]!;
+      if (key === 'from' || key === 'mentions') {
+        filters[key].push(membersNamed(value, members, selfId));
+        continue;
+      }
+      if (key === 'in') {
+        filters.in.push(value);
+        continue;
+      }
+      if (HAS_KINDS.has(value.toLowerCase())) {
+        filters.has.push(value.toLowerCase() as HasKind);
+        continue;
+      }
+      // An unknown has: kind is two ordinary words, as before the grammar.
+    }
     const words = tokenize(chunk).slice(0, MAX_TERMS - count);
     if (words.length === 0) continue;
     count += words.length;
@@ -86,14 +151,24 @@ export function parseSearchQuery(raw: string, members: readonly Member[]): Searc
         const nameWords = m.displayName.toLowerCase().split(/\s+/);
         if (nameWords.some((w) => w.startsWith(text))) alts.push(m.id.toLowerCase());
       }
-      return { text, alts, prefix: false };
+      return { text, alts };
     });
     groups.push({ whole: words.length > 1 ? chunk : null, terms });
   }
   const terms = groups.flatMap((g) => g.terms);
-  if (terms.length > 0) terms[terms.length - 1]!.prefix = true;
-  return { terms, groups };
+  const filtered = filters.from.length + filters.mentions.length + filters.in.length + filters.has.length > 0;
+  return { terms, groups, filters, filtered };
 }
+
+/**
+ * The body patterns `has:` matches (Postgres regular expressions over the raw
+ * body): a web link, an inline image, a file link into the space's blobs.
+ */
+export const HAS_PATTERNS: Record<HasKind, string> = {
+  link: 'https?://',
+  image: '!\\[[^]]*\\]\\(',
+  file: '(^|[^!])\\[[^]]*\\]\\([^)]*/b/',
+};
 
 /** A lexeme quoted for to_tsquery: single-quoted, internal quotes doubled. */
 function lexeme(text: string, prefix: boolean): string {
@@ -101,7 +176,7 @@ function lexeme(text: string, prefix: boolean): string {
 }
 
 /**
- * The pg form, one entry per group: "('harsh' | '01j8kq…') & 'deploy':*" for
+ * The pg form, one entry per group: "('harsh':* | '01j8kq…') & 'deploy':*" for
  * to_tsquery('simple'), beside the group's `whole` ('' for none), which
  * TSQUERY_SQL parses with plainto_tsquery and ORs in. Everything is quoted or
  * parsed by Postgres, so no user text ever reaches tsquery syntax.
@@ -110,7 +185,7 @@ export function toTsQueryParams(q: SearchQuery): { groups: string[]; wholes: str
   const groups = q.groups.map((g) => {
     const and = g.terms
       .map((t) => {
-        const branches = [lexeme(t.text, t.prefix), ...t.alts.map((a) => lexeme(a, false))];
+        const branches = [lexeme(t.text, true), ...t.alts.map((a) => lexeme(a, false))];
         return branches.length > 1 ? `(${branches.join(' | ')})` : branches[0];
       })
       .join(' & ');

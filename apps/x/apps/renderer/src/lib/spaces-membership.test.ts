@@ -6,7 +6,7 @@ const names = new Map([['ram', 'Ramnique'], ['harsh', 'Harsh'], ['repl', 'Replic
 const event = (action: spaces.MembershipEvent['action'], memberId: string, by?: spaces.MembershipEvent['by']): spaces.MembershipEvent => ({
     type: 'membership',
     action,
-    membership: { spaceId: 'S', memberId, joinedAt: '2026-09-29T00:00:00Z' },
+    membership: { spaceId: 'S', memberId, joinedAt: '2026-09-29T00:00:00Z', role: 'member' },
     ...(by ? { by } : {}),
 })
 

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlignLeft, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Columns3, GripVertical, Maximize2, MoreHorizontal, NotebookPen, Pencil, Plus, Rows3, Trash2, UserPlus, X } from 'lucide-react'
 import { invokeSpace } from '@/lib/spaces-invoke'
-import { canActInSpace, useSpaceAccess } from '@/lib/spaces-access'
+import { useSpaceAccess } from '@/lib/spaces-access'
 import { useSpaceMembers } from '@/hooks/use-space-members'
-import { isDeparted, isOthersPersonalAgent, isSwitchedOff } from '@/lib/spaces-direct'
-import { useOrgSettings } from '@/hooks/use-org-settings'
+import { answersOwnerOnly, isDeparted } from '@/lib/spaces-direct'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { MemberAvatar } from '@/components/spaces/atoms'
@@ -61,8 +60,8 @@ function readWidths(key: string): Record<string, number> {
 export function TodoListView({ orgId, spaceId, selfMemberId, assetId, content, version, onSaved }: {
     orgId: string
     spaceId: string
-    /** Who is reading: their own personal agent may be assigned, anyone else's not. */
     selfMemberId: string
+    /** Who is reading: their own personal agent may be assigned, anyone else's not. */
     assetId: string
     content: string
     version: number
@@ -144,7 +143,7 @@ export function TodoListView({ orgId, spaceId, selfMemberId, assetId, content, v
     }
 
     const apply = (edit: TodoEdit) => {
-        if (!writable || !canActInSpace(orgId, spaceId)) return
+        if (!writable) return
         pendingRef.current = [...pendingRef.current, edit]
         sync()
         void flush()
@@ -154,9 +153,8 @@ export function TodoListView({ orgId, spaceId, selfMemberId, assetId, content, v
         () => pending.reduce<TodoDoc>((d, edit) => edit(d) ?? d, parseTodoList(server.content)),
         [server.content, pending],
     )
-    // An assignee is a mention, so someone else's personal agent is left out (2026-10-30), and Ro while it is off.
-    const settings = useOrgSettings(orgId)
-    const roster = useMemo(() => members.filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId) && !isSwitchedOff(m, settings)), [members, selfMemberId, settings])
+    // An assignee is a mention, so an agent whose seat here is someone else's alone is left out (2026-11-09): the server would refuse it.
+    const roster = useMemo(() => members.filter((m) => !isDeparted(m) && !answersOwnerOnly(m, selfMemberId)), [members, selfMemberId])
     const names = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
 
     const [widths, setWidths] = useState(() => readWidths(columnsKey(orgId, spaceId, assetId)))

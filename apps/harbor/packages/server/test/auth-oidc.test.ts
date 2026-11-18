@@ -140,7 +140,7 @@ describe('invite-binding ceremony', () => {
       seedSpaces: [{ name: 'Roadboard', creator: 'ramnique' }],
     });
     const spaces = await harbor.service.listSpaces({ memberId: 'ramnique' });
-    const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaces[0]!.id] });
+    const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceId: spaces[0]!.id });
     const token = await as.mint({ sub: 'sub-harsh', email: 'harsh@rowboatlabs.com', name: 'Harsh Vardhan' });
     const rest = restClient(harbor, token);
 
@@ -160,7 +160,7 @@ describe('invite-binding ceremony', () => {
     const memberId = accepted.body.membership.memberId as string;
     expect(memberId).not.toBe('sub-harsh'); // minted id, sub lives only in the mapping
     const member = await harbor.store.getMember(memberId);
-    expect(member).toMatchObject({ displayName: 'Harsh Vardhan', role: 'member' });
+    expect(member).toMatchObject({ displayName: 'Harsh Vardhan', kind: 'human' });
     expect((await harbor.store.getMemberByIdentity(as.issuer, 'sub-harsh'))?.id).toBe(memberId);
 
     // After: the same token works; /v1/me answers who the identity became;
@@ -173,8 +173,7 @@ describe('invite-binding ceremony', () => {
       id: string;
       role: string;
     }>;
-    expect(members.find((m) => m.id === 'ramnique')?.role).toBe('admin');
-    expect(members.find((m) => m.id === memberId)?.role).toBe('member');
+    expect(members.some((m) => m.id === memberId)).toBe(true);
     await harbor.close();
   });
 
@@ -191,9 +190,9 @@ describe('invite-binding ceremony', () => {
     const token = await as.mint({ sub: 'sub-gagan', email: 'gagan@rowboatlabs.com' });
     const rest = restClient(harbor, token);
 
-    const first = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaces[0]!.id] });
+    const first = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceId: spaces[0]!.id });
     const one = await rest.post('/v1/invites/accept', { token: first.token });
-    const second = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaces[1]!.id] });
+    const second = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceId: spaces[1]!.id });
     const two = await rest.post('/v1/invites/accept', { token: second.token });
     expect(two.body.membership.memberId).toBe(one.body.membership.memberId);
     // No name claim → displayName seeded from the email local-part.
@@ -203,29 +202,4 @@ describe('invite-binding ceremony', () => {
     await harbor.close();
   });
 
-  it('domain rule: matching binds (case-insensitive), wrong or missing email is policy_refused', async () => {
-    const harbor = await startTestHarbor({
-      auth: new OidcAuthDriver({ issuer: as.issuer }),
-      allowedEmailDomains: ['rowboatlabs.com'],
-      seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
-      seedSpaces: [{ name: 'Roadboard', creator: 'ramnique' }],
-    });
-    const spaces = await harbor.service.listSpaces({ memberId: 'ramnique' });
-    const invite = await harbor.service.createInvite({ memberId: 'ramnique' }, { spaceIds: [spaces[0]!.id] });
-
-    const outsider = restClient(harbor, await as.mint({ sub: 'sub-x', email: 'x@gmail.com' }));
-    const refused = await outsider.post('/v1/invites/accept', { token: invite.token });
-    expect(refused.status).toBe(403);
-    expect(refused.body.code).toBe('policy_refused');
-    expect(refused.body.message).toContain('@rowboatlabs.com');
-
-    const noEmail = restClient(harbor, await as.mint({ sub: 'sub-y' }));
-    expect((await noEmail.post('/v1/invites/accept', { token: invite.token })).body.code).toBe('policy_refused');
-    // Refusal binds nothing.
-    expect(await harbor.store.getMemberByIdentity(as.issuer, 'sub-x')).toBeUndefined();
-
-    const insider = restClient(harbor, await as.mint({ sub: 'sub-p', email: 'Prakhar@RowboatLabs.COM' }));
-    expect((await insider.post('/v1/invites/accept', { token: invite.token })).status).toBe(200);
-    await harbor.close();
-  });
 });

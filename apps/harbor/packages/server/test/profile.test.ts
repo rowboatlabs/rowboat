@@ -14,11 +14,13 @@ const as = (token: string) => restClient(harbor, token);
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Profile Test Org',
+    name: 'Profile Test Org',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
     ],
+    // One shared space, so each is the other's contact (2026-11-09).
+    seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
   });
   gaganAgent = await agentClient(harbor, 'dev-gagan', { agentName: 'Rowboat' });
 });
@@ -32,10 +34,10 @@ describe('PUT /v1/me', () => {
   it('sets your name and title, trimmed to one line, and shows them on me and the roster', async () => {
     const r = await as('dev-gagan').put('/v1/me', { displayName: '  Gagan  P ', title: 'Founding\n engineer ' });
     expect(r.status).toBe(200);
-    expect(r.body.member).toMatchObject({ id: 'gagan', displayName: 'Gagan P', title: 'Founding engineer', role: 'member' });
+    expect(r.body.member).toMatchObject({ id: 'gagan', displayName: 'Gagan P', title: 'Founding engineer' });
 
     expect((await as('dev-gagan').get('/v1/me')).body.member).toEqual(r.body.member);
-    const roster = (await as('dev-ramnique').get('/v1/members')).body.members as Member[];
+    const roster = (await as('dev-ramnique').get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === 'gagan')).toMatchObject({ displayName: 'Gagan P', title: 'Founding engineer' });
   });
 
@@ -62,7 +64,8 @@ describe('PUT /v1/me', () => {
   it('edits only the profile: a role or an id in the body is ignored', async () => {
     const r = await as('dev-gagan').put('/v1/me', { displayName: 'Gagan', role: 'admin', id: 'ramnique' });
     expect(r.status).toBe(200);
-    expect(r.body.member).toMatchObject({ id: 'gagan', displayName: 'Gagan', role: 'member' });
+    expect(r.body.member).toMatchObject({ id: 'gagan', displayName: 'Gagan' });
+    expect(r.body.member.role).toBeUndefined();
     expect((await as('dev-ramnique').get('/v1/me')).body.member.displayName).toBe('Ramnique');
   });
 
@@ -113,12 +116,12 @@ describe('update_profile, the agent-face twin', () => {
 });
 
 // Profiles reach people outside the editor's spaces, without a space subscription (2026-10-22).
-it('broadcasts persisted profile updates to active org members only', async () => {
+it('broadcasts persisted profile updates to active members only', async () => {
   const viewer = await liveClient(harbor, 'dev-ramnique');
   const editor = await liveClient(harbor, 'dev-gagan');
-  const departed = { id: 'departed', displayName: 'Departed', role: 'member', kind: 'human', removedAt: new Date().toISOString() } as Member;
+  const departed = { id: 'departed', displayName: 'Departed', kind: 'human', removedAt: new Date().toISOString() } as Member;
   await harbor.store.putMember(departed);
-  await harbor.store.removeMemberFromOrg(departed.id, new Date().toISOString());
+  await harbor.store.deactivateMember(departed.id, new Date().toISOString());
   const received: unknown[] = [];
   const unsubscribe = harbor.hub.subscribeMember('departed', frame => received.push(frame));
   try {
@@ -128,7 +131,7 @@ it('broadcasts persisted profile updates to active org members only', async () =
       const frame = client.frames.find(f => f.kind === 'profile_updated');
       expect(frame).toMatchObject({ member: updated.body.member });
     }
-    expect((await as('dev-ramnique').get('/v1/members')).body.members).toContainEqual(updated.body.member);
+    expect((await as('dev-ramnique').get('/v1/contacts')).body.members).toContainEqual(updated.body.member);
     expect(received).toEqual([]);
     const publish = vi.spyOn(harbor.hub, 'publishToMember');
     await as('dev-gagan').put('/v1/me', { title: 'Profile test' });

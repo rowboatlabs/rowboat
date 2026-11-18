@@ -17,7 +17,7 @@ const INSTRUCTIONS = 'You are Scout, the team’s reviewer.\n- Be brief.\n- Run 
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'gagan', displayName: 'Gagan' },
       { id: 'harsh', displayName: 'Harsh' },
@@ -51,8 +51,8 @@ describe('setting it', () => {
     expect(saved).toMatchObject({ title: 'Reviews pull requests', instructions: INSTRUCTIONS });
     await harsh.until((frames) => frames.some((f) => f.kind === 'profile_updated' && f.member.id === agent.id && f.member.instructions === INSTRUCTIONS), 'profile_updated');
     harsh.close();
-    // Everyone reads them on the roster.
-    const roster = routes.listOrgMembers.response.parse((await as('dev-harsh').get('/v1/members')).body);
+    // Everyone in the space reads them on its roster.
+    const roster = routes.listMembers.response.parse((await as('dev-harsh').get(`/v1/spaces/${spaceId}/members`)).body);
     expect(roster.members.find((m) => m.id === agent.id)).toMatchObject({ title: 'Reviews pull requests', instructions: INSTRUCTIONS });
   });
 
@@ -105,7 +105,7 @@ describe('the prompt a coding connector sends', () => {
     updatedAt: '2026-10-29T10:00:00.000Z',
   });
   const prompt = (inv: Invocation, inSystem = false) =>
-    buildPrompt({ invocation: inv, agentId: 'a1', context: [], names: new Map([['gagan', 'Gagan']]), orgAddress: 'localhost', orgUrl: 'http://localhost', attachments: [], earlierAttachments: [], instructionsInSystemPrompt: inSystem });
+    buildPrompt({ invocation: inv, agentId: 'a1', context: [], names: new Map([['gagan', 'Gagan']]), address: 'localhost', serverUrl: 'http://localhost', attachments: [], earlierAttachments: [], instructionsInSystemPrompt: inSystem });
 
   it('puts the instructions right after the request, which stays first for its commands', () => {
     const text = prompt(invocation('Be brief.'));

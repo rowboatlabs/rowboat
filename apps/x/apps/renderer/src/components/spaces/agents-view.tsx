@@ -4,26 +4,22 @@ import type { spaces } from '@x/shared'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { AccessBadge } from '@/components/spaces/agent-access'
+import { DeleteAgentDialog } from '@/components/spaces/delete-agent-dialog'
 import { AgentsDialog, type AgentsDialogStart } from '@/components/spaces/agents-dialog'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { RemoveFromOrgDialog } from '@/components/spaces/member-admin'
 import { isAgentOffline, refreshOrgRoster, useAgentsOnline, useOrgRoster, useSpaceRosters } from '@/hooks/use-space-members'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, agentLabel, kindInfo } from '@/lib/agent-kinds'
 import { initials } from '@/lib/spaces-presentation'
-import { isSwitchedOff } from '@/lib/spaces-direct'
-import { useOrgSettings } from '@/hooks/use-org-settings'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 
-// Agents (2026-10-21): every agent in the org on one page — how many there
-// are, what each one is, who added it, and which of your spaces it is in.
-// Everyone sees every agent (the org roster already lists them); its owner
-// renames it and opens its keys and setup; an admin can also open its keys
-// (to revoke) and remove it from the server. Adding one, connecting it and
-// its keys reuse the Agents dialog's screens.
+// Agents (2026-10-21; 2026-11-09): your agents on one page — how many there
+// are, what each one is, and which of your spaces it is in — and, below,
+// the agents others brought into spaces you share. Only an owner renames an
+// agent or opens its keys and setup; nothing stands above the owner. Adding
+// one, connecting it and its keys reuse the Agents dialog's screens.
 
 type Filter = 'all' | 'mine'
 
@@ -57,7 +53,6 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
     const rosters = useSpaceRosters(org.id, spaceIds)
     const [filter, setFilter] = useState<Filter>('all')
     const [dialog, setDialog] = useState<AgentsDialogStart | null>(null)
-    const [removing, setRemoving] = useState<spaces.Member | null>(null)
     // Rowboat runs it (2026-10-26): offered when the org's Harbor creates agents on Rowboat's own Maritime account; the card names it then.
     const [creates, setCreates] = useState(false)
     useEffect(() => {
@@ -66,15 +61,14 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
         return () => { gone = true }
     }, [org.id])
 
-    const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
-    const settings = useOrgSettings(org.id)
-    const agents = useMemo(
-        // Ro while an admin has it off is left out (2026-10-30); the org menu turns it back on.
-        () => roster.filter((m) => m.kind === 'agent' && !m.removedAt && !m.deactivatedAt && !isSwitchedOff(m, settings))
-            .sort((a, b) => a.displayName.localeCompare(b.displayName)),
-        [roster, settings],
-    )
+    // Your contacts hold your own agents; others' agents show through the rosters of the spaces you share with them.
+    const agents = useMemo(() => {
+        const byId = new Map<string, spaces.Member>()
+        for (const m of roster) if (m.kind === 'agent') byId.set(m.id, m)
+        for (const members of rosters.values()) for (const m of members) if (m.kind === 'agent' && !byId.has(m.id)) byId.set(m.id, m)
+        return [...byId.values()].filter((m) => !m.removedAt && !m.deactivatedAt).sort((a, b) => a.displayName.localeCompare(b.displayName))
+    }, [roster, rosters])
     const mine = agents.filter((a) => a.ownerId === org.memberId)
     const others = agents.filter((a) => a.ownerId !== org.memberId)
     // Which of your spaces each agent is in: the only spaces you can see the rosters of.
@@ -98,9 +92,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
             agent={agent}
             owner={agent.ownerId === org.memberId ? 'you' : agent.ownerId ? { id: agent.ownerId, name: names.get(agent.ownerId) ?? 'Someone' } : 'built-in'}
             spaceNames={spacesOf.get(agent.id) ?? []}
-            isAdmin={isAdmin}
             onOpenSettings={() => setDialog({ name: 'agent', agentId: agent.id })}
-            onRemove={() => setRemoving(agent)}
         />
     )
 
@@ -113,7 +105,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
                             Agents
                             <span className="text-base font-normal tabular-nums text-muted-foreground">{agents.length}</span>
                         </h1>
-                        <p className="mt-1 text-sm text-[var(--rowboat-ink-secondary)]">Every agent in {org.name}, what it runs on, and who added it.</p>
+                        <p className="mt-1 text-sm text-[var(--rowboat-ink-secondary)]">Your agents, what each runs on, and which spaces it is in. Who may ask one is set per group.</p>
                     </div>
                     <Segmented
                         label="Show"
@@ -125,7 +117,7 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
 
                 <Group title="Yours" count={mine.length}>
                     {mine.map(card)}
-                    <NewAgentCard creates={creates} onNew={() => setDialog({ name: 'choose' })} onBot={() => setDialog({ name: 'add', bot: true })} />
+                    <NewAgentCard creates={creates} onNew={() => setDialog({ name: 'choose' })} />
                 </Group>
 
                 {filter === 'all' && others.length > 0 && (
@@ -141,7 +133,6 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
                 onOpenChange={(open) => { if (!open) setDialog(null) }}
                 {...(dialog ? { start: dialog } : {})}
             />
-            {removing && <RemoveFromOrgDialog orgId={org.id} orgName={org.name} member={removing} onClose={() => setRemoving(null)} />}
         </section>
     )
 }
@@ -210,20 +201,17 @@ function AgentFace({ agent }: { agent: spaces.Member }) {
     )
 }
 
-function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, onRemove }: {
+function AgentCard({ orgId, agent, owner, spaceNames, onOpenSettings }: {
     orgId: string
     agent: spaces.Member
     owner: 'you' | 'built-in' | { id: string; name: string }
     spaceNames: string[]
-    isAdmin: boolean
     onOpenSettings: () => void
-    onRemove: () => void
 }) {
     const yours = owner === 'you'
     const builtIn = agent.agentConnection === BUILT_IN_CONNECTION
-    // The owner's settings, or an admin's off switch (revoking keys); Ro has no keys.
-    const canOpen = !builtIn && (yours || isAdmin)
-    const canRemove = isAdmin && !builtIn
+    // The owner's settings and keys; nobody else's (2026-11-09).
+    const canOpen = !builtIn && yours
     // A local agent whose owner's computer isn't running it (2026-10-28).
     const offline = isAgentOffline(agent, useAgentsOnline(orgId))
     const [renaming, setRenamingState] = useState(false)
@@ -233,6 +221,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
         setRenamingState(on)
     }
     const [draft, setDraft] = useState('')
+    const [deleting, setDeleting] = useState(false)
     const [pendingName, setPendingName] = useState<string | null>(null)
 
     const startRename = () => {
@@ -270,9 +259,7 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
             <div className="flex items-start justify-between gap-2">
                 <AgentFace agent={{ ...agent, displayName: shownName }} />
                 <div className="flex items-center gap-1">
-                {/* Channel or personal, on every agent with an owner (2026-10-27). */}
-                <AccessBadge agent={agent} {...(typeof owner === 'object' ? { ownerName: owner.name } : {})} />
-                {(yours || canOpen || canRemove) && (
+                {(yours || canOpen) && (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <button
@@ -295,16 +282,20 @@ function AgentCard({ orgId, agent, owner, spaceNames, isAdmin, onOpenSettings, o
                                     <KeyRound className="size-3.5" /> {yours ? 'Keys and setup' : 'Keys'}
                                 </DropdownMenuItem>
                             )}
-                            {canRemove && (
+                            {/* The one place an agent is deleted (2026-11-13). */}
+                            {canOpen && (
                                 <>
-                                    {(yours || canOpen) && <DropdownMenuSeparator />}
-                                    <DropdownMenuItem variant="destructive" onSelect={onRemove}>
-                                        <Trash2 className="size-3.5" /> Remove from server
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(true)}>
+                                        <Trash2 className="size-3.5" /> Delete agent
                                     </DropdownMenuItem>
                                 </>
                             )}
                         </DropdownMenuContent>
                     </DropdownMenu>
+                )}
+                {canOpen && (
+                    <DeleteAgentDialog orgId={orgId} agent={agent} open={deleting} onOpenChange={setDeleting} />
                 )}
                 </div>
             </div>
@@ -375,19 +366,19 @@ function SpacesBadge({ names }: { names: string[] }) {
  * The card that adds one: New agent opens the chooser, which asks where it
  * runs (on this computer, Rowboat runs it, or one you already run; 2026-10-28,
  * replacing Create agent beside Add an agent you run, which didn't say what
- * either meant). A bot is the small print.
+ * either meant). No way to add a bot from here or the chooser (2026-11-09,
+ * Arjun: remove bots).
  */
-function NewAgentCard({ creates, onNew, onBot }: { creates: boolean; onNew: () => void; onBot: () => void }) {
+function NewAgentCard({ creates, onNew }: { creates: boolean; onNew: () => void }) {
     // The ways the chooser offers, in its order: this computer on the desktop, Rowboat's only when the org has it.
     const ways = [LOCAL_RUNTIME && 'on this computer', creates && 'run by Rowboat', 'one you already run'].filter(Boolean) as string[]
     const hint = ways.length === 1 ? 'Connect one you already run' : ways.length === 2 ? ways.join(' or ') : `${ways.slice(0, -1).join(', ')}, or ${ways.at(-1)}`
-    const small = 'text-[11px] text-muted-foreground/80 transition-colors hover:text-foreground'
     return (
         <li className="flex min-h-[188px] flex-col rounded-xl border border-dashed border-black/20 transition-colors hover:border-black/35 hover:bg-[#fafafa] [.dark_&]:border-border [.dark_&]:hover:border-foreground/25 [.dark_&]:hover:bg-transparent">
             <button
                 type="button"
                 onClick={onNew}
-                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-t-xl text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
             >
                 <span className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-[#f5f5f5] [.dark_&]:border-border [.dark_&]:bg-transparent">
                     <Plus className="size-4" />
@@ -395,7 +386,6 @@ function NewAgentCard({ creates, onNew, onBot }: { creates: boolean; onNew: () =
                 New agent
                 <span className="max-w-[16rem] px-4 text-center text-[11px] leading-snug text-muted-foreground/80">{hint.charAt(0).toUpperCase() + hint.slice(1)}</span>
             </button>
-            <button type="button" onClick={onBot} className={cn(small, 'py-2.5')}>or add a bot</button>
         </li>
     )
 }

@@ -1,3 +1,4 @@
+import { moveToTrash } from '../filesystem/trash.js';
 import fs from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
@@ -393,28 +394,7 @@ export async function remove(
   const stats = await fs.lstat(filePath);
 
   if (trash) {
-    // Move to trash: ~/.workspace/.trash/<timestamp>-<name>
-    const trashDir = path.join(WorkDir, '.trash');
-    await fs.mkdir(trashDir, { recursive: true });
-
-    const timestamp = Date.now();
-    const basename = path.basename(filePath);
-    const trashPath = path.join(trashDir, `${timestamp}-${basename}`);
-
-    // Handle name conflicts in trash
-    let finalTrashPath = trashPath;
-    let counter = 1;
-    while (true) {
-      try {
-        await fs.access(finalTrashPath);
-        finalTrashPath = path.join(trashDir, `${timestamp}-${counter}-${basename}`);
-        counter++;
-      } catch {
-        break;
-      }
-    }
-
-    await fs.rename(filePath, finalTrashPath);
+    await moveToTrash(filePath);
   } else {
     // Permanent delete
     if (stats.isDirectory()) {

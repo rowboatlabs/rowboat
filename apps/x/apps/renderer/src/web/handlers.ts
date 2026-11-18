@@ -1,8 +1,8 @@
-import { generatedOrgSlug, harborChannelHandlers, parseInviteLink, SpacesClient, SpaceSubscriptions } from '@x/spaces-client'
+import { harborChannelHandlers, parseInviteLink, SpacesClient, SpaceSubscriptions } from '@x/spaces-client'
 import { blobAppUrl } from '@/lib/spaces-presentation'
 import type { ipc, spaces } from '@x/shared'
-import { beginSignIn, getAccessToken, hasSession } from './account'
-import { APEX_HOST, APEX_URL, DEV_HARBOR } from './config'
+import { beginSignIn, hasSession } from './account'
+import { DEV_HARBOR, SERVER_URL } from './config'
 import { inviteOpenPath, rememberJoinClick } from './links'
 import * as orgs from './orgs'
 import { harborSession } from './session'
@@ -46,16 +46,15 @@ function blobDownloadUrl(orgId: string, spaceId: string, hash: string, name: str
 }
 
 /**
- * An invite to an org on this deployment (or the dev Harbor): the only orgs
+ * An invite to this deployment's server (or the dev Harbor): the only server
  * the web app can reach, since its page connects nowhere else (CSP) and only
- * they take its session. A self-hosted org's invite opens in the desktop app.
+ * it takes its session. A self-hosted server's invite opens in the desktop app.
  */
 function deploymentInvite(url: string): { baseUrl: string; token: string } {
     const parsed = parseInviteLink(url)
     if (!parsed) throw new Error('That isn’t an invite link. It looks like https://<server>/join/<code>.')
-    const host = new URL(parsed.baseUrl).host
-    const ours = DEV_HARBOR ? parsed.baseUrl === new URL(DEV_HARBOR).origin : host.endsWith(`.${APEX_HOST}`)
-    if (!ours) throw new Error(`This invite is for ${host}, which opens in the Rowboat desktop app.`)
+    const ours = parsed.baseUrl === new URL(DEV_HARBOR ?? SERVER_URL).origin
+    if (!ours) throw new Error(`This invite is for ${new URL(parsed.baseUrl).host}, which opens in the Rowboat desktop app.`)
     return parsed
 }
 
@@ -71,11 +70,10 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
         'spaces:accountState': async () => ({ hasSession: hasSession(), appSignedIn: hasSession() }),
         'spaces:signInRowboat': async () => beginSignIn(here()),
         'spaces:signInOrg': async () => beginSignIn(here()),
-        'spaces:apexInfo': async () => ({ apexDomain: DEV_HARBOR ? null : APEX_HOST }),
 
         // Invites (2026-10-13): read pre-auth, accepted on the session cookie,
-        // which every org on the deployment takes. Joining signed out signs in
-        // first and comes back to the same invite (links.ts).
+        // which the server takes. Joining signed out signs in first and comes
+        // back to the same invite (links.ts).
         'spaces:resolveInviteLink': async (args) => {
             const { baseUrl, token } = deploymentInvite(args.url)
             return { baseUrl, resolved: await new SpacesClient({ baseUrl, token: '' }).resolveInvite(token) }
@@ -88,28 +86,8 @@ export function webChannelHandlers(emit: (event: spaces.SpacesBusEvent) => void)
             }
             const { space } = await new SpacesClient({ baseUrl, token: harborSession }).acceptInvite(token)
             const org = (await orgs.loadOrgs()).find((o) => o.baseUrl === baseUrl)
-            if (!org) throw new Error(`You joined ${space?.name ?? 'the server'}, but it isn’t listed yet. Reload to see it.`)
+            if (!org) throw new Error(`You joined ${space?.name ?? 'the chat'}, but it isn’t listed yet. Reload to see it.`)
             return { org, ...(space ? { space } : {}) }
-        },
-
-        'spaces:createOrg': async (args) => {
-            let failure = 'Could not create the server.'
-            for (let attempt = 0; attempt < 3; attempt++) {
-                const res = await fetch(`${APEX_URL}/v1/orgs`, {
-                    method: 'POST',
-                    headers: { authorization: `Bearer ${await getAccessToken()}`, 'content-type': 'application/json' },
-                    body: JSON.stringify({ name: args.name, slug: generatedOrgSlug(args.name) }),
-                })
-                const json = (await res.json().catch(() => ({}))) as { org?: { id: string }; message?: string }
-                if (res.ok && json.org) {
-                    const created = (await orgs.loadOrgs()).find((org) => org.id === json.org!.id)
-                    if (!created) throw new Error('The server was created but is not listed yet. Reload to see it.')
-                    return { org: created }
-                }
-                failure = json.message ?? `Could not create the server (${res.status}).`
-                if (!/is taken/.test(failure)) break
-            }
-            throw new Error(failure)
         },
 
         // A browser has the bytes, never a path (electronUtils.getPathForFile is '').

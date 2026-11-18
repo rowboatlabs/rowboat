@@ -18,6 +18,12 @@ export const ZAuthScheme = z.enum([
     'NO_AUTH',
     'OAUTH1',
     'OAUTH2',
+    'BILLCOM_AUTH',
+    'CALCOM_AUTH',
+    'SAML',
+    'DCR_OAUTH',
+    'CIMD_OAUTH',
+    'S2S_OAUTH2',
 ]);
 
 /**
@@ -30,6 +36,7 @@ export const ZConnectedAccountStatus = z.enum([
     'FAILED',
     'EXPIRED',
     'INACTIVE',
+    'REVOKED',
 ]);
 
 /**
@@ -70,7 +77,7 @@ export const ZAuthConfig = z.object({
 /**
  * Credentials schema
  */
-export const ZCredentials = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
+export const ZCredentials = z.record(z.string(), z.unknown());
 
 /**
  * Create auth config request
@@ -109,10 +116,7 @@ export const ZCreateAuthConfigResponse = z.object({
  */
 export const ZConnectionData = z.object({
     authScheme: ZAuthScheme,
-    val: z.record(z.string(), z.unknown())
-        .and(z.object({
-            status: ZConnectedAccountStatus,
-        })),
+    val: z.record(z.string(), z.unknown()),
 });
 
 /**
@@ -159,9 +163,14 @@ export const ZConnectedAccount = z.object({
 export const ZErrorResponse = z.object({
     error: z.object({
         message: z.string(),
-        error_code: z.number(),
-        suggested_fix: z.string().nullable(),
-        errors: z.array(z.string()).nullable(),
+        code: z.union([z.number(), z.string()]).optional(),
+        slug: z.string().optional(),
+        status: z.number().optional(),
+        request_id: z.string().optional(),
+        error_code: z.number().optional(),
+        suggested_fix: z.string().nullish(),
+        suggestedFix: z.string().optional(),
+        errors: z.array(z.string()).nullish(),
     }),
 });
 
@@ -177,7 +186,7 @@ export const ZDeleteOperationResponse = z.object({
  */
 export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({
     items: z.array(schema),
-    next_cursor: z.string().nullable(),
+    next_cursor: z.string().nullish().transform(value => value ?? null),
     total_pages: z.number(),
     current_page: z.number(),
     total_items: z.number(),
@@ -187,10 +196,10 @@ export const ZListResponse = <T extends z.ZodTypeAny>(schema: T) => z.object({
  * Execute action request
  */
 export const ZExecuteActionRequest = z.object({
-    connected_account_id: z.string(),
-    user_id: z.string(),
-    version: z.string(),
-    arguments: z.any().optional(),
+    connected_account_id: z.string().min(1).optional(),
+    user_id: z.string().optional(),
+    version: z.string().min(1).optional(),
+    arguments: z.record(z.string(), z.unknown()).optional(),
 });
 
 /**
@@ -255,3 +264,19 @@ export const ZNormalizedToolResult = z.object({
     }),
 });
 export type NormalizedToolResult = z.infer<typeof ZNormalizedToolResult>;
+
+// 2026-11-11: managed OAuth uses Composio's hosted /link contract.
+export const ZLinkConnectedAccountRequest = z.object({
+    auth_config_id: z.string(),
+    user_id: z.string(),
+    callback_url: z.url().optional(),
+    alias: z.string().optional(),
+    connection_data: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const ZLinkConnectedAccountResponse = z.object({
+    link_token: z.string(),
+    redirect_url: z.url(),
+    expires_at: z.string(),
+    connected_account_id: z.string(),
+});

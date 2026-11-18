@@ -5,29 +5,32 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { danceForTokens, discoverIssuer, refreshTokens, type SpacesTokens } from './oauth';
 import { registerWithHarbor, unregisterFromHarbor } from '@/lib/push';
+import { SpacesClient } from './client';
 
-// Spaces account state: ONE sign-in against the deployment's AS (discovered
-// from the apex), tokens in the keychain, orgs from apex GET /v1/orgs.
-// Tokens are realm-generic — the same access token works at every org.
+// Spaces account state: ONE sign-in against the server's AS (discovered from
+// the server), tokens in the keychain. One server since 2026-11-09 (harbor
+// spec §4): the account is a member of it on first contact (POST /v1/me),
+// and `orgs` — the name the screens kept — holds that one record or none.
 
-/** The hosted deployment. Overridable for local Harbor dev. */
-export const APEX_URL = process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.x.rowboatlabs.com';
+/** The Spaces server. Overridable for local Harbor dev (EXPO_PUBLIC_SPACES_APEX, its earlier name, still works). */
+export const SERVER_URL = process.env.EXPO_PUBLIC_SPACES_SERVER ?? process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.x.rowboatlabs.com';
 
 /** Rowboat account API (rowboatx-backend) — owns the user record and billing. */
 export const ACCOUNT_API_URL = process.env.EXPO_PUBLIC_ACCOUNT_API ?? 'https://api.x.rowboatlabs.com';
 
 const ACCOUNT_KEY = 'rowboat.spaces.account.v1';
-/** Last-seen org list — painted instantly on launch, refreshed in the background. */
-const ORGS_CACHE_KEY = 'rowboat.spaces.orgs.v1';
+/** The last-seen server record — painted instantly on launch, refreshed in the background. */
+const ORGS_CACHE_KEY = 'rowboat.spaces.server.v1';
 
+/** The server, as the screens know it (the type kept its many-org name). */
 export interface SpacesOrg {
+  /** Always 'server'. */
   id: string;
   name: string;
-  /** host, e.g. rowboat.spaces.x.rowboatlabs.com */
+  /** host, e.g. spaces.x.rowboatlabs.com */
   address: string;
   memberId: string;
   displayName: string;
-  role: string;
 }
 
 interface StoredAccount {
@@ -99,15 +102,14 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
     if (!accountRef.current) return;
     setOrgsError(null);
     try {
-      const token = await getAccessToken();
-      const res = await fetch(`${APEX_URL}/v1/orgs`, { headers: { authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error(`org list failed (${res.status})`);
-      const json = (await res.json()) as { orgs: SpacesOrg[] };
-      setOrgs(json.orgs);
-      void AsyncStorage.setItem(ORGS_CACHE_KEY, JSON.stringify(json.orgs)).catch(() => {});
-      // Each org's Harbor is the push sender (PUSH_PLAN.md) — re-register on
-      // every refresh: idempotent, and it keeps token + level current.
-      void registerWithHarbor(json.orgs, getAccessToken).catch(() => {});
+      const client = new SpacesClient({ baseUrl: SERVER_URL, token: (opts) => getAccessToken(opts) });
+      const [health, { member }] = await Promise.all([client.health(), client.enroll()]);
+      const record: SpacesOrg[] = [{ id: 'server', name: health.server.name, address: new URL(SERVER_URL).host, memberId: member.id, displayName: member.displayName }];
+      setOrgs(record);
+      void AsyncStorage.setItem(ORGS_CACHE_KEY, JSON.stringify(record)).catch(() => {});
+      // Harbor is the push sender (PUSH_PLAN.md) — re-register on every
+      // refresh: idempotent, and it keeps token + level current.
+      void registerWithHarbor(record, getAccessToken).catch(() => {});
     } catch (err) {
       setOrgsError(err instanceof Error ? err.message : String(err));
     }
@@ -118,7 +120,7 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
   }, [status, refreshOrgs]);
 
   const signIn = useCallback(async () => {
-    const issuer = await discoverIssuer(APEX_URL);
+    const issuer = await discoverIssuer(SERVER_URL);
     if (!issuer) throw new Error('the Spaces server names no authorization server');
     const result = await danceForTokens(issuer);
     await persist(result);
@@ -126,8 +128,8 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
   }, [persist]);
 
   const signOut = useCallback(async () => {
-    // Forget this device's push token on every org BEFORE the tokens go —
-    // otherwise the phone keeps buzzing for an account it no longer shows.
+    // Forget this device's push token BEFORE the tokens go — otherwise the
+    // phone keeps buzzing for an account it no longer shows.
     if (orgs?.length) await unregisterFromHarbor(orgs, getAccessToken).catch(() => {});
     await persist(null);
     void AsyncStorage.removeItem(ORGS_CACHE_KEY).catch(() => {});
@@ -137,17 +139,18 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
     setStatus('signedOut');
   }, [persist, orgs, getAccessToken]);
 
-  // Account deletion, minimal v1 (2026-10-08, revised 2026-10-13). Two
-  // calls, Spaces first while the login still works: the apex deactivates
-  // you in every org (out of every space, name kept on what you wrote, push
-  // tokens gone), then rowboatx-backend bans the login, records the request
-  // and emails the date. The account and its data are deleted by hand before
-  // that date. Both calls are idempotent, so a retry after a failure is safe.
+  // Account deletion, minimal v1 (2026-10-08, revised 2026-10-13; one server
+  // since 2026-11-09). Two calls, Spaces first while the login still works:
+  // the server deactivates you (out of every space, your agents with you,
+  // name kept on what you wrote, push tokens gone), then rowboatx-backend
+  // bans the login, records the request and emails the date. The account and
+  // its data are deleted by hand before that date. Both calls are idempotent,
+  // so a retry after a failure is safe.
   const deleteAccount = useCallback(async () => {
     const token = await getAccessToken();
     const headers = { authorization: `Bearer ${token}` };
-    const apex = await fetch(`${APEX_URL}/v1/me`, { method: 'DELETE', headers });
-    if (!apex.ok) throw new Error(`Couldn't remove you from your orgs (${apex.status}). Please try again.`);
+    const spaces = await fetch(`${SERVER_URL}/v1/me`, { method: 'DELETE', headers });
+    if (!spaces.ok) throw new Error(`Couldn't remove you from Spaces (${spaces.status}). Please try again.`);
     const res = await fetch(`${ACCOUNT_API_URL}/v1/account`, { method: 'DELETE', headers });
     if (res.status === 404) throw new Error("Account deletion isn't available yet. Please try again later.");
     if (!res.ok) {

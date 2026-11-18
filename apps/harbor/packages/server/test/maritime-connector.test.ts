@@ -1,3 +1,4 @@
+import { HERMES_IMAGE } from '../src/connectors/maritime/runtimes.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { routes, type Invocation, type Member, type Message } from '@rowboat/spaces-protocol';
 import { MemoryBlobStore } from '../src/blobs.js';
@@ -34,7 +35,7 @@ class Org {
   async start(): Promise<this> {
     this.harbor = await startHarbor({
       store: this.store.store,
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'harsh', displayName: 'Harsh' },
@@ -126,6 +127,35 @@ describe('adding a Maritime agent', () => {
   });
 });
 
+describe('the Maritime connector with Hermes on Rowboat’s own image', () => {
+  // A managed Hermes is a `custom` box on Rowboat's image (2026-11-11): Maritime roots its files API at /data there,
+  // where its `hermes` framework roots it at /opt/data, and the connector learns which from the box's record.
+  let org: Org;
+  let imaged: Member;
+
+  beforeAll(async () => {
+    fake.agent = { ...fake.agent, framework: 'custom', templateId: null, imageName: HERMES_IMAGE, status: 'sleeping' };
+    org = await new Org(await freshStore()).start();
+    await org.space();
+    imaged = await org.agent('Imaged', 'hermes');
+  });
+  afterAll(async () => {
+    fake.agent = { ...fake.agent, framework: 'hermes', templateId: 'hermes', imageName: undefined };
+    await org.harbor.close();
+  });
+
+  it('keeps the turn’s files under /data, where the box’s files API is rooted, and still runs the Hermes script', async () => {
+    fake.nextTurn = hermesTurn('On my own image.');
+    const { invocations } = await org.post(`${mention(imaged)} hello`);
+    expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+    const execution = fake.submits().at(-1)!;
+    expect(execution.files.prompt).toBe(`/data/rowboat/${invocations[0]!.id}.prompt`);
+    expect(fake.lastPrompt()!.startsWith(`${mention(imaged)} hello`)).toBe(true);
+    expect(execution.script).toContain(`hermes chat --query-file '/data/rowboat/${invocations[0]!.id}.prompt'`);
+    expect(execution.script).toContain('export HERMES_HOME=/opt/data HOME=/opt/data');
+  });
+});
+
 describe('the Maritime connector with Hermes', () => {
   let org: Org;
   let scout: Member;
@@ -150,6 +180,16 @@ describe('the Maritime connector with Hermes', () => {
     expect(caps.options.map((o: { key: string }) => o.key)).toEqual(['effort']);
   });
 
+  it('fails the turn with the exit code when the command stops before Hermes writes anything, instead of saying it finished', async () => {
+    // 2026-11-13: an execution that ended with exit code 1 and no output file read as a success, and the thread got
+    // "Finished on Maritime." (Piper, super, c3po). The reason must survive even when stderr is empty.
+    fake.nextTurn = { lines: [], exitCode: 1 };
+    const { invocations } = await org.post(`${mention(scout)} are you there?`);
+    const ended = await org.ended(invocations[0]!.id);
+    expect(ended.state).toBe('failed');
+    expect(ended.error).toMatch(/Hermes did not run: its command stopped with exit code 1 and wrote nothing/);
+  });
+
   it('wakes the VM, writes the request to the volume, runs hermes chat on the thread’s session, and answers in the thread', async () => {
     fake.nextTurn = hermesTurn('The deploy is green.');
     const { message, invocations } = await org.post(`${mention(scout)} is the deploy green?`);
@@ -166,7 +206,7 @@ describe('the Maritime connector with Hermes', () => {
     expect(execution.script).toContain('--format stream-json');
     expect(execution.script).toMatch(/export HERMES_HOME=\/opt\/data HOME=\/opt\/data ROWBOAT_URL='http:\/\/localhost:\d+' ROWBOAT_AGENT_KEY='rbk_/);
     // The Spaces MCP server in Hermes's config, by placeholder, and the two values in its .env, where Hermes's gateway reads them from.
-    expect(execution.script).toContain(`hermes config set mcp_servers.rowboat.url '\${ROWBOAT_URL}/mcp'`);
+    expect(execution.script).toContain('hermes config set mcp_servers.rowboat ');
     expect(execution.script).toContain('hermes config set ROWBOAT_URL "$ROWBOAT_URL"');
     expect(execution.script).toContain('hermes config set ROWBOAT_AGENT_KEY "$ROWBOAT_AGENT_KEY"');
     expect(execution.script).toContain('hermes skills install rowboatlabs/rowboat/skills/rowboat-spaces --yes');

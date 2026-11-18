@@ -61,7 +61,7 @@ let gagan: ReturnType<typeof api>;
 describe('blob uploads over the render face', () => {
   beforeAll(async () => {
     harbor = await startTestHarbor({
-      orgName: 'Blob Test Org',
+      name: 'Blob Test Org',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'gagan', displayName: 'Gagan' },
@@ -143,6 +143,21 @@ describe('blob uploads over the render face', () => {
     expect(r.headers.get('cache-control')).toContain('immutable');
     expect(r.headers.get('x-content-type-options')).toBe('nosniff');
     expect(Buffer.from(r.body as Uint8Array)).toEqual(PNG_1PX);
+  });
+
+  it('downloads a prose video label with its stored MIME extension', async () => {
+    const bytes = new TextEncoder().encode('video download fixture');
+    const hash = blobHash(bytes);
+    const uploaded = await ramnique.putBlob(`/v1/spaces/${spaceId}/blobs`, bytes, {
+      'x-blob-sha256': hash, 'content-type': 'video/webm',
+    });
+    expect(uploaded.status).toBe(200);
+    const r = await ramnique.get(
+      `/v1/spaces/${spaceId}/blobs/${hash}?download=1&name=${encodeURIComponent('Watch the 54-second demo')}`,
+    );
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-disposition')).toBe('attachment; filename="Watch the 54-second demo.webm"');
+    expect(Buffer.from(r.body as Uint8Array)).toEqual(Buffer.from(bytes));
   });
 
   it('serves non-images as attachment, with the ?name= filename sanitized', async () => {
@@ -371,7 +386,7 @@ describe('blob uploads over the render face', () => {
 describe('upload size cap', () => {
   it('refuses a body over maxBlobBytes with payload_too_large', async () => {
     const small = await startTestHarbor({
-      orgName: 'Tiny Cap Org',
+      name: 'Tiny Cap Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       maxBlobBytes: 16,
     });

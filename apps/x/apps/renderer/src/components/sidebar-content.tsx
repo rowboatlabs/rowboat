@@ -1,3 +1,4 @@
+import { AvailabilitySettings } from '@/components/spaces/availability-menu'
 "use client"
 
 import { ProfileSettings } from './spaces/profile-settings'
@@ -79,15 +80,12 @@ import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
-import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
 import { SidebarSection } from "@/components/sidebar-section"
 import { Keys } from "@/components/keys"
 import { SHORTCUTS } from "@/lib/shortcuts"
 import { useCodeSessions } from "@/components/code/use-code-sessions"
 import { useUnreadCodeSessions } from "@/components/code/session-read-state"
 import { UnreadBadge } from "@/components/spaces/unread-badge"
-import { SPACES_ENABLED } from "@/lib/feature-flags"
-import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
@@ -203,11 +201,6 @@ type SidebarContentPanelProps = {
   onOpenApps?: () => void
   /** Open a specific app (pinned in the sidebar) inside the Apps view. */
   onOpenApp?: (folder: string) => void
-  /** Open one space (org + space) in the Spaces view. */
-  onOpenSpace?: (orgId: string, spaceId: string) => void
-  onOpenSpaces?: () => void
-  /** The space currently open, for highlighting its sidebar row. */
-  activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenAssistant?: () => void
@@ -456,9 +449,6 @@ export function SidebarContentPanel({
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
-  onOpenSpace,
-  onOpenSpaces,
-  activeSpace,
   recentRuns = [],
   onOpenRun,
   onOpenAssistant,
@@ -484,6 +474,7 @@ export function SidebarContentPanel({
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [profileSettingsOpen, setProfileSettingsOpen] = useState(false)
+  const [availabilityOpen, setAvailabilityOpen] = useState(false)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [openConnectionsAfterClose, setOpenConnectionsAfterClose] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1103,12 +1094,6 @@ export function SidebarContentPanel({
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Trying Spaces right after Apps (2026-10-21). */}
-        {SPACES_ENABLED && (
-          <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace}
-            onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} onOpenSpaces={onOpenSpaces} />
-        )}
-
         <SidebarSection id="chats" label="Chats" tourId="nav-chats">
           {recentChats.length === 0 ? (
             <p className="px-2.5 py-1.5 text-[12.5px] text-sidebar-foreground/45">
@@ -1246,7 +1231,8 @@ export function SidebarContentPanel({
         onConnectAccounts={() => setConnectionsSettingsOpen(true)}
       />
       <SidebarFooter className="gap-0 px-2 pb-2 pt-1">
-        {profileSettingsOpen && <ProfileSettings onClose={() => setProfileSettingsOpen(false)} />}
+        {availabilityOpen && <AvailabilitySettings onClose={() => setAvailabilityOpen(false)} />}
+      {profileSettingsOpen && <ProfileSettings onClose={() => setProfileSettingsOpen(false)} />}
         {/* The out-of-credits notice anchors to the account row and opens by
             itself once per episode, as the plan card's did. */}
         <Popover open={creditPopoverOpen && outOfCredits && !sidebarCollapsed} onOpenChange={setCreditPopoverOpen}>
@@ -1305,6 +1291,7 @@ export function SidebarContentPanel({
                       {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
                     </button>
                   )}
+                  <DropdownMenuItem onSelect={() => setAvailabilityOpen(true)}>Status &amp; availability</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setProfileSettingsOpen(true)}><Pencil />Edit Spaces profile</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setConnectionsSettingsOpen(true)}>
                     <Plug />

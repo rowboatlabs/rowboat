@@ -49,33 +49,30 @@ describe('thread follow-ups (Harbor spec §8, 2026-10-27)', () => {
       trigger: { messageId: id, authorId, body: '' },
       where: { spaceKind: 'shared', spaceName: 'S' },
     }) as Invocation;
-  const members = new Map([['ro', { agentKind: 'jev' }], ['hermes', {}], ['codex', {}]]);
   const msg = (id: string, memberId: string) => ({ id, author: { memberId } });
 
   it('is the agent this person invoked last in this thread', () => {
     const all = [inv('1', 'hermes', 'me', '2026-10-27T09:00:00Z'), inv('2', 'codex', 'me', '2026-10-27T09:05:00Z')];
-    expect(followUpAgentId(all, 'root', 'me', members, [msg('2', 'me')])).toBe('codex');
+    expect(followUpAgentId(all, 'root', 'me', [msg('2', 'me')])).toBe('codex');
   });
 
   it('only while that conversation is the thread’s latest (2026-11-05)', () => {
     const all = [inv('1', 'hermes', 'me', '2026-10-27T09:00:00Z')];
-    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me'), msg('a', 'hermes')])).toBe('hermes');
-    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me'), msg('a', 'hermes'), msg('cc', 'ro')])).toBe('hermes');
-    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me'), msg('b', 'alex')])).toBeUndefined();
-    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me'), msg('c', 'me')])).toBeUndefined();
-    expect(followUpAgentId(all, 'root', 'me', members, [])).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', [msg('1', 'me'), msg('a', 'hermes')])).toBe('hermes');
+    expect(followUpAgentId(all, 'root', 'me', [msg('1', 'me'), msg('b', 'alex')])).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', [msg('1', 'me'), msg('c', 'me')])).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', [])).toBeUndefined();
   });
 
-  it('skips other people’s, other threads’, refused ones and Ro', () => {
+  it('skips other people’s, other threads’ and refused ones', () => {
     const all = [
       inv('1', 'hermes', 'me', '2026-10-27T09:00:00Z'),
       inv('2', 'codex', 'alex', '2026-10-27T09:01:00Z'),
       inv('3', 'codex', 'me', '2026-10-27T09:02:00Z', 'done', 'elsewhere'),
       inv('4', 'codex', 'me', '2026-10-27T09:03:00Z', 'refused'),
-      inv('5', 'ro', 'me', '2026-10-27T09:04:00Z'),
     ];
-    expect(followUpAgentId(all, 'root', 'me', members, [msg('1', 'me')])).toBe('hermes');
-    expect(followUpAgentId(all, 'root', 'sam', members, [msg('1', 'me')])).toBeUndefined();
+    expect(followUpAgentId(all, 'root', 'me', [msg('1', 'me')])).toBe('hermes');
+    expect(followUpAgentId(all, 'root', 'sam', [msg('1', 'me')])).toBeUndefined();
   });
 
   it('a mention of anyone, @here or Ro counts; a bare name does not', () => {

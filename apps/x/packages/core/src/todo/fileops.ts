@@ -76,12 +76,13 @@ function serializeReceipt(r: TodoReceipt, indent: string): string {
     // A receipt is exactly one line — embedded newlines (e.g. multi-line
     // provider errors) would leak raw text lines into the file.
     const text = r.text.replace(/\s+/g, ' ').trim();
-    if (r.kind === 'question') return `${indent}- → needs you: ${text}`;
-    if (r.kind === 'error') return `${indent}- → failed: ${text}`;
+    // (2026-09-25) parseReceipt lifts links out of every kind, so every kind writes them
+    // back — otherwise a question or error's links vanish on the next save.
+    const prefix = r.kind === 'question' ? 'needs you: ' : r.kind === 'error' ? 'failed: ' : '';
     const links = r.links.map(l => `[${l.label}](${l.url ?? l.path ?? ''})`).join(', ');
-    if (links && text) return `${indent}- → ${links} — ${text}`;
-    if (links) return `${indent}- → ${links}`;
-    return `${indent}- → ${text}`;
+    if (links && text) return `${indent}- → ${prefix}${links} — ${text}`;
+    if (links) return `${indent}- → ${prefix}${links}`;
+    return `${indent}- → ${prefix}${text}`;
 }
 
 function newItem(text: string, checked: boolean, key: string): TodoItem {
@@ -544,10 +545,11 @@ export async function listArchived(limit = 30, now: Date = new Date()): Promise<
     const out: ArchivedTodo[] = [];
     for (const month of months) {
         const raw = await fs.readFile(path.join(ARCHIVE_DIR, `${month}.md`), 'utf-8').catch(() => '');
-        if (raw) out.push(...parseArchive(month, raw));
+        // 2026-11-13: reverse each append-only month independently so the
+        // previous month never jumps ahead of current-month entries.
+        if (raw) out.push(...parseArchive(month, raw).reverse());
     }
-    // File order is chronological (appends); newest first for display.
-    return out.reverse().slice(0, limit);
+    return out.slice(0, limit);
 }
 
 /** Permanently remove an archived item. The one true delete in the system —
@@ -587,7 +589,6 @@ export async function restoreItem(month: string, blockIndex: number, key: string
         const block = blocks[blockIndex];
         if (!block || block.kind !== 'item' || block.item.key !== norm) return false;
         blocks.splice(blockIndex, 1);
-        await fs.writeFile(target, serializeTodoFile({ blocks }), 'utf-8');
 
         const list = parseTodoFile(await readRaw());
         const fromIdx = block.item.receipts.findIndex(r => FROM_RE.test(r.text));
@@ -609,7 +610,10 @@ export async function restoreItem(month: string, blockIndex: number, key: string
             restored.key = normalizeKey(restored.text);
             list.blocks.push({ kind: 'item', item: restored });
         }
+        // 2026-11-13: preserve the archive until the active copy is saved.
+        // A cleanup failure can leave a duplicate; it must not lose the item.
         await writeRaw(serializeTodoFile(list));
+        await fs.writeFile(target, serializeTodoFile({ blocks }), 'utf-8');
         log.log(`restored "${norm}" from ${month}`);
         return true;
     });

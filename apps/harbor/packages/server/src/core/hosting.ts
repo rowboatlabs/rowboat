@@ -136,6 +136,8 @@ export interface HostingOps {
   setLlm(input: { kind: string; provider: LlmProvider; apiKey: string; model?: string }): Promise<void>;
   /** Rowboat's LLM gateway on a key billed to the owner (2026-11-04), with what the runtime needs to use it, applied. */
   useGateway(input: { kind: string; baseUrl: string; apiKey: string; model?: string }): Promise<void>;
+  /** Model-independent MCP access (2026-11-11): omit the key when updating only the endpoint. */
+  useComposio(input: { url: string; apiKey?: string }): Promise<void>;
   /** Nothing on the platform's own model credit (2026-11-04): the agent runs on what its owner brings. */
   withoutPlatformLlm(): Promise<void>;
   /** The machine's size, the platform's range and its estimated cost per memory size (2026-11-04). */
@@ -244,6 +246,8 @@ export class Hosting {
   private billing: BillingAccounts | undefined;
   private settledAt = 0;
   private settleEveryMs = SETTLE_EVERY_MS;
+  private composioConfigured = new Set<string>();
+  private repairedDeletions = false;
 
   constructor(
     private readonly k: Kernel,
@@ -280,7 +284,7 @@ export class Hosting {
   /** The kinds this Harbor creates, for a member: the platform's when a provider is attached, none otherwise. */
   async kinds(ctx: ActorCtx): Promise<{ kinds: string[]; billed?: true; upgradeUrl?: string }> {
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     if (!this.provider) return { kinds: [] };
     if (!this.billing) return { kinds: [...MARITIME_AGENTS] };
     const upgradeUrl = await this.billing.upgradeUrl();
@@ -300,12 +304,12 @@ export class Hosting {
    */
   async createManaged(
     ctx: ActorCtx,
-    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }> },
     /** The super agent whose setup card this completes (2026-11-02): it may delete what it asked for. */
     requestedBy?: string,
   ): Promise<{ agent: Member; key: AgentKeySecret; hosting: AgentHosting }> {
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     enforce(canAddAgent(actor));
     const { agent, hosting } = await this.provision(ctx.memberId, input, requestedBy);
     const key = await this.agents.createKey(ctx, agent.id);
@@ -327,7 +331,7 @@ export class Hosting {
 
   private async provision(
     ownerId: string,
-    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }>; personal?: boolean },
+    input: { displayName: string; kind: string; anthropicApiKey?: string; env?: Array<{ key: string; value: string; secret?: boolean }> },
     requestedBy?: string,
   ): Promise<{ agent: Member; hosting: AgentHosting }> {
     if (!this.provider || !this.hooks) throw new HarborError('invalid_request', 'this Harbor runs no managed hosting');
@@ -408,8 +412,6 @@ export class Hosting {
       agentKind: input.kind,
       agentConnection: 'maritime',
       agentInstance: externalId,
-      // Channel or personal, as on Add (spec §4 Agent members, 2026-10-27).
-      ...(input.personal ? { personal: true } : {}),
     });
     await this.hooks.save(agent.id, this.provider.credential(), ownerId);
     row = { ...row, agentId: agent.id, externalId, status: 'deploying', updatedAt: this.k.now() };
@@ -417,16 +419,33 @@ export class Hosting {
     return { agent, hosting: publicShape(row) };
   }
 
-  /** Delete a managed agent's hosting: the owner or an admin. Keys go now; the platform's resources in the background. */
+  /** Delete a managed agent's hosting: the owner. Keys go now; the platform's resources in the background. */
   async deleteManaged(ctx: ActorCtx, agentId: string): Promise<AgentHosting> {
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     const agent = await this.k.store.getMember(agentId);
     if (!agent || agent.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
     enforce(canRevokeAgentKey(actor, agent));
     const row = await this.k.store.getAgentHosting(agentId);
     if (!row) throw new HarborError('not_found', 'this agent is not one Rowboat hosts');
     return this.remove(agentId, row);
+  }
+
+  /** Delete any agent its owner made (2026-11-13): a managed one with its hosting, any other as Agents.delete does. */
+  async deleteAgent(ctx: ActorCtx, agentId: string): Promise<{ agent: Member; hosting?: AgentHosting }> {
+    await this.agents.deletable(ctx, agentId);
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row) return { agent: await this.agents.delete(ctx, agentId) };
+    const hosting = await this.remove(agentId, row);
+    return { agent: (await this.k.store.getMember(agentId))!, hosting };
+  }
+
+  /** Account deletion (2026-11-09): every managed agent the person owns goes with them, so nothing keeps billing. */
+  async deleteOwnedBy(ownerId: string): Promise<void> {
+    for (const agent of await this.k.store.listAgents(ownerId)) {
+      const row = await this.k.store.getAgentHosting(agent.id);
+      if (row) await this.remove(agent.id, row);
+    }
   }
 
   /** A super agent's delete (2026-11-02): only one an admin let delete, and only an agent it created. */
@@ -438,18 +457,22 @@ export class Hosting {
   }
 
   private async remove(agentId: string, row: StoredAgentHosting): Promise<AgentHosting> {
-    if (row.status === 'deleted' || row.status === 'deleting') return publicShape(row);
+    if (row.status === 'deleted' || row.status === 'deleting') {
+      await this.spaces.deactivateAgent(agentId);
+      return publicShape(row);
+    }
     this.k.guardWrite();
     const at = this.k.now();
-    for (const key of await this.k.store.listAgentKeys([agentId])) if (!key.revokedAt) await this.k.store.revokeAgentKey(key.id, at);
-    // The gateway key goes now too (2026-11-04); the worker revokes it again before the platform is told, should this fail.
-    if (this.billing && row.billingCustomer) {
-      await this.billing.revokeGatewayKey(row.billingCustomer, row.externalUserId).catch((err) => console.log('[harbor] hosting: gateway key not revoked yet', { id: row.id, error: (err as Error).message }));
-    }
-    await this.hooks?.stop(agentId);
     const next: StoredAgentHosting = { ...row, status: 'deleting', updatedAt: at };
     delete next.error;
     await this.k.store.putHosting(next);
+    await this.spaces.deactivateAgent(agentId);
+    // The gateway key goes now too (2026-11-04); the worker revokes it again before the platform is told, should this fail.
+    const customer = await this.gatewayCustomer(row);
+    if (this.billing && customer) {
+      await this.billing.revokeGatewayKey(customer, row.externalUserId).catch((err) => console.log('[harbor] hosting: gateway key not revoked yet', { id: row.id, error: (err as Error).message }));
+    }
+    await this.hooks?.stop(agentId);
     void this.tick();
     return publicShape(next);
   }
@@ -463,7 +486,7 @@ export class Hosting {
    */
   private async managed(ctx: ActorCtx, agentId: string, kinds?: ReadonlySet<string>): Promise<{ row: StoredAgentHosting; ops: HostingOps }> {
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
     const agent = await this.k.store.getMember(agentId);
     if (!agent || agent.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
     enforce(canRevokeAgentKey(actor, agent));
@@ -521,6 +544,8 @@ export class Hosting {
    * the cap with it (the provider's doing), then the record says `own`; a
    * failure before the record leaves the trial as it was, and a retry does
    * the same again. Also how a key is replaced.
+   * The agent's gateway identity is independent of model configuration
+   * (spec §8 Maritime, amended 2026-11-11).
    */
   async setLlm(ctx: ActorCtx, agentId: string, input: { provider: LlmProvider; apiKey: string; model?: string }): Promise<AgentHosting> {
     const { row, ops } = await this.managed(ctx, agentId);
@@ -534,8 +559,6 @@ export class Hosting {
     // Codex honours a ChatGPT sign-in over a key on its built-in provider: the sign-in goes first, so the key is what it runs on.
     if (row.llm?.provider === 'chatgpt') await this.platform(() => ops.signOut(row.kind));
     await this.platform(() => ops.setLlm({ kind: row.kind, provider: input.provider, apiKey, ...(model ? { model } : {}) }));
-    // Off Rowboat's credits (2026-11-04): the gateway key is revoked before the record says `own`, so a failure leaves a retry to do both.
-    if (row.funding === 'credits' && this.billing && row.billingCustomer) await this.billing.revokeGatewayKey(row.billingCustomer, row.externalUserId);
     const at = this.k.now();
     const next: StoredAgentHosting = {
       ...row,
@@ -857,6 +880,16 @@ export class Hosting {
   private async drive(): Promise<void> {
     const provider = this.provider;
     if (!provider || this.k.readOnly) return;
+    // Repair the active members left by hosting-only deletion before this release (2026-11-11).
+    if (!this.repairedDeletions) {
+      for (const row of await this.k.store.listHostingsByStatus(['deleted'])) {
+        if (row.agentId) {
+          await this.spaces.deactivateAgent(row.agentId);
+          await this.hooks?.stop(row.agentId);
+        }
+      }
+      this.repairedDeletions = true;
+    }
     for (const row of await this.k.store.listHostingsByStatus(['creating', 'deploying', 'checking', 'deleting'])) {
       try {
         await this.step(provider, row);
@@ -876,8 +909,15 @@ export class Hosting {
         }
       }
     }
-    // A trial that ran out of time, with credit left or not, is over.
     for (const row of await this.k.store.listHostingsByStatus(['ready'])) {
+      if (this.billing && row.externalId && !this.composioConfigured.has(row.id)) {
+        try {
+          await this.prepareComposio(provider, row);
+        } catch {
+          console.log('[harbor] hosting: Composio setup will retry', { id: row.id });
+        }
+      }
+      // A trial that ran out of time, with credit left or not, is over.
       if (row.funding !== 'trial' || !row.trial || row.trial.closedAt || !row.externalId || Date.parse(row.trial.endsAt) > Date.now()) continue;
       try {
         await this.endTrial(row, provider.manage(row.externalId, row.externalUserId), 'expired');
@@ -915,13 +955,18 @@ export class Hosting {
       return;
     }
     if (row.status === 'deleting') {
+      if (row.agentId) {
+        await this.spaces.deactivateAgent(row.agentId);
+        await this.hooks?.stop(row.agentId);
+      }
       // Billed (2026-11-04): the machine's last cost reported while the platform still has it, the gateway key
       // revoked, then the agent off the platform and out of its owner's plan. Each is safe to repeat on a retry.
       const billing = this.billing && row.billingCustomer ? { accounts: this.billing, customer: row.billingCustomer } : undefined;
       if (billing && row.externalId) {
         await this.settle(provider, row, billing.accounts, billing.customer).catch((err) => console.log('[harbor] hosting: last machine cost not reported', { id: row.id, error: (err as Error).message }));
       }
-      if (billing) await billing.accounts.revokeGatewayKey(billing.customer, row.externalUserId);
+      const customer = await this.gatewayCustomer(row);
+      if (this.billing && customer) await this.billing.revokeGatewayKey(customer, row.externalUserId);
       await provider.deprovision(row.externalUserId);
       if (billing) await billing.accounts.unregisterAgent(billing.customer, row.externalUserId);
       await this.move(row, 'deleted');
@@ -930,20 +975,57 @@ export class Hosting {
 
   /**
    * A billed agent's model access once its machine answers (2026-11-04): a
-   * Hermes on Rowboat's gateway with a key minted now for its owner (a retry
-   * mints again, and the backend revokes the earlier key), a Codex with the
-   * platform's own model credit taken away until its owner brings theirs.
+   * Hermes on Rowboat's gateway, a Codex with the platform's own model
+   * credit taken away until its owner brings theirs.
    * Done before `ready`, so no turn runs on the platform's credit.
    */
   private async fundOnReady(provider: HostingProvider, row: StoredAgentHosting): Promise<void> {
-    if (!this.billing || !row.billingCustomer || !row.externalId) return;
+    if (!this.billing || !row.externalId) return;
     const ops = provider.manage(row.externalId, row.externalUserId);
-    if (row.funding === 'credits') {
-      const { key } = await this.billing.mintGatewayKey(row.billingCustomer, { ref: row.externalUserId, name: row.displayName });
-      await ops.useGateway({ kind: row.kind, baseUrl: this.billing.gatewayUrl, apiKey: key, model: GATEWAY_MODEL });
-    } else if (!row.llm) {
+    await this.prepareComposio(provider, row, !!row.billingCustomer);
+    if (row.billingCustomer && row.funding !== 'credits' && !row.llm) {
       await ops.withoutPlatformLlm();
     }
+  }
+
+  /**
+   * 2026-11-11: each managed runtime with a Rowboat owner gets an identity for
+   * Composio and, when selected, model calls. Check metadata once per Harbor boot
+   * to upgrade existing VMs without reading redacted secrets. A missing key
+   * needs a mint; existing keys survive restarts and model changes.
+   */
+  private async prepareComposio(provider: HostingProvider, row: StoredAgentHosting, initial = false): Promise<void> {
+    const billing = this.billing;
+    if (!billing || !row.externalId || this.composioConfigured.has(row.id)) return;
+    const customer = await this.gatewayCustomer(row);
+    if (!customer) return;
+    const ops = provider.manage(row.externalId, row.externalUserId);
+    const env = await ops.env();
+    const hasKey = env.some(v => v.key === 'ROWBOAT_GATEWAY_KEY' && v.secret);
+    const url = env.find(v => v.key === 'ROWBOAT_COMPOSIO_MCP_URL');
+    if (initial || !hasKey) {
+      const { key } = await billing.mintGatewayKey(customer, { ref: row.externalUserId, name: row.displayName });
+      // 2026-11-11: install the model credential first. A partial setup must
+      // never leave a credit-funded model using the key that mint just rotated.
+      if (row.funding === 'credits') {
+        const model = !initial ? env.find(v => v.key === 'ROWBOAT_LLM_MODEL')?.value : undefined;
+        await ops.useGateway({ kind: row.kind, baseUrl: billing.gatewayUrl, apiKey: key, model: model ?? GATEWAY_MODEL });
+      }
+      await ops.useComposio({ url: billing.composioMcpUrl, apiKey: key });
+    } else if (url?.value !== billing.composioMcpUrl || url.secret) {
+      await ops.useComposio({ url: billing.composioMcpUrl });
+    }
+    this.composioConfigured.add(row.id);
+  }
+
+  /**
+   * 2026-11-11: pre-billing agents have no billingCustomer. Resolve their
+   * creator/owner's Rowboat identity for tool access without enrolling the
+   * legacy hosting in billing.
+   */
+  private async gatewayCustomer(row: StoredAgentHosting): Promise<string | undefined> {
+    if (!this.billing) return undefined;
+    return row.billingCustomer ?? this.billing.accountFor(await this.k.store.listIdentitiesOf(row.createdBy));
   }
 
   /**

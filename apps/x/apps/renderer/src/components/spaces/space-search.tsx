@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { FileText, Hash, MessageSquare, PenTool, Search } from 'lucide-react'
+import { AtSign, ChevronDown, FileText, Hash, Image, Link as LinkIcon, MessageSquare, Paperclip, PenTool, Search, User } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { useDebounce } from '@/hooks/use-debounce'
 import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
+import { useSpaceMembers } from '@/hooks/use-space-members'
 import { useSpaceNames } from '@/hooks/use-spaces'
 import { cn } from '@/lib/utils'
-import { hasKind, parseSearchQuery } from '@/lib/spaces-corpus'
+import { parseSearchQuery } from '@/lib/spaces-corpus'
 import { requestJump } from '@/lib/spaces-jump'
 import { FIND_SEARCH_EVENT } from '@/lib/spaces-find'
 import { chord } from '@/lib/shortcut'
@@ -23,17 +24,16 @@ import { useMemberNames } from './member-text'
 // resolve here, like any body.
 //
 // The filter grammar (from: / in: / has: / mentions:, `me` for yourself) is
-// parsed client-side and layered on the server's word search: mentions: adds
-// the name as a search word (the org expands a member's name to their id, and
-// bodies index mention ids); from:, in: and has: narrow the returned message
-// hits — so a filtered query asks for the org's max page and filters that.
-// A query of ONLY from:/in:/has: has no word for the org to search; the bar
-// says so instead of guessing.
+// the org's since 2026-11-06 ("search" in Main): the raw query goes to the
+// server, which filters in the store, so a filter never misses older messages
+// and a filter alone ("from:me") is a search. The bar's part is making the
+// grammar discoverable: focusing it lists the filters, and a half-typed
+// from:/mentions:/has: offers its values.
 
 interface Props {
     orgId: string
     spaceId: string
-    /** Resolves `me` in from:/mentions: to the viewer. */
+    /** The viewer: offered as `me` rather than by name in from:/mentions:. */
     selfMemberId?: string
     /** The wrapper's size — the header gives it the centre of the row. */
     className?: string
@@ -43,23 +43,70 @@ interface Props {
 /** One pickable row, whatever its section — the keyboard walks this flat list. */
 interface Item {
     key: string
+    /** A filter or a filter's value: Tab takes it as well as Enter. */
+    suggestion?: boolean
     pick: () => void
     row: ReactNode
 }
 
+interface Section {
+    label: string
+    items: Item[]
+    /** Shown beside the label. */
+    note?: string
+}
+
 const EMPTY: spaces.SearchResults = { messages: [], topics: [], assets: [], truncated: { messages: false, topics: false, assets: false } }
 const PAGE = 5
-/** The org's per-category cap — a filtered query fetches this and narrows it here. */
-const FILTERED_PAGE = 50
+/** A filtered query is about messages alone, so it gets the room of all three sections. */
+const FILTERED_PAGE = 20
+/** The org's per-category cap — what "Show more" asks for. */
+const MORE_PAGE = 50
+const FILTER_KEY = /^(from|mentions|in|has):(.*)$/
+
+/** The filters a focused, empty bar lists — picking one types it. */
+const FILTER_HINTS: Array<{ token: string; label: string; icon: typeof User }> = [
+    { token: 'from:', label: 'Messages from a person', icon: User },
+    { token: 'mentions:', label: 'Messages that mention a person', icon: AtSign },
+    { token: 'in:', label: 'Messages in a discussion or session, by title', icon: Hash },
+    { token: 'has:link', label: 'Messages with a link', icon: LinkIcon },
+    { token: 'has:image', label: 'Messages with an image', icon: Image },
+    { token: 'has:file', label: 'Messages with a file', icon: Paperclip },
+]
+const HAS_VALUES: Array<{ value: string; label: string; icon: typeof User }> = [
+    { value: 'link', label: 'a link', icon: LinkIcon },
+    { value: 'image', label: 'an image', icon: Image },
+    { value: 'file', label: 'a file', icon: Paperclip },
+]
+
+/** What the org is asked: the query less a half-typed filter at its end. */
+function serverQueryOf(raw: string): string {
+    const t = /\S+$/.exec(raw)?.[0]?.toLowerCase() ?? ''
+    const m = FILTER_KEY.exec(t)
+    // An empty filter value has nothing to filter by; a partial has: value
+    // is only complete once it names a kind.
+    const incomplete = m && (m[2] === '' || (m[1] === 'has' && !HAS_VALUES.some((h) => h.value === m[2])))
+    return (incomplete ? raw.slice(0, raw.length - t.length) : raw).trim()
+}
+
+/** A filter alone is a search; words need two characters between them. */
+function searchable(q: string): boolean {
+    const p = parseSearchQuery(q)
+    return p.filtered || p.terms.join(' ').length >= 2
+}
 
 export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, className }: Props) {
     const names = useMemberNames()
     const spaceNames = useSpaceNames(orgId)
+    const roster = useSpaceMembers(orgId, spaceId)
     const inputRef = useRef<HTMLInputElement>(null)
     const [query, setQuery] = useState('')
     const [focused, setFocused] = useState(false)
     const [results, setResults] = useState<spaces.SearchResults>(EMPTY)
-    const [loading, setLoading] = useState(false)
+    /** The query (and Show more) the current results answer: anything else is still loading. */
+    const [answered, setAnswered] = useState('')
+    /** The section "Show more" widened to the org's cap, for this query only. */
+    const [more, setMore] = useState<spaces.SearchKind | null>(null)
 
     // /find's "Search instead" (2026-09-24): the query arrives prefilled and
     // focused, and the debounced fetch below takes it from there.
@@ -72,7 +119,6 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
         window.addEventListener(FIND_SEARCH_EVENT, onFind)
         return () => window.removeEventListener(FIND_SEARCH_EVENT, onFind)
     }, [])
-    const debounced = useDebounce(query, 250)
 
     // ⌘⇧K focuses THIS search while a space pane exists. Capture on window
     // fires before App.tsx's document-bubble listener; stopPropagation keeps
@@ -90,46 +136,54 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
         return () => window.removeEventListener('keydown', onKey, true)
     }, [])
 
-    // `me` resolves to the viewer's display name (the org expands names to ids).
-    const selfName = selfMemberId ? (names.get(selfMemberId) ?? selfMemberId).toLowerCase() : null
-    const nameFor = (frag: string) => (frag === 'me' && selfName ? selfName : frag)
-    const parsed = parseSearchQuery(query)
-    // What the org searches: free words plus mentioned names (expanded server-side).
-    const serverQueryOf = (raw: string) => {
-        const p = parseSearchQuery(raw)
-        return [...p.terms, ...p.mentions.map(nameFor)].join(' ')
-    }
+    // The chunk under the caret when the query doesn't end in a space: a
+    // half-typed filter there gets suggestions, and stays out of the search
+    // until it is complete.
+    const tail = /\S+$/.exec(query)?.[0] ?? ''
+    const pending = FILTER_KEY.exec(tail.toLowerCase())
+    const pendingFilter = pending && (pending[2] === '' || pending[1] !== 'in') ? pending : null
     const serverQuery = serverQueryOf(query)
-    const needsWord = parsed.filtered && serverQuery.length < 2
+    const parsed = parseSearchQuery(serverQuery)
+    const canSearch = searchable(serverQuery)
+
+    // Show more belongs to the query it was asked for (adjust during render).
+    const [moreFor, setMoreFor] = useState(serverQuery)
+    if (moreFor !== serverQuery) {
+        setMoreFor(serverQuery)
+        if (more !== null) setMore(null)
+    }
+
+    const debounced = useDebounce(serverQuery, 250)
 
     // Fetch on the debounced query; a stale response never overwrites a newer one.
     const seq = useRef(0)
     useEffect(() => {
-        const q = serverQueryOf(debounced)
         // Too short to search: nothing to fetch. The render derives EMPTY for
         // this case below rather than setting state here, and bumping `seq`
         // orphans any fetch still in flight for the longer text before it.
-        if (q.length < 2) {
+        if (!searchable(debounced)) {
             ++seq.current
             return
         }
         const mine = ++seq.current
-        setLoading(true)
+        const asked = `${debounced}|${more ?? ''}`
         const filtered = parseSearchQuery(debounced).filtered
-        void window.ipc
-            .invoke('spaces:search', { orgId, spaceId, q, limit: filtered ? FILTERED_PAGE : PAGE })
+        const ask = more
+            ? window.ipc.invoke('spaces:search', { orgId, spaceId, q: debounced, kinds: [more], limit: MORE_PAGE })
+            : window.ipc.invoke('spaces:search', { orgId, spaceId, q: debounced, limit: filtered ? FILTERED_PAGE : PAGE })
+        void ask
             .then((r) => {
                 if (seq.current !== mine) return
-                setResults(r)
-                setLoading(false)
+                // Show more replaces one section and keeps the others as they were.
+                setResults((prev) => (more ? { ...prev, [more]: r[more], truncated: { ...prev.truncated, [more]: r.truncated[more] } } : r))
+                setAnswered(asked)
             })
             .catch(() => {
                 if (seq.current !== mine) return
-                setResults(EMPTY)
-                setLoading(false)
+                if (!more) setResults(EMPTY)
+                setAnswered(asked)
             })
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- serverQueryOf/nameFor derive from `names`, which only widens the name map; the debounced text is the trigger.
-    }, [debounced, orgId, spaceId])
+    }, [debounced, more, orgId, spaceId])
 
     const words = parsed.terms
     const mark = (text: string) => highlight(resolveMentions(text, names, spaceNames), words)
@@ -140,135 +194,234 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
         inputRef.current?.blur()
     }
 
-    // Below the search threshold the last fetched page is stale by definition:
-    // show nothing (derived, so no state write on the way down).
-    const shown = serverQuery.length >= 2 ? results : EMPTY
-    const searching = loading && serverQuery.length >= 2
+    /** Replace the chunk under the caret (or append) with `token`, and keep typing. */
+    const complete = (token: string, finished: boolean) => {
+        const base = tail && FILTER_KEY.test(tail.toLowerCase()) ? query.slice(0, query.length - tail.length) : query
+        const sep = base === '' || /\s$/.test(base) ? '' : ' '
+        // Rows keep the input's focus (onMouseDown below), so typing goes on.
+        setQuery(`${base}${sep}${token}${finished ? ' ' : ''}`)
+    }
 
-    // Filters narrow the message hits client-side; a filtered query is about
-    // messages, so discussion and file sections step aside for it.
-    const authorOf = (m: spaces.MessageSearchHit) => (names.get(m.author.memberId) ?? m.author.memberId).toLowerCase()
-    const messages = parsed.filtered
-        ? shown.messages.filter((m) => {
-              if (!parsed.from.every((f) => authorOf(m).includes(nameFor(f)) || m.author.memberId.toLowerCase() === nameFor(f))) return false
-              if (!parsed.inTopic.every((f) => (m.topicTitle ?? '').toLowerCase().includes(f))) return false
-              if (!parsed.has.every((kind) => hasKind(m.snippet, kind))) return false
-              return true
-          })
-        : shown.messages
-    const topics = parsed.filtered ? [] : shown.topics
-    const assets = parsed.filtered ? [] : shown.assets
-    const messagesTruncated = shown.truncated.messages && !parsed.filtered
-    // A filtered query narrowed the org's whole page: more may exist beyond it.
-    const filteredTruncated = parsed.filtered && shown.truncated.messages
+    /** What from:/mentions: write for a member: the first word of their name, or their id when that word is shared. */
+    const tokenFor = (m: spaces.Member) => {
+        const first = m.displayName.toLowerCase().split(/\s+/)[0] ?? ''
+        const shared = roster.some((o) => o.id !== m.id && o.displayName.toLowerCase().split(/\s+/).some((w) => w.startsWith(first)))
+        return first && !shared ? first : m.id
+    }
 
-    const items: Item[] = [
-        ...messages.map((m): Item => {
-            const isRoot = m.threadRootId === m.messageId
-            return {
-                key: `m:${m.messageId}`,
-                pick: () => {
-                    // Land on the row, not just its pane: the destination scrolls to
-                    // data-mid and flashes once it has the message.
-                    requestJump({ topicId: isRoot ? STREAM_READ_KEY : m.threadRootId, messageId: m.messageId })
-                    pick(isRoot ? { kind: 'general' } : { kind: 'thread', rootMessageId: m.threadRootId })
-                },
+    const sections: Section[] = []
+
+    // Suggestions: the filters themselves on an empty bar, a filter's values
+    // while one is half-typed.
+    if (query.trim() === '') {
+        sections.push({
+            label: 'Filters',
+            note: 'combine with words',
+            items: FILTER_HINTS.map((f) => ({
+                key: `f:${f.token}`,
+                suggestion: true,
+                pick: () => complete(f.token, f.token.startsWith('has:')),
                 row: (
                     <>
-                        <MessageSquare className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1">
-                            <span className="flex items-baseline gap-2">
-                                <span className="truncate text-xs font-medium">
-                                    {names.get(m.author.memberId) ?? m.author.memberId}
-                                    {m.author.agentName ? <span className="font-normal text-muted-foreground"> · {m.author.agentName}</span> : null}
-                                </span>
-                                {m.topicTitle && <span className="truncate text-[11px] text-muted-foreground">{mark(m.topicTitle)}</span>}
-                                <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{formatFeedTime(m.postedAt)}</span>
-                            </span>
-                            <span className="line-clamp-2 text-xs text-muted-foreground">{mark(m.snippet)}</span>
-                        </span>
+                        <f.icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="w-20 shrink-0 font-mono text-[11px]">{f.token}</span>
+                        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{f.label}</span>
                     </>
                 ),
-            }
-        }),
-        ...topics.map((t): Item => ({
-            key: `t:${t.topic.id}`,
-            pick: () => pick({ kind: 'thread', rootMessageId: t.topic.rootMessageId }),
+            })),
+        })
+    } else if (pendingFilter && (pendingFilter[1] === 'from' || pendingFilter[1] === 'mentions')) {
+        const key = pendingFilter[1]
+        const typed = pendingFilter[2]!.replace(/^@/, '')
+        const people = roster
+            .filter((m) => m.id !== selfMemberId)
+            .filter((m) => typed === '' || m.displayName.toLowerCase().split(/\s+/).some((w) => w.startsWith(typed)))
+            .slice(0, 6)
+        const items: Item[] = []
+        if ('me'.startsWith(typed)) {
+            items.push({
+                key: 'p:me',
+                suggestion: true,
+                pick: () => complete(`${key}:me`, true),
+                row: (
+                    <>
+                        <User className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="text-xs font-medium">me</span>
+                        <span className="text-xs text-muted-foreground">{key === 'from' ? 'messages you wrote' : 'messages that mention you'}</span>
+                    </>
+                ),
+            })
+        }
+        for (const m of people) {
+            items.push({
+                key: `p:${m.id}`,
+                suggestion: true,
+                pick: () => complete(`${key}:${tokenFor(m)}`, true),
+                row: (
+                    <>
+                        <User className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate text-xs font-medium">{m.displayName}</span>
+                    </>
+                ),
+            })
+        }
+        if (items.length > 0) sections.push({ label: key === 'from' ? 'From' : 'Mentions', items })
+    } else if (pendingFilter && pendingFilter[1] === 'has') {
+        const typed = pendingFilter[2]!
+        const items = HAS_VALUES.filter((h) => h.value.startsWith(typed) && h.value !== typed).map((h): Item => ({
+            key: `h:${h.value}`,
+            suggestion: true,
+            pick: () => complete(`has:${h.value}`, true),
             row: (
                 <>
-                    <Hash className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                    <h.icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="w-20 shrink-0 font-mono text-[11px]">has:{h.value}</span>
+                    <span className="text-xs text-muted-foreground">Messages with {h.label}</span>
+                </>
+            ),
+        }))
+        if (items.length > 0) sections.push({ label: 'Has', items })
+    }
+
+    // Below the search threshold the last fetched page is stale by definition:
+    // show nothing (derived, so no state write on the way down).
+    const shown = canSearch ? results : EMPTY
+    const searching = canSearch && answered !== `${serverQuery}|${more ?? ''}`
+
+    /** "Show more" closes a truncated section, until the org's cap. */
+    const moreItem = (kind: spaces.SearchKind, noun: string): Item[] => {
+        if (!shown.truncated[kind]) return []
+        if (more === kind) return []
+        return [{
+            key: `more:${kind}`,
+            pick: () => setMore(kind),
+            row: (
+                <>
+                    <ChevronDown className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Show more {noun}</span>
+                </>
+            ),
+        }]
+    }
+    const cappedNote = (kind: spaces.SearchKind) =>
+        shown.truncated[kind] && more === kind ? `newest ${MORE_PAGE} — add a word or filter to narrow` : undefined
+
+    const messages = shown.messages.map((m): Item => {
+        const isRoot = m.threadRootId === m.messageId
+        return {
+            key: `m:${m.messageId}`,
+            pick: () => {
+                // Land on the row, not just its pane: the destination scrolls to
+                // data-mid and flashes once it has the message.
+                requestJump({ topicId: isRoot ? STREAM_READ_KEY : m.threadRootId, messageId: m.messageId })
+                pick(isRoot ? { kind: 'general' } : { kind: 'thread', rootMessageId: m.threadRootId })
+            },
+            row: (
+                <>
+                    <MessageSquare className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1">
                         <span className="flex items-baseline gap-2">
-                            <span className="truncate text-xs font-medium">{mark(t.topic.title)}</span>
-                            {t.topic.archived && <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">archived</span>}
-                            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{formatFeedTime(t.topic.createdAt)}</span>
+                            <span className="truncate text-xs font-medium">
+                                {names.get(m.author.memberId) ?? m.author.memberId}
+                                {m.author.agentName ? <span className="font-normal text-muted-foreground"> · {m.author.agentName}</span> : null}
+                            </span>
+                            {m.topicTitle
+                                ? <span className="truncate text-[11px] text-muted-foreground">in {mark(m.topicTitle)}</span>
+                                : !isRoot && <span className="shrink-0 text-[11px] text-muted-foreground">in a thread</span>}
+                            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{formatFeedTime(m.postedAt)}</span>
                         </span>
+                        <span className="line-clamp-2 text-xs text-muted-foreground">{mark(m.snippet)}</span>
                     </span>
                 </>
             ),
-        })),
-        ...assets.map((a): Item => {
-            const board = /\.excalidraw$/i.test(a.path)
-            return {
-                key: `a:${a.id}`,
-                pick: () => pick(board ? { kind: 'whiteboard', assetId: a.id } : { kind: 'file', assetId: a.id }),
-                row: (
-                    <>
-                        {board
-                            ? <PenTool className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                            : <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />}
-                        <span className="min-w-0 flex-1">
-                            <span className="flex items-baseline gap-2">
-                                <span className="truncate font-mono text-[11px]">{mark(a.path)}</span>
-                                <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{formatFeedTime(a.updatedAt)}</span>
-                            </span>
-                            {a.snippet && <span className="line-clamp-1 text-xs text-muted-foreground">{mark(a.snippet)}</span>}
+        }
+    })
+    const topics = shown.topics.map((t): Item => ({
+        key: `t:${t.topic.id}`,
+        pick: () => pick({ kind: 'thread', rootMessageId: t.topic.rootMessageId }),
+        row: (
+            <>
+                <Hash className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2">
+                        <span className="truncate text-xs font-medium">{mark(t.topic.title)}</span>
+                        {t.topic.archived && <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">archived</span>}
+                        <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{formatFeedTime(t.topic.createdAt)}</span>
+                    </span>
+                </span>
+            </>
+        ),
+    }))
+    const assets = shown.assets.map((a): Item => {
+        const board = /\.excalidraw$/i.test(a.path)
+        return {
+            key: `a:${a.id}`,
+            pick: () => pick(board ? { kind: 'whiteboard', assetId: a.id } : { kind: 'file', assetId: a.id }),
+            row: (
+                <>
+                    {board
+                        ? <PenTool className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        : <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />}
+                    <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-2">
+                            <span className="truncate font-mono text-[11px]">{mark(a.path)}</span>
+                            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{formatFeedTime(a.updatedAt)}</span>
                         </span>
-                    </>
-                ),
-            }
-        }),
-    ]
+                        {a.snippet && <span className="line-clamp-1 text-xs text-muted-foreground">{mark(a.snippet)}</span>}
+                    </span>
+                </>
+            ),
+        }
+    })
+    if (messages.length > 0) sections.push({ label: 'Messages', note: cappedNote('messages'), items: [...messages, ...moreItem('messages', 'messages')] })
+    if (topics.length > 0) sections.push({ label: 'Discussions', note: cappedNote('topics'), items: [...topics, ...moreItem('topics', 'discussions')] })
+    if (assets.length > 0) sections.push({ label: 'Files', note: cappedNote('assets'), items: [...assets, ...moreItem('assets', 'files')] })
+
+    const items = sections.flatMap((s) => s.items)
+    const hasResults = messages.length + topics.length + assets.length > 0
 
     // Selection resets when the result set changes — adjust during render,
     // not in an effect (the composer's candidate-list idiom).
     const [sel, setSel] = useState(0)
     const itemsKey = items.map((i) => i.key).join('|')
-    const prevItemsKey = useRef(itemsKey)
-    if (prevItemsKey.current !== itemsKey) {
-        prevItemsKey.current = itemsKey
+    const [selFor, setSelFor] = useState(itemsKey)
+    if (selFor !== itemsKey) {
+        setSelFor(itemsKey)
         if (sel !== 0) setSel(0)
     }
 
-    const open = focused && (serverQuery.length >= 2 || parsed.filtered)
-    const sections: Array<{ label: string; hint: boolean; from: number; count: number }> = []
-    {
-        let at = 0
-        for (const [label, count, hint] of [
-            ['Messages', messages.length, messagesTruncated],
-            ['Discussions', topics.length, shown.truncated.topics],
-            ['Files', assets.length, shown.truncated.assets],
-        ] as const) {
-            if (count > 0) sections.push({ label, hint, from: at, count })
-            at += count
-        }
-    }
-
+    const open = focused
     const onKeyDown = (e: React.KeyboardEvent) => {
         if (!open) return
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault()
             if (items.length > 0) setSel((s) => (s + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length)
-        } else if (e.key === 'Enter') {
+        } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey && items[sel]?.suggestion)) {
+            // Tab completes a suggestion; Enter opens a result or takes a suggestion.
             e.preventDefault()
             items[sel]?.pick()
         } else if (e.key === 'Escape') {
             e.preventDefault()
-            setFocused(false)
-            inputRef.current?.blur()
+            if (query !== '') setQuery('')
+            else {
+                setFocused(false)
+                inputRef.current?.blur()
+            }
         }
     }
 
+    // What the panel says when it has no results to show.
+    const status = !canSearch
+        ? null
+        : searching && !hasResults
+          ? 'Searching…'
+          : !hasResults
+            ? parsed.filtered
+                ? 'No messages match — try fewer words or filters'
+                : 'No matches in this space — try fewer or shorter words'
+            : null
+
+    let at = 0
     return (
         <div className={cn('relative', className)}>
             <label
@@ -286,58 +439,52 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, classNam
                     onFocus={() => setFocused(true)}
                     onBlur={() => setFocused(false)}
                     onKeyDown={onKeyDown}
-                    placeholder="Search this space"
+                    placeholder="Search messages, discussions, files"
+                    spellCheck={false}
                     className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
                 />
                 {!focused && <kbd className="rounded border border-border bg-background px-1 text-[10px]">{chord('K', { shift: true })}</kbd>}
             </label>
-            {open && (
+            {open && (sections.length > 0 || status) && (
                 // Spaces redesign (2026-10-21): the box sits at the header's right edge now,
                 // so results open leftward from it at a fixed width.
-                <div className="absolute right-0 top-full z-30 mt-1 max-h-96 w-[min(28rem,80vw)] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md animate-in fade-in-0 slide-in-from-top-1 duration-150">
-                    {sections.map((s) => (
-                        <div key={s.label}>
-                            <div className="flex items-baseline justify-between px-2 pb-0.5 pt-1.5 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground/80">
-                                {s.label}
-                                {s.hint && <span className="normal-case tracking-normal">top {s.count} — refine to see more</span>}
-                            </div>
-                            {items.slice(s.from, s.from + s.count).map((item, i) => {
-                                const index = s.from + i
-                                return (
-                                    <button
-                                        key={item.key}
-                                        type="button"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={item.pick}
-                                        onMouseMove={() => setSel(index)}
-                                        className={cn(
-                                            'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left',
-                                            index === sel ? 'bg-accent' : 'hover:bg-accent/60',
-                                        )}
-                                    >
-                                        {item.row}
-                                    </button>
-                                )
-                            })}
-                        </div>
-                    ))}
-                    {items.length === 0 && (
-                        <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-                            {needsWord
-                                ? 'Add a word to search — from:, in: and has: narrow a text search'
-                                : searching
-                                  ? 'Searching…'
-                                  : 'No matches in this space'}
-                        </div>
-                    )}
-                    {filteredTruncated && (
-                        <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">
-                            Filtered the newest {FILTERED_PAGE} matches — add a word to narrow further
-                        </div>
-                    )}
-                    <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">
-                        {items.length > 0 ? '↑↓ · ↵ to open · esc · ' : ''}
-                        filters: from:name in:discussion has:link|image|file mentions:name (me works)
+                <div className="absolute right-0 top-full z-30 mt-1 flex max-h-[min(32rem,70vh)] w-[min(32rem,85vw)] flex-col rounded-lg border border-border bg-popover shadow-md animate-in fade-in-0 slide-in-from-top-1 duration-150">
+                    <div className="min-h-0 flex-1 overflow-y-auto p-1">
+                        {sections.map((s) => {
+                            const from = at
+                            at += s.items.length
+                            return (
+                                <div key={s.label}>
+                                    <div className="flex items-baseline justify-between gap-2 px-2 pb-0.5 pt-1.5 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                                        {s.label}
+                                        {s.note && <span className="truncate normal-case tracking-normal">{s.note}</span>}
+                                    </div>
+                                    {s.items.map((item, i) => {
+                                        const index = from + i
+                                        return (
+                                            <button
+                                                key={item.key}
+                                                type="button"
+                                                onMouseDown={(e) => e.preventDefault()}
+                                                onClick={item.pick}
+                                                onMouseMove={() => setSel(index)}
+                                                ref={index === sel ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+                                                className={cn(
+                                                    'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left',
+                                                    index === sel ? 'bg-accent' : 'hover:bg-accent/60',
+                                                )}
+                                            >
+                                                {item.row}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            )
+                        })}
+                        {status && <div className="px-2 py-3 text-center text-xs text-muted-foreground">{status}</div>}
+                    </div>
+                    <div className="border-t border-border px-3 py-1 text-[10.5px] text-muted-foreground/80">
+                        {hasResults ? '↑↓ to move · ↵ to open · esc to clear' : '↑↓ to move · ↵ or tab to pick · from: in: has: mentions: narrow a search'}
                     </div>
                 </div>
             )}

@@ -1,8 +1,10 @@
+import { StreamSkeleton } from '@/components/spaces/spaces-skeleton'
+import { EmptySpaceStart } from '@/components/spaces/empty-space-start'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
-import { useSpaceAccess, JoinSpacePrompt, canActInSpace } from '@/lib/spaces-access'
+import { useSpaceAccess, ArchivedNotice } from '@/lib/spaces-access'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, CornerDownRight, Loader2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, CornerDownRight, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
 import { mentionToken, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
@@ -43,13 +45,15 @@ import { useFollowUpAgent } from '@/hooks/use-follow-up-agent'
 import { AutoBanner } from '@/components/spaces/auto-banner'
 import { ThreadPickerDialog } from '@/components/spaces/thread-picker-dialog'
 import { FindBanner } from '@/components/spaces/find-banner'
+import { sessionCommand } from '@/components/spaces/session-command'
+import { refreshMyThreads, sessionsOf, useMyThreads } from '@/lib/spaces-my-threads'
 import { runFind, searchInstead } from '@/lib/spaces-find'
 import { toast } from '@/lib/toast'
 // The Spaces toast queue has no renderer; sonner is what the person sees.
 import { toast as notify } from 'sonner'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
-import { directAvatarId, isOthersPersonalAgent, isSelfDirect } from '@/lib/spaces-direct'
+import { answersOwnerOnly, directAvatarId, isSelfDirect } from '@/lib/spaces-direct'
 import { useSpaceMembers } from '@/hooks/use-space-members'
 
 // The space's one stream: ROOT messages in order; each message's flat thread
@@ -113,7 +117,7 @@ const AUTO_POST_HOLD_MS = 5_000
 const shortLabel = (label: string, max = 40): string => (label.length > max ? `${label.slice(0, max - 1)}…` : label)
 
 export function GeneralStream({
-    org, space, stream, presence, memberNames, onOpenThread, openThreadId, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true,
+    org, space, stream, presence, memberNames, onOpenThread, onOpenThreadIn, openThreadId, onOpenSession, onClose, visible = true, composeActive = true, showHeader = true, onAddPeople, onOpenFiles
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -122,6 +126,8 @@ export function GeneralStream({
     memberNames: Map<string, string>
     /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
     onOpenThread: (rootMessageId: string) => void
+    /** Open a thread in any space of this org: /session jumps to sessions elsewhere (2026-11-05). */
+    onOpenThreadIn?: (spaceId: string, rootMessageId: string) => void
     /** The root of the thread open beside the stream — its reply line stays tinted (spaces redesign, 2026-10-21). */
     openThreadId?: string | null
     /** Navigate to a chat session — the working strip's "Open chat" affordance. */
@@ -138,12 +144,15 @@ export function GeneralStream({
     composeActive?: boolean
     /** The content strip already labels a lone stream; split panes retain their headings. */
     showHeader?: boolean
+    /** A space with no messages yet shows its first-run page (EmptySpaceStart, 2026-11-09): these are its actions. */
+    onAddPeople?: () => void
+    onOpenFiles?: () => void
 }) {
-    const { member, writable } = useSpaceAccess()
+    const { writable } = useSpaceAccess()
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
-    const { onType } = usePresenceSender(org.id, space.id, undefined, visible && member)
+    const { onType } = usePresenceSender(org.id, space.id, undefined, visible)
     // The plain-text faces (quotes, titles, copies) name a space token by its current name.
     const spaceNames = useSpaceNames(org.id)
 
@@ -236,7 +245,7 @@ export function GeneralStream({
         setNewSince(markOrNull(getStreamReadOffset(org.id, space.id)))
     }, [visible, org.id, space.id])
     useEffect(() => {
-        if (!member || !visible || !stream.ready) return
+        if (!visible || !stream.ready) return
         // The newest root on screen, never head (Slack's rule).
         const newest = newestSettledOffset()
         // Inline (2026-10-25), replies are read where they show: each thread
@@ -252,7 +261,7 @@ export function GeneralStream({
         }
         if (newest > 0) markStreamRead(org.id, space.id, newest)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [org.id, space.id, stream.ready, stream.messages.length, visible, member, inline])
+    }, [org.id, space.id, stream.ready, stream.messages.length, visible, inline])
 
     // First paint: start at the bottom — the newest messages, always. After
     // that: keep the tail in view when new messages land, unless the reader
@@ -477,7 +486,7 @@ export function GeneralStream({
         return () => {
             for (const hold of holds.values()) {
                 window.clearTimeout(hold.timer)
-                if (canActInSpace(org.id, space.id)) hold.fire()
+                hold.fire()
             }
             holds.clear()
         }
@@ -514,9 +523,9 @@ export function GeneralStream({
     // stripped, so tagging never re-asks Jev. Every gesture is logged: Jev
     // learns nothing from them, but the threshold can.
     const tagSuggestions = useTagSuggestionsEnabled()
-    // A tag is a mention, so Auto never offers someone else's personal agent (2026-10-30), as Jev doesn't.
+    // A tag is a mention, so Auto never offers an agent whose seat here is someone else's alone (2026-11-09).
     const roster = useSpaceMembers(org.id, space.id)
-    const untaggable = useMemo(() => new Set(roster.filter((m) => isOthersPersonalAgent(m, org.memberId)).map((m) => m.id)), [roster, org.memberId])
+    const untaggable = useMemo(() => new Set(roster.filter((m) => answersOwnerOnly(m, org.memberId)).map((m) => m.id)), [roster, org.memberId])
     const [currentDraft, setCurrentDraft] = useState('')
     const [declined, setDeclined] = useState<ReadonlySet<string>>(() => new Set())
     const HERE_TOKEN = mentionToken({ kind: 'here' })
@@ -711,6 +720,19 @@ export function GeneralStream({
 
     /** Opens the poll dialog (state lives in PollDialogHost — see its doc). */
     const openPollRef = useRef<(() => void) | null>(null)
+    // /session (2026-11-05): a new session is a root with its title, marked
+    // in the same post, opened at once so the request goes in its thread.
+    const mySessions = sessionsOf(useMyThreads(org.id).threads)
+    const startSession = async (title: string) => {
+        if (!title) return
+        try {
+            const res = await invokeSpace('spaces:postMessage', { orgId: org.id, spaceId: space.id, body: title, session: { title } })
+            onOpenThread(res.message.id)
+            void refreshMyThreads(org.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not start the session', 'error')
+        }
+    }
     const createPoll = async (input: spaces.SpacesNewPollInput) => {
         try {
             if (detachedRef.current) await snapToLatest()
@@ -1193,10 +1215,11 @@ export function GeneralStream({
             >
                 {/* One measurable child — the tail pin observes its size. */}
                 <div ref={contentRef}>
-                {(!stream.ready || snapping) && (
-                    <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
+                {(!stream.ready || snapping) && <StreamSkeleton />}
+                {stream.ready && !snapping && messageRows === 0 && space.kind === 'shared' && !space.archived && (
+                    <EmptySpaceStart orgId={org.id} space={space} onAddPeople={onAddPeople} onOpenFiles={onOpenFiles} />
                 )}
-                {stream.ready && !snapping && messageRows === 0 && (
+                {stream.ready && !snapping && messageRows === 0 && !(space.kind === 'shared' && !space.archived) && (
                     <div className="px-2 py-6 text-sm text-muted-foreground">
                         {space.kind === 'direct' && (space.participants ?? []).length === 1
                             ? `Your notes to self — drafts, links, files for later. Only you can see this${LOCAL_RUNTIME ? ', and @rowboat works here too' : ''}.`
@@ -1368,12 +1391,21 @@ export function GeneralStream({
                 onType={onType}
                 seed={seed}
                 commands={[
+                    sessionCommand({
+                        spaceId: space.id,
+                        sessions: mySessions,
+                        newLabel: (title) => `New session: ${title}`,
+                        onNew: startSession,
+                        onOpen: (session) => session.spaceId === space.id
+                            ? onOpenThread(session.root.id)
+                            : onOpenThreadIn?.(session.spaceId, session.root.id),
+                    }),
                     {
                         name: 'invite',
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceIds: [space.id] })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
@@ -1449,7 +1481,7 @@ export function GeneralStream({
                         },
                     },
                 ]}
-            /> : <JoinSpacePrompt />}
+            /> : <ArchivedNotice />}
         </section>
     )
 }
