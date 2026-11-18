@@ -1,4 +1,4 @@
-// Mentions (2026-09-10). One grammar, one parser, shared by the org and every
+// Mentions (2026-09-10). One grammar, one parser, shared by the server and every
 // client: a mention is a markdown link token whose href carries the KEY and
 // whose label is a display hint —
 //
@@ -11,7 +11,7 @@
 // addresses are tokens too (Slack's <!here>, Zulip's @**all**): an address is
 // something a composer emitted deliberately, never a word that happened to be
 // in prose. Tokens inside code regions are cites, not addresses. Nothing
-// anywhere reads a mention out of a name — the org stamps `Message.mentions`
+// anywhere reads a mention out of a name — the server stamps `Message.mentions`
 // from these tokens alone, and every consumer (unread, Activity, push, chips)
 // reads the stamp. A space token (Slack's <#C123>) is a REFERENCE, not an
 // address: it renders as a chip that opens the space for readers who are in
@@ -23,7 +23,7 @@ export type MentionRef =
   | { kind: 'here' }
   | { kind: 'rowboat' };
 
-/** What the org stamps on a message from its tokens (core.ts Message). */
+/** What the server stamps on a message from its tokens (core.ts Message). */
 export interface MentionStamps {
   members: string[];
   here: boolean;

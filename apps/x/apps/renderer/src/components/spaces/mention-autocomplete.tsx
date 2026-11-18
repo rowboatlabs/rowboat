@@ -14,16 +14,16 @@ import { isAgentOffline, useAgentsOnline, useOrgRoster, useSpaceMembers } from '
 import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { assetWireUrl } from '@/lib/spaces-presentation'
 import { byRank, matchRank } from '@/lib/mention-rank'
-import { isDeparted, isOthersPersonalAgent, isSwitchedOff } from '@/lib/spaces-direct'
-import { useOrgSettings } from '@/hooks/use-org-settings'
+import { answersOwnerOnly, isDeparted } from '@/lib/spaces-direct'
 
 // The @ autocomplete behind every mention surface — the composer and the
 // inline message editor. The hook owns the popup's whole lifecycle off the
 // editor's own events; the host renders <MentionMenu> inside its relative
 // box and routes keydowns through onKeyDown ahead of its other bindings.
 // What it offers comes from the pane's refs alone (both hosts get the same
-// sources): the whole org's people, its shared spaces, and the files of
-// every shared space the reader is in — this space's ranking first.
+// sources): this space's people, then your contacts (2026-11-09), its shared
+// spaces, and the files of every shared space the reader is in — this
+// space's ranking first.
 
 export interface MentionCandidate {
     id: string
@@ -99,26 +99,24 @@ export function useMentionAutocomplete(editor: Editor | null) {
 
     // A local agent whose owner's computer isn't running it says so (2026-10-28): the mention waits until it is.
     const online = useAgentsOnline(orgId)
-    const settings = useOrgSettings(orgId)
-    const agentHint = (m: spaces.Member) => `${agentLabel(m.agentKind, m.agentConnection)}${m.personal ? ' · personal' : ''}${isAgentOffline(m, online) ? ' · offline' : ''}`
+    // An agent whose seat here is its owner's alone says so (2026-11-09): a mention of it is refused.
+    const agentHint = (m: spaces.Member & { invocableBy?: 'owner' | 'members' }) => `${agentLabel(m.agentKind, m.agentConnection)}${answersOwnerOnly(m, selfMemberId) ? ' · answers only its owner here' : ''}${isAgentOffline(m, online) ? ' · offline' : ''}`
     const candidates = useMemo<MentionCandidate[]>(() => {
         if (!match) return []
         const q = match.query
         const people: MentionCandidate[] = []
         if (LOCAL_RUNTIME && 'rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
         if ('here'.startsWith(q)) people.push({ id: 'here', label: 'here', hint: 'notify everyone online', isBroadcast: true })
-        // This space's people first, then the rest of the org. Someone not in
-        // this space can be named but is not notified (the org drops their
+        // This space's people first, then the rest of your contacts. Someone not
+        // in this space can be named but is not notified (the server drops their
         // stamp) — the hint says so.
         const inSpace = new Set(spaceMembers.map((m) => m.id))
         // A name matches anywhere; an id only as a prefix — a one-letter query
         // is a substring of most ULIDs and would drown the files below.
-        // Ranking stays inside each group: this space's people still lead the org's.
+        // Ranking stays inside each group: this space's people still lead your contacts.
         const rank = (m: spaces.Member) => (!q || m.id.toLowerCase().startsWith(q) ? 0 : matchRank(m.displayName, q))
         // Nobody names a deleted account (2026-10-13); a DM keeps one as a member.
-        // Someone else's personal agent is left out too (2026-10-26): it answers its owner only.
-        // So is Ro while an admin has it off (2026-10-30).
-        const pickable = (m: spaces.Member) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId) && !isSwitchedOff(m, settings)
+        const pickable = (m: spaces.Member) => !isDeparted(m)
         people.push(...byRank(spaceMembers.filter(pickable).map((m) => {
             const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? agentHint(m) : undefined
             return { row: { id: m.id, label: m.displayName, ...(hint ? { hint } : {}) }, rank: rank(m) }
@@ -163,7 +161,7 @@ export function useMentionAutocomplete(editor: Editor | null) {
         return [...[...people, ...spaceRows].slice(0, MAX_ROWS - fileQuota), ...files].slice(0, MAX_ROWS)
     // agentHint reads `online`; it changes with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId, online, settings])
+    }, [match, spaceMembers, orgRoster, org, listings, spaceId, selfMemberId, online])
 
     // Reset the highlighted row whenever the query changes (adjust-on-change, not an effect).
     const query = match?.query ?? null

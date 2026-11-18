@@ -49,7 +49,7 @@ const files: Record<string, unknown[]> = {
 }
 const invoke = vi.fn(async (channel: string, args: { spaceId?: string }) => {
     if (channel === 'spaces:listMembers') return { members: here }
-    if (channel === 'spaces:listOrgMembers') return { members: org }
+    if (channel === 'spaces:listContacts') return { members: org }
     if (channel === 'spaces:listAssets') return { entries: files[args.spaceId ?? ''] ?? [] }
     throw new Error(`unexpected ${channel}`)
 })

@@ -11,7 +11,7 @@ import { FakeAgent37, GOOD_KEY as AGENT37_KEY } from './fake-agent37.js';
 import { FakeMaritime, GOOD_KEY } from './fake-maritime.js';
 import { agentClient, freshStore, restClient } from './helpers.js';
 
-// Super agents (spec §4 Agent members, 2026-11-02), end to end: an admin
+// Super agents (spec §4 Agent members, 2026-11-02), end to end: the owner (2026-11-09)
 // makes Harsh's agent a super agent; it creates a managed agent through the
 // agent face, on a card Harsh decides in the thread it was asked in, or at
 // once when the admin waived approval; and deletes only what it created,
@@ -28,7 +28,7 @@ let bossKey: string;
 let bossMcp: Client;
 const as = (token: string) => restClient(harbor, token);
 
-async function setSuper(superAgent: Record<string, unknown> | null, token = 'dev-ramnique') {
+async function setSuper(superAgent: Record<string, unknown> | null, token = 'dev-harsh') {
   return as(token).put(`/v1/agents/${boss.id}/super`, { superAgent });
 }
 
@@ -74,7 +74,7 @@ beforeAll(async () => {
   const { store } = await freshStore();
   harbor = await startHarbor({
     store,
-    orgName: 'Rowboat Labs',
+    name: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },
@@ -82,7 +82,6 @@ beforeAll(async () => {
     blobs: new MemoryBlobStore(),
     hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url, llmCapCents: 500 }), tickMs: 50 },
   });
-  await store.putMember({ ...(await store.getMember('ramnique'))!, role: 'admin' });
   const created = await as('dev-harsh').post('/v1/agents', { displayName: 'Boss', kind: 'hermes', connection: 'plugin' });
   boss = created.body.agent;
   bossKey = created.body.key.secret;
@@ -115,9 +114,9 @@ describe('making a super agent', () => {
     expect(await refused('create_agent', { spaceId, threadRootId: rootId, displayName: 'Helper', kind: 'hermes', reason: 'split the work' })).toMatch(/only a super agent can create agents/);
   });
 
-  it('is an admin’s to grant, not the owner’s, and only for an agent', async () => {
-    expect((await setSuper({}, 'dev-harsh')).status).toBe(403);
-    expect((await as('dev-ramnique').put('/v1/agents/harsh/super', { superAgent: {} })).status).toBe(404);
+  it('is the owner’s to grant (2026-11-09), not another member’s, and only for an agent', async () => {
+    expect((await setSuper({}, 'dev-ramnique')).status).toBe(403);
+    expect((await as('dev-harsh').put('/v1/agents/harsh/super', { superAgent: {} })).status).toBe(404);
     const made = await setSuper({});
     expect(made.status).toBe(200);
     expect(made.body.agent.superAgent).toEqual({ askBeforeCreate: true, askBeforeDelete: true });
@@ -152,7 +151,6 @@ describe('creating, with its owner’s approval', () => {
   it('made the agent its owner’s, asked for by the super agent, in the space', async () => {
     const l = (await listing(created))!;
     expect(l.agent).toMatchObject({ displayName: 'Helper', ownerId: 'harsh', agentKind: 'hermes', agentConnection: 'maritime' });
-    expect(l.agent.personal).toBeUndefined();
     expect(l.hosting).toMatchObject({ createdBy: 'harsh', requestedBy: boss.id, funding: 'trial' });
     expect(await inSpace(created)).toBe(true);
   });

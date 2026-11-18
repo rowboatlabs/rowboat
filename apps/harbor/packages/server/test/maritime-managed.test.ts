@@ -39,7 +39,7 @@ class Org {
   async start(): Promise<this> {
     this.harbor = await startHarbor({
       store: this.store.store,
-      orgName: 'Rowboat Labs',
+      name: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'harsh', displayName: 'Harsh' },
@@ -118,7 +118,7 @@ describe('managed Maritime agents', () => {
     expect(claude).toMatchObject({ status: 400, body: { message: expect.stringMatching(/Anthropic API key/) } });
   });
 
-  it('creates a Hermes agent on Rowboat’s account: an end user with a cap, the pinned image with its PATH, the member with the platform id, and the first key', async () => {
+  it('creates a Hermes agent on Rowboat’s account: an end user with a cap, Rowboat’s own image as a custom container, the member with the platform id, and the first key', async () => {
     const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Scout', kind: 'hermes' });
     expect(r.status).toBe(200);
     const { agent, key, hosting } = r.body as { agent: Member; key: { secret: string }; hosting: { status: string; externalId: string } };
@@ -128,10 +128,11 @@ describe('managed Maritime agents', () => {
     expect(hosting).toMatchObject({ status: 'deploying', externalId: agent.agentInstance });
 
     const creation = fake.lastCreation()!;
-    expect(creation).toMatchObject({ framework: 'hermes', imageName: HERMES_IMAGE, useMaritimeLlm: true });
+    expect(creation).toMatchObject({ framework: 'custom', imageName: HERMES_IMAGE, useMaritimeLlm: true, hasWebUi: false });
+    expect(HERMES_IMAGE).toMatch(/^ghcr\.io\/rowboatlabs\/hermes-maritime:\d/);
     expect(creation.name).toMatch(/^scout-[a-z0-9]{8}$/);
-    const vars = creation.initialEnvVars as Array<{ key: string; value: string; isSecret: boolean }>;
-    expect(vars.find((v) => v.key === 'PATH')).toMatchObject({ value: expect.stringMatching(/^\/opt\/hermes\/bin:/), isSecret: false });
+    const vars = (creation.initialEnvVars ?? []) as Array<{ key: string; value: string; isSecret: boolean }>;
+    expect(vars.find((v) => v.key === 'PATH')).toBeUndefined();
     const created = fake.created.get(agent.agentInstance!)!;
     const endUser = fake.endUsers.get(created.endUser)!;
     expect(created.endUser).toMatch(/^rowboat-[0-9a-z]{26}$/);
@@ -143,11 +144,10 @@ describe('managed Maritime agents', () => {
     expect(listed?.credential?.hint).toBeDefined(); // the deployment's key, sealed for this agent
   });
 
-  it('creates a personal agent when asked, as Add does; a channel one otherwise', async () => {
-    const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Ramnique’s Hermes', kind: 'hermes', personal: true });
+  it('creates an agent its maker owns; who may ask it is a seat, set when it is added to a space (2026-11-09)', async () => {
+    const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Ramnique’s Hermes', kind: 'hermes' });
     expect(r.status).toBe(200);
-    expect(r.body.agent).toMatchObject({ ownerId: 'ramnique', personal: true });
-    expect(await org.harbor.store.getMember(r.body.agent.id)).toMatchObject({ personal: true });
+    expect(r.body.agent).toMatchObject({ ownerId: 'ramnique' });
   });
 
   it('follows the deploy to ready and then runs a turn on it', async () => {
@@ -201,7 +201,6 @@ describe('managed Maritime agents', () => {
     // The readiness check ran a command, which woke the VM: the page shows the platform's word as it is.
     expect(page.body.machine).toEqual({ status: 'active' });
     expect(page.body.env).toEqual([
-      { key: 'PATH', secret: false, value: expect.stringMatching(/^\/opt\/hermes\/bin:/) },
       { key: 'REPO', secret: false, value: 'rowboat' },
     ]);
 
@@ -210,7 +209,7 @@ describe('managed Maritime agents', () => {
     expect((await me.put(`/v1/agents/${agent.id}/hosting/env/REPO`, { value: 'spaces' })).body.env).toContainEqual({ key: 'REPO', secret: false, value: 'spaces' });
     expect((await me.put(`/v1/agents/${agent.id}/hosting/env/bad-key`, { value: 'x' })).status).toBe(400);
     const afterDelete = await me.delete(`/v1/agents/${agent.id}/hosting/env/REPO`);
-    expect(afterDelete.body.env.map((v: { key: string }) => v.key)).toEqual(['PATH', 'GH_TOKEN']);
+    expect(afterDelete.body.env.map((v: { key: string }) => v.key)).toEqual(['GH_TOKEN']);
 
     // Power: the platform's word for the machine comes back each time.
     expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'sleep' })).body.machine.status).toBe('sleeping');
@@ -364,6 +363,11 @@ describe('managed Maritime agents', () => {
     const { invocations } = await org.post(`${mention(agent)} hi`);
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     expect(fake.submits().at(-1)!.script).toContain('hermes config set model.provider "$HP"');
+    // On the trial, with no provider of the owner's, the same turn points Hermes at the platform's proxy from the
+    // OPENAI_BASE_URL and OPENAI_API_KEY the platform set, with the template's model when none is configured
+    // (Rowboat's own image gets no boot-time rewrite from Maritime, 2026-11-11).
+    expect(fake.submits().at(-1)!.script).toContain('"") if [ -n "$OPENAI_BASE_URL" ]; then HP=openai; LB="$OPENAI_BASE_URL"; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY;');
+    expect(fake.submits().at(-1)!.script).toContain("MD='gpt-5.4'");
 
     // Codex takes OpenAI only, and gets OpenAI's address where the template had the platform's proxy.
     const codex = (await me.post('/v1/agents/managed', { displayName: 'Cx', kind: 'codex' })).body as { agent: Member };
@@ -513,22 +517,61 @@ describe('managed Maritime agents', () => {
     expect(fake.spend.get(vm)?.limit).toBeNull();
   });
 
-  it('deletes: keys go at once, the platform’s end user goes in the background, and only the owner or an admin may', async () => {
+  it('deletes the member and hosting: removes all shared seats, keeps read-only DM history, and revokes keys', async () => {
     const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Gone Soon', kind: 'hermes' });
     const { agent, key } = r.body as { agent: Member; key: { secret: string } };
     await org.hostingStatus(agent.id, 'ready');
     expect((await org.as(key.secret).get('/v1/me')).status).toBe(200);
 
+    const me = org.as('dev-ramnique');
+    const archived = (await me.post('/v1/spaces', { name: 'Archived' })).body.space.id;
+    for (const id of [org.spaceId, archived]) {
+      expect((await me.post(`/v1/spaces/${id}/members`, { memberIds: [agent.id], actingMode: 'direct' })).status).toBe(200);
+    }
+    expect((await me.post(`/v1/spaces/${archived}/archive`, { actingMode: 'direct' })).status).toBe(200);
+    const dm = (await me.post('/v1/direct', { memberId: agent.id })).body.space.id;
+    const message = (await me.post(`/v1/spaces/${dm}/messages`, { body: 'Before deletion', actingMode: 'direct' })).body.message;
+
     expect((await org.as('dev-harsh').delete(`/v1/agents/${agent.id}/hosting`)).status).toBe(403);
     const deleted = await org.as('dev-ramnique').delete(`/v1/agents/${agent.id}/hosting`);
     expect(deleted).toMatchObject({ status: 200, body: { hosting: { status: 'deleting' } } });
     expect((await org.as(key.secret).get('/v1/me')).status).toBe(401);
+    const listing = await org.listing(agent.id);
+    expect(listing?.agent.deactivatedAt).toEqual(expect.any(String));
+    expect((await me.get('/v1/contacts')).body.members.map((m: Member) => m.id)).not.toContain(agent.id);
+    for (const id of [org.spaceId, archived]) {
+      expect((await me.get(`/v1/spaces/${id}/members`)).body.members.map((m: Member) => m.id)).not.toContain(agent.id);
+    }
+    expect((await me.post(`/v1/spaces/${org.spaceId}/members`, { memberIds: [agent.id], actingMode: 'direct' })).status).toBe(400);
+    expect((await me.post(`/v1/agents/${agent.id}/keys`, {})).status).toBe(400);
+    expect((await me.post(`/v1/spaces/${dm}/messages`, { body: 'After deletion', actingMode: 'direct' })).status).toBe(403);
+    expect((await me.post(`/v1/spaces/${dm}/messages`, { body: 'Reply after deletion', threadRoot: message.id, actingMode: 'direct' })).status).toBe(403);
+    expect((await me.get(`/v1/spaces/${dm}/messages/${message.id}`)).body.message.id).toBe(message.id);
     await org.hostingStatus(agent.id, 'deleted');
     const endUser = fake.created.get(agent.agentInstance!)?.endUser;
     expect(endUser).toBeUndefined(); // gone from the platform
     expect(fake.received.some((x) => x.method === 'DELETE' && /^\/api\/v1\/end-users\/rowboat-/.test(x.path))).toBe(true);
     // Deleting again is a no-op.
     expect((await org.as('dev-ramnique').delete(`/v1/agents/${agent.id}/hosting`)).body.hosting.status).toBe('deleted');
+  });
+
+  it('retires the member immediately while a failed Maritime deletion retries in the background', async () => {
+    const me = org.as('dev-ramnique');
+    const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Retry deletion', kind: 'hermes' })).body as { agent: Member };
+    await org.hostingStatus(agent.id, 'ready');
+    const before = fake.received.length;
+    fake.refuse = { status: 503, body: { detail: 'Try again later' }, paths: /^\/api\/v1\/end-users\/[^/]+$/ };
+    try {
+      expect((await me.delete(`/v1/agents/${agent.id}/hosting`)).status).toBe(200);
+      expect((await org.listing(agent.id))?.agent.deactivatedAt).toEqual(expect.any(String));
+      await until(async () => fake.received.slice(before).some((r) => r.method === 'DELETE'), 'platform deletion attempt');
+      expect((await org.listing(agent.id))?.hosting?.status).toBe('deleting');
+      expect(fake.created.has(agent.agentInstance!)).toBe(true);
+    } finally {
+      fake.refuse = undefined;
+    }
+    await org.hostingStatus(agent.id, 'deleted');
+    expect(fake.created.has(agent.agentInstance!)).toBe(false);
   });
 
   it('is refused on a Harbor that runs no managed hosting', async () => {
@@ -544,6 +587,29 @@ describe('managed Maritime agents', () => {
 });
 
 describe('the hosting worker after a restart', () => {
+  it('repairs active members left behind by the old hosting-only deletion', async () => {
+    const store = await freshStore();
+    let org = await new Org(store).start();
+    try {
+      const me = org.as('dev-ramnique');
+      const space = await org.space();
+      const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Legacy deleted', kind: 'hermes' })).body as { agent: Member };
+      await org.hostingStatus(agent.id, 'ready');
+      await me.post(`/v1/spaces/${space}/members`, { memberIds: [agent.id], actingMode: 'direct' });
+      await org.harbor.close();
+      const row = (await store.store.getAgentHosting(agent.id))!;
+      await store.store.putHosting({ ...row, status: 'deleted' });
+      org = await new Org(store).start();
+      await until(async () => {
+        const member = await store.store.getMember(agent.id);
+        return member?.deactivatedAt && !(await store.store.getMembership(space, agent.id));
+      }, 'legacy member cleanup');
+    } finally {
+      await org.harbor.close();
+      await store.db.close();
+    }
+  });
+
   it('carries a deploying agent to ready', async () => {
     const store = await freshStore();
     let org = await new Org(store).start();

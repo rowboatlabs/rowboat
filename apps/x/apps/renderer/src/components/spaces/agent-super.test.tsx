@@ -6,7 +6,7 @@ vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 
 import { SuperAgentSection } from './agent-super'
 
-const boss: spaces.Member = { id: 'boss', displayName: 'Boss', role: 'member', kind: 'agent', ownerId: 'harsh' }
+const boss: spaces.Member = { id: 'boss', displayName: 'Boss', kind: 'agent', ownerId: 'harsh' }
 const invoke = vi.fn(async () => ({ agent: boss }))
 const onChanged = vi.fn(async () => {})
 
@@ -16,10 +16,10 @@ beforeEach(() => {
     ;(window as unknown as { ipc: unknown }).ipc = { invoke, on: () => () => {} }
 })
 
-// Super agents (Harbor spec §4 Agent members, 2026-11-02): an admin's switch, with two per-agent choices.
+// Super agents (Harbor spec §4 Agent members, 2026-11-02; the owner's switch since 2026-11-09), with two per-agent choices.
 describe('SuperAgentSection', () => {
-    it('lets an admin make an agent a super agent, asking permission for both by default', async () => {
-        render(<SuperAgentSection orgId="org-1" agent={boss} isAdmin ownerName="Harsh" onChanged={onChanged} />)
+    it('lets the owner make an agent a super agent, asking permission for both by default', async () => {
+        render(<SuperAgentSection orgId="org-1" agent={boss} canSwitch ownerName="Harsh" onChanged={onChanged} />)
         expect(screen.queryByRole('switch', { name: 'Ask permission before creating agents' })).toBeNull()
         fireEvent.click(screen.getByRole('switch', { name: 'Super agent' }))
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:setAgentSuper', { orgId: 'org-1', agentId: 'boss', superAgent: { askBeforeCreate: true, askBeforeDelete: true } }))
@@ -27,7 +27,7 @@ describe('SuperAgentSection', () => {
 
     it('changes each choice on its own, and turns it off with null', async () => {
         const agent = { ...boss, superAgent: { askBeforeCreate: true, askBeforeDelete: true } }
-        render(<SuperAgentSection orgId="org-1" agent={agent} isAdmin ownerName="Harsh" onChanged={onChanged} />)
+        render(<SuperAgentSection orgId="org-1" agent={agent} canSwitch ownerName="Harsh" onChanged={onChanged} />)
         fireEvent.click(screen.getByRole('switch', { name: 'Ask permission before deleting agents it creates' }))
         await waitFor(() => expect(invoke).toHaveBeenLastCalledWith('spaces:setAgentSuper', { orgId: 'org-1', agentId: 'boss', superAgent: { askBeforeCreate: true, askBeforeDelete: false } }))
         fireEvent.click(screen.getByRole('switch', { name: 'Ask permission before creating agents' }))
@@ -37,13 +37,13 @@ describe('SuperAgentSection', () => {
     })
 
     it('shows everyone else what it may do, and nothing for an ordinary agent', () => {
-        render(<SuperAgentSection orgId="org-1" agent={{ ...boss, superAgent: { askBeforeCreate: false, askBeforeDelete: true } }} isAdmin={false} ownerName="Harsh" onChanged={onChanged} />)
+        render(<SuperAgentSection orgId="org-1" agent={{ ...boss, superAgent: { askBeforeCreate: false, askBeforeDelete: true } }} canSwitch={false} ownerName="Harsh" onChanged={onChanged} />)
         expect(screen.queryByRole('switch')).toBeNull()
         expect(screen.getByText('Lets it create agents for Harsh and hand them work.')).toBeInTheDocument()
         expect(screen.getByText('Ask permission before creating agents: off')).toBeInTheDocument()
         expect(screen.getByText('Ask permission before deleting agents it creates: on')).toBeInTheDocument()
         cleanup()
-        const { container } = render(<SuperAgentSection orgId="org-1" agent={boss} isAdmin={false} ownerName="Harsh" onChanged={onChanged} />)
+        const { container } = render(<SuperAgentSection orgId="org-1" agent={boss} canSwitch={false} ownerName="Harsh" onChanged={onChanged} />)
         expect(container).toBeEmptyDOMElement()
     })
 })

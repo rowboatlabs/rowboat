@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
-import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type OrgAuth } from './auth.js';
+import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type ServerAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import { webCors } from './cors.js';
 import { clearedSessionCookie, sessionCookie, sessionToken, type SessionCookieConfig } from './session.js';
@@ -111,16 +111,14 @@ function actor(c: Context<Env>): { memberId: string; agent?: boolean } {
 
 export function buildHttpApp(deps: {
   service: HarborService;
-  auth: OrgAuth;
+  auth: ServerAuth;
   /** Mounts the login/consent page (Supabase-flagship glue; consent.ts). */
   consent?: { issuer: string; publishableKey: string };
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
-  /** Browser origins allowed to call this org cross-origin (cors.ts), and to use the session cookie (session.ts). */
+  /** Browser origins allowed to call the server cross-origin (cors.ts), and to use the session cookie (session.ts). */
   webOrigins?: readonly string[];
-  /** The session cookie's Domain: the apex on a deployment, so one cookie covers every org. */
-  sessionCookieDomain?: string;
-  /** The Spaces web app, which a browser-opened org link offers beside the desktop app (the landings below). */
+  /** The Spaces web app, which a browser-opened link offers beside the desktop app (the landings below). */
   webAppUrl?: string;
 }): Hono<Env> {
   const { service, auth, consent } = deps;
@@ -137,13 +135,11 @@ export function buildHttpApp(deps: {
   });
 
   app.use('*', webCors(deps.webOrigins ?? []));
-  const session: SessionCookieConfig = {
-    webOrigins: new Set(deps.webOrigins ?? []),
-    ...(deps.sessionCookieDomain ? { domain: deps.sessionCookieDomain } : {}),
-  };
+  // Host-only since 2026-11-09: there is one host (session.ts).
+  const session: SessionCookieConfig = { webOrigins: new Set(deps.webOrigins ?? []) };
 
-  // RFC 9728 protected-resource metadata: the org names its authorization
-  // server here (the org is only ever a resource server — spec §4). 404 under
+  // RFC 9728 protected-resource metadata: the server names its authorization
+  // server here (Harbor is only ever a resource server — spec §4). 404 under
   // the dev driver, which has no AS.
   app.get('/.well-known/oauth-protected-resource', (c) => {
     const meta = auth.metadata();
@@ -156,7 +152,7 @@ export function buildHttpApp(deps: {
   // here with an authorization_id.
   if (consent) {
     app.get('/oauth/consent', (c) =>
-      c.html(consentPageHtml({ ...consent, orgName: service.org.name })),
+      c.html(consentPageHtml({ ...consent, serverName: service.server.name })),
     );
   }
 
@@ -178,7 +174,8 @@ export function buildHttpApp(deps: {
       : sessionToken({ cookie: c.req.header('cookie'), origin: c.req.header('origin') }, session.webOrigins, { originless: blobRead(c.req.method, c.req.path) });
     if (cookie) c.set('viaSession', true);
     const credentials = { authorization, queryToken: query ?? cookie };
-    if (c.req.path === routes.acceptInvite.path) {
+    // The two routes a signed-in stranger may call: accepting an invite, and becoming a member (2026-11-09).
+    if (c.req.path === routes.acceptInvite.path || (c.req.path === routes.enroll.path && c.req.method === 'POST')) {
       const { identity, member } = await authenticateRequest(auth, credentials, { allowUnmapped: true });
       c.set('identity', identity);
       if (member) c.set('memberId', member.id);
@@ -195,11 +192,11 @@ export function buildHttpApp(deps: {
   // as HARBOR_BUILD, so a reader can tell a merge from a deploy; absent where neither is set (local runs).
   app.get('/v1/health', (c) => {
     const build = (process.env.RENDER_GIT_COMMIT ?? process.env.HARBOR_BUILD ?? '').trim().slice(0, 12);
-    return c.json({ ok: true, org: { name: service.org.name, address: service.org.address }, ...(build ? { build } : {}) });
+    return c.json({ ok: true, server: { name: service.server.name, address: service.server.address }, ...(build ? { build } : {}) });
   });
 
   // The web app's session (session.ts): the bearer in, the cookie out. The
-  // token only has to be valid here; membership is checked per org on use.
+  // token only has to be valid here; membership is checked on use.
   app.post(routes.createSession.path, async (c) => {
     const authorization = c.req.header('authorization');
     if (!authorization?.startsWith('Bearer ')) throw new HarborError('unauthorized', 'a session starts from a bearer in the Authorization header');
@@ -215,6 +212,23 @@ export function buildHttpApp(deps: {
   });
 
   app.get(routes.me.path, async (c) => reply(c, routes.me.response, { member: await service.me(actor(c)) }));
+
+  // Becoming a member (2026-11-09, spec §4 Joining): the cold start with no invite link. A member already
+  // (the dev driver, an agent key, a mapped identity) gets their row back.
+  app.post(routes.enroll.path, async (c) => {
+    const memberId = c.get('memberId');
+    const result = memberId
+      ? { member: await service.me({ memberId }), created: false }
+      : await service.enroll(c.get('identity')!);
+    return reply(c, routes.enroll.response, result);
+  });
+
+  // Account deletion (2026-10-08; here since 2026-11-09, there being no apex): the app calls it before the
+  // account API bans the login, while the token is still good. Idempotent.
+  app.delete(routes.deleteMe.path, async (c) => {
+    await service.deactivateSelf(actor(c));
+    return reply(c, routes.deleteMe.response, { ok: true });
+  });
 
   app.put(routes.updateMe.path, async (c) => {
     const input = await body(c, routes.updateMe.request);
@@ -235,17 +249,6 @@ export function buildHttpApp(deps: {
 
   app.delete(routes.clearAvatar.path, async (c) =>
     reply(c, routes.clearAvatar.response, { member: await service.clearAvatar(actor(c)) }));
-
-  app.get(routes.getOrgLogo.path, async (c) => {
-    const logoUrl = await service.orgLogoUrl(actor(c), publicOrigin(c));
-    return reply(c, routes.getOrgLogo.response, logoUrl ? { logoUrl } : {});
-  });
-
-  app.put(routes.setOrgLogo.path, async (c) =>
-    reply(c, routes.setOrgLogo.response, await service.setOrgLogo(actor(c), await imageBody(c), publicOrigin(c))));
-
-  app.delete(routes.clearOrgLogo.path, async (c) =>
-    reply(c, routes.clearOrgLogo.response, await service.clearOrgLogo(actor(c))));
 
   // Immutable by address → cache forever, privately. Always an image (sniffed at upload).
   app.get(routes.getImage.path, async (c) => {
@@ -274,20 +277,12 @@ export function buildHttpApp(deps: {
       ...(c.req.query('includeDirect') !== undefined ? { includeDirect: c.req.query('includeDirect') } : {}),
     });
     const spaces = await service.listSpaces(actor(c), { includeDirect: q.includeDirect ?? false });
-    return reply(c, routes.listSpaces.response, { spaces, groupChat: await service.isGroupChat() });
-  });
-
-  app.get(routes.browseSpaces.path, async (c) =>
-    reply(c, routes.browseSpaces.response, { spaces: await service.browseSpaces(actor(c)) }));
-
-  app.post(routes.joinSpace.path, async (c) => {
-    const { spaceId } = parseWith(routes.joinSpace.params, c.req.param());
-    return reply(c, routes.joinSpace.response, await service.joinSpace(actor(c), spaceId));
+    return reply(c, routes.listSpaces.response, { spaces });
   });
 
   app.post(routes.createSpace.path, async (c) => {
     const input = await body(c, routes.createSpace.request);
-    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name, input.visibility) });
+    return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name) });
   });
 
   app.post('/v1/spaces/:spaceId/rename', async (c) => {
@@ -296,6 +291,19 @@ export function buildHttpApp(deps: {
     return reply(c, routes.renameSpace.response, { space: await service.renameSpace(actor(c), spaceId, input) });
   });
 
+  app.post(routes.setSpaceGraph.path, async (c) => {
+    const { spaceId } = parseWith(routes.setSpaceGraph.params, c.req.param());
+    const input = await body(c, routes.setSpaceGraph.request);
+    return reply(c, routes.setSpaceGraph.response, { space: await service.setSpaceGraph(actor(c), spaceId, input) });
+  });
+  app.get(routes.getSpaceGraph.path, async (c) => {
+    const { spaceId } = parseWith(routes.getSpaceGraph.params, c.req.param());
+    const q = parseWith(routes.getSpaceGraph.query, {
+      ...(c.req.query('about') !== undefined ? { about: c.req.query('about') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.getSpaceGraph.response, await service.getSpaceGraph(actor(c), spaceId, q));
+  });
   app.post(routes.archiveSpace.path, async (c) => {
     const { spaceId } = parseWith(routes.archiveSpace.params, c.req.param());
     const input = await body(c, routes.archiveSpace.request);
@@ -308,12 +316,6 @@ export function buildHttpApp(deps: {
     return reply(c, routes.deleteSpace.response, { deleted: true });
   });
 
-  app.post(routes.setSpaceVisibility.path, async (c) => {
-    const { spaceId } = parseWith(routes.setSpaceVisibility.params, c.req.param());
-    const input = await body(c, routes.setSpaceVisibility.request);
-    return reply(c, routes.setSpaceVisibility.response, { space: await service.setSpaceVisibility(actor(c), spaceId, input) });
-  });
-
   app.post(routes.removeMember.path, async (c) => {
     const { spaceId, memberId } = parseWith(routes.removeMember.params, c.req.param());
     const input = await body(c, routes.removeMember.request);
@@ -324,12 +326,6 @@ export function buildHttpApp(deps: {
     const { spaceId } = parseWith(routes.unarchiveSpace.params, c.req.param());
     const input = await body(c, routes.unarchiveSpace.request);
     return reply(c, routes.unarchiveSpace.response, { space: await service.unarchiveSpace(actor(c), spaceId, input) });
-  });
-
-  app.post(routes.setDefaultSpace.path, async (c) => {
-    const { spaceId } = parseWith(routes.setDefaultSpace.params, c.req.param());
-    const input = await body(c, routes.setDefaultSpace.request);
-    return reply(c, routes.setDefaultSpace.response, { space: await service.setDefaultSpace(actor(c), spaceId, input) });
   });
 
   app.post(routes.openDirect.path, async (c) => {
@@ -352,30 +348,21 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
   });
 
-  app.post(routes.removeOrgMember.path, async (c) => {
-    const { memberId } = parseWith(routes.removeOrgMember.params, c.req.param());
-    const input = await body(c, routes.removeOrgMember.request);
-    return reply(c, routes.removeOrgMember.response, { member: await service.removeOrgMember(actor(c), memberId, input) });
+  app.put(routes.setAgentAccess.path, async (c) => {
+    const { spaceId, agentId } = parseWith(routes.setAgentAccess.params, c.req.param());
+    const input = await body(c, routes.setAgentAccess.request);
+    return reply(c, routes.setAgentAccess.response, { membership: await service.setAgentAccess(actor(c), spaceId, agentId, input) });
   });
 
-  app.post(routes.setMemberRole.path, async (c) => {
-    const { memberId } = parseWith(routes.setMemberRole.params, c.req.param());
-    const input = await body(c, routes.setMemberRole.request);
-    return reply(c, routes.setMemberRole.response, { member: await service.setMemberRole(actor(c), memberId, input) });
+  app.post(routes.setSpaceRole.path, async (c) => {
+    const { spaceId, memberId } = parseWith(routes.setSpaceRole.params, c.req.param());
+    const input = await body(c, routes.setSpaceRole.request);
+    return reply(c, routes.setSpaceRole.response, { membership: await service.setSpaceRole(actor(c), spaceId, memberId, input) });
   });
 
-  app.get(routes.getOrgSettings.path, async (c) => {
-    return reply(c, routes.getOrgSettings.response, { settings: await service.getOrgSettings(actor(c)) });
-  });
-
-  app.patch(routes.updateOrgSettings.path, async (c) => {
-    const input = await body(c, routes.updateOrgSettings.request);
-    return reply(c, routes.updateOrgSettings.response, { settings: await service.updateOrgSettings(actor(c), input) });
-  });
-
-  app.get(routes.listOrgMembers.path, async (c) => {
-    const members = await service.listOrgMembers(actor(c));
-    return reply(c, routes.listOrgMembers.response, { members, online: service.onlineAgents(members), onlinePeople: service.onlinePeople(members) });
+  app.get(routes.listContacts.path, async (c) => {
+    const members = await service.listContacts(actor(c));
+    return reply(c, routes.listContacts.response, { members, online: service.onlineAgents(members), onlinePeople: service.onlinePeople(members) });
   });
 
   app.post('/v1/spaces/:spaceId/leave', async (c) => {
@@ -469,7 +456,6 @@ export function buildHttpApp(deps: {
         connection: input.connection,
         ...(input.credential !== undefined ? { credential: input.credential } : {}),
         ...(input.instance !== undefined ? { instance: input.instance } : {}),
-        personal: input.personal,
         ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
@@ -488,12 +474,15 @@ export function buildHttpApp(deps: {
         kind: input.kind,
         ...(input.anthropicApiKey !== undefined ? { anthropicApiKey: input.anthropicApiKey } : {}),
         ...(input.env !== undefined ? { env: input.env } : {}),
-        personal: input.personal,
         ...(input.request !== undefined ? { request: input.request } : {}),
       }),
     );
   });
 
+  app.delete(routes.deleteAgent.path, async (c) => {
+    const { agentId } = parseWith(routes.deleteAgent.params, c.req.param());
+    return reply(c, routes.deleteAgent.response, await service.deleteAgent(actor(c), agentId));
+  });
   app.delete(routes.deleteManagedAgent.path, async (c) => {
     const { agentId } = parseWith(routes.deleteManagedAgent.params, c.req.param());
     return reply(c, routes.deleteManagedAgent.response, { hosting: await service.deleteManagedAgent(actor(c), agentId) });
@@ -647,12 +636,6 @@ export function buildHttpApp(deps: {
     return reply(c, routes.setAgentProfile.response, { agent: await service.setAgentProfile(actor(c), agentId, input) });
   });
 
-  app.put(routes.setAgentPersonal.path, async (c) => {
-    const { agentId } = parseWith(routes.setAgentPersonal.params, c.req.param());
-    const input = await body(c, routes.setAgentPersonal.request);
-    return reply(c, routes.setAgentPersonal.response, { agent: await service.setAgentPersonal(actor(c), agentId, input) });
-  });
-
   app.post(routes.listSetupInstances.path, async (c) => {
     const { connection } = parseWith(routes.listSetupInstances.params, c.req.param());
     const { key } = await body(c, routes.listSetupInstances.request);
@@ -743,18 +726,33 @@ export function buildHttpApp(deps: {
     return reply(c, routes.acceptInvite.response, result);
   });
 
-  // Where a browser-opened link goes (2026-10-13, Slack's pattern): the
-  // desktop app, launched at once, else the web app when this Harbor names
-  // one. The web app's /open takes the deep link's query unchanged, so both
-  // resolve the link the same way (the renderer's parseSpacesLink).
+  // Where a browser-opened link goes. The web app, when this Harbor names one
+  // (2026-11-09: most people opening a link have no desktop app, and a browser
+  // cannot tell whether one is installed, so the page used to dead-end them on
+  // a launch that did nothing); its /open takes the deep link's query
+  // unchanged, so it resolves the link the way the desktop does (the
+  // renderer's parseSpacesLink). Without a web app, the hand-off page of
+  // 2026-10-13: the desktop app launched at once, and its download.
   const openers = (query: string): Openers => ({
     deep: `rowboat://open?${query}`,
     ...(deps.webAppUrl ? { web: `${deps.webAppUrl.replace(/\/$/, '')}/open?${query}` } : {}),
   });
+  /**
+   * The web app when there is one, else the hand-off page. A phone's browser
+   * (by user agent) gets the hand-off page even then (2026-11-09, evening):
+   * the app it may have is the phone app, which the page offers along with
+   * the App Store and the browser; the web app is built for a desktop. The
+   * phone page launches nothing by itself — a scheme the phone has no app
+   * for is an error dialog on iOS.
+   */
+  const handOff = (c: Context, o: Openers, page: (phone: boolean) => string) => {
+    const phone = /iPhone|iPad|iPod|Android/i.test(c.req.header('user-agent') ?? '');
+    return o.web && !phone ? c.redirect(o.web, 302) : c.html(page(phone));
+  };
 
   // The invite link's landing (2026-09-15): a browser-opened /join/<token>
-  // hands the invite into the app as rowboat://open?type=spaces&org=…&invite=…
-  // — the same deep-link grammar as the org link landings below, the org
+  // hands the invite into the app as rowboat://open?type=spaces&server=…&invite=…
+  // — the same deep-link grammar as the link landings below, the server
   // named by its address — and shows what is being joined meanwhile (invite
   // resolution is pre-auth by design, spec §4). A dead invite says so and
   // launches nothing.
@@ -762,29 +760,45 @@ export function buildHttpApp(deps: {
     const token = c.req.param('token');
     const resolved = await service.resolveInvite(token);
     if (resolved.state !== 'ok') return c.html(invitePage({ state: resolved.state }), 410);
-    const query = `type=spaces&org=${encodeURIComponent(service.org.address)}&invite=${encodeURIComponent(token)}`;
-    return c.html(invitePage({ state: 'ok', spaces: resolved.spaces.map((s) => s.name), org: resolved.org.name, invitedBy: resolved.invitedBy, ...openers(query) }));
+    const query = `type=spaces&server=${encodeURIComponent(service.server.address)}&invite=${encodeURIComponent(token)}`;
+    const o = openers(query);
+    return handOff(c, o, (phone) => invitePage({ state: 'ok', phone, ...(resolved.space ? { space: resolved.space.name } : {}), ...(resolved.direct ? { person: resolved.direct.displayName } : {}), server: service.server.name, invitedBy: resolved.invitedBy, ...o }));
   });
 
+  // Apple's site association (2026-11-09): with it, and the domain declared in
+  // the phone app, iOS opens a link on this server in the app directly when
+  // it is installed, and in the browser otherwise — no page in between. The
+  // app id is the team and the bundle; the paths are the links the app can
+  // open: an invite, a space (and anything under it), a person.
+  const siteAssociation = (c: Context) =>
+    c.json({
+      applinks: {
+        details: [{ appIDs: ['9526N79222.com.rowboatlabs.spaces'], components: [{ '/': '/join/*' }, { '/': '/s/*' }, { '/': '/u/*' }] }],
+      },
+    });
+  app.get('/.well-known/apple-app-site-association', siteAssociation);
+  app.get('/apple-app-site-association', siteAssociation);
+
   // --- link landings ---------------------------------------------------------
-  // Every org link (ids.ts grammar) opened in a browser lands here and is
-  // handed on, the org named by its address. Nothing is looked up and nothing
+  // Every Spaces link (ids.ts grammar) opened in a browser lands here and is
+  // handed on, the server named by its address. Nothing is looked up and nothing
   // is rendered about the target, so a link says nothing to someone who
   // cannot open it. The app itself intercepts these URLs before they ever
   // reach a browser.
-  const landing = (target: URLSearchParams) => {
-    target.set('org', service.org.address);
-    return landingPage(openers(`type=spaces&${target.toString()}`));
+  const landing = (c: Context, target: URLSearchParams) => {
+    target.set('server', service.server.address);
+    const o = openers(`type=spaces&${target.toString()}`);
+    return handOff(c, o, (phone) => landingPage({ ...o, phone }));
   };
-  app.get('/', (c) => c.html(landing(new URLSearchParams())));
-  app.get('/s/:spaceId', (c) => c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId') }))));
+  app.get('/', (c) => landing(c, new URLSearchParams()));
+  app.get('/s/:spaceId', (c) => landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId') })));
   app.get('/s/:spaceId/m/:messageId', (c) =>
-    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') }))),
+    landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId'), messageId: c.req.param('messageId') })),
   );
   app.get('/s/:spaceId/a/:assetId', (c) =>
-    c.html(landing(new URLSearchParams({ spaceId: c.req.param('spaceId'), assetId: c.req.param('assetId') }))),
+    landing(c, new URLSearchParams({ spaceId: c.req.param('spaceId'), assetId: c.req.param('assetId') })),
   );
-  app.get('/u/:memberId', (c) => c.html(landing(new URLSearchParams({ memberId: c.req.param('memberId') }))));
+  app.get('/u/:memberId', (c) => landing(c, new URLSearchParams({ memberId: c.req.param('memberId') })));
 
   // --- assets ----------------------------------------------------------------
 
@@ -937,6 +951,20 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listTopics.response, { topics });
   });
 
+  app.get(routes.searchAll.path, async (c) => {
+    const q = parseWith(routes.searchAll.query, {
+      q: c.req.query('q'),
+      ...(c.req.query('spaceId') !== undefined ? { spaceId: c.req.query('spaceId') } : {}),
+      ...(c.req.query('kinds') !== undefined ? { kinds: c.req.query('kinds') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    const results = await service.search(actor(c), q.spaceId, q.q, {
+      ...(q.kinds !== undefined ? { kinds: q.kinds } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    });
+    return reply(c, routes.searchAll.response, results);
+  });
+
   app.get('/v1/spaces/:spaceId/search', async (c) => {
     const { spaceId } = parseWith(routes.search.params, c.req.param());
     const q = parseWith(routes.search.query, {
@@ -1049,6 +1077,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.archiveThread.response, { root: await service.archiveThread(actor(c), spaceId, rootMessageId, input) });
   });
 
+  app.post('/v1/spaces/:spaceId/threads/:rootMessageId/session', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.setSession.params, c.req.param());
+    const input = await body(c, routes.setSession.request);
+    return reply(c, routes.setSession.response, { root: await service.setSession(actor(c), spaceId, rootMessageId, input) });
+  });
+
   app.get('/v1/spaces/:spaceId/archived-threads', async (c) => {
     const { spaceId } = parseWith(routes.listArchivedThreads.params, c.req.param());
     return reply(c, routes.listArchivedThreads.response, { threads: await service.listArchivedThreads(actor(c), spaceId) });
@@ -1073,6 +1107,10 @@ export function buildHttpApp(deps: {
   });
 
   app.get(routes.unread.path, async (c) => reply(c, routes.unread.response, await service.unread(actor(c))));
+  app.get(routes.myThreads.path, async (c) => {
+    const q = parseWith(routes.myThreads.query, { ...(c.req.query('archived') !== undefined ? { archived: c.req.query('archived') } : {}) });
+    return reply(c, routes.myThreads.response, { threads: await service.myThreads(actor(c), q) });
+  });
 
   app.get(routes.activity.path, async (c) => {
     const q = parseWith(routes.activity.query, {
@@ -1109,14 +1147,26 @@ const PAGE_STYLE =
   `a.b{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;border-radius:8px;background:#111;color:#fff;text-decoration:none}` +
   `.s{margin-top:1.25rem;font-size:13px;color:#666}.s+.s{margin-top:.25rem}.s a{color:inherit}</style>`;
 
-/** The desktop app's deep link, and the web app's address for the same link when the Harbor names one. */
+/** The app's deep link, and the web app's address for the same link when the Harbor names one. */
 interface Openers {
   deep: string;
   web?: string;
+  /** A phone's browser: offer the phone app and the store, launch nothing. */
+  phone?: boolean;
 }
 
-/** Launch the desktop app at once; offer the download, and the web app. */
+/** The phone app, on the App Store (2026-11-09); the one listing serves iPhone and iPad. */
+const APP_STORE_URL = 'https://apps.apple.com/app/id6818016444';
+
+/** Launch the desktop app at once; offer the download, and the web app. On a phone: the app, the store, the browser. */
 function openerLinks(o: Openers): string {
+  if (o.phone) {
+    return (
+      `<a class="b" href="${escapeHtml(o.deep)}">Open in the Rowboat app</a>` +
+      `<p class="s">Don't have it? <a href="${APP_STORE_URL}">Get it on the App Store</a>, then open this link again.</p>` +
+      (o.web ? `<p class="s">Or <a href="${escapeHtml(o.web)}">continue in your browser</a>.</p>` : '')
+    );
+  }
   return (
     `<a class="b" href="${escapeHtml(o.deep)}">Open in Rowboat</a>` +
     `<p class="s">Don't have the app? <a href="${DOWNLOAD_URL}">Download Rowboat</a>, then open this link again.</p>` +
@@ -1125,19 +1175,15 @@ function openerLinks(o: Openers): string {
   );
 }
 
-/** An org link's landing. */
+/** A link's landing. */
 function landingPage(o: Openers): string {
   return `${PAGE_HEAD}<title>Open in Rowboat</title>${PAGE_STYLE}<main><h1>This link opens in Rowboat</h1>${openerLinks(o)}</main>`;
 }
 
 type InvitePage =
-  | ({ state: 'ok'; spaces: string[]; org: string; invitedBy?: string } & Openers)
+  | ({ state: 'ok'; space?: string; person?: string; server: string; invitedBy?: string } & Openers)
   | { state: 'expired' | 'revoked' };
 
-/** "a", "a and b", "a, b and c". */
-function listNames(names: string[]): string {
-  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
 
 /** The /join landing: launch the app with the invite, or say why not. */
 function invitePage(page: InvitePage): string {
@@ -1145,13 +1191,16 @@ function invitePage(page: InvitePage): string {
     const why = page.state === 'expired' ? 'This invite has expired.' : 'This invite was revoked.';
     return `${PAGE_HEAD}<title>Invite ${page.state}</title>${PAGE_STYLE}<main><h1>${why}</h1><p class="m">Ask whoever sent it for a new link.</p></main>`;
   }
-  // An invite is to the org (2026-10-19): the org is the headline, the
-  // spaces accepting joins the line under it.
-  const joins = page.spaces.length > 0 ? `<p class="m">You'll join ${escapeHtml(listNames(page.spaces))}</p>` : '';
-  const by = page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
+  // The space, or the person, is the headline (2026-11-09: an invite is to one space, or it is someone's link).
+  const headline = page.space
+    ? `You're invited to ${escapeHtml(page.space)}`
+    : page.person
+      ? `${escapeHtml(page.person)} invited you to message them`
+      : `You're invited to ${escapeHtml(page.server)}`;
+  const by = page.space && page.invitedBy ? `<p class="m">Invited by ${escapeHtml(page.invitedBy)}</p>` : '';
   return (
-    `${PAGE_HEAD}<title>Join ${escapeHtml(page.org)}</title>${PAGE_STYLE}<main>` +
-    `<h1>You're invited to ${escapeHtml(page.org)}</h1>${joins}${by}` +
+    `${PAGE_HEAD}<title>${escapeHtml(page.space ? `Join ${page.space}` : page.person ? `Message ${page.person}` : `Join ${page.server}`)}</title>${PAGE_STYLE}<main>` +
+    `<h1>${headline}</h1>${by}` +
     `${openerLinks(page)}</main>`
   );
 }

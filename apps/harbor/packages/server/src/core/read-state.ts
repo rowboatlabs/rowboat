@@ -1,11 +1,11 @@
-import type { ActivityItem, ActivityKind, ActivityPage, Routes } from '@rowboat/spaces-protocol';
+import type { ActivityItem, ActivityKind, ActivityPage, InvocationState, Routes, ThreadListing, ThreadStatus } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { HarborError } from '../errors.js';
 import type { Feed } from './feed.js';
 import { Kernel, type ActorCtx } from './kernel.js';
 import type { Spaces } from './spaces.js';
 
-// Per-member cursors the org owns (read marks, follows), the unread snapshot,
+// Per-member cursors the server owns (read marks, follows), the unread snapshot,
 // Activity, and mark-everything-read (the read-state arc, 2026-09-09).
 
 export type MarkReadInput = z.infer<Routes['markRead']['request']>;
@@ -13,6 +13,9 @@ export type MarkReadInput = z.infer<Routes['markRead']['request']>;
 export type UnreadSnapshot = z.infer<Routes['unread']['response']>;
 
 const DEFAULT_ACTIVITY_PAGE = 30;
+
+/** How many of a member's threads the cross-space list carries (newest activity first). */
+const MY_THREADS_LIMIT = 200;
 
 // The activity cursor: the last item's instant and id, joined on a character
 // neither contains (ISO instants and item ids are both `~`-free).
@@ -34,7 +37,7 @@ export class ReadState {
   ) {}
 
   // --- read state ------------------------------------------------------------
-  // Per-member cursors the org owns (read state, 2026-09-09) so every device
+  // Per-member cursors the server owns (read state, 2026-09-09) so every device
   // agrees. Offsets, never timestamps. Never on the log: a mark is private
   // member state, not a space fact — the member's other connections learn by
   // an ephemeral read_mark frame, and a reconnecting client refetches unread().
@@ -86,7 +89,7 @@ export class ReadState {
   }
 
   // --- activity (2026-09-10) -------------------------------------------------
-  // The member's feed is a query over facts the org already keeps (stamps,
+  // The member's feed is a query over facts the server already keeps (stamps,
   // follow rows, DM kind, reactions), never a second table: edits, deletes
   // and the backfill stay consistent for free, and unread is the read marks'
   // answer. Cursor = the last item's (at, id), opaque on the wire.
@@ -127,8 +130,8 @@ export class ReadState {
       };
     });
     const last = page[page.length - 1];
-    // Names for everyone on the page, from the roster the caller may see —
-    // actors and mention labels alike, so no client walks spaces for names.
+    // Names for everyone on the page — actors and mention labels alike, departed
+    // members included, so no client walks spaces for names (by id since 2026-11-09).
     const wanted = new Set<string>();
     for (const item of items) {
       for (const actor of item.actors) wanted.add(actor.memberId);
@@ -137,7 +140,7 @@ export class ReadState {
     }
     const names: Record<string, string> = {};
     if (wanted.size > 0) {
-      for (const m of await this.spaces.listOrgMembers(ctx)) if (wanted.has(m.id)) names[m.id] = m.displayName;
+      for (const m of await this.k.store.listMembersByIds([...wanted])) names[m.id] = m.displayName;
     }
     return {
       items,
@@ -150,7 +153,7 @@ export class ReadState {
   /**
    * Reactions through `at` read as seen. Monotone. The one instant a client
    * supplies is re-serialized first: marks are compared as text, which is
-   * chronological only in the 24-character form the org itself writes.
+   * chronological only in the 24-character form the server itself writes.
    */
   async markActivitySeen(ctx: ActorCtx, at: string): Promise<{ seenAt: string }> {
     return { seenAt: await this.k.store.advanceActivitySeenAt(ctx.memberId, new Date(at).toISOString()) };
@@ -186,6 +189,59 @@ export class ReadState {
     }
     const seenAt = await this.k.store.advanceActivitySeenAt(ctx.memberId, at);
     return { spaces: out, threads: threads.length, seenAt };
+  }
+
+  /**
+   * The member's threads across their spaces (2026-11-05, "coding session:
+   * threads" in Main), for the rail's Threads page and the /session picker:
+   * the ones they started (with replies, or a session) or follow, newest
+   * activity first. Active ones, or with `archived` the archived and ended
+   * ones; a discussion's archive is its topic's. Each carries where it
+   * stands for them, from its agents' open invocations and their thread mark.
+   */
+  async myThreads(ctx: ActorCtx, opts: { archived?: boolean } = {}): Promise<ThreadListing[]> {
+    const spaces = await this.k.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    const byId = new Map(spaces.map((s) => [s.id, s]));
+    const spaceIds = spaces.map((s) => s.id);
+    const roots = await this.k.store.listMemberThreadRoots(ctx.memberId, spaceIds, MY_THREADS_LIMIT);
+    const agents = new Map<string, InvocationState[]>();
+    for (const i of await this.k.store.listOpenInvocationStates(spaceIds)) {
+      const key = `${i.spaceId}/${i.threadRootId}`;
+      agents.set(key, [...(agents.get(key) ?? []), i.state]);
+    }
+    const unreadBySpace = new Map<string, Map<string, { unreadReplies: number; unreadMentions: number }>>();
+    const out: ThreadListing[] = [];
+    for (const root of roots) {
+      const topic = await this.k.store.getTopicByRoot(root.spaceId, root.id);
+      if ((topic ? topic.archived : root.archived === true) !== (opts.archived === true)) continue;
+      let unread = unreadBySpace.get(root.spaceId);
+      if (!unread) {
+        unread = new Map((await this.k.store.listUnreadFollowedThreads(root.spaceId, ctx.memberId)).map((t) => [t.rootMessageId, t]));
+        unreadBySpace.set(root.spaceId, unread);
+      }
+      const counts = unread.get(root.id) ?? { unreadReplies: 0, unreadMentions: 0 };
+      const states = agents.get(`${root.spaceId}/${root.id}`) ?? [];
+      const status: ThreadStatus = states.includes('waiting')
+        ? 'needs_you'
+        : states.length > 0
+          ? 'working'
+          : counts.unreadReplies > 0
+            ? 'needs_you'
+            : 'idle';
+      const space = byId.get(root.spaceId)!;
+      out.push({
+        spaceId: space.id,
+        spaceName: space.name,
+        spaceKind: space.kind,
+        root,
+        ...(topic ? { topic } : {}),
+        status,
+        unreadReplies: counts.unreadReplies,
+        unreadMentions: counts.unreadMentions,
+        lastActivityAt: root.lastReplyAt ?? root.postedAt,
+      });
+    }
+    return out;
   }
 
   /** Every space the member is in (DMs included): cursor, unread roots, unread followed threads. */

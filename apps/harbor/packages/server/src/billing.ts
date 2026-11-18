@@ -10,6 +10,8 @@
 // - a Hermes calls the model through the backend's LLM gateway on a key the
 //   backend mints for the owner and the agent, so model calls are settled
 //   per call like the desktop app's;
+// - every billed runtime uses that same identity for Composio MCP tools,
+//   independently of the model's provider (2026-11-11);
 // - the machine's cost is the platform's own, passed on at cost: Harbor
 //   reports each agent's running total for the month and the backend debits
 //   what is new since its last settlement;
@@ -29,6 +31,8 @@ export interface RegisterAgentInput {
 export interface BillingAccounts {
   /** Rowboat's LLM gateway, OpenAI-format: where a billed Hermes sends its model calls. */
   readonly gatewayUrl: string;
+  /** Owner-scoped Composio tools, authenticated with that same gateway key (2026-11-11). */
+  readonly composioMcpUrl: string;
   /** Where an owner changes their plan, for the message an agent posts when credits run out. */
   upgradeUrl(): Promise<string | undefined>;
   /** Refused with `limit` when the owner's plan already has as many managed agents as it allows. Idempotent on `ref`. */
@@ -91,6 +95,7 @@ export function httpBilling(options: HttpBillingOptions): BillingAccounts {
 
   return {
     gatewayUrl: `${base}/v1/llm`,
+    composioMcpUrl: `${base}/v1/composio/mcp`,
     async upgradeUrl() {
       if (upgrade) return upgrade;
       try {

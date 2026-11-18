@@ -7,7 +7,7 @@ import { SpaceRefsProvider, SpaceNavContext } from './space-nav'
 import type { spaces } from '@x/shared'
 
 const apply = vi.hoisted(() => vi.fn())
-vi.mock('@/hooks/use-space-members', () => ({ applyProfileUpdate: apply }))
+vi.mock('@/hooks/use-space-members', () => ({ applyProfileUpdate: apply, usePeopleOnline: () => new Set(['me', 'other']) }))
 vi.mock('@/lib/toast', () => ({ toast: vi.fn() }))
 const member = { id: 'me', displayName: 'Harsh', title: 'Engineer', role: 'member', kind: 'human' } as spaces.Member
 const invoke = vi.fn()
@@ -100,7 +100,7 @@ function profile(person: spaces.Member, selfId = 'me') {
 it('shows title and presence and offers editing only for your own profile', async () => {
     profile(member)
     expect(screen.getByRole('dialog')).toHaveTextContent('Engineer')
-    expect(screen.getByText('Here now')).toBeInTheDocument()
+    expect(screen.getByText('Online')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }))
     expect(await screen.findByLabelText('Display name')).toHaveValue('Harsh')
 })
@@ -110,10 +110,14 @@ it('opens a DM with another member from the profile panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Message' }))
     expect(openDirect).toHaveBeenCalledWith('profile-org', 'other')
 })
-it('offers no Mention or Message for someone else’s personal agent, and both to its owner (2026-10-30)', () => {
-    const agent = { id: 'claude', displayName: 'Claude Code', role: 'member', kind: 'agent', agentConnection: 'local', personal: true, ownerId: 'owner' } as spaces.Member
+it('offers no Message for someone else’s agent, no Mention when its seat here is the owner’s alone, and both to its owner (2026-11-09)', () => {
+    const agent = { id: 'claude', displayName: 'Claude Code', kind: 'agent', agentConnection: 'local', invocableBy: 'owner', ownerId: 'owner' } as spaces.Member
     profile(agent, 'me')
     expect(screen.queryByRole('button', { name: 'Mention' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Message' })).not.toBeInTheDocument()
+    cleanup()
+    profile({ ...agent, invocableBy: 'members' } as spaces.Member, 'me')
+    expect(screen.getByRole('button', { name: 'Mention' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Message' })).not.toBeInTheDocument()
     cleanup()
     profile(agent, 'owner')
@@ -126,4 +130,9 @@ it('loads photos through the selected org and falls back to initials on decode f
     expect(invoke).toHaveBeenCalledWith('spaces:getProfileImage', { orgId: 'avatar-org', hash: 'b'.repeat(64) })
     fireEvent.error(container.querySelector('img')!)
     expect(screen.getByText('HV')).toBeInTheDocument()
+})
+
+it('uses server presence even when profile preferences have not caught up', () => {
+    profile({ ...member, availability: { manualAway: true } })
+    expect(screen.getByText('Online')).toBeInTheDocument()
 })

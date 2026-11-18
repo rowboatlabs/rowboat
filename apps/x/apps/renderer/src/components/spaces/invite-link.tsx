@@ -3,7 +3,6 @@ import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import * as analytics from '@/lib/analytics'
-import { listNames } from '@/lib/spaces-invites'
 
 type InviteLinkState =
     | { kind: 'loading' }
@@ -51,29 +50,30 @@ function InviteLinkText({ link }: { link: string }) {
 /**
  * An invite link, minted when this mounts: the link as selectable text, a
  * Copy button that says "Copied" for a beat, and one line on what the link
- * admits. An invite is to the org (harbor, 2026-10-19), and accepting also
- * joins the org's default spaces, so the line is read back from the invite
- * itself rather than guessed from the spaces asked for. Mount it fresh (a
- * new `key`) for a new link; there is nothing stale to hand out.
+ * admits. An invite is to one space, or it is your personal link (`direct`),
+ * whose target is a DM with you (harbor spec §4 Invites, 2026-11-09); the
+ * line is read back from the invite itself. Mount it fresh (a new `key`) for
+ * a new link; there is nothing stale to hand out.
  */
-export function InviteLinkPanel({ orgId, spaceIds }: { orgId: string; spaceIds: string[] }) {
+export function InviteLinkPanel({ orgId, spaceId, direct }: { orgId: string; spaceId?: string; direct?: true }) {
     const [state, setState] = useState<InviteLinkState>({ kind: 'loading' })
     const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
     useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
-    const idsKey = spaceIds.join('|')
 
     useEffect(() => {
         let cancelled = false
         void (async () => {
             try {
-                const { link } = await invokeSpace('spaces:createInvite', { orgId, spaceIds })
+                const { link } = await invokeSpace('spaces:createInvite', { orgId, ...(spaceId ? { spaceId } : {}), ...(direct ? { direct: true } : {}) })
                 // What it admits is a nicety: the link works without it.
                 const admits = await window.ipc.invoke('spaces:resolveInviteLink', { url: link }).then(
                     ({ resolved }) => resolved.state === 'ok'
-                        ? (resolved.spaces ?? []).length > 0
-                            ? `Anyone with it can join ${resolved.org.name} and ${listNames((resolved.spaces ?? []).map((s) => `#${s.name}`))}.`
-                            : `Anyone with it can join ${resolved.org.name}.`
+                        ? resolved.space
+                            ? `Anyone with it can join #${resolved.space.name}. It works for seven days.`
+                            : resolved.direct
+                                ? 'Anyone with it can message you directly, and you them. It works for seven days.'
+                                : null
                         : null,
                     () => null,
                 )
@@ -83,9 +83,7 @@ export function InviteLinkPanel({ orgId, spaceIds }: { orgId: string; spaceIds: 
             }
         })()
         return () => { cancelled = true }
-        // The joined key IS the dependency — the array identity changes every render.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [orgId, idsKey])
+    }, [orgId, spaceId, direct])
 
     const copyLink = (link: string) =>
         navigator.clipboard.writeText(link).then(
@@ -99,8 +97,11 @@ export function InviteLinkPanel({ orgId, spaceIds }: { orgId: string; spaceIds: 
         )
 
     const link = state.kind === 'ready' ? state.link : ''
+    // min-w-0 (2026-11-06): inside a grid (the invite dialog) a no-wrap link
+    // otherwise sets the item's min width, the track grows to the whole URL,
+    // and the link, description and Copy button run past the panel.
     return (
-        <div className="flex flex-col gap-2">
+        <div className="flex min-w-0 flex-col gap-2">
             {state.kind === 'ready'
                 ? <InviteLinkText link={state.link} />
                 : <span className="block font-mono text-xs leading-6 text-muted-foreground">{state.kind === 'loading' ? 'Creating link…' : 'No link'}</span>}

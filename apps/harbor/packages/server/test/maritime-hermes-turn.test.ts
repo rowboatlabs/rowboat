@@ -15,7 +15,7 @@ describe('Hermes turn: a gateway that is not ready', () => {
   function turn(failures: number, words = 'Gateway draining: not_ready') {
     dir = mkdtempSync(join(tmpdir(), 'hermes-turn-'));
     const files = { promptPath: join(dir, 't.prompt'), outPath: join(dir, 't.jsonl'), errPath: join(dir, 't.err'), lastPath: join(dir, 't.last') };
-    const line = RUNTIMES.hermes!.command({ orgUrl: 'https://acme.example', agentKey: 'rbk_x', session: 'rb-t', ...files }).split('\n').at(-1)!;
+    const line = RUNTIMES.hermes!.command({ serverUrl: 'https://acme.example', agentKey: 'rbk_x', session: 'rb-t', ...files }).split('\n').at(-1)!;
     const stub = [
       `calls=${join(dir, 'calls')}`,
       'sleep() { :; }',

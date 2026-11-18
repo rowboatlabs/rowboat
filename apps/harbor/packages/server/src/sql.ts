@@ -18,8 +18,8 @@ export interface SqlDb extends SqlExecutor {
 
 /**
  * `max` caps the pool (pg's default is 10). Every space-locked write holds one
- * connection for its transaction, and a multi-org deployment shares this one
- * pool across every org, so size it to the database plan's connection limit
+ * connection for its transaction, and the server shares this one
+ * pool, so size it to the database plan's connection limit
  * with headroom for migrations and the odd psql session.
  */
 export function postgresDb(connectionString: string, opts: { max?: number } = {}): SqlDb {

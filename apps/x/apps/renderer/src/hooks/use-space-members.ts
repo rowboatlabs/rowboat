@@ -11,12 +11,13 @@ function key(orgId: string, spaceId: string): string {
     return `${orgId}/${spaceId}`
 }
 
-/** The org-wide roster lives in the same store, under a key no space id can take. */
+/** Your contacts (the server's roster until 2026-11-09) live in the same store, under a key no space id can take. */
 function orgKey(orgId: string): string {
     return `org:${orgId}`
 }
 
-const CACHE_VERSION = 1
+// 2 (2026-11-09): a space's rows carry `role`, `joinedAt` and an agent's seat; older caches lack them.
+const CACHE_VERSION = 2
 
 function cacheKey(k: string): string {
     return `spaces:members:${k}`
@@ -122,11 +123,11 @@ export function refreshMembers(orgId: string, spaceId: string, opts: { force?: b
     const k = key(orgId, spaceId)
     const due = (at: number | undefined) => opts.force || Date.now() - (at ?? 0) >= REFRESH_MIN_MS
     if (due(lastLoadedAt.get(k))) void loadMembers(orgId, spaceId, opts.force)
-    // Membership changes in any space change who is in the org's directory too.
+    // Membership changes in any space change who your contacts are too.
     if (due(lastLoadedAt.get(orgKey(orgId)))) void loadOrgRoster(orgId, [])
 }
 
-/** Refetch the org roster now: a change this member just made (a new agent) must show in the pickers at once. */
+/** Refetch the contacts now: a change this member just made (a new agent) must show in the pickers at once. */
 export function refreshOrgRoster(orgId: string): void {
     void loadOrgRoster(orgId, [])
 }
@@ -144,15 +145,14 @@ async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promis
     if (membersLoading.has(k)) return
     membersLoading.add(k)
     try {
-        const res = await window.ipc.invoke('spaces:listOrgMembers', { orgId })
+        const res = await window.ipc.invoke('spaces:listContacts', { orgId })
         membersCacheOnly.delete(k)
         lastLoadedAt.set(k, Date.now())
         if (!membersDirty.has(k)) setMembers(k, res.members)
         if (res.online) setAgentsOnline(orgId, res.online)
         if (!membersDirty.has(k)) setPeopleOnline(orgId, res.onlinePeople ?? [])
     } catch {
-        // Org unreachable, or an older org without the route: the per-space
-        // rosters the app has already fetched stand in for the directory.
+        // Server unreachable: the per-space rosters the app has already fetched stand in.
         if (!memberState.has(k) || membersCacheOnly.has(k)) setMembers(k, unionOfRosters(orgId, spaceIds))
     } finally {
         membersLoading.delete(k)
@@ -179,8 +179,8 @@ function subscribeMembers(l: () => void): () => void {
     }
 }
 
-/** The space's roster: cached names in the first frame, refreshed behind. */
-export function useSpaceMembers(orgId: string, spaceId: string): spaces.Member[] {
+/** The space's roster, each with their role and an agent's seat (2026-11-09): cached names in the first frame, refreshed behind. */
+export function useSpaceMembers(orgId: string, spaceId: string): spaces.SpaceMember[] {
     // Before the snapshot read, not in an effect: a revisited space must
     // resolve names in its FIRST frame, beside the stream's cached tail.
     hydrateMembers(key(orgId, spaceId))
@@ -188,11 +188,11 @@ export function useSpaceMembers(orgId: string, spaceId: string): spaces.Member[]
     useEffect(() => {
         void loadMembers(orgId, spaceId)
     }, [orgId, spaceId])
-    return state.get(key(orgId, spaceId)) ?? EMPTY_MEMBERS
+    return (state.get(key(orgId, spaceId)) ?? EMPTY_MEMBERS) as spaces.SpaceMember[]
 }
 
 /**
- * Your own display name on an org — the sidebar's self-DM row shows it the
+ * Your own display name on the server — the sidebar's self-DM row shows it the
  * way Slack does ("<name>  you"). Read from the org roster (cached, then
  * refreshed); null until it lands.
  */

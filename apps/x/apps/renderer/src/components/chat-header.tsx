@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { ArrowUpRight, BarChart3, Bug, ChevronDown, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { formatRelativeTime } from '@/lib/relative-time'
+import { useTitlebarTabsClearance } from '@/hooks/use-titlebar-tabs-clearance'
 
 export interface ChatHeaderRecentRun {
   id: string
@@ -85,12 +86,16 @@ export function ChatHeader({
     }
   }, [activeRunId])
 
+  const titleRef = useRef<HTMLElement | null>(null)
+  useTitlebarTabsClearance(titleRef)
+
   return (
     <>
       {hasHistory ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
+              ref={(el) => { titleRef.current = el }}
               type="button"
               // Hugs the title (2026-10-22): stretched across the bar, its hover
               // lit the whole header once the header became the top bar.
@@ -132,7 +137,7 @@ export function ChatHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <div className="flex min-w-0 shrink items-center gap-2 px-2.5 text-sm font-medium text-foreground">
+        <div ref={(el) => { titleRef.current = el }} className="flex min-w-0 shrink items-center gap-2 px-2.5 text-sm font-medium text-foreground">
           <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{activeTitle}</span>
         </div>

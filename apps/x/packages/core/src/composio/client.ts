@@ -9,6 +9,8 @@ import {
     ZCreateAuthConfigResponse,
     ZCreateConnectedAccountRequest,
     ZCreateConnectedAccountResponse,
+    ZLinkConnectedAccountRequest,
+    ZLinkConnectedAccountResponse,
     ZDeleteOperationResponse,
     ZErrorResponse,
     ZExecuteActionRequest,
@@ -22,7 +24,7 @@ import { isSignedIn } from "../account/account.js";
 import { getAccessToken } from "../auth/tokens.js";
 import { API_URL } from "../config/env.js";
 
-const COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3';
+const COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3.1';
 const CONFIG_FILE = path.join(WorkDir, 'config', 'composio.json');
 
 async function getBaseUrl(): Promise<string> {
@@ -125,6 +127,7 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
 
         const response = await fetch(url, {
             ...options,
+            redirect: "manual",
             headers: {
                 ...options.headers,
                 ...authHeaders,
@@ -143,7 +146,6 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
                 status: response.status,
                 statusText: response.statusText,
                 contentType,
-                preview: rawText.slice(0, 200),
             });
         }
 
@@ -152,7 +154,8 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
             let detail = '';
             try {
                 const body = JSON.parse(rawText);
-                if (typeof body?.error === 'string') detail = body.error;
+                if (typeof body?.error?.message === 'string') detail = body.error.message;
+                else if (typeof body?.error === 'string') detail = body.error;
                 else if (typeof body?.message === 'string') detail = body.message;
             } catch { /* body isn't JSON or has no message field */ }
             const suffix = detail ? `: ${detail}` : '';
@@ -173,7 +176,8 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
 
         if (typeof data === 'object' && data !== null && 'error' in data && data.error !== null && typeof data.error === 'object') {
             const parsedError = ZErrorResponse.parse(data);
-            throw new Error(`Composio error (${parsedError.error.error_code}): ${parsedError.error.message}`);
+            const error = parsedError.error;
+            throw new Error(`Composio error (${error.slug ?? error.code ?? error.error_code ?? "unknown"}): ${error.message}`);
         }
 
         return schema.parse(data);
@@ -200,7 +204,7 @@ export async function listToolkits(cursor: string | null = null): Promise<z.infe
  * Get a specific toolkit
  */
 export async function getToolkit(toolkitSlug: string): Promise<z.infer<typeof ZToolkit>> {
-    return composioApiCall(ZToolkit, `/toolkits/${toolkitSlug}`);
+    return composioApiCall(ZToolkit, `/toolkits/${encodeURIComponent(toolkitSlug)}`);
 }
 
 /**
@@ -251,14 +255,14 @@ export async function createConnectedAccount(
  * Get a connected account
  */
 export async function getConnectedAccount(connectedAccountId: string): Promise<z.infer<typeof ZConnectedAccount>> {
-    return composioApiCall(ZConnectedAccount, `/connected_accounts/${connectedAccountId}`);
+    return composioApiCall(ZConnectedAccount, `/connected_accounts/${encodeURIComponent(connectedAccountId)}`);
 }
 
 /**
  * Delete a connected account
  */
 export async function deleteConnectedAccount(connectedAccountId: string): Promise<z.infer<typeof ZDeleteOperationResponse>> {
-    return composioApiCall(ZDeleteOperationResponse, `/connected_accounts/${connectedAccountId}`, {}, {
+    return composioApiCall(ZDeleteOperationResponse, `/connected_accounts/${encodeURIComponent(connectedAccountId)}`, {}, {
         method: 'DELETE',
     });
 }
@@ -277,9 +281,10 @@ export async function searchTools(
     const params: Record<string, string> = {
         query: searchQuery,
         limit: '50',
+        toolkit_versions: 'latest',
     };
-    if (toolkitSlugs && toolkitSlugs.length === 1) {
-        params.toolkit_slug = toolkitSlugs[0];
+    if (toolkitSlugs?.length) {
+        params.toolkit_slug = toolkitSlugs.join(",");
     }
 
     const result = await composioApiCall(ZListResponse(ZSearchResultTool), "/tools", params);
@@ -306,7 +311,16 @@ export async function executeAction(
     actionSlug: string,
     request: z.infer<typeof ZExecuteActionRequest>
 ): Promise<z.infer<typeof ZExecuteActionResponse>> {
-    return composioApiCall(ZExecuteActionResponse, `/tools/execute/${actionSlug}`, {}, {
+    return composioApiCall(ZExecuteActionResponse, `/tools/execute/${encodeURIComponent(actionSlug)}`, {}, {
+        method: 'POST',
+        body: JSON.stringify(request),
+    });
+}
+
+export async function linkConnectedAccount(
+    request: z.infer<typeof ZLinkConnectedAccountRequest>
+): Promise<z.infer<typeof ZLinkConnectedAccountResponse>> {
+    return composioApiCall(ZLinkConnectedAccountResponse, "/connected_accounts/link", {}, {
         method: 'POST',
         body: JSON.stringify(request),
     });

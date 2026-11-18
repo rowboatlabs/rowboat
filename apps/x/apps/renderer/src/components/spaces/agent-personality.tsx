@@ -4,6 +4,7 @@ import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { ScreenHeader } from '@/components/spaces/agent-tabs'
 import { applyProfileUpdate } from '@/hooks/use-space-members'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
 import { toast } from '@/lib/toast'
@@ -56,7 +57,8 @@ export function PersonalityFields({ name, kind, title, onTitle, instructions, on
                     onChange={(e) => onTitle(e.target.value)}
                     placeholder="e.g. Reviews pull requests and runs the tests"
                     aria-label="Description"
-                    className="h-9 text-sm"
+                    // Bordered like the personality box below it (2026-11-13), not the grey wash.
+                    className="h-9 rounded-md border-input bg-transparent text-xs shadow-xs md:text-xs"
                     maxLength={DESCRIPTION_MAX}
                     disabled={disabled}
                 />
@@ -130,7 +132,7 @@ export function PersonalitySection({ orgId, agent, canEdit, onSaved }: { orgId: 
     if (!canEdit) {
         return (
             <section aria-label="Description and personality" className="flex flex-col gap-2">
-                <h3 className="text-sm font-semibold text-foreground">Description and personality</h3>
+                <ScreenHeader title="Description and personality" />
                 {agent.title ? <p className="text-xs text-foreground">{agent.title}</p> : <p className="text-xs text-muted-foreground">No description.</p>}
                 {agent.instructions ? (
                     <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-3 font-sans text-xs leading-relaxed text-foreground">{agent.instructions}</pre>
@@ -160,10 +162,7 @@ export function PersonalitySection({ orgId, agent, canEdit, onSaved }: { orgId: 
 
     return (
         <section aria-label="Description and personality" className="flex flex-col gap-3">
-            <div>
-                <h3 className="text-sm font-semibold text-foreground">Description and personality</h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">It reads its personality before every request. Changes apply from the next mention.</p>
-            </div>
+            <ScreenHeader title="Description and personality" note="It reads its personality before every request. Changes apply from the next mention." />
             <PersonalityFields name={agent.displayName} {...(agent.agentKind ? { kind: agent.agentKind } : {})} title={title} onTitle={setTitle} instructions={instructions} onInstructions={setInstructions} disabled={busy} />
             <div className="flex justify-end gap-2">
                 {dirty && (

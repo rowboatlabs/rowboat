@@ -4,8 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { Invocation, Member, Message } from '@rowboat/spaces-protocol';
 import { attioPlatform } from '../src/connectors/attio/index.js';
 import { PLATFORMS } from '../src/connectors/platforms.js';
-import { DEFAULT_ORG_ID } from '../src/pg-store.js';
-import { unseal } from '../src/sealing.js';
+import { SEAL_SCOPE, unseal } from '../src/sealing.js';
 import type { RunningHarbor } from '../src/server.js';
 import { restClient, startTestHarbor } from './helpers.js';
 
@@ -104,7 +103,7 @@ describe('Attio connection through the agent API', () => {
     expect(calls.at(-1)).toEqual({ token: GOOD, method: 'GET', path: '/v2/self' });
     const stored = (await harbor.store.getAgentCredential(id))!;
     expect(stored.sealed).not.toContain(GOOD);
-    expect(unseal(stored.sealed, DEFAULT_ORG_ID, id)).toBe(secret);
+    expect(unseal(stored.sealed, SEAL_SCOPE, id)).toBe(secret);
     const listed = await as().get('/v1/agents');
     expect(JSON.stringify([result.body, listed.body])).not.toContain(GOOD);
     expect(listed.body.agents.find((item: { agent: Member }) => item.agent.id === id).credential).toMatchObject({ setBy: 'owner' });
@@ -177,7 +176,7 @@ describe('Attio connection through the agent API', () => {
     expect(replaced.status).toBe(200);
     expect(JSON.stringify(replaced.body)).not.toContain(REPLACEMENT);
     const stored = (await harbor.store.getAgentCredential(id))!;
-    expect(unseal(stored.sealed, DEFAULT_ORG_ID, id)).toBe(REPLACEMENT);
+    expect(unseal(stored.sealed, SEAL_SCOPE, id)).toBe(REPLACEMENT);
     expect(stored.rejectedAt).toBeUndefined();
     expect(stored.rejectedReason).toBeUndefined();
     expect(calls.at(-1)?.token).toBe(REPLACEMENT);

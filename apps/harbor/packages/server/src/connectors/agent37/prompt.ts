@@ -19,9 +19,9 @@ export function buildPrompt(input: {
   /** Earlier messages the session has not seen, oldest first (never the trigger itself). */
   context: Message[];
   names: ReadonlyMap<string, string>;
-  orgAddress: string;
-  /** The org's address with its scheme: attachment downloads. */
-  orgUrl: string;
+  address: string;
+  /** The server's address with its scheme: attachment downloads. */
+  serverUrl: string;
   /** Attachments on earlier messages in the context, listed for the agent to fetch. */
   earlierAttachments: Attachment[];
 }): string {
@@ -42,11 +42,11 @@ export function buildPrompt(input: {
       [
         'Files attached earlier in the thread. Download one when you need it, to disk, with',
         '`curl -fsSL -H "Authorization: Bearer $ROWBOAT_AGENT_KEY" -o <name> <url>` (when ROWBOAT_AGENT_KEY is set):',
-        ...input.earlierAttachments.map((a) => downloadLine(input.orgUrl, spaceId, a)),
+        ...input.earlierAttachments.map((a) => downloadLine(input.serverUrl, spaceId, a)),
       ].join('\n'),
     );
   }
-  const secrets = secretsSection(input.orgUrl, invocation);
+  const secrets = secretsSection(input.serverUrl, invocation);
   if (secrets) parts.push(secrets);
   parts.push(standingParagraph(input));
   parts.push(requestMarker(invocation.trigger.messageId));

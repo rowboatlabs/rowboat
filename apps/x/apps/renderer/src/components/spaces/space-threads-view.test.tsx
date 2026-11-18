@@ -41,6 +41,18 @@ function openOptions(name: string) {
     fireEvent.pointerDown(screen.getByRole('button', { name }), { button: 0, ctrlKey: false })
 }
 describe('threads view', () => {
+    it('Sessions lists the roots marked as sessions, replies or not, by their title, and ends them', async () => {
+        const session = { ...root('root-session', 'me', 'fix thread nav', 0), session: { title: 'fix thread nav' } }
+        mount(vi.fn(), [...roots, session])
+        // A session is a thread from its first message: All has it too.
+        expect(screen.getByRole('button', { name: /^fix thread nav/ })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Sessions' }))
+        expect(screen.getAllByRole('button', { name: / repl(y|ies)/ }).map((row) => row.textContent)).toEqual([expect.stringMatching(/^fix thread nav Arjun · 0 replies/)])
+        invoke.mockImplementation(async (channel: string) => channel === 'spaces:archiveThread' ? { root: { ...session, archived: true } } : defaultInvoke(channel))
+        openOptions('Options for fix thread nav')
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'End session' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:archiveThread', { orgId: 'org', spaceId: 'dm', rootMessageId: 'root-session', archived: true }))
+    })
     it('lists every thread with replies, named or not, newest activity first', () => {
         const onOpen = mount()
         const rows = screen.getAllByRole('button', { name: / replies/ }).map((row) => row.textContent)

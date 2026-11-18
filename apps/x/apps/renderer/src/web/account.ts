@@ -10,7 +10,8 @@ import {
     SessionEndedError,
     type SpacesTokens,
 } from '@x/spaces-client'
-import { APEX_URL, DEV_HARBOR } from './config'
+import { tokenEmail } from '@/lib/spaces-account'
+import { DEV_HARBOR, SERVER_URL } from './config'
 
 // The browser's Rowboat session (2026-10-09, the Spaces web app): the phone's
 // journey, as a full-page redirect. The apex names the authorization server;
@@ -83,15 +84,7 @@ window.addEventListener('storage', (event) => {
  * who you are only: Harbor verifies the token, and nothing here trusts it.
  */
 export function sessionEmail(): string | null {
-    const payload = readSession()?.tokens.access.split('.')[1]
-    if (!payload) return null
-    try {
-        const bytes = Uint8Array.from(atob(payload.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
-        const claims = JSON.parse(new TextDecoder().decode(bytes)) as { email?: unknown }
-        return typeof claims.email === 'string' ? claims.email : null
-    } catch {
-        return null
-    }
+    return tokenEmail(readSession()?.tokens.access)
 }
 
 /** A local dev Harbor needs no session: its tokens are dev tokens. */
@@ -110,7 +103,7 @@ async function clientIdFor(issuer: string): Promise<string> {
 
 /** Leave for the authorization server; the callback lands back on `returnTo`. Never resolves. */
 export async function beginSignIn(returnTo: string): Promise<never> {
-    const issuer = await discoverIssuer(APEX_URL)
+    const issuer = await discoverIssuer(SERVER_URL)
     if (!issuer) throw new Error('This Spaces server names no sign-in provider.')
     const meta = await authServerMetadata(issuer)
     const clientId = await clientIdFor(meta.issuer)
@@ -144,7 +137,7 @@ export async function completeSignIn(url: URL): Promise<string> {
 export function signOut(): void {
     writeSession(null)
     // Harbor's cookie (session.ts) holds the same token; clear it too.
-    void fetch(`${DEV_HARBOR ?? APEX_URL}/v1/session`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
+    void fetch(`${DEV_HARBOR ?? SERVER_URL}/v1/session`, { method: 'DELETE', credentials: 'include' }).catch(() => {})
     for (const listener of sessionListeners) listener()
 }
 

@@ -15,14 +15,13 @@ const rename = (token: string, displayName: string) => as(token).put(`/v1/agents
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    orgName: 'Rename Test Org',
+    name: 'Rename Test Org',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },
     ],
   });
   const ram = (await harbor.store.getMember('ramnique'))!;
-  await harbor.store.putMember({ ...ram, role: 'admin' });
   const created = await as('dev-harsh').post('/v1/agents', { displayName: 'Hermes' });
   ({ agent } = routes.createAgent.response.parse(created.body));
   secret = created.body.key.secret;
@@ -37,7 +36,7 @@ describe('PUT /v1/agents/:agentId/name', () => {
     const r = await rename('dev-harsh', '  Hermes \n Prime ');
     expect(r.status).toBe(200);
     expect(r.body.agent).toMatchObject({ id: agent.id, displayName: 'Hermes Prime', kind: 'agent', ownerId: 'harsh' });
-    const roster = (await as('dev-ramnique').get('/v1/members')).body.members as Member[];
+    const roster = (await as('dev-harsh').get('/v1/contacts')).body.members as Member[];
     expect(roster.find((m) => m.id === agent.id)?.displayName).toBe('Hermes Prime');
   });
 

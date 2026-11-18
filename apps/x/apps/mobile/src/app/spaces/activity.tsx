@@ -74,7 +74,7 @@ export default function ActivityScreen() {
     void load();
   }, [load]);
 
-  // readAll on every org, then repaint — the server owns read state.
+  // readAll on the server, then repaint — the server owns read state.
   const markAllRead = async () => {
     if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setClearing(true);

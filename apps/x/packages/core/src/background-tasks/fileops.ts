@@ -12,7 +12,16 @@ import { withFileLock } from '../knowledge/file-lock.js';
 const BG_TASKS_DIR = path.join(WorkDir, 'bg-tasks');
 
 function taskDir(slug: string): string {
-    return path.join(BG_TASKS_DIR, slug);
+    // 2026-11-09: tools and IPC share these paths; a task slug must name
+    // one direct child rather than address another workspace directory.
+    if (!slug || slug === '.' || slug === '..' || /[/\\\0]/.test(slug)) {
+        throw new Error('Invalid task slug');
+    }
+    const resolved = path.resolve(BG_TASKS_DIR, slug);
+    if (path.dirname(resolved) !== path.resolve(BG_TASKS_DIR)) {
+        throw new Error('Invalid task slug');
+    }
+    return resolved;
 }
 
 export function taskYamlPath(slug: string): string {
@@ -56,9 +65,10 @@ export function slugify(name: string): string {
 // ---------------------------------------------------------------------------
 
 export async function fetchTask(slug: string): Promise<BackgroundTask | null> {
+    const filePath = taskYamlPath(slug);
     let raw: string;
     try {
-        raw = await fs.readFile(taskYamlPath(slug), 'utf-8');
+        raw = await fs.readFile(filePath, 'utf-8');
     } catch {
         return null;
     }
