@@ -1,3 +1,5 @@
+import { FileArchive, Loader2 } from 'lucide-react'
+import { SlackImportGuide } from './slack-import-guide'
 import { SlackIcon } from '@/components/onboarding/provider-icons'
 import { useEffect, useRef, useState } from 'react'
 import { spaces } from '@x/shared'
@@ -94,42 +96,58 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
         if (next.has(id)) next.delete(id); else next.add(id)
         return next
     })
-    return <section className="space-y-4 py-4">
-        <div><h2 className="flex items-center gap-2.5 text-base font-medium"><SlackIcon className="size-5 shrink-0" />Import from Slack</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Upload a Slack JSON export ZIP to review its channels. Each selected channel will become a separate new space.</p></div>
-        <p className="rounded-lg bg-muted p-3 text-sm">Imports continue after you leave. Each space initially contains only you; Slack profiles do not grant access. Existing imported channels are skipped unless you choose to append new messages. Text, threads and historical file links/reaction counts are preserved; admins can optionally link legacy authors to existing space members by opening their Slack profile. Basic Slack formatting and readable user mentions are supported.</p>
-        <label className="block text-sm">Slack export ZIP (up to 100 MiB)
-            <Input type="file" accept=".zip,application/zip" disabled={busy || starting} className="mt-2" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void upload(file) }} />
-        </label>
-        {busy && <p role="status" className="text-sm">Uploading and checking {filename}…</p>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    return <section className="space-y-5 py-4">
+        <div className="flex items-start gap-3">
+            <div className="rounded-xl border border-border bg-background p-3"><SlackIcon className="size-6 shrink-0" /></div>
+            <div><h2 className="text-lg font-semibold">Bring your Slack history</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Choose the conversations to bring with you. Each channel gets its own Rowboat space.</p></div>
+        </div>
+        <ol aria-label="Import steps" className="grid grid-cols-3 gap-2 text-xs">
+            {['Upload ZIP', 'Choose channels', 'Import history'].map((step, index) => <li key={step} aria-current={(starting ? 2 : preview ? 1 : 0) === index ? 'step' : undefined} className="flex items-center gap-2 rounded-lg bg-muted/40 p-2 text-muted-foreground aria-[current=step]:bg-muted aria-[current=step]:text-foreground"><span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-current">{index + 1}</span>{step}</li>)}
+        </ol>
+        <SlackImportGuide />
+        <div className="rounded-xl border border-dashed border-border bg-muted/10 p-4">
+            <label className="block text-sm font-medium"><span className="flex items-center gap-2"><FileArchive className="size-4" aria-hidden />Slack export ZIP (up to 100 MiB)</span>
+                <Input type="file" accept=".zip,application/zip" disabled={busy || starting} className="mt-3 h-auto cursor-pointer bg-background file:mr-3 file:cursor-pointer file:font-medium" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void upload(file) }} />
+            </label>
+            <p className="mt-2 text-xs text-muted-foreground">Use the original JSON export ZIP. We’ll show a preview before creating any spaces.</p>
+            {busy && <p role="status" className="mt-3 flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" aria-hidden />Uploading and checking {filename}…</p>}
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">Only you are added to new spaces. Invite teammates separately. Attachment links are kept; files are not downloaded. DMs and canvases are skipped.</p>
+        {error && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
         {preview && <>
-            <p role="status" className="text-sm">{filename}: {preview.channels.length} channels found. {preview.records.accepted} message records accepted, {preview.records.skipped} skipped, {preview.records.superseded} superseded.</p>
+            <h3 className="text-sm font-semibold">Review your export</h3>
+            <p role="status" className="rounded-lg bg-muted/40 p-3 text-sm break-words">{filename}: {preview.channels.length} channels found. {preview.records.accepted} messages or deletion markers ready, {preview.records.skipped} unsupported records skipped, {preview.records.superseded} older versions replaced.</p>
             <p className="text-xs text-muted-foreground">Counts include retained deletion records. File links are preserved; files are not downloaded. DMs and canvases are not supported.</p>
             {preview.channels.length === 0 ? <p>No supported channels were found in this export.</p> : <>
                 <Input aria-label="Search Slack channels" placeholder="Search channels…" value={query} onChange={e => {setQuery(e.target.value);setPage(0)}} />
                 <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => setSelected(new Set(channels.map(c => c.id)))}>Select matching channels</Button><Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>Clear selection</Button></div>
-                <div className="max-h-80 overflow-auto rounded-lg border border-border"><table className="w-full text-left text-xs"><thead><tr className="border-b border-border"><th className="p-3">Channel</th><th className="p-3">Messages / replies</th><th className="p-3">Dates (UTC)</th></tr></thead><tbody>
-                    {channels.slice(page * 50, (page + 1) * 50).map(c => <tr key={c.id} className="border-b border-border last:border-0"><td className="p-3"><label className="flex items-start gap-2"><input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} aria-label={`Select ${c.name}`} /><span className="break-all">#{c.name}<span className="block text-muted-foreground">{c.private ? 'Private' : 'Public'}{c.archived ? ' · Archived' : ''}</span></span></label></td><td className="p-3">{c.messages} / {c.replies}</td><td className="p-3">{date(c.firstTimestamp)} – {date(c.lastTimestamp)}</td></tr>)}
+                <div className="max-h-80 overflow-auto rounded-lg border border-border"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-background"><tr className="border-b border-border"><th className="p-3">Channel</th><th className="p-3">Messages / replies</th><th className="p-3">Dates (UTC)</th></tr></thead><tbody>
+                    {channels.slice(page * 50, (page + 1) * 50).map(c => <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/30"><td className="p-3"><label className="flex items-start gap-2"><input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} aria-label={`Select ${c.name}`} /><span className="break-all">#{c.name}<span className="block text-muted-foreground">{c.private ? 'Private' : 'Public'}{c.archived ? ' · Archived' : ''}</span></span></label></td><td className="p-3">{c.messages} / {c.replies}</td><td className="p-3">{date(c.firstTimestamp)} – {date(c.lastTimestamp)}</td></tr>)}
                 </tbody></table>{channels.length === 0 && <p className="p-3 text-sm">No matching channels.</p>}</div>
                 {channels.length > 50 && <div className="flex items-center gap-3"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Button><span className="text-xs">Page {page + 1} of {Math.ceil(channels.length / 50)}</span><Button variant="outline" size="sm" disabled={(page + 1) * 50 >= channels.length} onClick={() => setPage(page + 1)}>Next</Button></div>}
                 <p className="text-sm" aria-live="polite">{chosen.length} channels selected · {chosen.reduce((n, c) => n + c.messages, 0)} messages · {chosen.reduce((n, c) => n + c.replies, 0)} replies</p>
             </>}
-            {chosen.length > 0 && <div className="space-y-2">
+            {chosen.length > 0 && <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+                <h3 className="text-sm font-semibold">Ready to import</h3>
                 <label className="block text-sm">Slack workspace domain<Input value={workspace} onChange={e => setWorkspace(e.target.value)} placeholder="team.slack.com" /></label>
-                <p className="text-xs text-muted-foreground">Use the same domain on future imports to prevent duplicate channels. Up to 100 channels per job.</p>
+                <p className="text-xs text-muted-foreground">For example, team.slack.com — use the same domain each time so we can recognize previous imports. Choose up to 100 channels.</p>
                 <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={append} onChange={e => setAppend(e.target.checked)} />Append new messages to channels I previously imported</label>
+                {chosen.length > 100 && <p role="alert" className="text-sm text-destructive">Select 100 channels or fewer to start this import.</p>}
+                {jobs.some(j => j.status === 'queued' || j.status === 'running') && <p role="status" className="text-sm text-muted-foreground">Another import is still running. You can start this one when it finishes.</p>}
                 {append && <p className="text-xs text-muted-foreground">Requires admin access to each destination. Existing messages, edits and deletions stay unchanged; only unseen Slack timestamps are added.</p>}
                 <Button disabled={starting || chosen.length > 100 || !workspace.trim() || jobs.some(j => j.status === 'queued' || j.status === 'running')} onClick={() => void start()}>{starting ? 'Starting import…' : append ? `Import or update ${chosen.length} channels` : `Import ${chosen.length} channels as new spaces`}</Button>
             </div>}
-            {preview.warnings.length > 0 && <details><summary className="cursor-pointer text-sm">{preview.warnings.length} warnings — review before importing</summary><ul className="mt-2 max-h-48 space-y-2 overflow-auto text-xs">{preview.warnings.slice(0, 100).map((w, i) => <li key={i} className="break-words"><strong>{w.code}</strong>: {w.path}{w.record !== undefined ? ` (record ${w.record})` : ''} — {w.detail}</li>)}</ul>{preview.warnings.length > 100 && <p className="text-xs">Showing the first 100 warnings.</p>}</details>}
+            {preview.warnings.length > 0 && <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-sm">{preview.warnings.length} warnings — review before importing</summary><ul className="mt-2 max-h-48 space-y-2 overflow-auto text-xs">{preview.warnings.slice(0, 100).map((w, i) => <li key={i} className="break-words"><strong>{w.code}</strong>: {w.path}{w.record !== undefined ? ` (record ${w.record})` : ''} — {w.detail}</li>)}</ul>{preview.warnings.length > 100 && <p className="text-xs">Showing the first 100 warnings.</p>}</details>}
         </>}
         {jobs.length > 0 && <div className="space-y-3"><h3 className="text-sm font-medium">Recent imports</h3>{jobs.map(job => <div key={job.id} className="rounded-lg border p-3 text-sm">
-            <p>{job.workspace} · {job.status} · {job.channels.filter(c => c.status !== 'pending').length}/{job.channels.length} channels</p>
+            <p className="break-words font-medium">{job.workspace} · {job.status} · {job.channels.filter(c => c.status !== 'pending').length}/{job.channels.length} channels</p>
+            <progress aria-label={`Import progress for ${job.workspace}`} max={Math.max(1, job.channels.length)} value={job.channels.filter(c => c.status !== 'pending').length} className="my-3 h-1.5 w-full accent-primary" />
+            <p className="mb-2 text-xs text-muted-foreground">{job.status === 'completed' ? 'Finished. Your imported history is ready.' : job.status === 'failed' ? 'Import paused after an error. Completed channels are kept; retry the remaining channels below.' : 'You can leave this screen. Your import will continue in the background.'}</p>
             {job.warnings?.length > 0 && <details><summary>{job.warnings.length} import warnings</summary><ul className="max-h-48 overflow-auto text-xs">{job.warnings.slice(0, 100).map((w, i) => <li key={i}>{w.path}: {w.detail}</li>)}</ul>{job.warnings.length > 100 && <p>Showing the first 100 warnings.</p>}</details>}
             {job.error && <p role="alert">{job.error}</p>}
             {job.status === 'failed' && <Button variant="outline" size="sm" onClick={() => void retry(job.id)}>Retry remaining channels</Button>}
-            <ul>{job.channels.map(c => <li key={c.id}>#{c.name} · {c.status}{c.status !== 'pending' && onOpenSpace && <Button variant="link" size="sm" onClick={() => onOpenSpace(c.spaceId)}>Open space</Button>}</li>)}</ul>
+            <ul className="mt-2 divide-y divide-border">{job.channels.map(c => <li className="flex flex-wrap items-center gap-2 py-2" key={c.id}>#{c.name} · {c.status}{c.status !== 'pending' && onOpenSpace && <Button variant="link" size="sm" onClick={() => onOpenSpace(c.spaceId)}>Open space</Button>}</li>)}</ul>
         </div>)}</div>}
     </section>
 }

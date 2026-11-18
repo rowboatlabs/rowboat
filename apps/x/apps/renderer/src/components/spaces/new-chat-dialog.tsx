@@ -73,7 +73,7 @@ export function NewChatDialog({ org, open, start = 'menu', onOpenChange, onOpenS
     )
     return <>
         <Dialog open={open && !messaging} onOpenChange={close}>
-            <DialogContent className={screen === 'slack' ? 'max-w-2xl max-h-[90vh] overflow-y-auto' : 'max-w-md'}>
+            <DialogContent className={screen === 'slack' ? 'sm:max-w-2xl max-h-[90vh] overflow-y-auto' : 'max-w-md'}>
                 {screen === 'menu' ? <>
                     <DialogHeader>
                         <DialogTitle>New chat</DialogTitle>
