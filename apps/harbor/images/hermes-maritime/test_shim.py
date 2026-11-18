@@ -119,7 +119,7 @@ class KeepaliveTests(unittest.TestCase):
         k.start("aaa111", jobs, 1000.0)
         entries = shim.schedules(jobs, keepalive=k.active())
         self.assertEqual([e["id"] for e in entries], ["aaa111", shim.KEEPALIVE_ID])
-        self.assertEqual((entries[1]["cron"], entries[1]["prompt"], entries[1]["enabled"]), ("*/2 * * * *", "rowboat-keepalive", True))
+        self.assertEqual((entries[1]["cron"], entries[1]["prompt"], entries[1]["enabled"]), ("* * * * *", "rowboat-keepalive", True))
         self.assertEqual(k.sweep(jobs, 1100.0), [])  # still running
         done = [dict(jobs[0], last_run_at="2026-11-18T05:31:00+00:00")]
         self.assertEqual(k.sweep(done, 1200.0), ["aaa111"])  # Hermes stamped the run

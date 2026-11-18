@@ -36,7 +36,7 @@ JOBS_POLL_S = 5
 REPUSH_S = 30 * 60
 KEEPALIVE_ID = "rowboat-keepalive"
 KEEPALIVE_PROMPT = "rowboat-keepalive"
-KEEPALIVE_CRON = "*/2 * * * *"
+KEEPALIVE_CRON = "* * * * *"
 KEEPALIVE_MAX_S = float(os.environ.get("KEEPALIVE_MAX_S") or str(45 * 60))
 
 STATE: dict = {
@@ -255,10 +255,11 @@ def schedules(jobs: list[dict] | None = None, keepalive: bool | None = None) -> 
 
 class Keepalive:
     """The jobs the shim fired that Hermes has not finished. While there is one, the pushed schedule
-    carries a two-minute trigger: its delivery to /chat is activity to Maritime, which otherwise puts
-    the box to sleep a few minutes after the wake with the job half done (oss-pm, 2026-11-13..18).
-    A schedule push on its own is not activity (measured 2026-11-18). A job is finished when Hermes
-    stamps its last_run_at, or given up on after KEEPALIVE_MAX_S."""
+    carries a one-minute trigger: its delivery to /chat is activity to Maritime, which otherwise puts
+    the box to sleep with the job half done (oss-pm, 2026-11-13..18). A schedule push on its own is
+    not activity, and Maritime's sweep checkpoints a box idle for about 115 s, checking every two
+    minutes, so a two-minute trigger was a coin flip at each sweep (both measured 2026-11-18). A job
+    is finished when Hermes stamps its last_run_at, or given up on after KEEPALIVE_MAX_S."""
 
     def __init__(self) -> None:
         self.jobs: dict[str, tuple[float, str]] = {}
