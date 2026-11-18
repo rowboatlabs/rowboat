@@ -34,6 +34,10 @@ LOG_FILE = os.path.join(HOME, "logs", "shim.log")
 SCHEDULE_PROMPT = "rowboat-cron "
 JOBS_POLL_S = 5
 REPUSH_S = 30 * 60
+KEEPALIVE_ID = "rowboat-keepalive"
+KEEPALIVE_PROMPT = "rowboat-keepalive"
+KEEPALIVE_CRON = "*/2 * * * *"
+KEEPALIVE_MAX_S = float(os.environ.get("KEEPALIVE_MAX_S") or str(45 * 60))
 
 STATE: dict = {
     "started": time.time(),
@@ -217,8 +221,9 @@ def read_jobs(path: str = JOBS_FILE) -> list[dict]:
     return [j for j in (jobs or []) if isinstance(j, dict)]
 
 
-def schedules(jobs: list[dict] | None = None) -> list[dict]:
-    """Hermes's enabled cron jobs as Maritime schedule entries, each with the prompt that fires it."""
+def schedules(jobs: list[dict] | None = None, keepalive: bool | None = None) -> list[dict]:
+    """Hermes's enabled cron jobs as Maritime schedule entries, each with the prompt that fires it,
+    plus the keepalive trigger while a fired job is still running."""
     out = []
     for j in (read_jobs() if jobs is None else jobs):
         if not j.get("enabled", True) or j.get("paused_at"):
@@ -243,7 +248,47 @@ def schedules(jobs: list[dict] | None = None) -> list[dict]:
         else:
             continue
         out.append(entry)
+    if KEEPALIVE.active() if keepalive is None else keepalive:
+        out.append(KEEPALIVE.entry())
     return out
+
+
+class Keepalive:
+    """The jobs the shim fired that Hermes has not finished. While there is one, the pushed schedule
+    carries a two-minute trigger: its delivery to /chat is activity to Maritime, which otherwise puts
+    the box to sleep a few minutes after the wake with the job half done (oss-pm, 2026-11-13..18).
+    A schedule push on its own is not activity (measured 2026-11-18). A job is finished when Hermes
+    stamps its last_run_at, or given up on after KEEPALIVE_MAX_S."""
+
+    def __init__(self) -> None:
+        self.jobs: dict[str, tuple[float, str]] = {}
+        self.changed = threading.Event()
+
+    @staticmethod
+    def _last_run(jobs: list[dict], job_id: str) -> str:
+        return next((str(j.get("last_run_at") or "") for j in jobs if j.get("id") == job_id), "")
+
+    def start(self, job_id: str, jobs: list[dict], now: float) -> None:
+        self.jobs[job_id] = (now, self._last_run(jobs, job_id))
+        self.changed.set()
+
+    def sweep(self, jobs: list[dict], now: float) -> list[str]:
+        """Forget the jobs that finished or overran; their ids."""
+        done = [job_id for job_id, (started, before) in self.jobs.items()
+                if self._last_run(jobs, job_id) != before or now - started > KEEPALIVE_MAX_S]
+        for job_id in done:
+            del self.jobs[job_id]
+        return done
+
+    def active(self) -> bool:
+        return bool(self.jobs)
+
+    @staticmethod
+    def entry() -> dict:
+        return {"id": KEEPALIVE_ID, "name": "Rowboat keepalive", "enabled": True, "prompt": KEEPALIVE_PROMPT, "cron": KEEPALIVE_CRON, "tz": "UTC"}
+
+
+KEEPALIVE = Keepalive()
 
 
 def interval_cron(minutes) -> str | None:
@@ -293,8 +338,8 @@ def push_schedules(entries: list[dict]) -> bool | None:
 
 class SchedulePusher:
     """Decides when the schedule list goes to Maritime: at boot, when the list itself changes
-    (a run touches jobs.json without changing any schedule, so the file's time is not enough),
-    and every half hour regardless."""
+    (a run touches jobs.json without changing any schedule, so the file's time is not enough; the
+    keepalive comes and goes without touching it at all), and every half hour regardless."""
 
     def __init__(self) -> None:
         self.last_mtime: float | None = None
@@ -304,8 +349,6 @@ class SchedulePusher:
     def due(self, entries: list[dict], mtime: float | None, now: float) -> bool:
         if self.last_entries is None or now - self.last_push > REPUSH_S:
             return True
-        if mtime == self.last_mtime:
-            return False
         return entries != self.last_entries
 
     def note(self, entries: list[dict], mtime: float | None, now: float) -> None:
@@ -320,19 +363,23 @@ def watch_jobs() -> None:
         except OSError:
             mtime = None
         now = time.time()
-        entries = schedules()
+        jobs = read_jobs()
+        for job_id in KEEPALIVE.sweep(jobs, now):
+            log(f"job {job_id}: finished, keepalive released")
+        entries = schedules(jobs)
         if pusher.due(entries, mtime, now):
             ok = push_schedules(entries)
             if ok is not None:
                 log(f"pushed {len(entries)} schedule(s): {'ok' if ok else 'rejected'}")
             pusher.note(entries, mtime, now)
-        elif mtime != pusher.last_mtime:
-            pusher.last_mtime = mtime
-        time.sleep(JOBS_POLL_S)
+        KEEPALIVE.changed.wait(JOBS_POLL_S)
+        KEEPALIVE.changed.clear()
 
 
 def fire_job(job_id: str, user: pwd.struct_passwd | None) -> None:
-    """Run a job now: through the gateway's API, else by one scheduler tick."""
+    """Run a job now: through the gateway's API, else by one scheduler tick. The keepalive holds
+    the box awake until Hermes stamps the run."""
+    KEEPALIVE.start(job_id, read_jobs(), time.time())
     req = urllib.request.Request(
         f"{GATEWAY_API}/api/jobs/{job_id}/run", data=b"{}", method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {API_SERVER_KEY}"},
@@ -454,6 +501,10 @@ class Handler(BaseHTTPRequestHandler):
         source = str(body.get("source") or "")
         conversation = str(body.get("conversation_id") or body.get("conversationId") or "default")
         conversation = "".join(ch for ch in conversation if ch.isalnum() or ch in "-_")[:64] or "default"
+        if message == KEEPALIVE_PROMPT:
+            log(f"keepalive delivered ({len(KEEPALIVE.jobs)} job(s) running)")
+            KEEPALIVE.changed.set()
+            return self._send(200, {"response": "ok"})
         if message.startswith(SCHEDULE_PROMPT):
             job_id = message[len(SCHEDULE_PROMPT):].strip().split()[0] if message[len(SCHEDULE_PROMPT):].strip() else ""
             known = {j.get("id") for j in read_jobs()}

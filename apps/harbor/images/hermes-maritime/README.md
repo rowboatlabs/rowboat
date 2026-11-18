@@ -23,6 +23,12 @@ What the shim does, in order:
    the SDK's `push_schedules`) at boot and whenever `cron/jobs.json` changes, so a job
    created inside Hermes becomes a wake trigger within seconds. Maritime's own poll of
    `/schedules` runs only every few minutes and only while the box is awake.
+5. Keeps the box awake while a fired job runs: the pushed list then carries a two-minute
+   trigger (`rowboat-keepalive`) whose delivery to `/chat` counts as activity, which a
+   schedule push on its own does not. It leaves the list when Hermes stamps the run's
+   `last_run_at`, or after `KEEPALIVE_MAX_S` (45 minutes). Without it Maritime checkpoints
+   the box a few minutes after the wake with the job half done, and the next wake kills the
+   frozen run and skips its own.
 
 Harbor drives turns through Maritime's exec API exactly as before; nothing here is on
 that path except the gateway being up.
