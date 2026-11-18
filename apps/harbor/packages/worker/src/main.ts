@@ -1,19 +1,74 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { CodexRuntime } from './codex/runtime.js';
-import { errorText, makeLogger } from './log.js';
-import { ThreadState } from './state.js';
+import { errorText, makeLogger, type Logger } from './log.js';
+import { ThreadState, type ThreadRecord } from './state.js';
 import { Worker } from './worker.js';
 
 // The command: `rowboat-worker --url https://org.example --agent codex --cwd /data/workspace --state /data/rowboat/worker [--idle 600]`.
 // The key comes from ROWBOAT_AGENT_KEY or --key-file, and is never written anywhere by the worker.
 
 const USAGE = `usage: rowboat-worker --url <harbor-url> [--agent codex] [--cwd <dir>] [--state <dir>] [--idle <seconds>] [--key-file <path>]
-       [--codex <bin>] [--sandbox danger-full-access|workspace-write|read-only]
+       [--codex <bin>] [--sandbox danger-full-access|workspace-write|read-only] [--lock <file>]
   The agent's key: ROWBOAT_AGENT_KEY in the environment, or --key-file.
-  --idle: exit after this many seconds with nothing to do (a box that should sleep); unset runs until stopped.`;
+  --idle: exit after this many seconds with nothing to do (a box that should sleep); unset runs until stopped.
+  --lock: one worker per machine; a second start finds the first alive and exits at once.
+  <state>/seed.json, when present, is read once: sessions kept elsewhere for conversations this worker has not seen.`;
+
+/**
+ * One worker per machine (a Maritime box started by Harbor on every
+ * invocation that finds no worker connected): the lock file names the
+ * process that holds it; a dead holder's lock is taken over.
+ */
+function takeLock(file: string, log: Logger): boolean {
+  mkdirSync(dirname(file), { recursive: true });
+  if (existsSync(file)) {
+    const pid = Number(readFileSync(file, 'utf8').trim());
+    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && alive(pid)) {
+      log(`another worker (pid ${pid}) holds ${file}; exiting`);
+      return false;
+    }
+  }
+  writeFileSync(file, String(process.pid));
+  const release = () => {
+    try {
+      if (readFileSync(file, 'utf8').trim() === String(process.pid)) unlinkSync(file);
+    } catch {
+      // Already gone.
+    }
+  };
+  process.on('exit', release);
+  return true;
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** Sessions kept elsewhere (Harbor's exec-driven turns) for conversations this worker's record does not know yet. */
+function takeSeed(state: ThreadState, stateDir: string, log: Logger): void {
+  const file = join(stateDir, 'seed.json');
+  if (!existsSync(file)) return;
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { threads?: Record<string, ThreadRecord> };
+    const added = state.seed(parsed.threads ?? {});
+    if (added > 0) log(`took ${added} thread session(s) from the seed`);
+  } catch (err) {
+    log('the seed file could not be read; ignored', { error: errorText(err) });
+  }
+  try {
+    unlinkSync(file);
+  } catch {
+    // Left in place; read again next time, harmlessly.
+  }
+}
 
 function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -61,6 +116,9 @@ async function main(): Promise<void> {
   const stateDir = args.state ?? join(homedir(), '.rowboat', 'worker');
   const idleMs = args.idle ? Number(args.idle) * 1000 : undefined;
   const sandbox = args.sandbox as 'danger-full-access' | 'workspace-write' | 'read-only' | undefined;
+  if (args.lock && !takeLock(args.lock, log)) process.exit(0);
+  const state = new ThreadState(join(stateDir, 'threads.json'));
+  takeSeed(state, stateDir, log);
   const runtime = new CodexRuntime({
     orgUrl: args.url,
     agentKey: key,
@@ -74,7 +132,7 @@ async function main(): Promise<void> {
     key,
     cwd,
     runtime,
-    state: new ThreadState(join(stateDir, 'threads.json')),
+    state,
     log,
     ...(idleMs ? { idleMs, onIdle: () => process.exit(0) } : {}),
   });

@@ -96,6 +96,7 @@ export class HostedConnectors {
       thread: {
         get: (spaceId, threadRootId) => store.getConnectionThread(agent.id, spaceId, threadRootId),
         put: (spaceId, threadRootId, data) => store.putConnectionThread(agent.id, spaceId, threadRootId, data, service.now()),
+        list: () => store.listConnectionThreads(agent.id),
       },
       log: (message, detail) => (detail === undefined ? console.log(tag, message) : console.log(tag, message, detail)),
     };

@@ -4,6 +4,7 @@ import { MARITIME_API, MaritimeError, maritimeApi } from './api.js';
 import { MaritimeConnector, type PollTiming } from './connector.js';
 import { kindOfAgent, RUNTIMES } from './runtimes.js';
 import { listMaritimeAgents } from './setup.js';
+import { MaritimeWorkerHost, type WorkerHostOptions } from './worker-host.js';
 
 // The Maritime platform (spec §8 Connectors, Maritime, 2026-10-26): checking
 // an agent's Maritime key, and running its connector. A Maritime agent is one
@@ -12,9 +13,26 @@ import { listMaritimeAgents } from './setup.js';
 // confirms it runs the agent's kind. An agent made from an image says nothing
 // about its runtime, so it is taken at the person's word and the first turn
 // says so if the CLI is not there. `base` is Maritime's API, or a stand-in in
-// tests.
+// tests. For the kinds in worker mode (the agent worker, 2026-11-05), the
+// connector starts the worker on the box instead of running the turns.
 
-export function maritimePlatform(base = MARITIME_API, timing?: PollTiming): ConnectorPlatform {
+/** Which kinds the worker drives on the box, and how it is started (HARBOR_MARITIME_WORKER_* in a deployment). */
+export interface MaritimeWorkerMode extends WorkerHostOptions {
+  kinds: string[];
+}
+
+export function workerModeFromEnv(): MaritimeWorkerMode {
+  const kinds = (process.env.HARBOR_MARITIME_WORKER_KINDS ?? '').split(',').map((k) => k.trim()).filter(Boolean);
+  const ttl = Number(process.env.HARBOR_MARITIME_WORKER_TTL_SECONDS);
+  const idle = Number(process.env.HARBOR_MARITIME_WORKER_IDLE_SECONDS);
+  return {
+    kinds,
+    ...(Number.isFinite(ttl) && ttl > 0 ? { ttlSeconds: ttl } : {}),
+    ...(Number.isFinite(idle) && idle > 0 ? { idleSeconds: idle } : {}),
+  };
+}
+
+export function maritimePlatform(base = MARITIME_API, timing?: PollTiming, worker: MaritimeWorkerMode = workerModeFromEnv()): ConnectorPlatform {
   return {
     async verify(secret, target) {
       if (!target.instance) throw new HarborError('invalid_request', 'a Maritime agent is one Maritime agent: name its id');
@@ -34,7 +52,10 @@ export function maritimePlatform(base = MARITIME_API, timing?: PollTiming): Conn
     },
     setup: { list: (secret) => listMaritimeAgents(secret, fetch, base) },
     start(env) {
-      return new MaritimeConnector(env, async () => maritimeApi(await env.credential(), base), timing).start();
+      const api = async () => maritimeApi(await env.credential(), base);
+      // Worker mode (2026-11-05): the worker on the box does the turns; Harbor wakes the box and starts it.
+      if (worker.kinds.includes(env.agent.agentKind ?? '')) return new MaritimeWorkerHost(env, api, worker).start();
+      return new MaritimeConnector(env, api, timing).start();
     },
   };
 }
