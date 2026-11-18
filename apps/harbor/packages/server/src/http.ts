@@ -334,7 +334,7 @@ export function buildHttpApp(deps: {
 
   app.put(routes.previewSlackImport.path, async (c) => {
     if (Number(c.req.header('content-length') ?? '0') > MAX_SLACK_ZIP_BYTES) {
-      throw new HarborError('payload_too_large', 'ZIP exceeds the 25 MiB preview limit');
+      throw new HarborError('payload_too_large', 'ZIP exceeds the 100 MiB preview limit');
     }
     const reader = c.req.raw.body?.getReader();
     if (!reader) throw new HarborError('invalid_request', 'ZIP body is required');
@@ -347,7 +347,7 @@ export function buildHttpApp(deps: {
         size += value.byteLength;
         if (size > MAX_SLACK_ZIP_BYTES) {
           await reader.cancel();
-          throw new HarborError('payload_too_large', 'ZIP exceeds the 25 MiB preview limit');
+          throw new HarborError('payload_too_large', 'ZIP exceeds the 100 MiB preview limit');
         }
         chunks.push(value);
       }

@@ -34,9 +34,9 @@ it('clears stale selection and supports retry after a server refusal', async () 
 })
 it('rejects oversized archives before sending data', async () => {
     render(<SlackImportPreviewPanel orgId="server" />)
-    const file = new File(['zip'], 'large.zip'); Object.defineProperty(file, 'size', { value: 26 * 1024 * 1024 })
+    const file = new File(['zip'], 'large.zip'); Object.defineProperty(file, 'size', { value: 101 * 1024 * 1024 })
     fireEvent.change(screen.getByLabelText(/Slack export ZIP/), { target: { files: [file] } })
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('25 MiB'))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('100 MiB'))
     expect(invoke).not.toHaveBeenCalledWith('spaces:previewSlackImport', expect.anything())
 })
 
