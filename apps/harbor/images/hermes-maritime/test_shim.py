@@ -42,6 +42,22 @@ class Schedules(unittest.TestCase):
         self.assertEqual(entries[1]["nextRunAt"], "2026-11-11T08:55:00+00:00")
         self.assertNotIn("cron", entries[1])
 
+    def test_interval_jobs_fire_on_a_cron_grid_or_at_their_next_occurrence(self):
+        every = lambda minutes, **extra: {"id": f"i{minutes}", "name": f"every {minutes}m", "enabled": True,
+                                           "schedule": {"kind": "interval", "minutes": minutes, "display": f"every {minutes}m"}, **extra}
+        entries = shim.schedules([every(60), every(15), every(120), every(1440), every(7, next_run_at="2026-11-13T20:52:32+00:00"), every(7)])
+        self.assertEqual([(e["id"], e.get("cron"), e.get("nextRunAt")) for e in entries], [
+            ("i60", "0 */1 * * *", None),
+            ("i15", "*/15 * * * *", None),
+            ("i120", "0 */2 * * *", None),
+            ("i1440", "0 0 * * *", None),
+            ("i7", None, "2026-11-13T20:52:32+00:00"),
+        ])
+        self.assertEqual(entries[0]["prompt"], "rowboat-cron i60")
+        self.assertEqual(shim.interval_cron(45), None)
+        self.assertEqual(shim.interval_cron(5 * 60), None)
+        self.assertEqual(shim.interval_cron("x"), None)
+
     def test_missing_or_broken_file_is_an_empty_list(self):
         self.assertEqual(shim.read_jobs(os.path.join(TMP, "nope.json")), [])
         write_jobs({"jobs": "garbage"})

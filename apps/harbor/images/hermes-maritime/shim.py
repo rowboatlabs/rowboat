@@ -232,10 +232,38 @@ def schedules(jobs: list[dict] | None = None) -> list[dict]:
             entry.update({"cron": s["expr"], "tz": "UTC"})
         elif s.get("kind") == "once" and s.get("run_at"):
             entry["nextRunAt"] = s["run_at"]
+        elif s.get("kind") == "interval":
+            cron = interval_cron(s.get("minutes"))
+            if cron:
+                entry.update({"cron": cron, "tz": "UTC"})
+            elif j.get("next_run_at"):
+                entry["nextRunAt"] = j["next_run_at"]
+            else:
+                continue
         else:
             continue
         out.append(entry)
     return out
+
+
+def interval_cron(minutes) -> str | None:
+    """A cron line that fires every `minutes` on a clean grid ("every hour" -> on the hour), or None
+    when no such grid exists; such a job is pushed as its next occurrence instead."""
+    try:
+        m = int(minutes)
+    except (TypeError, ValueError):
+        return None
+    if m <= 0:
+        return None
+    if m < 60:
+        return f"*/{m} * * * *" if 60 % m == 0 else None
+    if m % 60 == 0 and m < 1440:
+        h = m // 60
+        return f"0 */{h} * * *" if 24 % h == 0 else None
+    if m % 1440 == 0:
+        d = m // 1440
+        return "0 0 * * *" if d == 1 else (f"0 0 */{d} * *" if d <= 15 else None)
+    return None
 
 
 def push_schedules(entries: list[dict]) -> bool | None:
