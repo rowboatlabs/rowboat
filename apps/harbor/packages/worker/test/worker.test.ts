@@ -135,7 +135,6 @@ beforeAll(async () => {
   await store.init();
   const started = await startHarbor({
     store,
-    orgName: 'Worker Test Org',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

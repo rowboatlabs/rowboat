@@ -11,8 +11,12 @@ import { errorText, type Logger } from './log.js';
 export interface PromptInput {
   invocation: Invocation;
   agentId: string;
-  orgAddress: string;
-  orgUrl: string;
+  /** The agent's own display name: contacts list everyone but the caller (2026-11-09). */
+  agentName?: string;
+  /** The host links are minted on. */
+  address: string;
+  /** The server's address with its scheme (attachment downloads). */
+  serverUrl: string;
   /** The stream offset the session has heard up to; earlier messages after it are the context. */
   deliveredOffset: number | undefined;
   log: Logger;
@@ -37,6 +41,7 @@ export async function requestPrompt(harbor: HarborClient, input: PromptInput): P
     }
   };
   const names = new Map((await quietly('roster', () => harbor.roster(), [])).map((m) => [m.id, m.displayName] as const));
+  if (input.agentName) names.set(input.agentId, input.agentName);
   const trigger = await quietly('trigger', () => harbor.getMessage(spaceId, invocation.trigger.messageId), undefined);
   const after = input.deliveredOffset ?? 0;
   const context: Message[] = [];
@@ -56,8 +61,8 @@ export async function requestPrompt(harbor: HarborClient, input: PromptInput): P
     agentId: input.agentId,
     context,
     names,
-    orgAddress: input.orgAddress,
-    orgUrl: input.orgUrl,
+    address: input.address,
+    serverUrl: input.serverUrl,
     attachments,
     earlierAttachments,
   });
