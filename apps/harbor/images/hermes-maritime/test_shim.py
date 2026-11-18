@@ -42,6 +42,22 @@ class Schedules(unittest.TestCase):
         self.assertEqual(entries[1]["nextRunAt"], "2026-11-11T08:55:00+00:00")
         self.assertNotIn("cron", entries[1])
 
+    def test_interval_jobs_fire_on_a_cron_grid_or_at_their_next_occurrence(self):
+        every = lambda minutes, **extra: {"id": f"i{minutes}", "name": f"every {minutes}m", "enabled": True,
+                                           "schedule": {"kind": "interval", "minutes": minutes, "display": f"every {minutes}m"}, **extra}
+        entries = shim.schedules([every(60), every(15), every(120), every(1440), every(7, next_run_at="2026-11-13T20:52:32+00:00"), every(7)])
+        self.assertEqual([(e["id"], e.get("cron"), e.get("nextRunAt")) for e in entries], [
+            ("i60", "0 */1 * * *", None),
+            ("i15", "*/15 * * * *", None),
+            ("i120", "0 */2 * * *", None),
+            ("i1440", "0 0 * * *", None),
+            ("i7", None, "2026-11-13T20:52:32+00:00"),
+        ])
+        self.assertEqual(entries[0]["prompt"], "rowboat-cron i60")
+        self.assertEqual(shim.interval_cron(45), None)
+        self.assertEqual(shim.interval_cron(5 * 60), None)
+        self.assertEqual(shim.interval_cron("x"), None)
+
     def test_missing_or_broken_file_is_an_empty_list(self):
         self.assertEqual(shim.read_jobs(os.path.join(TMP, "nope.json")), [])
         write_jobs({"jobs": "garbage"})
@@ -91,6 +107,26 @@ class Pusher(unittest.TestCase):
         self.assertTrue(p.due(b, 3.0, 1030.0))       # a schedule changed
         p.note(b, 3.0, 1030.0)
         self.assertTrue(p.due(b, 3.0, 1030.0 + shim.REPUSH_S + 1))  # the periodic safety net
+        p.note(b, 3.0, 1040.0)
+        self.assertTrue(p.due(b + [shim.Keepalive.entry()], 3.0, 1050.0))  # the keepalive, with the file untouched
+
+
+class KeepaliveTests(unittest.TestCase):
+    def test_rides_the_schedule_while_a_fired_job_runs_and_leaves_when_hermes_stamps_the_run(self):
+        k = shim.Keepalive()
+        jobs = [{"id": "aaa111", "enabled": True, "schedule": {"kind": "cron", "expr": "30 4 * * *"}, "last_run_at": "2026-11-17T05:42:53+00:00"}]
+        self.assertEqual([e["id"] for e in shim.schedules(jobs, keepalive=k.active())], ["aaa111"])
+        k.start("aaa111", jobs, 1000.0)
+        entries = shim.schedules(jobs, keepalive=k.active())
+        self.assertEqual([e["id"] for e in entries], ["aaa111", shim.KEEPALIVE_ID])
+        self.assertEqual((entries[1]["cron"], entries[1]["prompt"], entries[1]["enabled"]), ("*/2 * * * *", "rowboat-keepalive", True))
+        self.assertEqual(k.sweep(jobs, 1100.0), [])  # still running
+        done = [dict(jobs[0], last_run_at="2026-11-18T05:31:00+00:00")]
+        self.assertEqual(k.sweep(done, 1200.0), ["aaa111"])  # Hermes stamped the run
+        self.assertFalse(k.active())
+        k.start("aaa111", jobs, 2000.0)
+        self.assertEqual(k.sweep(jobs, 2000.0 + shim.KEEPALIVE_MAX_S + 1), ["aaa111"])  # or it overran
+        self.assertFalse(k.active())
 
 
 class Http(unittest.TestCase):
@@ -135,6 +171,10 @@ class Http(unittest.TestCase):
             self.fail("expected 400")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 400)
+
+    def test_keepalive_delivery_is_acknowledged_without_a_turn(self):
+        with mock.patch.object(shim, "fire_job", lambda job_id, user: self.fail("fired")), mock.patch.object(shim, "chat", lambda *a: self.fail("chatted")):
+            self.assertEqual(self.post("/chat", {"message": "rowboat-keepalive", "source": "scheduled"}), (200, {"response": "ok"}))
 
     def test_scheduled_prompt_fires_a_known_job_and_ignores_unknown_ones(self):
         fired = []
@@ -223,6 +263,7 @@ class Ports(unittest.TestCase):
             self.assertEqual(shim.hermes_env()["API_SERVER_PORT"], "9000")
 
     def test_firing_a_job_calls_the_gateway_api_with_the_key_and_ticks_only_when_it_is_down(self):
+        self.addCleanup(shim.KEEPALIVE.jobs.clear)
         seen = {}
 
         class Resp:
