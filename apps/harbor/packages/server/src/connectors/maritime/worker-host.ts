@@ -194,7 +194,7 @@ export class MaritimeWorkerHost implements RunningConnector {
 
   /** The execution that is the worker: the exec-driven turn's environment, then the worker until it is idle. */
   private script(agentKey: string): string {
-    const orgUrl = this.env.orgUrl;
+    const orgUrl = this.env.serverUrl;
     const idle = this.options.idleSeconds ?? DEFAULT_IDLE_S;
     return [
       'set -e',

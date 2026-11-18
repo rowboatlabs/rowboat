@@ -2065,8 +2065,8 @@ export class PgStore implements Store {
   }
   async listConnectionThreads(agentId: string): Promise<Array<{ spaceId: string; threadRootId: string; data: unknown }>> {
     const rows = await this.sql.query<{ space_id: string; thread_root_id: string; data: unknown }>(
-      'select space_id, thread_root_id, data from agent_connection_threads where org_id = $1 and agent_id = $2 order by updated_at desc',
-      [this.orgId, agentId],
+      'select space_id, thread_root_id, data from agent_connection_threads where agent_id = $1 order by updated_at desc',
+      [agentId],
     );
     return rows.map((r) => ({ spaceId: r.space_id, threadRootId: r.thread_root_id, data: r.data }));
   }
