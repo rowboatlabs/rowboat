@@ -1,11 +1,12 @@
 # Rowboat monorepo
 
-Two applications, each its own pnpm workspace, plus product docs. Each area keeps its own guide; this file holds only what is true everywhere.
+Two applications, each its own pnpm workspace, a static company site, and product docs. Each area keeps its own guide; this file holds only what is true everywhere.
 
 | Path | What | Guide |
 |---|---|---|
 | `apps/x/` | The Rowboat desktop app (Electron + React) and its packages, including the mobile app and the Spaces web app | none yet — read `apps/x/package.json` scripts and the package READMEs; the web app is [`apps/x/apps/renderer/WEB.md`](apps/x/apps/renderer/WEB.md) |
 | `apps/harbor/` | Harbor, the Spaces server, and the spaces protocol package | [`apps/harbor/AGENTS.md`](apps/harbor/AGENTS.md) |
+| `apps/site/` | The Rowboat Labs company site: one static page, no build | [`apps/site/README.md`](apps/site/README.md) |
 | `docs/` | Product docs that belong to no one app (the Spaces design language, notes) | — |
 
 ## How the two apps relate

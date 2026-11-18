@@ -1,0 +1,309 @@
+<!doctype html>
+<!--
+  Rowboat Labs company site (2026-11-18, requested by Arjun in Spaces).
+  About the company, not the product: the story is told through our Hacker News
+  launches. Numbers are a snapshot from HN (Algolia API) and X (fxtwitter API)
+  on 2026-11-18, kept static so the page has no third-party scripts or trackers.
+  Sources and how to refresh them are in README.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rowboat Labs: building in public</title>
+<meta name="description" content="Rowboat Labs (YC S24): the company, its founders, and every launch we've shipped on Hacker News.">
+<link rel="icon" href="logo.png">
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #16181d; --muted: #5d6270; --line: #e4e1d9;
+    --card: #ffffff; --accent: #2353d6; --hn: #e8590c; --soft: #f1efe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111317; --fg: #eceae4; --muted: #9aa0ad; --line: #2a2e36;
+            --card: #181b21; --accent: #7aa2ff; --hn: #ff8a3d; --soft: #1d2027; }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+  header.top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--fg); }
+  .brand img { width: 28px; height: 28px; }
+  nav a { color: var(--muted); margin-left: 20px; font-size: 14px; }
+
+  .hero { padding: 72px 0 56px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font-size: 13px; letter-spacing: .04em; color: var(--hn); font-weight: 600; }
+  h1 { font-size: clamp(36px, 6vw, 60px); line-height: 1.05; margin: 12px 0 20px; letter-spacing: -0.02em; }
+  .lede { font-size: 19px; color: var(--muted); max-width: 680px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 44px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .stat b { display: block; font-size: 28px; letter-spacing: -0.01em; }
+  .stat span { color: var(--muted); font-size: 13px; }
+
+  section { padding: 64px 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 36px; max-width: 680px; }
+
+  .founders { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .person { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .person h3 { margin: 0; font-size: 18px; }
+  .person .role { color: var(--muted); font-size: 14px; margin-bottom: 10px; }
+  .person p { margin: 0; font-size: 15px; }
+
+  /* Timeline */
+  .timeline { position: relative; margin-left: 8px; }
+  .timeline::before { content: ""; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px; background: var(--line); }
+  .event { position: relative; padding-left: 40px; margin-bottom: 44px; }
+  .event::before { content: ""; position: absolute; left: 0; top: 6px; width: 16px; height: 16px;
+                   border-radius: 50%; background: var(--bg); border: 3px solid var(--hn); }
+  .event.minor::before { border-color: var(--muted); width: 12px; height: 12px; left: 2px; top: 8px; }
+  .event.after::before { border-color: var(--accent); }
+  .date { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .event h3 { font-size: 21px; margin: 4px 0 6px; line-height: 1.3; }
+  .event h3 a { color: var(--fg); }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+         background: var(--soft); color: var(--muted); margin-right: 6px; vertical-align: middle; }
+  .tag.hn { color: var(--hn); }
+  .meta { display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; color: var(--muted); margin: 6px 0 14px; }
+  .meta b { color: var(--fg); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .card h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+  .card h4:first-child { margin-top: 0; }
+  .card p { margin: 0 0 8px; }
+  .card ul { margin: 0; padding-left: 18px; }
+  .card li { margin-bottom: 6px; }
+  .quote { color: var(--muted); }
+  .quote em { color: var(--fg); font-style: normal; }
+
+  .tweets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
+  .tweet { display: block; color: var(--fg); background: var(--soft); border-radius: 10px; padding: 14px 16px; font-size: 14px; }
+  .tweet:hover { text-decoration: none; outline: 1px solid var(--line); }
+  .tweet .who { font-weight: 600; }
+  .tweet .handle { color: var(--muted); font-weight: 400; }
+  .tweet p { margin: 6px 0 8px; white-space: pre-line; }
+  .tweet .nums { color: var(--muted); font-size: 12px; }
+
+  .lessons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .lesson { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .lesson h3 { margin: 0 0 6px; font-size: 17px; }
+  .lesson p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  footer { padding: 40px 0 60px; color: var(--muted); font-size: 14px; }
+  @media (max-width: 760px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .founders, .lessons { grid-template-columns: 1fr; }
+    nav { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#"><img src="logo.png" alt="">Rowboat Labs</a>
+    <nav><a href="#team">Team</a><a href="#launches">Launches</a><a href="#learned">What we learned</a><a href="https://github.com/rowboatlabs/rowboat">GitHub</a></nav>
+  </header>
+
+  <div class="hero">
+    <div class="eyebrow">Y Combinator S24 · Open source · Building in public</div>
+    <h1>We ship in public,<br>and HN tells us the truth.</h1>
+    <p class="lede">Rowboat Labs is a small team of builders working on AI coworkers. Since April 2025 we've launched on Hacker News six times. Each time the comments told us what to build next, and the product changed with them: from an IDE for multi-agent systems to a shared space where people and agents work together.</p>
+    <div class="stats">
+      <div class="stat"><b>6</b><span>Show / Launch HN posts</span></div>
+      <div class="stat"><b>789</b><span>HN points across launches</span></div>
+      <div class="stat"><b>276</b><span>HN comments</span></div>
+      <div class="stat"><b>16k+</b><span>GitHub stars</span></div>
+    </div>
+  </div>
+
+  <section id="team">
+    <h2>The team</h2>
+    <p class="sub">We met building AI for customer support. Our previous company, Agara, was acquired by Coinbase. We went through Y Combinator in Summer 2024 and still work as a tiny team.</p>
+    <div class="founders">
+      <div class="person">
+        <h3>Arjun Maheswaran</h3>
+        <div class="role">Co-founder &amp; CEO · <a href="https://x.com/segmenta">@segmenta</a></div>
+        <p>Built Twitter's first deep-learning spam and abuse models. Co-founded Agara (acquired by Coinbase), where his work included graph neural networks.</p>
+      </div>
+      <div class="person">
+        <h3>Ramnique Singh</h3>
+        <div class="role">Co-founder</div>
+        <p>Has spent years using language models to make customer experiences better, from Agara to Rowboat.</p>
+      </div>
+      <div class="person">
+        <h3>Akhilesh</h3>
+        <div class="role">Co-founder</div>
+        <p>A founder on the original Show HN and the YC Launch HN, building Rowboat since day one.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="launches">
+    <h2>Our launches on Hacker News</h2>
+    <p class="sub">Every launch we posted from <a href="https://news.ycombinator.com/submitted?id=segmenta">news.ycombinator.com/submitted?id=segmenta</a>: what it was, how HN took it, and what people posted on X.</p>
+
+    <div class="timeline">
+
+      <!-- 1 -->
+      <article class="event">
+        <div class="date">22 April 2025</div>
+        <h3><span class="tag hn">Show HN</span><a href="https://news.ycombinator.com/item?id=43763967">Rowboat – Open-source IDE for multi-agent systems</a></h3>
+        <div class="meta"><span><b>161</b> points</span><span><b>51</b> comments</span></div>
+        <div class="card">
+          <h4>What it was</h4>
+          <p>Our first public release. An AI-assisted IDE for building teams of agents: start with one agent, then add more agents and MCP tools, guided by a copilot that edits agent instructions with code-style diffs. The pitch: <em>"Rowboat is to AI agents what Cursor is to code."</em></p>
+          <h4>How it was received</h4>
+          <ul>
+            <li>The top thread came from Simon Willison, who pushed back on our premise: <span class="quote"><em>"I don't buy that premise (yet)"</em></span>, that multi-agent systems beat a single agent. It started a 14-reply debate.</li>
+            <li>People asked for a native app instead of another web app, and asked whether it counts as an IDE without a text editor.</li>
+            <li>Builders who had tried node-based agent builders were enthusiastic: <span class="quote"><em>"this checks all the boxes for me."</em></span></li>
+          </ul>
+          <div class="tweets">
+            <a class="tweet" href="https://x.com/jreuben1/status/1914894090786742306"><span class="who">(((JReuben1))) <span class="handle">@jreuben1</span></span><p>Rowboat: a low-code AI IDE to build MCP tools connected multi-agent assistants. Rowboat copilot builds the agents for you based on your requirements…</p><span class="nums">23 Apr 2025</span></a>
+            <a class="tweet" href="https://x.com/segmenta/status/1928309490870366335"><span class="who">Arjun <span class="handle">@segmenta</span></span><p>Checkout Rowboat… It's an AI-assisted IDE that uses Agents SDK but easily swappable with anything including just not using any framework.</p><span class="nums">30 May 2025 · 2k views</span></a>
+            <a class="tweet" href="https://x.com/betterhn50/status/1914783712975401251"><span class="who">Hacker News 50 <span class="handle">@betterhn50</span></span><p>Show HN: Rowboat – Open-source IDE for multi-agent systems</p><span class="nums">22 Apr 2025</span></a>
+          </div>
+        </div>
+      </article>
+
+      <!-- 2 -->
+      <article class="event">
+        <div class="date">16 September 2025</div>
+        <h3><span class="tag hn">Launch HN</span><a href="https://news.ycombinator.com/item?id=45264867">Rowboat (YC S24) – Open-source IDE for multi-agent systems</a></h3>
+        <div class="meta"><span><b>66</b> points</span><span><b>28</b> comments</span></div>
+        <div class="card">
+          <h4>What it was</h4>
+          <p>Our official YC launch. It added a hosted cloud version, built-in integrations with hundreds of tools (Gmail, GitHub, Slack), RAG over documents and URLs, and triggers that start assistants from outside events. It came with $10 of free usage, and paid plans started at $20 a month.</p>
+          <h4>How it was received</h4>
+          <ul>
+            <li>The hard questions were about positioning: <span class="quote"><em>"why would I use this over n8n?"</em></span>, and how it compares with Relevance AI.</li>
+            <li>We took a clear position in the thread: flowchart-style agent builders won't scale as models get better at reasoning. Building agents should feel like onboarding a new teammate.</li>
+            <li>One commenter said the playful UI looked like it was made for children. The feedback was blunt and fair.</li>
+          </ul>
+          <div class="tweets">
+            <a class="tweet" href="https://x.com/betterhn50/status/1968150416161476818"><span class="who">Hacker News 50 <span class="handle">@betterhn50</span></span><p>Launch HN: Rowboat (YC S24) – Open-source IDE for multi-agent systems</p><span class="nums">17 Sep 2025</span></a>
+          </div>
+        </div>
+      </article>
+
+      <!-- essay -->
+      <article class="event minor">
+        <div class="date">7 October 2025</div>
+        <h3><span class="tag">Essay</span><a href="https://news.ycombinator.com/item?id=45503268">Handoffs vs. flowcharts for agents, in light of OpenAI's visual builder</a></h3>
+        <div class="meta"><span><b>3</b> points</span></div>
+        <div class="card"><p>The day after OpenAI announced its visual agent builder, we wrote up the argument from our Launch HN thread: static flowcharts compared with runtime handoffs that carry full history. <a href="https://blog.rowboatlabs.com/handoffs-vs-flowcharts-for-agents-in-light-of-openais-visual-builder/">Read the post</a>.</p></div>
+      </article>
+
+      <!-- 3 -->
+      <article class="event">
+        <div class="date">18 November 2025</div>
+        <h3><span class="tag hn">Show HN</span><a href="https://news.ycombinator.com/item?id=45970338">RowboatX – open-source Claude Code for everyday automations</a></h3>
+        <div class="meta"><span><b>131</b> points</span><span><b>42</b> comments</span></div>
+        <div class="card">
+          <h4>What it was</h4>
+          <p>A turn toward the terminal. RowboatX is a CLI modeled on Claude Code that creates and supervises background agents for work that isn't coding. Its state lives in the file system (instructions, memory and logs are plain files you can grep), a supervisor agent drives everything with Unix tools, and agents pause to ask a person for input. Install with <code>npx @rowboatlabs/rowboatx</code>.</p>
+          <h4>How it was received</h4>
+          <ul>
+            <li>The biggest thread (21 replies) was about pricing, not features: people stay on Claude Code because of its fixed-price plan, and they worry that API-key tools cost more once they use them for real.</li>
+            <li>Commenters agreed with the premise: <span class="quote"><em>"I'm increasingly seeing code-adjacent people who are using coding agents for non-coding things."</em></span> They compared it with Block's Goose and the Cline CLI.</li>
+            <li>People asked whether it could run local LLMs. It can.</li>
+          </ul>
+        </div>
+      </article>
+
+      <!-- 4 -->
+      <article class="event minor">
+        <div class="date">21 January 2026</div>
+        <h3><span class="tag hn">Show HN</span><a href="https://news.ycombinator.com/item?id=46708613">Rowboat – Open-Source Claude Cowork with an Obsidian Vault</a></h3>
+        <div class="meta"><span><b>7</b> points</span><span><b>0</b> comments</span></div>
+        <div class="card"><p>The first version of our new direction: Rowboat on the desktop, turning Gmail and meeting notes into an Obsidian-compatible vault of linked Markdown. We posted it the week Claude Cowork launched, and it got almost no attention. We sharpened the story and tried again three weeks later.</p></div>
+      </article>
+
+      <!-- 5 -->
+      <article class="event">
+        <div class="date">10 February 2026</div>
+        <h3><span class="tag hn">Show HN</span><a href="https://news.ycombinator.com/item?id=46962641">Rowboat – AI coworker that turns your work into a knowledge graph (OSS)</a></h3>
+        <div class="meta"><span><b>205</b> points</span><span><b>56</b> comments</span><span>Front page · #1 on GitHub Trending</span></div>
+        <div class="card">
+          <h4>What it was</h4>
+          <p>The same idea, explained better. Rowboat is a local-first app that turns email, meetings and voice memos into a living knowledge graph of plain Markdown with backlinks. On top of it sits an assistant with shell access and MCP that uses the graph to do real work, such as <em>"Build me a deck about our next quarter roadmap."</em></p>
+          <h4>How it was received</h4>
+          <ul>
+            <li>This time the questions were about how it works, a sign that people took it seriously. How do we handle growing context and contradictory facts? How do we merge duplicate entities?</li>
+            <li>People asked for email and calendar providers other than Google (IMAP, JMAP, CalDAV), and the request came up again at every later launch.</li>
+            <li><span class="quote"><em>"This is a product that just makes sense to me. Well done on picking a great problem to solve and communicating it so well."</em></span></li>
+          </ul>
+          <h4>What came after on X</h4>
+          <p>Two months later, Andrej Karpathy described the "LLM wiki" idea, and Rowboat became one of the projects people pointed to.</p>
+          <div class="tweets">
+            <a class="tweet" href="https://x.com/segmenta/status/2041563979299139975"><span class="who">Arjun <span class="handle">@segmenta</span></span><p>Introducing Rowboat. An AI coworker that compiles your emails, meetings, and work into a living knowledge graph… Karpathy described the idea last week. We've been building it for a while.</p><span class="nums">7 Apr 2026 · 478 likes · 74k views</span></a>
+            <a class="tweet" href="https://x.com/_avichawla/status/2041987680012247121"><span class="who">Avi Chawla <span class="handle">@_avichawla</span></span><p>Karpathy liked this one! For work, you need a knowledge graph that links decisions and commitments across sources. Rowboat builds this on the same Obsidian foundation.</p><span class="nums">8 Apr 2026 · 444 likes · 76k views</span></a>
+            <a class="tweet" href="https://x.com/simplifyinAI/status/2046179163074150445"><span class="who">Simplifying AI <span class="handle">@simplifyinAI</span></span><p>Someone just built a 100% free and local alternative to Claude Cowork. It's called Rowboat…</p><span class="nums">20 Apr 2026 · 62 likes · 4.7k views</span></a>
+            <a class="tweet" href="https://x.com/RoundtableSpace/status/2042667679413342495"><span class="who">0xMarioNawfal <span class="handle">@RoundtableSpace</span></span><p>Most AI tools search your transcripts and docs on demand. Rowboat maintains long-lived memory instead.</p><span class="nums">10 Apr 2026 · 31 likes · 4.2k views</span></a>
+            <a class="tweet" href="https://x.com/0x0SojalSec/status/2023118829614956811"><span class="who">Md Ismail Šojal <span class="handle">@0x0SojalSec</span></span><p>Open-source AI coworker Rowboat: long-term recall without full-system agent risks… Markdown files you own/edit.</p><span class="nums">15 Feb 2026 · 27 likes · 2.4k views</span></a>
+            <a class="tweet" href="https://x.com/betterhn20/status/2021289858761720074"><span class="who">Hacker News 20 <span class="handle">@betterhn20</span></span><p>Show HN: Rowboat – AI coworker that turns your work into a knowledge graph (OSS)</p><span class="nums">10 Feb 2026</span></a>
+          </div>
+        </div>
+      </article>
+
+      <!-- 6 -->
+      <article class="event">
+        <div class="date">7 July 2026</div>
+        <h3><span class="tag hn">Show HN</span><a href="https://news.ycombinator.com/item?id=48819808">Rowboat – Open-source, local-first alternative to Claude Desktop</a></h3>
+        <div class="meta"><span><b>219</b> points</span><span><b>99</b> comments</span><span>Our biggest launch</span></div>
+        <div class="card">
+          <h4>What it was</h4>
+          <p>Rowboat as a full work app rather than a chat window. It added <em>work surfaces</em>, where the assistant helps inside the workflow itself: an email client that writes drafts in your voice, a local meeting notetaker, an isolated browser, parallel Claude Code and Codex sessions over ACP, and Obsidian-style notes. You can also build your own apps inside Rowboat. The idea came from our support-AI days: <em>"it's not enough for the AI to be right, the help has to show up where the work is happening."</em></p>
+          <h4>How it was received</h4>
+          <ul>
+            <li>The most-replied thread (20 replies) asked for a tool where <span class="quote"><em>"more than one person"</em></span> can take part in the conversation and take turns steering it. Two months later, that is what we shipped.</li>
+            <li>There was real criticism. One commenter warned about an "asymmetry of effort": AI that gives everyone more to read. Another challenged the "local-first" label because transcription, voice and analytics still use cloud services.</li>
+            <li>The IMAP request came up again, and long-time users told us they point Claude at their Rowboat folder as a context store.</li>
+          </ul>
+          <h4>Beyond HN</h4>
+          <p><a href="https://gigazine.net/gsc_news/en/20260708-rowboat/">GIGAZINE</a> covered the launch the next day, and Rowboat Labs was in YC's Launches of the Week.</p>
+          <div class="tweets">
+            <a class="tweet" href="https://x.com/akshay_pachaar/status/2074850500441522457"><span class="who">Akshay <span class="handle">@akshay_pachaar</span></span><p>Andrej Karpathy said: "There's room for an incredible new product in the second brain space." This might be it.</p><span class="nums">8 Jul 2026 · 298 likes · 47k views</span></a>
+            <a class="tweet" href="https://x.com/about_hiroppy/status/2074637880052662601"><span class="who">hiroppy <span class="handle">@about_hiroppy</span></span><p>Claude Desktop代替のローカルファーストAI作業環境で、メール、会議メモ、隔離ブラウザ、ノート、Claude Code/Codex並列実行が行えるアプリ。</p><span class="nums">7 Jul 2026 · 13 likes · 2.9k views</span></a>
+            <a class="tweet" href="https://x.com/menlotimes/status/2080596620429996062"><span class="who">Menlo Times <span class="handle">@menlotimes</span></span><p>Y Combinator Launches of the Week: 1) Rowboat Labs @rowboatlabshq: an AI coworker for everyday work: email, meetings, projects, and people.</p><span class="nums">24 Jul 2026</span></a>
+          </div>
+        </div>
+      </article>
+
+      <!-- after HN -->
+      <article class="event after">
+        <div class="date">September – November 2026</div>
+        <h3><span class="tag">Since then</span>From single-player to multiplayer</h3>
+        <div class="card">
+          <p>The July launch's most-replied thread asked for a multiplayer assistant. In September we launched Rowboat as <em>the multiplayer personal assistant for work</em>. In November we launched <a href="https://rowboats.ai">rowboats.ai</a>, a space where people and their agents (Claude Code, Codex, Hermes, OpenClaw) plan, write docs and hand off work to each other. It's how we run our own company now.</p>
+          <div class="tweets">
+            <a class="tweet" href="https://x.com/akshay_pachaar/status/2100201632659329183"><span class="who">Akshay <span class="handle">@akshay_pachaar</span></span><p>Anthropic just got outplayed again. Devs built the multiplayer assistant Anthropic couldn't, and open-sourced it.</p><span class="nums">16 Sep 2026 · 593 likes · 120k views</span></a>
+            <a class="tweet" href="https://x.com/segmenta/status/2099918163916054891"><span class="who">Arjun <span class="handle">@segmenta</span></span><p>AI assistants are still single-player. Introducing Rowboat: the multiplayer personal assistant for work.</p><span class="nums">15 Sep 2026 · 75 likes · 47k views</span></a>
+            <a class="tweet" href="https://x.com/segmenta/status/2120571965048230156"><span class="who">Arjun <span class="handle">@segmenta</span></span><p>Introducing rowboats.ai: a space for your agents to work together. 10 years ago, I built Twitter's first deep learning-powered bots to fight spam and abuse. Now the bots are agents…</p><span class="nums">11 Nov 2026 · 91 likes · 88k views</span></a>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="learned">
+    <h2>What six launches taught us</h2>
+    <p class="sub">What we learned from 276 HN comments.</p>
+    <div class="lessons">
+      <div class="lesson"><h3>Read the top thread</h3><p>The most-replied comment on each launch named our next problem: whether multi-agent systems are worth it, why use this over n8n, pricing, and finally multiplayer. Each time, we built what that thread asked about.</p></div>
+      <div class="lesson"><h3>A flop is information</h3><p>Our January post got 7 points. Three weeks later the same product, explained more clearly, got 205 points and reached #1 on GitHub Trending.</p></div>
+      <div class="lesson"><h3>Plain files win trust</h3><p>Markdown on disk, grep-able runs, and Apache-2.0 came up as reasons people tried Rowboat, and "is it really local?" is a question we have to answer honestly.</p></div>
+      <div class="lesson"><h3>The same request at every launch</h3><p>IMAP and calendars beyond Google came up at every launch from February on. When a request keeps coming back, it belongs on the roadmap.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Rowboat Labs · YC S24 · <a href="https://www.rowboatlabs.com">rowboatlabs.com</a> · <a href="https://github.com/rowboatlabs/rowboat">GitHub</a> · <a href="https://x.com/rowboatlabshq">@rowboatlabshq</a> · <a href="https://www.ycombinator.com/companies/rowboat-labs">YC profile</a></p>
+    <p>HN points and comment counts and X likes and views as of 18 November 2026.</p>
+  </footer>
+</div>
+</body>
+</html>
