@@ -12,7 +12,9 @@ What the shim does, in order:
    with a short backoff. The gateway holds Hermes's sessions and its cron scheduler.
 3. Serves Maritime's contract on `$PORT`:
    - `GET /health` — `{"ok": true}`.
-   - `GET /schedules` — Hermes's cron jobs as Maritime schedule entries.
+   - `GET /schedules` — Hermes's cron jobs as Maritime schedule entries: a cron job as its
+     expression, a one-off as its time, an interval ("every hour") as a cron line on the
+     matching grid, or as its next occurrence when no grid fits (then re-pushed after each run).
    - `POST /chat` — a scheduled delivery (`source: scheduled`, prompt `rowboat-cron <id>`)
      fires that job through the gateway at once; anything else runs one `hermes chat`
      turn, answering within Maritime's reply budget or with "working on it".
