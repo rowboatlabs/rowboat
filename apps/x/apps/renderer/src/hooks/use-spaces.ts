@@ -20,8 +20,15 @@ export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
     directLabels: Record<string, string>
     /** DM participant kinds survive removal from active contacts (2026-11-12, inactive-agent sidebar fix). */
     directKinds?: Record<string, spaces.Member['kind']>
-    /** Set when the server could not be reached — the sidebar's "unreachable" state. */
+    /** Set when the server could not be reached and nothing was loaded before — the "unreachable" state. */
     error?: string
+    /**
+     * Set when a refresh failed but an earlier listing is still shown: the
+     * view keeps it under a "Reconnecting…" banner and retries on its own
+     * (2026-11-19, the app-switch "unreachable" screen: one failed fetch after
+     * a long background — expired token, stale socket — blanked the view).
+     */
+    reconnecting?: string
 }
 
 /** A space by id, shared or direct. */
@@ -98,13 +105,16 @@ export function refreshSpacesOrgs(): Promise<void> {
                         }))
                         return { ...org, spaces: shared, directs, directLabels, directKinds }
                     } catch (err) {
-                        return { ...org, spaces: [], directs: [], directLabels: {}, error: err instanceof Error ? err.message : String(err) }
+                        const message = err instanceof Error ? err.message : String(err)
+                        // Keep what we already showed; only a first load with nothing to show is "unreachable".
+                        if (previous && !previous.error) return { ...previous, ...org, reconnecting: message }
+                        return { ...org, spaces: [], directs: [], directLabels: {}, error: message }
                     }
                 }),
             )
             if (revision !== membershipRevision) { orgsDirty = true; return }
             for (const org of withSpaces) {
-                if (org.error) continue
+                if (org.error || org.reconnecting) continue
                 const current = new Set([...org.spaces, ...org.directs].map(s => s.id))
                 const previous = orgsState.orgs.find(o => o.id === org.id)
                 for (const old of [...(previous?.spaces ?? []), ...(previous?.directs ?? [])]) {
@@ -116,14 +126,17 @@ export function refreshSpacesOrgs(): Promise<void> {
             orgsRefreshedAt = Date.now()
             // The org-owned read state rides the same moment: one snapshot per
             // reachable org, folded live from here on (spaces-read-state).
-            for (const org of withSpaces) if (!org.error) void loadUnread(org.id, org.memberId)
-        } catch {
-            orgsState = { ...orgsState, loading: false }
+            for (const org of withSpaces) if (!org.error && !org.reconnecting) void loadUnread(org.id, org.memberId)
+        } catch (err) {
+            // The server list itself failed: keep the listing, flag it, retry.
+            const message = err instanceof Error ? err.message : String(err)
+            orgsState = { orgs: orgsState.orgs.map((o) => (o.error ? o : { ...o, reconnecting: message })), loading: false }
         } finally {
             orgsFetchedOnce = true
             orgsInflight = null
             emitOrgs()
             syncFeedSubscriptions()
+            scheduleOrgsRetry()
             if (orgsDirty) {
                 orgsDirty = false
                 void refreshSpacesOrgs()
@@ -131,6 +144,30 @@ export function refreshSpacesOrgs(): Promise<void> {
         }
     })()
     return orgsInflight
+}
+
+/**
+ * While any server is unreachable or reconnecting, retry on our own with
+ * backoff (2s doubling to 30s) instead of waiting for the next focus or a
+ * Retry click (2026-11-19). A success resets the backoff.
+ */
+const RETRY_BASE_MS = 2_000
+const RETRY_MAX_MS = 30_000
+let retryDelayMs = RETRY_BASE_MS
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleOrgsRetry(): void {
+    const failing = orgsState.orgs.some((o) => o.error || o.reconnecting)
+    if (!failing) {
+        retryDelayMs = RETRY_BASE_MS
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+        return
+    }
+    if (retryTimer) return
+    retryTimer = setTimeout(() => {
+        retryTimer = null
+        void refreshSpacesOrgs()
+    }, retryDelayMs)
+    retryDelayMs = Math.min(retryDelayMs * 2, RETRY_MAX_MS)
 }
 
 /**

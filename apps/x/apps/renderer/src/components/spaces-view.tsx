@@ -239,6 +239,12 @@ export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, 
                 edgeless={!!selectedSpace}
             />
             <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+            {/* A failed refresh keeps the last listing and says so here; the store retries on its own (2026-11-19). */}
+            {selectedOrg.reconnecting && (
+                <div role="status" title={selectedOrg.reconnecting} className="flex shrink-0 items-center justify-center gap-2 border-b bg-muted/60 px-4 py-1.5 text-xs text-muted-foreground">
+                    <Loader2 className="size-3 animate-spin" /> Reconnecting…
+                </div>
+            )}
             {selectedSpace ? (
                 <SpaceAccessProvider orgId={selectedOrg.id} space={selectedSpace}>
                 <SpacePane
