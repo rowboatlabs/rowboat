@@ -32,6 +32,44 @@ describe('the grammar', () => {
     expect(parseMentions('[@rowboat](#rowboat) summarise')).toMatchObject({ rowboat: true });
   });
 
+  it.each([
+    ['plain', '~~~\n', '\n~~~'],
+    ['info and CRLF', '~~~markdown\r\n', '\r\n~~~\r\n'],
+    ['long, indented, longer close', '   ~~~~~ markdown\n', '\n ~~~~~~ \t\n'],
+    ['short run is not a close', '~~~~\n~~~\n', '\n~~~~'],
+    ['text after a run is not a close', '~~~\n~~~ still code\n', '\n~~~'],
+    ['over-indented run is not a close', '~~~\n    ~~~\n', '\n~~~'],
+    ['backtick in info', '~~~lang`example\n', '\n~~~'],
+    ['unclosed', '~~~\n', ''],
+    ['unclosed long', '~~~~\n~~~\n', ''],
+    ['backticks inside', '~~~\n```\n', '\n`\n~~~'],
+  ])('keeps %s tilde-fenced tokens literal', (_name, open, close) => {
+    const body = `${open}${tok('harsh', 'Old')} [@here](#here) [@rowboat](#rowboat) ${sp('S1', 'Old')}${close}`;
+    expect(parseMentions(body)).toEqual({ members: [], here: false, rowboat: false });
+    expect(relabelMentions(body, new Map([['harsh', 'Harsh']]), new Map([['S1', 'General']]))).toBe(body);
+    expect(mentionsAsText(body, new Map([['harsh', 'Harsh']]), new Map([['S1', 'General']]))).toBe(body);
+    expect(mapMentionTokens(body, () => 'rewritten')).toBe(body);
+  });
+
+  it('keeps outside tokens active, ordered and deduplicated around tilde fences', () => {
+    const code = `~~~~\n${tok('arjun')} [@rowboat](#rowboat)\n~~~~~\n`;
+    const body = `${tok('harsh')}\n${code}${tok('ramnique')} ${tok('harsh')} [@here](#here) ${sp('S1')}`;
+    expect(parseMentions(body)).toEqual({ members: ['harsh', 'ramnique'], here: true, rowboat: false });
+    expect(mentionsAsText(body, new Map())).toBe(`@harsh\n${code}@ramnique @harsh @here #S1`);
+    expect(parseMentions(`~~~\n${tok('arjun')}\n~~~\n~~~\n[@here](#here)\n~~~\n[@rowboat](#rowboat)`))
+      .toEqual({ members: [], here: false, rowboat: true });
+  });
+
+  it('does not treat prose, escaped or short tilde runs as fences, or change backtick regions', () => {
+    for (const prefix of ['text ~~~\n', '\\~~~\n', '~~\n']) {
+      expect(parseMentions(prefix + tok('harsh'))).toEqual({ members: ['harsh'], here: false, rowboat: false });
+    }
+    expect(parseMentions(`\`\`\`\n~~~\n${tok('harsh')}\n\`\`\`\n${tok('arjun')}`))
+      .toEqual({ members: ['arjun'], here: false, rowboat: false });
+    expect(parseMentions(`\`\`\`\n${tok('harsh')}\n`)).toEqual({ members: [], here: false, rowboat: false });
+    expect(parseMentions(`\`${tok('harsh')}\` ${tok('arjun')}`)).toEqual({ members: ['arjun'], here: false, rowboat: false });
+  });
+
   it('serializes a token; brackets and newlines never reach a label', () => {
     expect(mentionToken({ kind: 'member', id: 'x', label: 'Ram [S]\nSingh' })).toBe('[@Ram  S  Singh](#member:x)');
     expect(mentionToken({ kind: 'member', id: 'x', label: '' })).toBe('[@x](#member:x)');
@@ -239,5 +277,53 @@ describe('mentions', () => {
     expect(await harbor.service.migrateMentions({ force: true })).toEqual({ messages: 0, titles: 0, restamped: 0 });
     expect(await harbor.service.migrateMentions()).toEqual({ messages: 0, titles: 0, restamped: 0 }); // the ledger: never again
     expect((await harbor.store.listEventsAfter(main, head + 1)).length).toBe(3);
+  });
+});
+
+describe('tilde-fenced mentions on both faces', () => {
+  it('stores no addresses or follows for examples, and keeps their labels literal on MCP reads', async () => {
+    const instance = await startTestHarbor({
+      seedMembers: [{ id: 'author', displayName: 'Author' }, { id: 'reader', displayName: 'Reader' }],
+      seedSpaces: [{ name: 'Examples', creator: 'author' }],
+    });
+    let client: Client | undefined;
+    try {
+      const author = restClient(instance, 'dev-author');
+      const reader = restClient(instance, 'dev-reader');
+      const spaceId = (await author.get('/v1/spaces')).body.spaces[0].id as string;
+      client = await agentClient(instance, 'dev-author');
+      const body = `~~~markdown\n${tok('reader', 'Old')} [@here](#here) [@rowboat](#rowboat) ${sp(spaceId, 'Old')}\n~~~`;
+      const posted = await author.post(`/v1/spaces/${spaceId}/messages`, { body, actingMode: 'direct' });
+      expect(posted.status).toBe(200);
+      const mcpPost = await callStructured<{ messageId: string }>(client, 'post_message', { spaceId, body });
+      for (const id of [posted.body.message.id, mcpPost.messageId]) {
+        const stored = await instance.store.getMessage(spaceId, id);
+        expect(stored).toMatchObject({ body, mentions: [], mentionsHere: false, mentionsRowboat: false });
+        const thread = await reader.get(`/v1/spaces/${spaceId}/threads/${id}`);
+        expect(thread.body.following).toBe(false);
+        const mcpThread = await callStructured<{ root: Message }>(client, 'read_thread', { spaceId, rootMessageId: id });
+        expect(mcpThread.root).toMatchObject({ body, mentions: [], mentionsHere: false, mentionsRowboat: false });
+      }
+      const unread = await reader.get('/v1/unread');
+      expect(unread.body.spaces.find((s: { spaceId: string }) => s.spaceId === spaceId))
+        .toMatchObject({ unreadMentions: 0 });
+      const active = await author.post(`/v1/spaces/${spaceId}/messages`, {
+        body: `${body}\n${tok('reader', 'Old')} [@here](#here)`, actingMode: 'direct',
+      });
+      expect(active.body.message).toMatchObject({ mentions: ['reader'], mentionsHere: true, mentionsRowboat: false });
+      const mcpRead = await callStructured<{ root: Message }>(client, 'read_thread', { spaceId, rootMessageId: active.body.message.id });
+      expect(mcpRead.root.body).toBe(`${body}\n${tok('reader', 'Reader')} [@here](#here)`);
+      const mcpActive = await callStructured<{ message: Message }>(client, 'edit_message', {
+        spaceId, messageId: mcpPost.messageId, body: `${body}\n[@here](#here)`,
+      });
+      expect(mcpActive.message).toMatchObject({ mentions: [], mentionsHere: true, mentionsRowboat: false });
+      const mcpEdited = await callStructured<{ message: Message }>(client, 'edit_message', { spaceId, messageId: mcpPost.messageId, body });
+      expect(mcpEdited.message).toMatchObject({ body, mentions: [], mentionsHere: false, mentionsRowboat: false });
+      const edited = await author.post(`/v1/spaces/${spaceId}/messages/${active.body.message.id}/edit`, { body, actingMode: 'direct' });
+      expect(edited.body.message).toMatchObject({ body, mentions: [], mentionsHere: false, mentionsRowboat: false });
+    } finally {
+      await client?.close();
+      await instance.close();
+    }
   });
 });
