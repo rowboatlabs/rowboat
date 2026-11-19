@@ -1045,11 +1045,11 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
       return container.resolve<ISessions>('sessions').sendOrQueueMessage(args.sessionId, args.input, args.config);
     },
     'sessions:editQueued': async (args) => {
-      container.resolve<ISessions>('sessions').editQueued(args.sessionId, args.queueId, args.message);
+      await container.resolve<ISessions>('sessions').editQueued(args.sessionId, args.queueId, args.message);
       return { success: true };
     },
     'sessions:removeQueued': async (args) => {
-      const removed = container.resolve<ISessions>('sessions').removeQueued(args.sessionId, args.queueId);
+      const removed = await container.resolve<ISessions>('sessions').removeQueued(args.sessionId, args.queueId);
       return { removed: removed ?? null };
     },
     'models:test': async (args) => {

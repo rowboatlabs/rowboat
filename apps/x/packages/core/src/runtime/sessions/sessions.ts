@@ -313,33 +313,37 @@ export class SessionsImpl implements ISessions {
         return (this.pending.get(sessionId) ?? []).map(publicQueueEntry);
     }
 
-    editQueued(
+    async editQueued(
         sessionId: string,
         queueId: string,
         message: z.infer<typeof UserMessage>,
-    ): void {
-        const entry = (this.pending.get(sessionId) ?? []).find(
-            (e) => e.queueId === queueId,
-        );
-        if (!entry) {
-            throw new Error(`no queued message ${queueId} in session ${sessionId}`);
-        }
-        entry.message = message;
-        this.publishQueue(sessionId);
+    ): Promise<void> {
+        return this.sessionRepo.withLock(sessionId, async () => {
+            const entry = (this.pending.get(sessionId) ?? []).find(
+                (e) => e.queueId === queueId,
+            );
+            if (!entry) {
+                throw new Error(`no queued message ${queueId} in session ${sessionId}`);
+            }
+            entry.message = message;
+            this.publishQueue(sessionId);
+        });
     }
 
-    removeQueued(
+    async removeQueued(
         sessionId: string,
         queueId: string,
-    ): QueuedSessionMessage | undefined {
-        const queue = this.pending.get(sessionId) ?? [];
-        const at = queue.findIndex((e) => e.queueId === queueId);
-        if (at < 0) {
-            return undefined;
-        }
-        const [removed] = queue.splice(at, 1);
-        this.publishQueue(sessionId);
-        return publicQueueEntry(removed);
+    ): Promise<QueuedSessionMessage | undefined> {
+        return this.sessionRepo.withLock(sessionId, async () => {
+            const queue = this.pending.get(sessionId) ?? [];
+            const at = queue.findIndex((e) => e.queueId === queueId);
+            if (at < 0) {
+                return undefined;
+            }
+            const [removed] = queue.splice(at, 1);
+            this.publishQueue(sessionId);
+            return publicQueueEntry(removed);
+        });
     }
 
     private async latestTurnState(
@@ -853,6 +857,7 @@ export class SessionsImpl implements ISessions {
                     }
                 }
                 const head = queue[0];
+                if (!head) return;
                 await this.startTurnLocked(
                     sessionId,
                     events,
@@ -864,7 +869,8 @@ export class SessionsImpl implements ISessions {
                 // Dequeue only after the turn exists: a createTurn failure
                 // (agent resolution, repo fault) leaves the entry pending and
                 // editable instead of silently dropping the user's text.
-                queue.shift();
+                const promoted = queue.findIndex((entry) => entry.queueId === head.queueId);
+                if (promoted >= 0) queue.splice(promoted, 1);
                 this.publishQueue(sessionId);
             });
         } catch (error) {

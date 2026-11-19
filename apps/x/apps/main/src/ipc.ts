@@ -1482,11 +1482,11 @@ export function setupIpcHandlers() {
       return { queue: container.resolve<ISessions>('sessions').listQueued(args.sessionId) };
     },
     'sessions:editQueued': async (_event, args) => {
-      container.resolve<ISessions>('sessions').editQueued(args.sessionId, args.queueId, args.message);
+      await container.resolve<ISessions>('sessions').editQueued(args.sessionId, args.queueId, args.message);
       return { success: true };
     },
     'sessions:removeQueued': async (_event, args) => {
-      const removed = container.resolve<ISessions>('sessions').removeQueued(args.sessionId, args.queueId);
+      const removed = await container.resolve<ISessions>('sessions').removeQueued(args.sessionId, args.queueId);
       return { removed: removed ?? null };
     },
     'sessions:respondToPermission': async (_event, args) => {

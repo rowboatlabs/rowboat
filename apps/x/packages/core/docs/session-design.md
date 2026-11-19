@@ -505,6 +505,9 @@ choice):
 - The enqueue and the settled-check share one session-lock hold, and
   promotion re-checks everything under the same lock, so a concurrent
   settle cannot strand a message (no lost wakeup).
+- Queue edits and removals take the session lock (2026-11-19). If promotion
+  already has the lock and succeeds, the entry is no longer available to edit
+  or remove. If promotion fails, the entry is still available.
 - Promotion failure (e.g. agent resolution) leaves the entry queued,
   visible, and editable rather than silently dropping user text.
 - `stopTurn` drains the queue first and returns the drained messages; a
