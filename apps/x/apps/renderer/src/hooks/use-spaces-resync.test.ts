@@ -171,3 +171,43 @@ it.each(['deactivatedAt', 'removedAt'])('resolves historical DM kinds with %s an
     await mod.refreshSpacesOrgs()
     expect(mod.getSpacesOrgs()[0].directKinds).toEqual({ dm: 'agent' })
 })
+
+// A failed refresh after a long background (2026-11-19): keep the last
+// listing, flag it reconnecting, and retry on our own until it answers.
+describe('a failed refresh', () => {
+    it('keeps the last listing, flags it reconnecting, and retries until it recovers', async () => {
+        const original = invoke.getMockImplementation()!
+        let down = false
+        invoke.mockImplementation(async (channel: string) => {
+            if (channel === 'spaces:listSpaces' && down) throw new Error('Rowboat org at http://x is unreachable (ECONNRESET)')
+            return original(channel)
+        })
+        const mod = await boot()
+        down = true
+        await mod.refreshSpacesOrgs()
+        const org = mod.getSpacesOrgs()[0]
+        expect(org.error).toBeUndefined()
+        expect(org.reconnecting).toMatch(/unreachable/)
+        expect(org.spaces.map((s) => s.id)).toEqual(['s1'])
+        await vi.advanceTimersByTimeAsync(2_000) // first retry, still down
+        expect(listing()).toBe(3)
+        down = false
+        await vi.advanceTimersByTimeAsync(4_000) // backoff doubled
+        expect(listing()).toBe(4)
+        expect(mod.getSpacesOrgs()[0].reconnecting).toBeUndefined()
+        await vi.advanceTimersByTimeAsync(60_000) // healthy: no more retries
+        expect(listing()).toBe(4)
+    })
+
+    it('with nothing loaded yet is unreachable, and still retries', async () => {
+        invoke.mockImplementation(async (channel: string) => {
+            if (channel === 'spaces:listOrgs') return { orgs }
+            if (channel === 'spaces:listSpaces') throw new Error('offline')
+            return null
+        })
+        const mod = await boot()
+        expect(mod.getSpacesOrgs()[0].error).toBe('offline')
+        await vi.advanceTimersByTimeAsync(2_000)
+        expect(listing()).toBe(2)
+    })
+})
