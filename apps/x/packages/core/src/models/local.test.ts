@@ -61,6 +61,29 @@ describe("makeOllamaThinkFetch", () => {
         return calls;
     }
 
+    it("cancels a chat waiting on discovery without interrupting another chat", async () => {
+        let finishProbe!: (response: Response) => void;
+        const probe = new Promise<Response>((resolve) => { finishProbe = resolve; });
+        const network = vi.fn(async (input: RequestInfo | URL) =>
+            String(input).endsWith("/api/show") ? probe : new Response("{}"),
+        );
+        vi.stubGlobal("fetch", network);
+        const wrapped = makeOllamaThinkFetch("high");
+        const url = "http://localhost:11434/api/chat";
+        const body = JSON.stringify({ model: "qwen3.5:27b" });
+        const controller = new AbortController();
+        const cancelled = wrapped(url, { body, signal: controller.signal });
+        const other = wrapped(url, { body });
+        const assertion = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+        controller.abort();
+
+        await assertion;
+        expect(network).toHaveBeenCalledTimes(1);
+        finishProbe(new Response(JSON.stringify({ capabilities: ["thinking"] })));
+        expect((await other).ok).toBe(true);
+        expect(network).toHaveBeenCalledTimes(2);
+    }, 1000);
+
     it("rewrites think on /api/chat for gpt-oss", async () => {
         const calls = stubFetch(["completion", "tools", "thinking"]);
         const wrapped = makeOllamaThinkFetch("low");
