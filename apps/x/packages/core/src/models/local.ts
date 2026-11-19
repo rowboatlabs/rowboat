@@ -113,6 +113,21 @@ async function rewrapErrorResponse(res: Response): Promise<Response> {
     });
 }
 
+// 2026-11-19: discovery is shared, so a chat can stop waiting without
+// cancelling the probe that other chats still need.
+function waitForThinkingSupport(probe: Promise<boolean>, signal?: AbortSignal | null): Promise<boolean> {
+    if (!signal) return probe;
+    signal.throwIfAborted();
+    return new Promise<boolean>((resolve, reject) => {
+        const onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+        void probe.then((supported) => {
+            signal.removeEventListener("abort", onAbort);
+            resolve(supported);
+        });
+    });
+}
+
 // The ollama-ai-provider-v2 request builder always writes `think: false`
 // (its providerOptions schema is boolean-only), so effort can only be set by
 // rewriting the wire request. This wraps fetch for createOllama: /api/chat
@@ -135,19 +150,25 @@ export function makeOllamaThinkFetch(
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ model }),
+                signal: AbortSignal.timeout(5000),
             })
                 .then(async (res) => {
                     if (!res.ok) return false;
                     const data = await res.json() as { capabilities?: string[] };
                     return Array.isArray(data.capabilities) && data.capabilities.includes("thinking");
                 })
-                .catch(() => false);
+                .catch(() => {
+                    thinkingSupport.delete(key);
+                    return false;
+                });
             thinkingSupport.set(key, cached);
         }
         return cached;
     };
 
     return async (input, init) => {
+        const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+        signal?.throwIfAborted();
         let finalInit = init;
         try {
             const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -156,7 +177,8 @@ export function makeOllamaThinkFetch(
             if (isChat && typeof body === "string") {
                 const parsed = JSON.parse(body) as Record<string, unknown>;
                 const model = typeof parsed.model === "string" ? parsed.model : "";
-                const think = resolveThinkValue(model, effort, await supportsThinking(url, model));
+                const supports = await waitForThinkingSupport(supportsThinking(url, model), signal);
+                const think = resolveThinkValue(model, effort, supports);
                 if (think === undefined) {
                     delete parsed.think;
                 } else {
@@ -167,6 +189,7 @@ export function makeOllamaThinkFetch(
         } catch {
             // Malformed body or URL — send the original request unchanged.
         }
+        signal?.throwIfAborted();
         const res = await fetch(input, finalInit);
         return res.ok ? res : rewrapErrorResponse(res);
     };
