@@ -20,6 +20,8 @@ import {
     DEFAULT_OLLAMA_REASONING_EFFORT,
 } from "./local.js";
 
+export const ATLAS_CLOUD_BASE_URL = "https://api.atlascloud.ai/v1";
+
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
 
@@ -72,6 +74,13 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
                 name: "openai-compatible",
                 apiKey,
                 baseURL: baseURL || "",
+                headers,
+            });
+        case "atlascloud":
+            return createOpenAICompatible({
+                name: "atlascloud",
+                apiKey,
+                baseURL: baseURL || ATLAS_CLOUD_BASE_URL,
                 headers,
             });
         case "openrouter":
@@ -282,7 +291,8 @@ export async function listModelsForProvider(
                 break;
             case "openai-compatible":
             case "aigateway":
-                url = `${(baseURL ?? "").replace(/\/$/, "")}/models`;
+            case "atlascloud":
+                url = `${(baseURL ?? (flavor === "atlascloud" ? ATLAS_CLOUD_BASE_URL : "")).replace(/\/$/, "")}/models`;
                 if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
                 break;
             default:
