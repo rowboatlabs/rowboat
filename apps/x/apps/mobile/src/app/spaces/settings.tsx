@@ -50,6 +50,13 @@ export default function SettingsScreen() {
         </Group>
       ) : null}
 
+      {account.orgs?.length ? <Group label="Imports">
+        {account.orgs.map((org, i) => <Row key={org.address} first={i === 0} onPress={() => router.push({ pathname: '/spaces/slack-import', params: { org: org.address, me: org.memberId } })}>
+          <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>Import from Slack{account.orgs!.length > 1 ? ` · ${org.address}` : ''}</Text>
+          <Chevron />
+        </Row>)}
+      </Group> : null}
+
       <Group label="Appearance">
         {THEME_PREFS.map((t, i) => (
           <Row key={t.key} first={i === 0} onPress={() => pickTheme(t.key)}>

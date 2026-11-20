@@ -210,7 +210,7 @@ export function GeneralStream({
         const topic = stream.topicsByRoot.get(rootMessageId)
         const root = stream.messages.find((m) => m.id === rootMessageId) ?? stream.threadRoots.get(rootMessageId)
         const label = topic ? topic.title : root ? (root.deletedAt ? 'a deleted message' : threadLabelOf(root.body)) : 'an earlier message'
-        const author = root ? memberNames.get(root.author.memberId) : undefined
+        const author = root ? root.author.slack?.name ?? memberNames.get(root.author.memberId) : undefined
         return { ...(author ? { author } : {}), label: resolveMentions(label, memberNames, spaceNames) }
     }
     const threadLineFor = (rootMessageId: string): string => {
@@ -682,7 +682,7 @@ export function GeneralStream({
     }
 
     const askRowboat = (message: spaces.Message) => {
-        const name = memberNames.get(message.author.memberId) ?? message.author.memberId
+        const name = message.author.slack?.name ?? memberNames.get(message.author.memberId) ?? message.author.memberId
         // The quote is a cite, so it carries names, never tokens; the ask is a
         // token, which the composer's seed path parses into a pill.
         const quote = resolveMentions(message.body, memberNames, spaceNames).split('\n').map((l) => `> ${l}`).join('\n')
@@ -693,7 +693,7 @@ export function GeneralStream({
     // the reply lands in the stream beside it — plain markdown on the wire.
     // Image embeds drop (a quote is text); names, not wire ids, like askRowboat.
     const quoteReply = (message: spaces.Message) => {
-        const name = memberNames.get(message.author.memberId) ?? message.author.memberId
+        const name = message.author.slack?.name ?? memberNames.get(message.author.memberId) ?? message.author.memberId
         const text = resolveMentions(message.body, memberNames, spaceNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
         if (!text) return
         const quote = text.split('\n').map((l) => `> ${l}`).join('\n')

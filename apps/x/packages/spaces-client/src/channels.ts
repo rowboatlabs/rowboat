@@ -17,6 +17,9 @@ type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
   | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
+  | 'spaces:getSlackProfile' | 'spaces:linkSlackProfile'
+  | 'spaces:startSlackImport' | 'spaces:listSlackImports' | 'spaces:getSlackImport' | 'spaces:retrySlackImport'
+  | 'spaces:previewSlackImport'
   | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:renameSpace'
   | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
   | 'spaces:setSpaceGraph' | 'spaces:getSpaceGraph'
@@ -61,6 +64,13 @@ export interface HarborChannelDeps {
 
 export function harborChannelHandlers({ getClient, getLive, subscriptions, emit, isActive }: HarborChannelDeps): HarborChannelHandlers {
   return {
+    'spaces:getSlackProfile': args => getClient(args.orgId).getSlackProfile(args.spaceId, args.messageId),
+    'spaces:linkSlackProfile': args => getClient(args.orgId).linkSlackProfile(args.spaceId, args.messageId, args.memberId),
+    'spaces:startSlackImport': args => getClient(args.orgId).startSlackImport(args),
+    'spaces:listSlackImports': args => getClient(args.orgId).listSlackImports(),
+    'spaces:getSlackImport': args => getClient(args.orgId).getSlackImport(args.jobId),
+    'spaces:retrySlackImport': args => getClient(args.orgId).retrySlackImport(args.jobId),
+    'spaces:previewSlackImport': args => getClient(args.orgId).previewSlackImport(Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0))),
     'spaces:getProfile': (args) => getClient(args.orgId).me(),
     'spaces:updateProfile': async ({ orgId, ...input }) => ({ member: await getClient(orgId).updateProfile(input) }),
     'spaces:setAvatar': async (args) => ({ member: await getClient(args.orgId).setAvatar({ bytes: Uint8Array.from(atob(args.bytes), c => c.charCodeAt(0)), mime: args.mime }) }),

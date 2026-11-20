@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SlackProfileLink, LinkSlackProfileInput, StartSlackImportInput, SlackImportJob, SlackImportPreview, SlackPreviewInput } from './slack-import.js';
 import { MENTION_GRAMMAR } from './mentions.js';
 import { ActivityKind, NewPoll, ThreadListing } from './api.js';
 import {
@@ -154,6 +155,20 @@ export const listAssets = tool({
   description: 'List files in a readable space, including an open space you have not joined. Returns asset IDs for read_asset, asset_history and diff. Set includeDeleted to also list trashed files.',
   input: z.object({ spaceId: SpaceId, includeDeleted: z.boolean().optional() }),
   output: z.object({ entries: z.array(Asset) }),
+});
+
+export const getSlackProfile = tool({ name: 'get_slack_profile', description: 'Read the legacy Slack author and optional Rowboat profile link for an imported message. Requires space membership.', input: z.object({ spaceId: z.string(), messageId: z.string() }), output: SlackProfileLink });
+export const linkSlackProfile = tool({ name: 'link_slack_profile', description: 'As a space admin, link a legacy Slack author to an existing human member of this space, or unlink with memberId null. Applies only within this space, grants no access, and preserves historical attribution.', input: z.object({ spaceId: z.string(), messageId: z.string() }).extend(LinkSlackProfileInput.shape), output: SlackProfileLink });
+export const startSlackImport = tool({ name: 'start_slack_import', description: 'Import selected channels from a Slack ZIP as new private spaces, initially accessible only to you. Supply the same workspace domain on repeat imports. Historical authors grant no membership. Returns a durable job; poll get_slack_import. Already imported channels are skipped by default; existingChannels append adds unseen messages to your previous destinations (requires space admin). Existing message edits and deletions are not synchronized.', input: StartSlackImportInput, output: SlackImportJob });
+export const listSlackImports = tool({ name: 'list_slack_imports', description: 'List your most recent Slack import jobs.', input: z.object({}), output: z.object({ jobs: z.array(SlackImportJob) }) });
+export const getSlackImport = tool({ name: 'get_slack_import', description: 'Read progress and destinations of your Slack import job.', input: z.object({ jobId: z.string() }), output: SlackImportJob });
+export const retrySlackImport = tool({ name: 'retry_slack_import', description: 'Retry a failed Slack import job, retaining already completed channels.', input: z.object({ jobId: z.string() }), output: SlackImportJob });
+
+export const previewSlackImport = tool({
+  name: 'preview_slack_import',
+  description: 'Preview a Slack JSON export ZIP supplied as base64 (maximum 100 MiB). Returns channel summaries and warnings; creates no spaces, memberships or messages and does not retain the archive.',
+  input: SlackPreviewInput,
+  output: SlackImportPreview,
 });
 
 export const createSpace = tool({
@@ -850,6 +865,9 @@ export const deleteAgent = tool({
 });
 
 export const mcpTools = [
+  getSlackProfile, linkSlackProfile,
+  startSlackImport, listSlackImports, getSlackImport, retrySlackImport,
+  previewSlackImport,
   whoami,
   updateProfile,
   listMembers,
@@ -911,6 +929,8 @@ export const agentOnlyMcpToolNames: ReadonlySet<string> = new Set([createAgent.n
 
 /** Tool names whose only effect is reading — no event is appended, nothing is written. */
 export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
+  getSlackProfile.name, listSlackImports.name, getSlackImport.name,
+  previewSlackImport.name,
   whoami.name,
   listMembers.name,
   listContacts.name,

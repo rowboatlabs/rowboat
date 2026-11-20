@@ -1,3 +1,4 @@
+import { SlackImportPreviewPanel } from './slack-import-preview'
 import { useState } from 'react'
 import { ArrowLeft, PanelLeft, Bot } from 'lucide-react'
 import { spaces } from '@x/shared'
@@ -14,7 +15,7 @@ import { AddMembersDialog } from './add-members-dialog'
 import { ArchiveSpaceDialog, DeleteSpaceDialog } from './space-admin-dialogs'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 
-type Tab = 'general' | 'people' | 'agents' | 'actions'
+type Tab = 'imports' | 'general' | 'people' | 'agents' | 'actions'
 type Confirmation = { title: string; description: string; run: () => Promise<unknown> }
 
 // 2026-11-12: Use Harbor's existing operations and live roster for space settings.
@@ -43,7 +44,7 @@ export function SpaceSettings({ org, space, members, onBack, onShowSidebar }: {
         catch (error) { toast(error instanceof Error ? error.message : 'Could not save changes', 'error') }
         finally { setBusy(false) }
     }
-    const tabs: {id: Tab; label: string; count?: number}[] = [{id:'general',label:'General'}, {id:'people',label:'People',count:people.length}, {id:'agents',label:'Agents',count:agents.length}, {id:'actions',label:'Space actions'}]
+    const tabs: {id: Tab; label: string; count?: number}[] = [{id:'general',label:'General'}, {id:'people',label:'People',count:people.length}, {id:'agents',label:'Agents',count:agents.length}, {id:'imports',label:'Imports'}, {id:'actions',label:'Space actions'}]
     const roster = (tab === 'agents' ? agents : people).filter(m => m.displayName.toLowerCase().includes(query.trim().toLowerCase())).sort((a,b) => a.displayName.localeCompare(b.displayName))
     if (!admin) return <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
         <h1 className="text-xl font-semibold">Space settings</h1>
@@ -56,6 +57,7 @@ export function SpaceSettings({ org, space, members, onBack, onShowSidebar }: {
             <Button variant="ghost" size="sm" className="mb-6 -ml-3 text-muted-foreground" onClick={onBack}><ArrowLeft className="size-4" />Back to space</Button>
             <h1 className="text-2xl font-semibold tracking-tight">Space settings</h1><p className="mt-2 text-sm text-muted-foreground">Manage {space.name} and the people and agents who work here.</p>
             <nav aria-label="Space settings sections" className="mt-7 flex gap-6 overflow-x-auto border-b border-border">{tabs.map(t => <button key={t.id} type="button" aria-current={tab === t.id ? 'page' : undefined} className={cn('flex shrink-0 items-center gap-2 border-b-2 py-3 text-sm',tab === t.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')} onClick={() => {setTab(t.id);setQuery('')}}>{t.label}{t.count !== undefined && <span className="rounded bg-muted px-1.5 text-xs">{t.count}</span>}</button>)}</nav>
+            {tab === 'imports' && <SlackImportPreviewPanel orgId={org.id} />}
             {tab === 'general' && <div className="space-y-8 py-7"><form onSubmit={e => {e.preventDefault();if(name.trim() && writable) void perform(() => window.ipc.invoke('spaces:renameSpace',{orgId:org.id,spaceId:space.id,name:name.trim()}),'Space renamed')}}>
                 <h2 className="text-base font-medium">Space details</h2><p className="mt-1 text-sm text-muted-foreground">Give this space a name people recognize.</p><label htmlFor="settings-space-name" className="mt-6 mb-2 block text-sm">Space name</label><Input id="settings-space-name" className="max-w-lg" value={name} onChange={e => setName(e.target.value)} required maxLength={100} disabled={!writable || busy} /><div className="mt-5 flex gap-2"><Button type="submit" disabled={!writable || busy || !name.trim() || name.trim() === space.name}>Save changes</Button><Button type="button" variant="outline" disabled={busy || name === space.name} onClick={() => setName(space.name)}>Discard</Button></div>
             </form><section className="border-t border-border pt-7"><h2 className="text-base font-medium">Space link</h2><p className="mt-1 mb-4 text-sm text-muted-foreground">A direct link for people who already have access.</p><Button variant="outline" onClick={() => void copySpacesLink(spaces.spaceUrl(org.address,space.id))}>Copy space link</Button></section>

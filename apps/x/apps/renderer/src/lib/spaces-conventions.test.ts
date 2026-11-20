@@ -110,6 +110,12 @@ describe('stream helpers', () => {
         expect(isContinuation(b, c)).toBe(false)
         expect(isContinuation(a, viaAgent)).toBe(false)
     })
+    it('never groups live messages under an imported Slack author', () => {
+        const live = msg({ id: 'live' })
+        const imported = msg({ id: 'imported', author: { ...live.author, slack: { workspace: 'team.slack.com', channelId: 'C1', userId: 'U1', name: 'Alex', timestamp: '1.000001' } } })
+        expect(isContinuation(imported, live)).toBe(false)
+        expect(isContinuation(live, imported)).toBe(false)
+    })
     it('labels days relative to now', () => {
         const now = new Date('2026-08-19T15:00:00')
         expect(formatDayLabel('2026-08-19T09:00:00', now)).toBe('Today')

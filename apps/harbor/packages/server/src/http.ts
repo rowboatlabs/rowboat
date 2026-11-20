@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import { routes } from '@rowboat/spaces-protocol';
+import { MAX_SLACK_ZIP_BYTES, routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import { authenticateRequest, protectedResourceMetadata, wwwAuthenticate, type AuthIdentity, type ServerAuth } from './auth.js';
 import { consentPageHtml } from './consent.js';
@@ -40,6 +40,25 @@ async function body<S extends z.ZodType>(c: Context<Env>, schema: S): Promise<z.
     throw new HarborError('invalid_request', 'body is not valid JSON');
   }
   return parseWith(schema, raw);
+}
+
+async function slackImportBody(c: Context<Env>) {
+  const limit = Math.ceil(MAX_SLACK_ZIP_BYTES / 3) * 4 + 65536;
+  if (Number(c.req.header('content-length') ?? '0') > limit) throw new HarborError('payload_too_large', 'Import request too large');
+  const reader = c.req.raw.body?.getReader();
+  if (!reader) throw new HarborError('invalid_request', 'Import body required');
+  const chunks: Uint8Array[] = []; let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > limit) { await reader.cancel(); throw new HarborError('payload_too_large', 'Import request too large'); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  let raw: unknown;
+  try { raw = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HarborError('invalid_request', 'Invalid JSON'); }
+  return parseWith(routes.startSlackImport.request, raw);
 }
 
 /** Outbound contract check: the stub refuses to send a shape the schemas don't bless. */
@@ -278,6 +297,58 @@ export function buildHttpApp(deps: {
     });
     const spaces = await service.listSpaces(actor(c), { includeDirect: q.includeDirect ?? false });
     return reply(c, routes.listSpaces.response, { spaces });
+  });
+
+  app.get(routes.getSlackProfile.path, async c => {
+    c.header('Cache-Control', 'no-store');
+    const p = parseWith(routes.getSlackProfile.params, c.req.param());
+    return reply(c, routes.getSlackProfile.response, await service.getSlackProfile(actor(c), p.spaceId, p.messageId));
+  });
+  app.put(routes.linkSlackProfile.path, async c => {
+    c.header('Cache-Control', 'no-store');
+    const p = parseWith(routes.linkSlackProfile.params, c.req.param());
+    const input = await body(c, routes.linkSlackProfile.request);
+    return reply(c, routes.linkSlackProfile.response, await service.linkSlackProfile(actor(c), p.spaceId, p.messageId, input.memberId));
+  });
+  app.post(routes.startSlackImport.path, async c => {
+    c.header('Cache-Control', 'no-store');
+    return reply(c, routes.startSlackImport.response, await service.startSlackImport(actor(c), await slackImportBody(c)));
+  });
+  app.get(routes.listSlackImports.path, async c => {
+    c.header('Cache-Control', 'no-store');
+    return reply(c, routes.listSlackImports.response, await service.listSlackImports(actor(c)));
+  });
+  app.get(routes.getSlackImport.path, async c => {
+    c.header('Cache-Control', 'no-store');
+    return reply(c, routes.getSlackImport.response, await service.getSlackImport(actor(c), c.req.param('jobId')));
+  });
+  app.post(routes.retrySlackImport.path, async c => {
+    c.header('Cache-Control', 'no-store');
+    return reply(c, routes.retrySlackImport.response, await service.retrySlackImport(actor(c), c.req.param('jobId')));
+  });
+
+  app.put(routes.previewSlackImport.path, async (c) => {
+    if (Number(c.req.header('content-length') ?? '0') > MAX_SLACK_ZIP_BYTES) {
+      throw new HarborError('payload_too_large', 'ZIP exceeds the 100 MiB preview limit');
+    }
+    const reader = c.req.raw.body?.getReader();
+    if (!reader) throw new HarborError('invalid_request', 'ZIP body is required');
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > MAX_SLACK_ZIP_BYTES) {
+          await reader.cancel();
+          throw new HarborError('payload_too_large', 'ZIP exceeds the 100 MiB preview limit');
+        }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    c.header('Cache-Control', 'no-store');
+    return reply(c, routes.previewSlackImport.response, await service.previewSlackImport(actor(c), Buffer.concat(chunks)));
   });
 
   app.post(routes.createSpace.path, async (c) => {

@@ -381,8 +381,8 @@ export const MessageRow = memo(function MessageRow({
 }) {
   const colors = useColors();
   const dark = colors.isDark;
-  const name = member ? memberLabel(member) : message.author.memberId;
-  const agent = message.author.actingMode !== 'direct';
+  const name = message.author.slack?.name ?? (member ? memberLabel(member) : message.author.memberId);
+  const agent = !message.author.slack && message.author.actingMode !== 'direct';
   // A send not yet confirmed (2026-11-13): faded, and no actions — it has no
   // real id for reactions, edits, deletes or a thread yet.
   const pending = isPending(message);
@@ -460,12 +460,12 @@ export const MessageRow = memo(function MessageRow({
         <Text style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>
           {(name[0] ?? '?').toUpperCase()}
         </Text>
-        {member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 34, height: 34 }} /> : null}
+        {!message.author.slack && member?.avatarUrl ? <AuthedImage url={member.avatarUrl} style={{ position: 'absolute', top: 0, left: 0, width: 34, height: 34 }} /> : null}
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
           <Text style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>
-            {name}
+            {name}{message.author.slack ? ' · Slack' : ''}
             {agent ? <Text style={{ fontWeight: '400', color: colors.tertiaryLabel }}>  (agent)</Text> : null}
           </Text>
           <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{time}</Text>
@@ -484,7 +484,7 @@ export const MessageRow = memo(function MessageRow({
           />
         ) : (
           <>
-            <MessageBody
+            {message.author.slack ? <Text style={{ color: colors.label, fontSize: 15 }}>{message.body}{message.author.slack.reactions?.map(r => `\n:${r.name}: × ${r.count} (Slack)`).join('')}</Text> : <MessageBody
               body={body}
               fileNames={fileNames}
               rules={imageRule}
@@ -499,8 +499,8 @@ export const MessageRow = memo(function MessageRow({
                 onOpenAsset(link);
                 return false;
               }}
-            />
-            <MessageLinkPreviews body={message.body} />
+            />}
+            {!message.author.slack && <MessageLinkPreviews body={message.body} />}
           </>
         )}
         {!pending && (reactions.length > 0 || alwaysShowReactionBar) ? (
@@ -706,10 +706,10 @@ export function MessageActionSheet({
     const saved = isSaved?.(message) ?? false;
     actions.push({ key: 'save', icon: saved ? 'sf:bookmark.fill' : 'sf:bookmark', label: saved ? 'Remove from saved' : 'Save for later', run: () => onToggleSave(message) });
   }
-  if (isAuthor && onEdit && !message.poll) actions.push({ key: 'edit', icon: 'sf:pencil', label: 'Edit message', run: () => onEdit(message) });
+  if (isAuthor && !message.author.slack && onEdit && !message.poll) actions.push({ key: 'edit', icon: 'sf:pencil', label: 'Edit message', run: () => onEdit(message) });
   if (isAuthor && onDelete) actions.push({ key: 'delete', icon: 'sf:trash', label: 'Delete message', destructive: true, run: () => onDelete(message) });
   if (!isAuthor && onReport) actions.push({ key: 'report', icon: 'sf:flag', label: 'Report message', destructive: true, run: () => onReport(message) });
-  if (!isAuthor && onBlock) actions.push({ key: 'block', icon: 'sf:hand.raised', label: 'Block this person', destructive: true, run: () => onBlock(message) });
+  if (!message.author.slack && !isAuthor && onBlock) actions.push({ key: 'block', icon: 'sf:hand.raised', label: 'Block this person', destructive: true, run: () => onBlock(message) });
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose}>

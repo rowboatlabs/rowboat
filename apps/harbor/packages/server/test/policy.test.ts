@@ -300,3 +300,12 @@ describe('secrets in a message (2026-11-04)', () => {
     expect(canReadSecret('scout', undefined, 'KEY')).toMatchObject({ code: 'not_found' });
   });
 });
+
+import { canLinkSlackProfile, canAppendSlackImport } from '../src/policy.js';
+it('requires a space admin for legacy profile links and appended history', () => {
+  for (const rule of [canLinkSlackProfile, canAppendSlackImport]) {
+    expect(rule(undefined)?.code).toBe('forbidden');
+    expect(rule({ spaceId: 's', memberId: 'm', joinedAt: '2026-11-17T00:00:00.000Z', role: 'member' })?.code).toBe('forbidden');
+    expect(rule({ spaceId: 's', memberId: 'm', joinedAt: '2026-11-17T00:00:00.000Z', role: 'admin' })).toBeNull();
+  }
+});

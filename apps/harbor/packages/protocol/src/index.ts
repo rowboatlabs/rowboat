@@ -3,6 +3,7 @@
 // wire decisions and the change process. v0 posture: breaking changes are
 // expected and fine, but they happen HERE, via PR — never in a Slack message.
 
+export * from './slack-import.js';
 export * from './ids.js';
 export * from './blob.js';
 export * from './core.js';
