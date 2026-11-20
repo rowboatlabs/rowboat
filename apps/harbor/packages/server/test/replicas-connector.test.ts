@@ -120,6 +120,7 @@ describe('the Replicas connector', () => {
     }, 'capabilities');
     expect(caps).toEqual({
       stop: false,
+      steer: false,
       options: [
         { type: 'select', key: 'model', label: 'Model', choices: [{ id: 'claude-opus-5-5', label: 'Opus 5.5' }, { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }] },
         {

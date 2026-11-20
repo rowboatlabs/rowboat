@@ -496,7 +496,7 @@ export class ReplicasConnector implements RunningConnector {
     }
     options.push({ type: 'select', key: 'effort', label: 'Effort', choices: levelsFor(agent).map((level) => ({ id: level, label: LEVEL_LABELS[level] ?? level })) });
     options.push({ type: 'toggle', key: 'plan_first', label: 'Plan first' });
-    const capabilities: ConnectorCapabilities = { stop: false, options };
+    const capabilities: ConnectorCapabilities = { stop: false, steer: false, options };
     const signature = JSON.stringify(capabilities);
     if (signature === this.declared) return;
     this.declared = signature;

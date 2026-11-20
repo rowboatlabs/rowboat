@@ -6,6 +6,7 @@ import {
   canReachMember,
   canSignIn,
   canCancelQueuedInvocation,
+  canSteerInvocation,
   canStopInvocation,
   invocationRefusal,
   canAccessSpace,
@@ -225,6 +226,12 @@ describe('policy', () => {
     expect(canStopInvocation(row('gagan'), inv, true)).toMatchObject({ code: 'forbidden' });
     expect(canStopInvocation(undefined, inv, true)).toMatchObject({ code: 'forbidden' });
     expect(canStopInvocation(row('harsh'), inv, false)).toMatchObject({ code: 'invalid_request' });
+    // Steering a working turn (2026-11-05): the same people as Stop, and only a connector that declared it.
+    expect(canSteerInvocation(row('harsh'), inv, true)).toBeNull();
+    expect(canSteerInvocation(row('ramnique', 'admin'), inv, true)).toBeNull();
+    expect(canSteerInvocation(row('gagan'), inv, true)).toMatchObject({ code: 'forbidden' });
+    expect(canSteerInvocation(undefined, inv, true)).toMatchObject({ code: 'forbidden' });
+    expect(canSteerInvocation(row('harsh'), inv, false)).toMatchObject({ code: 'invalid_request' });
   });
 });
 

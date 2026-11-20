@@ -127,6 +127,17 @@ describe('InvocationLines', () => {
         await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:getAgentCapabilities', expect.anything()))
         expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
     })
+
+    // A message folded into the running turn (steers, 2026-11-05): says so, cancellable until taken, never stopped on its own.
+    it('says a steer is being added, then folded in, with Cancel while pending and no Stop of its own', async () => {
+        stop = true
+        lines([invocation('s1', 'pending', { steers: 'turn' }), invocation('s2', 'working', { steers: 'turn' })], { selfId: 'harsh' })
+        expect(screen.getByText('Adding this to what Echo is doing')).toBeInTheDocument()
+        expect(screen.getByText('Echo folded this into its current turn')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith('spaces:getAgentCapabilities', expect.anything()))
+        expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    })
 })
 
 describe('AgentOptionsStrip', () => {

@@ -445,7 +445,7 @@ export class ConductorConnector implements RunningConnector {
     options.push({ type: 'select', key: 'model', label: 'Model', choices: CLAUDE_MODELS });
     options.push({ type: 'select', key: 'effort', label: 'Effort', choices: CLAUDE_EFFORTS });
     options.push({ type: 'toggle', key: 'fast_mode', label: 'Fast mode' });
-    const capabilities: ConnectorCapabilities = { stop: true, options };
+    const capabilities: ConnectorCapabilities = { stop: true, steer: false, options };
     const signature = JSON.stringify(capabilities);
     if (signature === this.declared) return;
     this.declared = signature;
