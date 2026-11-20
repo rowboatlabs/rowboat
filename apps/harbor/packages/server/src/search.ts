@@ -229,14 +229,36 @@ export function snippetAround(body: string, q: SearchQuery): string {
     }
   }
   if (at === -1) at = 0;
-  const start = Math.max(0, at - 60);
-  const end = Math.min(body.length, at + 160);
+  // Widen to whole code points: a cut between an emoji's surrogate halves
+  // left a lone \uD83D that strict JSON decoders (serde_json in MCP clients)
+  // reject as "unexpected end of hex escape" (UX-002, 2026-11-18).
+  const start = codePointStart(body, Math.max(0, at - 60));
+  const end = codePointEnd(body, Math.min(body.length, at + 160));
   const slice = body.slice(start, end).replace(/\s+/g, ' ').trim();
   return `${start > 0 ? '…' : ''}${slice}${end < body.length ? '…' : ''}`;
 }
 
 /** Extracted text is capped well under tsvector's limits; snippets never need more. */
 const EXTRACT_CAP = 100_000;
+
+const isHigh = (c: number): boolean => c >= 0xd800 && c <= 0xdbff;
+const isLow = (c: number): boolean => c >= 0xdc00 && c <= 0xdfff;
+
+/** A slice start moved back off the low half of a surrogate pair. */
+function codePointStart(s: string, i: number): number {
+  return i > 0 && isLow(s.charCodeAt(i)) && isHigh(s.charCodeAt(i - 1)) ? i - 1 : i;
+}
+
+/** A slice end moved forward past the low half of a surrogate pair. */
+function codePointEnd(s: string, i: number): number {
+  return i < s.length && isLow(s.charCodeAt(i)) && isHigh(s.charCodeAt(i - 1)) ? i + 1 : i;
+}
+
+/** The first `cap` UTF-16 units, dropping a high surrogate the cap would orphan. */
+function capText(s: string): string {
+  if (s.length <= EXTRACT_CAP) return s;
+  return s.slice(0, isHigh(s.charCodeAt(EXTRACT_CAP - 1)) ? EXTRACT_CAP - 1 : EXTRACT_CAP);
+}
 
 /**
  * What of this file is SEARCHABLE — the one per-kind seam future asset types
@@ -259,7 +281,7 @@ export function extractSearchText(path: string, content: string): string {
   if (/\.json$/i.test(path) || looksJson) {
     return extractFromJson(content, null);
   }
-  return content.slice(0, EXTRACT_CAP);
+  return capText(content);
 }
 
 /**
@@ -271,7 +293,7 @@ function extractFromJson(content: string, pick: ((obj: Record<string, unknown>) 
   try {
     root = JSON.parse(content);
   } catch {
-    return content.slice(0, EXTRACT_CAP); // not actually JSON — index as prose
+    return capText(content); // not actually JSON — index as prose
   }
   const out: string[] = [];
   let size = 0;
@@ -298,5 +320,5 @@ function extractFromJson(content: string, pick: ((obj: Record<string, unknown>) 
     for (const v of Object.values(obj)) walk(v);
   };
   walk(root);
-  return out.join('\n').slice(0, EXTRACT_CAP);
+  return capText(out.join('\n'));
 }
