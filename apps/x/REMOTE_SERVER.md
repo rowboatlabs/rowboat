@@ -110,3 +110,10 @@ desktop settings UI while connected remotely; the writes land on the server.
 - **Transport**: bearer token over plain HTTP inside the tailnet. Tailscale
   encrypts on the wire (WireGuard); do not run this over untrusted networks
   without it (or a TLS reverse proxy).
+- **Shell working-directory boundary**: to restrict `executeCommand` to specific
+  directories on remote hosts, configure `shell.allowedRoots` in `~/.rowboat/config/server.json`
+  (e.g. `{"shell": {"allowedRoots": ["/home/ubuntu/projects"]}}`) or set the
+  `ROWBOAT_SHELL_ALLOWED_ROOTS` environment variable (comma-separated). Unset by
+  default. Note: `cwd` enforcement is a convenience boundary for tool executions,
+  not a process sandbox; full isolation should be provided by the host environment
+  (containers or VMs).
