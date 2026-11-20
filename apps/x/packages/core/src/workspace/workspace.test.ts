@@ -173,4 +173,22 @@ describe("workspace.readFile path boundary", () => {
 
     await expect(workspace.readFile("link.txt", "utf8")).rejects.toThrow("Path outside workspace boundary");
   });
+
+  it("allows an in-workspace file whose name starts with two dots", async () => {
+    const workspace = await loadWorkspace();
+    await fs.writeFile(path.join(workspaceDir, "..notes"), "private notes", "utf8");
+
+    await expect(workspace.readFile("..notes", "utf8")).resolves.toMatchObject({
+      data: "private notes",
+    });
+  });
+
+  it("returns the real path for an in-workspace symlink", async () => {
+    const workspace = await loadWorkspace();
+    const targetPath = path.join(workspaceDir, "notes.txt");
+    await fs.writeFile(targetPath, "note", "utf8");
+    await fs.symlink(targetPath, path.join(workspaceDir, "notes-link.txt"));
+
+    await expect(workspace.resolveExistingWorkspacePath("notes-link.txt")).resolves.toBe(targetPath);
+  });
 });
