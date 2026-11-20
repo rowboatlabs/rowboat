@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { streamableHttpRequestInit } from "../mcp/streamable-http-request.js";
 import container from '../di/container.js';
 import { IOAuthRepo } from '../auth/repo.js';
 import { IClientRegistrationRepo } from '../auth/client-repo.js';
@@ -193,11 +194,9 @@ export class FirefliesClientFactory {
         const url = new URL(FIREFLIES_MCP_URL);
         
         // Create transport with Authorization header
-        const requestInit: RequestInit = {
-            headers: {
-                'Authorization': `Bearer ${tokens.access_token}`,
-            },
-        };
+        const requestInit = streamableHttpRequestInit({
+            Authorization: `Bearer ${tokens.access_token}`,
+        });
 
         const transport = new StreamableHTTPClientTransport(url, { requestInit });
 
