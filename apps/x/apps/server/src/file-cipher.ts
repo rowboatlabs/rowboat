@@ -5,7 +5,7 @@ import type { TokenCipher } from '@x/core/dist/auth/chatgpt-auth.js';
 
 // Token-at-rest encryption for headless hosts (Phase 8b). The Electron app
 // used safeStorage (OS keychain); a standalone server has no keychain, so the
-// cipher key is a random 32-byte file next to the data it protects —
+// cipher key is a random 32-byte file next to the data it protects:
 // `<workdir>/cipher-key`, mode 0600. This protects tokens from casual reads
 // and backups that miss the key file; an attacker with full workdir access
 // gets both, which matches the keychain-less posture of comparable
@@ -19,13 +19,25 @@ export async function createFileCipher(workDir: string): Promise<TokenCipher> {
   let key: Buffer;
   try {
     key = Buffer.from((await fs.readFile(keyPath, 'utf8')).trim(), 'base64');
-    if (key.length !== KEY_BYTES) throw new Error(`cipher-key is ${key.length} bytes, expected ${KEY_BYTES}`);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     key = crypto.randomBytes(KEY_BYTES);
     await fs.mkdir(workDir, { recursive: true });
-    await fs.writeFile(keyPath, key.toString('base64') + '\n', { mode: 0o600 });
+    const tempKeyPath = path.join(workDir, `.cipher-key-${crypto.randomUUID()}.tmp`);
+    try {
+      await fs.writeFile(tempKeyPath, key.toString('base64') + '\n', { mode: 0o600, flag: 'wx' });
+      try {
+        await fs.link(tempKeyPath, keyPath);
+      } catch (publishErr) {
+        if ((publishErr as NodeJS.ErrnoException).code !== 'EEXIST') throw publishErr;
+      }
+      key = Buffer.from((await fs.readFile(keyPath, 'utf8')).trim(), 'base64');
+    } finally {
+      await fs.rm(tempKeyPath, { force: true });
+    }
   }
+
+  if (key.length !== KEY_BYTES) throw new Error(`cipher-key is ${key.length} bytes, expected ${KEY_BYTES}`);
 
   return {
     isAvailable: () => true,
