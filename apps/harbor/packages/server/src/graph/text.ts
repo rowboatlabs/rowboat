@@ -64,7 +64,7 @@ export function codeIn(body: string): string[] {
 // --- candidate topics ---------------------------------------------------------------
 
 const STOP = new Set(
-  `a about above after again against all also am an and any are aren't as at be because been before being below between both but by can can't cannot could couldn't did didn't do does doesn't doing don't down during each few for from further had hadn't has hasn't have haven't having he her here hers herself him himself his how i if in into is isn't it its itself just let me more most my myself no nor not now of off on once one only or other our ours out over own same she should shouldn't so some such than that the their theirs them themselves then there these they this those through to too under until up very was wasn't we were weren't what when where which while who whom why will with won't would wouldn't you your yours yourself yes ok okay please thanks thank need needs want wants make makes made get gets got use uses used using see seen look looks still already yet done new old two three first second next last way thing things lot much many may might must shall like even though however since without within via per etc vs it's i'm i'll i've i'd that's there's what's let's we're you're they're every either neither whether else ever never always often another back going go goes went come comes came say says said know knows knew think thinks thought take takes took give gives gave work works worked working right left good bad sure maybe really actually currently today yesterday tomorrow here's change changes changed add adds added adding remove removes removed fix fixes fixed run runs running ran show shows showed keep keeps kept set sets put try tries tried tell tells told ask asks asked read reads write writes wrote check checks checked open opens opened close closes closed start starts started stop stops stopped twice instead rather able`.split(/\s+/),
+  `a about above after again against all also am an and any are aren't as at be because been before being below between both but by can can't cannot could couldn't did didn't do does doesn't doing don't down during each few for from further had hadn't has hasn't have haven't having he her here hers herself him himself his how i if in into is isn't it its itself just let me more most my myself no nor not now of off on once one only or other our ours out over own same she should shouldn't so some such than that the their theirs them themselves then there these they this those through to too under until up very was wasn't we were weren't what when where which while who whom why will with won't would wouldn't you your yours yourself yes ok okay please thanks thank need needs want wants make makes made get gets got use uses used using see seen look looks still already yet done new old two three first second next last way thing things lot much many may might must shall like even though however since without within via per etc vs it's i'm i'll i've i'd that's there's what's let's we're you're they're every either neither whether else ever never always often another back going go goes went come comes came say says said know knows knew think thinks thought take takes took give gives gave work works worked working right left good bad sure maybe really actually currently today yesterday tomorrow here's change changes changed add adds added adding remove removes removed fix fixes fixed run runs running ran show shows showed keep keeps kept set sets put try tries tried tell tells told ask asks asked read reads write writes wrote check checks checked open opens opened close closes closed start starts started stop stops stopped twice instead rather able في من على إلى عن مع هذا هذه ذلك تلك التي الذي الذين أن إن كان كانت يكون ما لا لم لن قد كل بعض أو ثم بل لكن حتى عند بين فوق تحت قبل بعد حول خلال دون غير مثل كيف متى أين لماذا نحن هم هن أنا أنت أنتم هو هي`.split(/\s+/),
 );
 
 export interface TopicCandidate {
@@ -98,7 +98,7 @@ const stem = (word: string): string => (word.length > 4 && /[^s]s$/.test(word) &
  */
 export function topicCandidates(threads: readonly ThreadText[], memberNames: Iterable<string>): TopicCandidate[] {
   const nameTokens = new Set<string>();
-  for (const name of memberNames) for (const token of name.toLowerCase().split(/[^a-z0-9]+/)) if (token.length > 2) nameTokens.add(token);
+  for (const name of memberNames) for (const token of name.toLowerCase().split(/[^\p{L}\p{N}]+/u)) if (token.length > 2) nameTokens.add(token);
   interface Stat { n: number; threads: Set<string>; surface: Map<string, number>; mid: number; capital: number }
   const words = new Map<string, Stat>();
   const phrases = new Map<string, Stat>();
@@ -124,13 +124,16 @@ export function topicCandidates(threads: readonly ThreadText[], memberNames: Ite
         .replace(/https?:\/\/\S+/g, ' . ')
         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
         .replace(/[*_>#|~]/g, ' ');
-      for (const sentence of clean.split(/[.!?:;\n()[\]"“”]+/)) {
-        const tokens = [...sentence.matchAll(/[A-Za-z][A-Za-z0-9'’-]*/g)].map((m) => m[0].replace(/['’]s$/, '')).filter(Boolean);
+      for (const sentence of clean.split(/[.!?:;\n()[\]"“”؟،؛]+/)) {
+        const tokens = [...sentence.matchAll(/\p{L}[\p{L}\p{N}'’-]*/gu)].map((m) => m[0].replace(/['’]s$/, '')).filter(Boolean);
         const low = tokens.map((t) => stem(t.toLowerCase().replace(/’/g, "'")));
         total += tokens.length;
         for (let i = 0; i < tokens.length; i++) {
           const word = low[i] ?? '';
-          if (!STOP.has(word) && word.length > 2) bump(words, word, thread.id, tokens[i] ?? '', i > 0 ? 1 : 0, i > 0 && /^[A-Z]/.test(tokens[i] ?? '') ? 1 : 0);
+          const tok = tokens[i] ?? '';
+          const isUnicameral = /[\u0600-\u06FF\u4E00-\u9FFF]/.test(tok);
+          const isCapOrUnicameral = /^[A-Z]/.test(tok) || (isUnicameral && word.length >= 4);
+          if (!STOP.has(word) && word.length > 2) bump(words, word, thread.id, tok, i > 0 ? 1 : 0, i > 0 && isCapOrUnicameral ? 1 : 0);
           for (const n of [2, 3]) {
             if (i + n > tokens.length) continue;
             const first = low[i] ?? '';
@@ -174,7 +177,7 @@ export function topicCandidates(threads: readonly ThreadText[], memberNames: Ite
 
 /** Matches any of a topic's wordings as whole words, plural or not. */
 export function topicPattern(labels: readonly string[]): RegExp {
-  return new RegExp(`(?<![A-Za-z0-9])(?:${labels.map(escapeRe).join('|')})s?(?![A-Za-z0-9])`, 'gi');
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${labels.map(escapeRe).join('|')})s?(?![\\p{L}\\p{N}])`, 'giu');
 }
 
 /** Up to `max` short excerpts around a wording, one per thread: what Jev reads to judge a candidate. */
