@@ -230,7 +230,7 @@ async function ensureUserEmail(): Promise<string | null> {
 
 // --- Main processing ---
 
-async function processAgentNotes(): Promise<void> {
+export async function processAgentNotes(): Promise<void> {
     ensureAgentNotesDir();
     const state = loadAgentNotesState();
     const userEmail = await ensureUserEmail();
@@ -302,11 +302,11 @@ async function processAgentNotes(): Promise<void> {
             throwOnError: true,
         });
 
-        // Mark everything as processed
+        // 2026-11-23: leave runs outside this batch pending for later polls.
         for (const p of emailPaths) {
             markEmailProcessed(p, state);
         }
-        for (const r of newRuns) {
+        for (const r of runsToProcess) {
             markRunProcessed(r, state);
         }
         if (inboxEntries.length > 0) {
