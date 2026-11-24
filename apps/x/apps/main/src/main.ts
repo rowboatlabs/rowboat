@@ -52,7 +52,8 @@ import { promisify } from "node:util";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import { forwardRpc } from "./rpc-forwarder.js";
 import { bounceAllLive, getClient as getSpaceClient, listOrgs as listSpaceOrgs } from "@x/core/dist/spaces/orgs.js";
-import { parseSpacesUrl } from "@x/shared/dist/spaces.js";
+import { apexUrl } from "@x/core/dist/spaces/oauth.js";
+import { onServer, parseOrgUrl } from "@x/shared/dist/spaces.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
@@ -539,14 +540,20 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     }
   });
 
-  // A link into the signed-in server (the contract's link grammar: a space, a
+  // A link into a signed-in org (the contract's link grammar: a space, a
   // file, a message, a person) opens in the app, not in a browser that would
-  // only hand it straight back through the server's landing page. Any other
+  // only hand it straight back through the org's landing page. Any other
   // URL is external.
-  const openOrgLinkInApp = (url: string): boolean => {
-    const link = parseSpacesUrl(url);
-    if (!link || !listSpaceOrgs().some((o) => o.address === link.address)) return false;
-    const target = new URLSearchParams({ type: "spaces", server: link.address });
+  const openOrgLinkInApp = async (url: string): Promise<boolean> => {
+    const link = parseOrgUrl(url);
+    if (!link) return false;
+    const orgs = listSpaceOrgs();
+    if (!orgs.some((o) => o.address === link.orgAddress)) {
+      if (!orgs.some((o) => onServer(o.address, link.orgAddress))) return false;
+      const apex = await apexUrl().catch(() => null);
+      if (!apex || new URL(apex).host !== link.orgAddress) return false;
+    }
+    const target = new URLSearchParams({ type: "spaces", org: link.orgAddress });
     if ('spaceId' in link) target.set("spaceId", link.spaceId);
     if (link.kind === "asset") target.set("assetId", link.assetId);
     if (link.kind === "message") target.set("messageId", link.messageId);
@@ -555,10 +562,14 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     return true;
   };
 
+  const openLink = async (url: string) => {
+    if (!await openOrgLinkInApp(url)) await shell.openExternal(url);
+  };
+
   // Open external links in system browser (not sandboxed Electron window)
   // This handles window.open() and target="_blank" links
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!openOrgLinkInApp(url)) shell.openExternal(url);
+    void openLink(url);
     return { action: "deny" };
   });
 
@@ -568,7 +579,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     const isInternal =
       url.startsWith("app://") || url.startsWith(DEV_SERVER_URL);
     if (isInternal) return false;
-    if (!openOrgLinkInApp(url)) shell.openExternal(url);
+    void openLink(url);
     return true;
   };
 

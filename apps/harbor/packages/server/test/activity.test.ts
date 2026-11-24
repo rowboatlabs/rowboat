@@ -18,7 +18,7 @@ let main: string;
 
 async function start(): Promise<void> {
   harbor = await startTestHarbor({
-    name: 'Rowboat Labs',
+    orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

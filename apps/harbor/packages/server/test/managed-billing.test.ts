@@ -126,7 +126,7 @@ describe('managed agents on a deployment that bills', () => {
     const store = await freshStore();
     harbor = await startHarbor({
       store: store.store,
-      name: 'Rowboat Labs',
+      orgName: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'harsh', displayName: 'Harsh' },
@@ -344,7 +344,7 @@ describe('upgrading existing managed agents to Composio', () => {
     const store = await freshStore();
     const billing = new FakeBilling();
     const start = () => startHarbor({
-      store: store.store, name: 'Upgrade', seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
+      store: store.store, orgName: 'Upgrade', seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       blobs: new MemoryBlobStore(),
       hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url }), tickMs: 25, billing },
     });
@@ -411,7 +411,7 @@ describe('agents created before the deployment enabled billing', () => {
     const store = await freshStore();
     const billing = new FakeBilling();
     const start = (billed: boolean) => startHarbor({
-      store: store.store, name: 'Legacy', seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
+      store: store.store, orgName: 'Legacy', seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       blobs: new MemoryBlobStore(),
       hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url }), tickMs: 25, ...(billed ? { billing, settleEveryMs: 25 } : {}) },
     });
@@ -474,7 +474,7 @@ describe('agents created before the deployment enabled billing', () => {
     const store = await freshStore();
     const billing = new FakeBilling();
     const start = (billed: boolean) => startHarbor({
-      store: store.store, name: 'Identity', seedMembers: [{ id: 'owner', displayName: 'Owner' }, { id: 'other', displayName: 'Other' }],
+      store: store.store, orgName: 'Identity', seedMembers: [{ id: 'owner', displayName: 'Owner' }, { id: 'other', displayName: 'Other' }],
       blobs: new MemoryBlobStore(),
       hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url }), tickMs: 25, ...(billed ? { billing } : {}) },
     });

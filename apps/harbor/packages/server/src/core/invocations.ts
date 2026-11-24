@@ -1,5 +1,6 @@
 import {
   ConnectorCapabilities,
+  JEV_KIND,
   type ActingMode,
   type Approval,
   type ApprovalClose,
@@ -16,7 +17,7 @@ import {
   type Space,
 } from '@rowboat/spaces-protocol';
 import { HarborError } from '../errors.js';
-import { canCancelQueuedInvocation, canDecideApproval, canDecideSuperAgentRequest, canStopInvocation, enforce, invocationRefusal, seatOf } from '../policy.js';
+import { canCancelQueuedInvocation, canDecideApproval, canDecideSuperAgentRequest, canStopInvocation, enforce, invocationRefusal } from '../policy.js';
 import type { ActorCtx, Kernel } from './kernel.js';
 
 // Invoking agent members (spec §8, 2026-09-30). Harbor decides and a
@@ -88,7 +89,7 @@ export class Invocations {
    * The agents a new message invokes: the agents it mentions, the agent in a
    * DM, and in a shared space's thread the agent a person's unaddressed reply
    * follows up (followedUp). Each agent member other than the author gets an
-   * invocation: refused (no shared space, an owner-only seat, or past the hop limit),
+   * invocation: refused (no shared space, personal, or past the hop limit),
    * pending (its conversation is free, or its turn is waiting on a person,
    * which this answers), or queued. Edits never invoke. `depth` is the
    * message's hand-off depth (handOffDepth).
@@ -117,9 +118,7 @@ export class Invocations {
       if (agent?.kind !== 'agent') continue;
       const threadRootId = message.threadRoot ?? message.id;
       const shares = space.kind === 'shared' || (await this.k.store.sharesSharedSpace(message.author.memberId, agentId));
-      // The agent's seat here (spec §4 Agent members, 2026-11-09): everyone, or its owner only.
-      const seat = seatOf(await this.k.store.getMembership(space.id, agentId));
-      const refusal = invocationRefusal(shares, depth, { agent, authorId: message.author.memberId, seat });
+      const refusal = invocationRefusal(shares, depth, { agent, authorId: message.author.memberId });
       const now = this.k.now();
       // The owner's defaults fill what the invoker did not pick: a mention, a DM, an agent's hand-off alike.
       const options = { ...(await this.defaultsFor(agentId)), ...agentOptions?.[agentId] };
@@ -163,10 +162,11 @@ export class Invocations {
   /**
    * The agent a thread reply follows up without a mention (spec §8, amended
    * 2026-10-27): a person's own reply, acting directly, that mentions nobody
-   * (no member or @here) and is not sent to people only continues the
+   * (no member, @here or Ro) and is not sent to people only continues the
    * conversation with the agent its author most recently invoked in that
    * thread. Only that one, so a reply never starts two agents. A refused
-   * invocation does not count, since it never reached the agent. Policy then applies as
+   * invocation does not count, since it never reached the agent, and neither
+   * does Ro, which tags and never converses (§8 Jev). Policy then applies as
    * to a mention. Amended 2026-11-05 ("reply ux" in Main): only while that
    * conversation is the thread's latest, so the message before the reply is
    * the agent's own or the author's to it; otherwise the reply is to people.
@@ -178,13 +178,20 @@ export class Invocations {
     let agentId: string | undefined;
     for (const i of invocations) {
       if (i.trigger.authorId !== message.author.memberId || i.state === 'refused') continue;
+      if ((await this.k.store.getMember(i.agentId))?.agentKind === JEV_KIND) continue;
       agentId = i.agentId;
       break;
     }
     if (!agentId) return undefined;
-    const earlier = (await this.k.store.listThread(spaceId, message.threadRoot, { beforeOffset: message.offset, limit: 1 })).reverse();
+    // Ro's cc lines only tag, so they are not the conversation's latest.
+    const earlier = (await this.k.store.listThread(spaceId, message.threadRoot, { beforeOffset: message.offset, limit: 10 })).reverse();
     const root = await this.k.store.getMessage(spaceId, message.threadRoot);
-    const previous: Message | undefined = earlier[0] ?? root;
+    let previous: Message | undefined;
+    for (const m of [...earlier, ...(root ? [root] : [])]) {
+      if ((await this.k.store.getMember(m.author.memberId))?.agentKind === JEV_KIND) continue;
+      previous = m;
+      break;
+    }
     if (!previous) return undefined;
     if (previous.author.memberId === agentId) return agentId;
     const toAgent = previous.author.memberId === message.author.memberId
@@ -349,12 +356,12 @@ export class Invocations {
     return applicableDefaults((await this.k.store.getAgentCapabilities(agentId)) ?? ConnectorCapabilities.parse({}), defaults);
   }
 
-  /** The defaults the agent's owner set, as set (the composer preselects those that fit). Any member. */
+  /** The defaults the agent's owner set, as set (the composer preselects those that fit). Any org member. */
   async optionDefaults(agentId: string): Promise<InvocationOptionValues> {
     return (await this.k.store.getAgentOptionDefaults(agentId)) ?? {};
   }
 
-  /** Any member may read an agent's capabilities: the composer shows its options, the thread its Stop. */
+  /** Any org member may read an agent's capabilities: the composer shows its options, the thread its Stop. */
   async capabilities(agentId: string): Promise<ConnectorCapabilities> {
     const agent = await this.k.store.getMember(agentId);
     if (agent?.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
@@ -362,7 +369,7 @@ export class Invocations {
   }
 
   async listForSpace(ctx: ActorCtx, spaceId: string, threadRootId?: string): Promise<Invocation[]> {
-    await this.k.requireMember(ctx, spaceId);
+    await this.k.requireReadableSpace(ctx, spaceId);
     return (await this.k.store.listSpaceInvocations(spaceId, threadRootId ?? null, LIST_LIMIT)).map((i) => this.withActivityHistory(i));
   }
 
@@ -380,9 +387,9 @@ export class Invocations {
   private async cancelInner(ctx: ActorCtx, id: string): Promise<Invocation> {
     const found = await this.k.store.getInvocation(id);
     if (!found) throw new HarborError('not_found', 'no such invocation');
-    await this.k.requireMember(ctx, found.conversation.spaceId);
+    await this.k.requireReadableSpace(ctx, found.conversation.spaceId);
     const actor = await this.k.store.getMember(ctx.memberId);
-    if (!actor) throw new HarborError('not_a_member', 'not a member of this server');
+    if (!actor) throw new HarborError('not_a_member', 'not a member of this org');
     const { stop } = await this.capabilities(found.agentId);
     const out: InvocationOutbox = [];
     const result = await this.k.locked(found.conversation.spaceId, async () => {
@@ -397,7 +404,7 @@ export class Invocations {
         if (current.state === 'pending') await this.promote(next.agentId, next.conversation.spaceId, next.conversation.threadRootId, out);
         return next;
       }
-      enforce(canStopInvocation(await this.k.store.getMembership(current.conversation.spaceId, ctx.memberId), current, stop));
+      enforce(canStopInvocation(actor, current, stop));
       if (current.stopRequested) return current;
       const next: Invocation = { ...current, stopRequested: true, updatedAt: this.k.now() };
       await this.k.store.putInvocation(next);
@@ -477,7 +484,7 @@ export class Invocations {
     // A super agent's request is its owner's to decide (2026-11-02).
     if (found.action) {
       const actor = await this.k.store.getMember(ctx.memberId);
-      enforce(actor ? canDecideSuperAgentRequest(actor, await this.k.store.getMember(found.agentId)) : { code: 'not_a_member', message: 'not a member of this server' });
+      enforce(actor ? canDecideSuperAgentRequest(actor, await this.k.store.getMember(found.agentId)) : { code: 'not_a_member', message: 'not a member of this org' });
     }
     const out: InvocationOutbox = [];
     const result = await this.k.lockedAs(ctx, spaceId, async () => {
@@ -644,9 +651,13 @@ export class Invocations {
   /**
    * The depth an agent a new message mentions is invoked at (spec §8). A
    * person's post is 0; an agent's hands work on, one hop deeper than the
-   * deepest turn it is running.
+   * deepest turn it is running. Jev's tags (`relayOf`, spec §8 Jev,
+   * 2026-10-07) complete the mentions of the message they answer, so they
+   * take that message's depth: an agent and Jev passing work along still
+   * stop at the hop limit.
    */
-  async handOffDepth(ctx: ActorCtx): Promise<number> {
+  async handOffDepth(ctx: ActorCtx, spaceId: string, relayOf?: string): Promise<number> {
+    if (relayOf) return this.k.store.getMessageHops(spaceId, relayOf);
     if (!ctx.agent) return 0;
     const live = await this.k.store.listInvocationsForAgent(ctx.memberId, LIVE);
     return 1 + live.reduce((max, i) => Math.max(max, i.depth), 0);

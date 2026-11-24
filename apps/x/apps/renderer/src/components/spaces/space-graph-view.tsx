@@ -50,7 +50,7 @@ function Dot({ type }: { type: GraphNodeType }) {
 export function SpaceGraphView({ orgId, space, members, admin, refreshTick, onOpenThread, onOpenSettings }: {
     orgId: string
     space: spaces.Space
-    members: readonly spaces.SpaceMember[]
+    members: readonly spaces.Member[]
     admin: boolean
     /** Bumped on any durable event in the space: a reason to ask again. */
     refreshTick: number
@@ -446,7 +446,7 @@ function Meter({ label, value, text }: { label: string; value: number; text: str
     </div>
 }
 
-function ThreadPanel({ model, id, members, onFocus, onOpenThread }: { model: GraphModel; id: string; members: readonly spaces.SpaceMember[]; onFocus: (id: string) => void; onOpenThread: (rootMessageId: string) => void }) {
+function ThreadPanel({ model, id, members, onFocus, onOpenThread }: { model: GraphModel; id: string; members: readonly spaces.Member[]; onFocus: (id: string) => void; onOpenThread: (rootMessageId: string) => void }) {
     const thread = model.threads.get(id)
     const edges = useMemo(() => [...(model.byNode.get(id) ?? [])].sort((a, b) => b.weight - a.weight), [model, id])
     if (!thread) return <p className="text-sm text-muted-foreground">This thread is no longer in the graph.</p>

@@ -33,7 +33,7 @@ import { PIN_EMOJI } from '@/lib/spaces/pins';
 import { toggleSaved, useSaved } from '@/lib/spaces/saved';
 import { loadRoster, loadThread, peekRoster, peekThread, peekValue, saveRoster, saveThread } from '@/lib/spaces/cache';
 import { SpacesClient } from '@/lib/spaces/client';
-import { isDeparted, answersOwnerOnly, memberLabel, useProfiles } from '@/lib/spaces/profiles';
+import { isDeparted, isOthersPersonalAgent, memberLabel, useProfiles } from '@/lib/spaces/profiles';
 import { blockMember, reportMessage, useBlockedIds } from '@/lib/spaces/moderation';
 import { SpacesLive } from '@x/spaces-client';
 import { ThreadOptionsSheet, type ThreadChange } from '@/components/thread-options';
@@ -108,9 +108,9 @@ export default function SpaceThreadScreen() {
   const followUp = useMemo(() => {
     // Not a pending send (2026-11-13): it isn't the thread's yet.
     const thread = rootMessage ? [rootMessage, ...withoutPending(replies ?? [])] : [];
-    const id = spaces.followUpAgentId(invocations, root, me, thread);
+    const id = spaces.followUpAgentId(invocations, root, me, members, thread);
     const agent = id ? members.get(id) : undefined;
-    return agent && !answersOwnerOnly(agent, me) ? agent : undefined;
+    return agent && !isOthersPersonalAgent(agent, me) ? agent : undefined;
   }, [invocations, root, me, members, rootMessage, replies]);
   const scrollRef = useRef<ScrollView>(null);
   const composerRef = useRef<SpaceComposerHandle>(null);
@@ -285,7 +285,7 @@ export default function SpaceThreadScreen() {
   }, [replies === null, org, space, root]);
 
 
-  // A tapped attachment: the server's videos play in the app; other files
+  // A tapped attachment: this org's videos play in the app; other files
   // download with the bearer and open in the share sheet (Quick Look, Save to
   // Files); other hosts go to the browser.
   const [openingFile, setOpeningFile] = useState(false);
@@ -309,7 +309,7 @@ export default function SpaceThreadScreen() {
     [client, org, openingFile],
   );
 
-  // A file link in a message: the server's files open in the file screen (by
+  // A file link in a message: this org's files open in the file screen (by
   // id, so a rename never breaks it); any other host goes to the browser.
   const openAssetLink = useCallback(
     (link: { host: string; spaceId: string; assetId: string }) => {
@@ -681,7 +681,7 @@ export default function SpaceThreadScreen() {
         <SpaceComposer
           ref={composerRef}
           placeholder="Add a reply"
-          members={[...members.values()].filter((m) => !isDeparted(m) && !answersOwnerOnly(m, me))}
+          members={[...members.values()].filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, me))}
           me={me}
           sending={sending}
           onSend={send}

@@ -99,25 +99,6 @@ function saveRecord(record: LocalAgentRecord): void {
   writeConfig(config);
 }
 
-// Before the one-server registry (2026-11-09, 64539ba3) each record named its
-// own org; orgs.ts now has one record, SPACES_SERVER_ID, and left the old
-// `spaces_orgs.json` in place. A record still naming an old org found no
-// server, so its agent never started and its turns sat pending (2026-11-13).
-const LEGACY_ORGS_FILE = path.join(WorkDir, 'config', 'spaces_orgs.json');
-
-function legacyOrgUrls(): Map<string, string> {
-  try {
-    const raw = JSON.parse(fs.readFileSync(LEGACY_ORGS_FILE, 'utf-8')) as { orgs?: Array<{ id?: unknown; baseUrl?: unknown }> };
-    const urls = new Map<string, string>();
-    for (const org of raw.orgs ?? []) {
-      if (typeof org.id === 'string' && typeof org.baseUrl === 'string') urls.set(org.id, org.baseUrl);
-    }
-    return urls;
-  } catch {
-    return new Map();
-  }
-}
-
 /** Whether an old org lived on this server: the same host, or one of its org subdomains (rowboat.spaces.x… under spaces.x…). */
 export function sameServer(orgUrl: string, serverUrl: string): boolean {
   try {
@@ -129,28 +110,26 @@ export function sameServer(orgUrl: string, serverUrl: string): boolean {
   }
 }
 
-/**
- * Move records whose old org lived on the current server onto it. A record
- * from an org on another server (a dev Harbor) stays as it is: its key means
- * nothing here, and the app keeps saying it is not signed in to its server.
- */
-export function adoptLegacyRecords(): void {
-  const server = orgs.getOrg(orgs.SPACES_SERVER_ID);
-  if (!server) return;
-  const config = readConfig();
-  if (config.agents.every((r) => r.orgId === orgs.SPACES_SERVER_ID)) return;
-  const urls = legacyOrgUrls();
-  let moved = false;
-  const agents = config.agents.map((r) => {
-    const url = r.orgId === orgs.SPACES_SERVER_ID ? undefined : urls.get(r.orgId);
-    if (!url || !sameServer(url, server.baseUrl)) return r;
-    moved = true;
-    return { ...r, orgId: orgs.SPACES_SERVER_ID };
-  });
-  if (!moved) return;
-  // One record per agent: the latest one saved wins, as saveRecord would have it.
-  config.agents = agents.filter((r, i) => !agents.slice(i + 1).some((later) => sameAgent(later, r)));
-  writeConfig(config);
+/** Flat records have no org id (2026-11-24). The signed-in owner's roster
+ * identifies each local agent without sending its key to candidate hosts. */
+export async function adoptLegacyRecords(): Promise<void> {
+  if (!readConfig().agents.some(record => record.orgId === 'server')) return;
+  const flat = orgs.flatServerRecord();
+  if (!flat) return;
+  for (const org of orgs.listOrgs().filter(record => sameServer(record.baseUrl, flat.baseUrl))) {
+    const roster = await orgs.getClient(org.id).orgRoster().catch(() => undefined);
+    if (!roster || orgs.getOrg(org.id)?.auth.memberId !== org.auth.memberId) continue;
+    const owned = new Set(roster.members.filter(member =>
+      member.agentConnection === 'local' && member.ownerId === org.auth.memberId).map(member => member.id));
+    const config = readConfig();
+    const moved = config.agents.filter(record => record.orgId === 'server' && owned.has(record.agentId));
+    if (!moved.length) continue;
+    for (const record of moved) record.orgId = org.id;
+    config.agents = config.agents.filter((record, i) => !config.agents.slice(i + 1).some(other => sameAgent(other, record)));
+    writeConfig(config);
+    for (const record of config.agents.filter(record => moved.includes(record))) startRunner(record);
+    changed();
+  }
 }
 
 function seenKey(agentId: string, threadRootId: string): string {
@@ -463,7 +442,7 @@ class LocalAgentRunner {
    */
   private async prompt(invocation: Invocation, signal: AbortSignal, instructionsInSystemPrompt: boolean): Promise<string> {
     const { spaceId, threadRootId } = invocation.conversation;
-    const roster = await this.client.listContacts().catch(() => ({ members: [] as Member[] }));
+    const roster = await this.client.orgRoster().catch(() => ({ members: [] as Member[] }));
     const names = new Map(roster.members.map((m) => [m.id, m.displayName]));
     const trigger = await this.client.getMessage(spaceId, invocation.trigger.messageId).catch(() => undefined);
     const after = readConfig().seen[seenKey(this.agentId, threadRootId)] ?? 0;
@@ -485,8 +464,8 @@ class LocalAgentRunner {
       agentId: this.agentId,
       context,
       names,
-      address: this.orgAddress,
-      serverUrl: this.baseUrl,
+      orgAddress: this.orgAddress,
+      orgUrl: this.baseUrl,
       attachments: [],
       earlierAttachments: [],
     });
@@ -624,7 +603,7 @@ let unwatchServer: (() => void) | undefined;
  * started before it lands would otherwise wait for the next launch.
  */
 export function startLocalAgents(): void {
-  adoptLegacyRecords();
+  void adoptLegacyRecords();
   for (const record of readConfig().agents) startRunner(record);
   changed();
   unwatchServer ??= orgs.onServerChanged(() => startLocalAgents());
@@ -648,7 +627,8 @@ export async function addLocalAgent(input: {
   const { agent, key } = await orgs.getClient(input.orgId).addAgent({
     displayName: input.displayName,
     kind: input.kind,
-    connection: LOCAL_CONNECTION, // its seats are its owner's alone wherever it is added (2026-11-09)
+    connection: LOCAL_CONNECTION,
+    personal: true,
   });
   const record: LocalAgentRecord = { orgId: input.orgId, agentId: agent.id, kind: input.kind, key: key.secret, cwd: input.cwd, policy: input.policy };
   saveRecord(record);

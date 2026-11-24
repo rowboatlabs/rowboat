@@ -2,7 +2,7 @@ import { StreamSkeleton } from '@/components/spaces/spaces-skeleton'
 import { EmptySpaceStart } from '@/components/spaces/empty-space-start'
 import { invokeSpace } from '@/lib/spaces-invoke'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
-import { useSpaceAccess, ArchivedNotice } from '@/lib/spaces-access'
+import { useSpaceAccess, JoinSpacePrompt, canActInSpace } from '@/lib/spaces-access'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, CornerDownRight, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
@@ -53,7 +53,7 @@ import { toast } from '@/lib/toast'
 import { toast as notify } from 'sonner'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
-import { answersOwnerOnly, directAvatarId, isSelfDirect } from '@/lib/spaces-direct'
+import { directAvatarId, isOthersPersonalAgent, isSelfDirect } from '@/lib/spaces-direct'
 import { useSpaceMembers } from '@/hooks/use-space-members'
 
 // The space's one stream: ROOT messages in order; each message's flat thread
@@ -148,11 +148,11 @@ export function GeneralStream({
     onAddPeople?: () => void
     onOpenFiles?: () => void
 }) {
-    const { writable } = useSpaceAccess()
+    const { member, writable } = useSpaceAccess()
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
-    const { onType } = usePresenceSender(org.id, space.id, undefined, visible)
+    const { onType } = usePresenceSender(org.id, space.id, undefined, visible && member)
     // The plain-text faces (quotes, titles, copies) name a space token by its current name.
     const spaceNames = useSpaceNames(org.id)
 
@@ -245,7 +245,7 @@ export function GeneralStream({
         setNewSince(markOrNull(getStreamReadOffset(org.id, space.id)))
     }, [visible, org.id, space.id])
     useEffect(() => {
-        if (!visible || !stream.ready) return
+        if (!member || !visible || !stream.ready) return
         // The newest root on screen, never head (Slack's rule).
         const newest = newestSettledOffset()
         // Inline (2026-10-25), replies are read where they show: each thread
@@ -261,7 +261,7 @@ export function GeneralStream({
         }
         if (newest > 0) markStreamRead(org.id, space.id, newest)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [org.id, space.id, stream.ready, stream.messages.length, visible, inline])
+    }, [org.id, space.id, stream.ready, stream.messages.length, visible, member, inline])
 
     // First paint: start at the bottom — the newest messages, always. After
     // that: keep the tail in view when new messages land, unless the reader
@@ -486,7 +486,7 @@ export function GeneralStream({
         return () => {
             for (const hold of holds.values()) {
                 window.clearTimeout(hold.timer)
-                hold.fire()
+                if (canActInSpace(org.id, space.id)) hold.fire()
             }
             holds.clear()
         }
@@ -523,9 +523,9 @@ export function GeneralStream({
     // stripped, so tagging never re-asks Jev. Every gesture is logged: Jev
     // learns nothing from them, but the threshold can.
     const tagSuggestions = useTagSuggestionsEnabled()
-    // A tag is a mention, so Auto never offers an agent whose seat here is someone else's alone (2026-11-09).
+    // A tag is a mention, so Auto never offers someone else's personal agent (2026-10-30), as Jev doesn't.
     const roster = useSpaceMembers(org.id, space.id)
-    const untaggable = useMemo(() => new Set(roster.filter((m) => answersOwnerOnly(m, org.memberId)).map((m) => m.id)), [roster, org.memberId])
+    const untaggable = useMemo(() => new Set(roster.filter((m) => isOthersPersonalAgent(m, org.memberId)).map((m) => m.id)), [roster, org.memberId])
     const [currentDraft, setCurrentDraft] = useState('')
     const [declined, setDeclined] = useState<ReadonlySet<string>>(() => new Set())
     const HERE_TOKEN = mentionToken({ kind: 'here' })
@@ -1405,7 +1405,7 @@ export function GeneralStream({
                         hint: 'Copy an invite link to this space',
                         run: async () => {
                             try {
-                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                const result = await invokeSpace('spaces:createInvite', { orgId: org.id, spaceIds: [space.id] })
                                 await navigator.clipboard.writeText(result.link)
                                 analytics.spacesInviteLinkCopied()
                                 toast('Invite link copied to clipboard', 'success')
@@ -1481,7 +1481,7 @@ export function GeneralStream({
                         },
                     },
                 ]}
-            /> : <ArchivedNotice />}
+            /> : <JoinSpacePrompt />}
         </section>
     )
 }

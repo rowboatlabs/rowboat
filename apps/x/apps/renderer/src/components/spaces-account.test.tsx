@@ -2,15 +2,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SpacesAccount } from './spaces-account'
 
-// One server (2026-11-09): the record the app keeps of it, under the name the store kept.
 const orgs = [
-  { id: 'server', name: 'Rowboat Spaces', memberId: 'me', spaces: [{ id: 's1' }] },
+  { id: 'o1', name: 'Rowboat', memberId: 'me', spaces: [{ id: 's1' }] },
+  { id: 'o2', name: 'Friends', memberId: 'me2', spaces: [{ id: 's2' }] },
 ]
 vi.mock('@/hooks/use-spaces', () => ({ useSpacesOrgs: () => ({ orgs }) }))
 vi.mock('@/hooks/use-space-members', () => ({
   usePeopleOnline: () => new Set(['me']),
   useOrgRosters: () => new Map([
-    ['server', [{ id: 'me', displayName: 'Arjun Maheswaran' }]],
+    ['o1', [{ id: 'me', displayName: 'Arjun Maheswaran', role: 'admin' }]],
+    ['o2', [{ id: 'me2', displayName: 'Arjun Maheswaran', role: 'member' }]],
   ]),
 }))
 vi.mock('@/hooks/use-profile-image', () => ({ useProfileImage: () => undefined }))
@@ -40,9 +41,8 @@ describe('the Spaces account row', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Your account' }))
     await waitFor(() => expect(screen.getByText('arjun@rowboatlabs.com')).toBeInTheDocument())
     expect(screen.getAllByText('Arjun Maheswaran').length).toBeGreaterThan(0)
-    expect(screen.getByText('Rowboat Spaces')).toBeInTheDocument()
-    // Roles live on each space's membership now, not on the account (2026-11-09).
-    expect(screen.queryByText('Admin')).not.toBeInTheDocument()
+    expect(screen.getByText('Admin')).toBeInTheDocument()
+    expect(screen.getByText('Member')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Plan & usage/ })).toHaveAttribute('href', 'https://app.example?intent=upgrade')
     fireEvent.click(screen.getByRole('button', { name: 'Edit Spaces profile' }))
     expect(screen.getByText('profile editor')).toBeInTheDocument()

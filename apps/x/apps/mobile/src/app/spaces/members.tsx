@@ -10,7 +10,7 @@ import { Chevron, Glyph, Group, Row } from '@/components/grouped';
 import { StatusBanner } from '@/components/status-banner';
 import { peekRoster, peekValue, saveRoster, saveValue } from '@/lib/spaces/cache';
 import { friendlyError, isNetworkError } from '@/lib/spaces/errors';
-import { markSpacesChanged, useOrgClient } from '@/lib/spaces/invites';
+import { markSpacesChanged, canInvite, useOrg, useOrgClient, useOrgSettings } from '@/lib/spaces/invites';
 import { isDeparted, memberLabel } from '@/lib/spaces/profiles';
 import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
@@ -19,27 +19,21 @@ import { type } from '@/theme/type';
 type RosterMember = Member & { role?: MemberRole };
 
 // A space's people (2026-11-02, desktop's members popover): who's here, and
-// on top, Invite (the space's link, for anyone) and Add people (your
-// contacts, people or your own agents). A DM's membership is fixed and an
-// archived space takes no one new, so neither shows there. Anyone in a
-// space invites to it (2026-11-09).
-//
-// Managing the space (2026-11-13, desktop member-admin.tsx and
-// space-settings.tsx, #1376), with the server's rules (harbor spec §4 Roles):
-// anyone in it renames it (not while archived) or leaves it; an admin of it
-// makes a person an admin or a member again, removes anyone else, archives,
-// unarchives and deletes it. An agent is never an admin, and the only admin
-// can't step down. Every destructive act asks first; delete asks for the
-// name on iOS, as the desktop does.
+// on top, Invite (a link, for people not in the org yet) and Add people (org
+// members, people or agents). A DM's membership is fixed and an archived
+// space takes no one new, so neither shows there.
 export default function MembersScreen() {
   const colors = useColors();
   const navigation = useNavigation();
   const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string }>();
   const client = useOrgClient(params.org);
-  const mayInvite = true;
+  const org = useOrg(params.org);
+  const settings = useOrgSettings(client, params.org);
+  const mayInvite = canInvite(settings, org?.role);
 
   const [members, setMembers] = useState<RosterMember[] | null>(() => peekRoster(params.org, params.space) ?? null);
   // Roles come only from the server's answer: no admin act runs on a cached role.
+  const [orgAdminCount, setOrgAdminCount] = useState<number>();
   const [fresh, setFresh] = useState(false);
   const [space, setSpace] = useState<Space | undefined>(() =>
     peekValue<Space[]>(`spaces:${params.org}`)?.find((s) => s.id === params.space),
@@ -62,6 +56,9 @@ export default function MembersScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+      void client.orgRoster().then(({ members }) => {
+        if (!cancelled) setOrgAdminCount(members.filter(m => m.role === 'admin' && !isDeparted(m)).length);
+      }).catch(() => {});
       client
         .listMembers(params.space)
         .then((list) => {
@@ -92,7 +89,6 @@ export default function MembersScreen() {
   const open = shared && !space.archived;
   const name = space?.name ?? params.title;
   const isAdmin = shared && fresh && members?.find((m) => m.id === params.me)?.role === 'admin';
-  const adminCount = (members ?? []).filter((m) => m.role === 'admin').length;
 
   // The space as it now stands, everywhere this phone shows it: this screen,
   // Home's saved list (Home reloads on focus), and the chat underneath, whose
@@ -134,7 +130,7 @@ export default function MembersScreen() {
   const rename = () => {
     const next = draft?.trim();
     setDraft(null);
-    if (!next || !space || next === space.name) return;
+    if (!next || !space || space.isDefault || next === space.name) return;
     void run(async () => applySpace(await client.renameSpace(params.space, next)), "Couldn't rename the space");
   };
 
@@ -142,7 +138,7 @@ export default function MembersScreen() {
 
   const setRole = (m: RosterMember, role: MemberRole) =>
     void run(async () => {
-      await client.setSpaceRole(params.space, m.id, role);
+      await client.setMemberRole(m.id, role);
       await reloadMembers();
     }, "Couldn't change their role");
 
@@ -152,7 +148,7 @@ export default function MembersScreen() {
       `Remove ${m.displayName} from #${name}?`,
       m.kind === 'agent'
         ? 'It stops seeing this space and answering here. What it wrote stays.'
-        : 'They stop seeing this space, and their agents leave with them. What they wrote stays; someone in the space can invite them back.',
+        : 'They leave this space. What they wrote stays; someone in the space can invite them back.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -175,7 +171,7 @@ export default function MembersScreen() {
     const acts: { label: string; destructive?: boolean; run: () => void }[] = [];
     if (m.kind !== 'agent') {
       if (m.role === 'admin') {
-        if (!self || adminCount > 1) acts.push({ label: self ? 'Step down as admin' : 'Remove admin', run: () => setRole(m, 'member') });
+        if (!self || (orgAdminCount ?? 0) > 1) acts.push({ label: self ? 'Step down as admin' : 'Remove admin', run: () => setRole(m, 'member') });
       } else {
         acts.push({ label: 'Make admin', run: () => setRole(m, 'admin') });
       }
@@ -208,7 +204,7 @@ export default function MembersScreen() {
     if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(
       `Leave #${name}?`,
-      "You'll stop seeing it, and your agents leave with you. What you wrote stays; someone in the space can invite you back.",
+      "You leave this space. What you wrote stays; someone in the space can invite you back.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -287,7 +283,7 @@ export default function MembersScreen() {
             onPress={() => router.push({ pathname: '/spaces/add-people', params: { org: params.org, space: params.space, title: name, me: params.me } })}
           >
             <Glyph icon="sf:person.2" />
-            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>Add people and your agents</Text>
+            <Text numberOfLines={1} style={{ flex: 1, ...type.body, color: colors.label }}>Add people from {org?.name ?? 'the org'}</Text>
             <Chevron />
           </Row>
         </Group>
@@ -301,7 +297,7 @@ export default function MembersScreen() {
               value={draft ?? name}
               onChangeText={setDraft}
               onEndEditing={rename}
-              editable={open && !busy}
+              editable={open && !busy && !space.isDefault}
               maxLength={100}
               returnKeyType="done"
               autoCorrect={false}
@@ -317,7 +313,7 @@ export default function MembersScreen() {
       {sorted.length > 0 ? (
         <Group
           label={`${sorted.length} ${sorted.length === 1 ? 'member' : 'members'}`}
-          footer={isAdmin ? 'Tap someone to make them an admin or remove them. A space keeps at least one admin.' : undefined}
+          footer={isAdmin ? 'Tap someone to make them an admin or remove them. Roles apply across the organization.' : undefined}
         >
           {sorted.map((m, i) => {
             const acts = actsOn(m);
@@ -341,8 +337,8 @@ export default function MembersScreen() {
       ) : null}
 
       {shared && fresh ? (
-        <Group footer={isAdmin ? undefined : 'Only an admin of this space can archive or delete it.'}>
-          {isAdmin ? (
+        <Group footer={isAdmin ? undefined : 'Only an organization admin can archive or delete it.'}>
+          {isAdmin && !space.isDefault ? (
             <Row first disabled={busy} onPress={space.archived ? unarchive : confirmArchive}>
               <Glyph icon={space.archived ? 'sf:tray.and.arrow.up' : 'sf:archivebox'} />
               <Text style={{ flex: 1, ...type.body, color: colors.label }}>{space.archived ? 'Unarchive space' : 'Archive space'}</Text>
@@ -352,7 +348,7 @@ export default function MembersScreen() {
             <Glyph icon="sf:rectangle.portrait.and.arrow.right" tint={colors.destructive} />
             <Text style={{ flex: 1, ...type.body, color: colors.destructive }}>Leave #{name}</Text>
           </Row>
-          {isAdmin ? (
+          {isAdmin && !space.isDefault ? (
             <Row disabled={busy} onPress={confirmDelete}>
               <Glyph icon="sf:trash" tint={colors.destructive} />
               <Text style={{ flex: 1, ...type.body, color: colors.destructive }}>Delete space</Text>

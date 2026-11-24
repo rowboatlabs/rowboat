@@ -18,19 +18,20 @@ export function plainSnippet(raw: string): string {
   return raw.replace(/\[(@[^\]]+)\]\(#(?:member:[^)]+|here)\)/g, '$1').replace(/\[(#[^\]]+)\]\(#space:[^)]+\)/g, '$1');
 }
 
-export function SearchHits({ results, org, me, spaceFor, showSpace }: {
+export function SearchHits({ results, org, me, spaceFor, spaceId, showSpace }: {
   results: SearchResults;
   org: string;
   me: string;
   /** The hit's space, by id; a hit in a space not known here is left out. */
+  spaceId: string;
   spaceFor: (spaceId: string) => HitSpace | undefined;
   /** Label each hit with its space (the cross-space search). */
   showSpace?: boolean;
 }) {
   const colors = useColors();
-  const messages = results.messages.filter((h) => spaceFor(h.spaceId));
+  const messages = results.messages.filter((h) => spaceFor(spaceId));
   const topics = results.topics.filter((h) => spaceFor(h.topic.spaceId));
-  const assets = results.assets.filter((h) => spaceFor(h.spaceId));
+  const assets = results.assets.filter((h) => spaceFor(spaceId));
   const where = (spaceId: string) => {
     if (!showSpace) return '';
     const s = spaceFor(spaceId);
@@ -50,9 +51,9 @@ export function SearchHits({ results, org, me, spaceFor, showSpace }: {
     <View>
       {messages.length ? <SearchSection label="Messages" /> : null}
       {messages.map((hit) => (
-        <Pressable key={hit.messageId} onPress={() => openThread(hit.spaceId, hit.threadRootId, hit.messageId)} style={(s) => ({ ...rowStyle(s), gap: 2 })}>
+        <Pressable key={hit.messageId} onPress={() => openThread(spaceId, hit.threadRootId, hit.messageId)} style={(s) => ({ ...rowStyle(s), gap: 2 })}>
           <Text numberOfLines={1} style={{ fontSize: 12, color: colors.tertiaryLabel }}>
-            {where(hit.spaceId)}{hit.topicTitle ? `${hit.topicTitle} · ` : ''}{day(hit.postedAt)}
+            {where(spaceId)}{hit.topicTitle ? `${hit.topicTitle} · ` : ''}{day(hit.postedAt)}
           </Text>
           <Text numberOfLines={3} style={{ fontSize: 15, lineHeight: 20, color: colors.label }}>{plainSnippet(hit.snippet)}</Text>
         </Pressable>
@@ -75,13 +76,13 @@ export function SearchHits({ results, org, me, spaceFor, showSpace }: {
       {assets.map((hit) => (
         <Pressable
           key={hit.id}
-          onPress={() => router.push({ pathname: '/spaces/file', params: { org, space: hit.spaceId, assetId: hit.id, path: hit.path, title: hit.path.split('/').pop() ?? hit.path, mime: hit.blob?.mime ?? '' } })}
+          onPress={() => router.push({ pathname: '/spaces/file', params: { org, space: spaceId, assetId: hit.id, path: hit.path, title: hit.path.split('/').pop() ?? hit.path, mime: hit.blob?.mime ?? '' } })}
           style={(s) => ({ ...rowStyle(s), flexDirection: 'row', alignItems: 'center', gap: 10 })}
         >
           <Image source="sf:doc.text" style={{ width: 16, height: 16 }} tintColor={colors.secondaryLabel} />
           <View style={{ flex: 1 }}>
             <Text numberOfLines={1} style={{ fontSize: 15, color: colors.label }}>{hit.path}</Text>
-            {showSpace ? <Text numberOfLines={1} style={{ fontSize: 12, color: colors.tertiaryLabel }}>{where(hit.spaceId).replace(/ · $/, '')}</Text> : null}
+            {showSpace ? <Text numberOfLines={1} style={{ fontSize: 12, color: colors.tertiaryLabel }}>{where(spaceId).replace(/ · $/, '')}</Text> : null}
             {hit.snippet ? <Text numberOfLines={2} style={{ fontSize: 13, color: colors.secondaryLabel }}>{plainSnippet(hit.snippet)}</Text> : null}
           </View>
         </Pressable>
@@ -91,11 +92,11 @@ export function SearchHits({ results, org, me, spaceFor, showSpace }: {
 }
 
 /** True when the page holds no hit this screen can open. */
-export function noHits(results: SearchResults, spaceFor: (spaceId: string) => HitSpace | undefined): boolean {
+export function noHits(results: SearchResults, spaceId: string, spaceFor: (spaceId: string) => HitSpace | undefined): boolean {
   return (
-    !results.messages.some((h) => spaceFor(h.spaceId)) &&
+    !results.messages.some((h) => spaceFor(spaceId)) &&
     !results.topics.some((h) => spaceFor(h.topic.spaceId)) &&
-    !results.assets.some((h) => spaceFor(h.spaceId))
+    !results.assets.some((h) => spaceFor(spaceId))
   );
 }
 

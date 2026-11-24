@@ -70,7 +70,7 @@ describe('migration 062 — one server', () => {
     const db = await pgliteDb();
     try {
       await seed(db);
-      await migrate(db);
+      await migrate(db, { upTo: '066-space-graph' });
 
       // The person: the most active row wins (Ramnique's Team row, Gagan's Side row); losers stay, departed.
       const ids = await db.query<{ iss: string; sub: string; member_id: string }>('select iss, sub, member_id from member_identities order by sub');

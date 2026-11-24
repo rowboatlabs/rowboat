@@ -1,5 +1,5 @@
 import { SpaceAccessContext } from '@/lib/spaces-access'
-import { markThreadRead } from '@/lib/spaces-read-state'
+import { markStreamRead, markThreadRead } from '@/lib/spaces-read-state'
 import { postInlineReply, postStreamMessage } from '@/lib/spaces-post'
 import { setStreamView } from '@/lib/spaces-stream-view'
 import { setAutoRouteMode } from '@/lib/spaces-auto-route'
@@ -253,6 +253,19 @@ describe('GeneralStream jump to a row outside the window', () => {
 })
 
 
+it('renders preview content and an explicit Join action without marking it read', () => {
+    vi.mocked(markStreamRead).mockClear()
+    const join = vi.fn()
+    render(<SpaceAccessContext.Provider value={{ member: false, writable: false, archived: false, join, joining: false }}>
+        <GeneralStream org={org} space={space} stream={streamOf([msg(1)])} presence={presence} memberNames={new Map()}
+            onOpenThread={vi.fn()} />
+    </SpaceAccessContext.Provider>)
+    expect(screen.getByText('body 1')).toBeInTheDocument()
+    expect(vi.mocked(markStreamRead)).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Join space' }))
+    expect(join).toHaveBeenCalledTimes(1)
+})
+
 describe('GeneralStream join lines (2026-09-29)', () => {
     const names = new Map([['alex', 'Alex'], ['sam', 'Sam'], ['kim', 'Kim']])
     const joined = (offset: number, memberId: string, by?: string): spaces.StreamEvent => ({
@@ -261,7 +274,7 @@ describe('GeneralStream join lines (2026-09-29)', () => {
         event: {
             type: 'membership',
             action: 'joined',
-            membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z', role: 'member' },
+            membership: { spaceId: 'space', memberId, joinedAt: '2026-09-14T09:00:00Z' },
             ...(by ? { by: { memberId: by, actingMode: 'direct' as const } } : {}),
         },
     })
@@ -487,11 +500,11 @@ describe('inline view (2026-10-25)', () => {
 })
 
 describe('GeneralStream Auto tags', () => {
-    it('never offers an agent whose seat here is someone else’s alone to tag, and still offers your own (2026-11-09)', async () => {
+    it('never offers someone else’s personal agent to tag, and still offers your own (2026-10-30)', async () => {
         const roster = [
             { id: 'harsh', displayName: 'Harsh', role: 'member', kind: 'human' },
-            { id: 'theirs', displayName: 'Their Claude', role: 'member', kind: 'agent', invocableBy: 'owner', ownerId: 'harsh' },
-            { id: 'mine', displayName: 'My Claude', role: 'member', kind: 'agent', invocableBy: 'owner', ownerId: 'me' },
+            { id: 'theirs', displayName: 'Their Claude', role: 'member', kind: 'agent', personal: true, ownerId: 'harsh' },
+            { id: 'mine', displayName: 'My Claude', role: 'member', kind: 'agent', personal: true, ownerId: 'me' },
         ]
         const invoke = vi.fn<(channel: string, args?: unknown) => Promise<unknown>>(async (channel) => {
             if (channel === 'typesafe:isConfigured') return { configured: true }
