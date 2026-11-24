@@ -39,11 +39,12 @@ class Org {
   async start(): Promise<this> {
     this.harbor = await startHarbor({
       store: this.store.store,
-      name: 'Rowboat Labs',
+      orgName: 'Rowboat Labs',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'harsh', displayName: 'Harsh' },
       ],
+      seedSpaces: [{ name: 'Team', creator: 'ramnique' }],
       blobs: new MemoryBlobStore(),
       ...(this.hosting ? { hosting: { provider: maritimeProvisioner({ apiKey: GOOD_KEY, base: fake.url, llmCapCents: 500 }), tickMs: 50, ...(this.trialMs !== undefined ? { trialMs: this.trialMs } : {}) } } : {}),
     });
@@ -144,10 +145,11 @@ describe('managed Maritime agents', () => {
     expect(listed?.credential?.hint).toBeDefined(); // the deployment's key, sealed for this agent
   });
 
-  it('creates an agent its maker owns; who may ask it is a seat, set when it is added to a space (2026-11-09)', async () => {
-    const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Ramnique’s Hermes', kind: 'hermes' });
+  it('creates a personal agent when asked, as Add does; a channel one otherwise', async () => {
+    const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Ramnique’s Hermes', kind: 'hermes', personal: true });
     expect(r.status).toBe(200);
-    expect(r.body.agent).toMatchObject({ ownerId: 'ramnique' });
+    expect(r.body.agent).toMatchObject({ ownerId: 'ramnique', personal: true });
+    expect(await org.harbor.store.getMember(r.body.agent.id)).toMatchObject({ personal: true });
   });
 
   it('follows the deploy to ready and then runs a turn on it', async () => {
@@ -538,7 +540,7 @@ describe('managed Maritime agents', () => {
     expect((await org.as(key.secret).get('/v1/me')).status).toBe(401);
     const listing = await org.listing(agent.id);
     expect(listing?.agent.deactivatedAt).toEqual(expect.any(String));
-    expect((await me.get('/v1/contacts')).body.members.map((m: Member) => m.id)).not.toContain(agent.id);
+    expect((await me.get('/v1/members')).body.members.find((m: Member) => m.id === agent.id)?.deactivatedAt).toBeDefined();
     for (const id of [org.spaceId, archived]) {
       expect((await me.get(`/v1/spaces/${id}/members`)).body.members.map((m: Member) => m.id)).not.toContain(agent.id);
     }

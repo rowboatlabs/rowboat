@@ -61,6 +61,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -77,7 +78,7 @@ import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from
 import { ProfileSettings } from "@/components/spaces/profile-settings"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
-import { type SpaceSelection } from "@/components/spaces-view"
+import { OrgMonogram, type SpaceSelection } from "@/components/spaces-view"
 import { openServerDialog } from "@/lib/server-dialog"
 import { openSelfDirect, useSpacesOrgs, type OrgWithSpaces } from "@/hooks/use-spaces"
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts, type SpaceBadge } from "@/hooks/use-space-chat"
@@ -903,6 +904,7 @@ export function DockSidebar({
   }, [recentRuns, pinnedChatIds])
 
   const [deleteChatTarget, setDeleteChatTarget] = useState<{ id: string; title: string } | null>(null)
+  const [removeOrgTarget, setRemoveOrgTarget] = useState<{ id: string; name: string } | null>(null)
 
   // ----- data: spaces (safe when the flag is off — the store stays empty) -----
   const { orgs, loading: spacesLoading, refresh: refreshSpaces } = useSpacesOrgs()
@@ -1541,8 +1543,9 @@ export function DockSidebar({
           activeSpace={activeSpace}
           onOpenSpace={(orgId, spaceId) => { closeFlyouts(); onOpenSpace?.(orgId, spaceId) }}
           onOpenActivity={onOpenActivity ? (orgId) => { closeFlyouts(); onOpenActivity(orgId) } : undefined}
-          onJoin={() => openServerDialog({ kind: 'join' })}
+          onAddOrg={() => openServerDialog({ kind: 'create' })}
           onChanged={() => void refreshSpaces()}
+          onRequestRemoveOrg={(id, name) => setRemoveOrgTarget({ id, name })}
         />
       )}
 
@@ -1603,6 +1606,32 @@ export function DockSidebar({
               }}
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Remove-server confirm — hoisted to the root like delete-chat: the
+          flyout it's triggered from can close underneath it. */}
+      <AlertDialog open={!!removeOrgTarget} onOpenChange={(open) => { if (!open) setRemoveOrgTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {removeOrgTarget?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This only removes the server from this device — you can rejoin with an invite link.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => {
+                const target = removeOrgTarget
+                setRemoveOrgTarget(null)
+                if (target) void window.ipc.invoke('spaces:removeOrg', { orgId: target.id }).then(() => void refreshSpaces())
+              }}
+            >
+              Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1786,8 +1815,9 @@ function SpacesFlyout({
   activeSpace,
   onOpenSpace,
   onOpenActivity,
-  onJoin,
+  onAddOrg,
   onChanged,
+  onRequestRemoveOrg,
 }: {
   orgs: OrgWithSpaces[]
   loading: boolean
@@ -1795,24 +1825,31 @@ function SpacesFlyout({
   activeSpace: SpaceSelection
   onOpenSpace: (orgId: string, spaceId: string) => void
   onOpenActivity?: (orgId: string) => void
-  /** Not signed in to Spaces yet: the join-by-link door (2026-11-09; there is no server to create). */
-  onJoin: () => void
+  onAddOrg: () => void
   onChanged: () => void
+  onRequestRemoveOrg: (orgId: string, name: string) => void
 }) {
   return (
     <div data-dock-flyout="" data-slot="dock-overlay" data-state="open" className="rowboat-dock-flyout titlebar-no-drag" style={{ left: DOCK_FLYOUT_LEFT_PX }}>
       <div className="flex items-center justify-between px-2 pb-2.5 pt-1">
         <span className="text-[13px] font-bold text-foreground/70">Spaces</span>
+        <button
+          type="button"
+          onClick={onAddOrg}
+          className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-800 dark:text-teal-400 dark:hover:text-teal-300"
+        >
+          <Plus className="size-3" /> Add organization
+        </button>
       </div>
       {loading ? (
         <div className="px-2.5 pb-2 text-[11.5px] text-muted-foreground">Loading…</div>
       ) : orgs.length === 0 ? (
         <button
           type="button"
-          onClick={onJoin}
+          onClick={onAddOrg}
           className="px-2.5 pb-2 text-left text-[11.5px] italic text-muted-foreground hover:text-foreground"
         >
-          Sign in to Spaces, or join a group with an invite link.
+          Create an organization or join one with an invite.
         </button>
       ) : (
         orgs.map((org) => (
@@ -1824,6 +1861,7 @@ function SpacesFlyout({
             onOpenSpace={onOpenSpace}
             onOpenActivity={onOpenActivity}
             onChanged={onChanged}
+            onRequestRemoveOrg={onRequestRemoveOrg}
           />
         ))
       )}
@@ -1831,13 +1869,14 @@ function SpacesFlyout({
   )
 }
 
-function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onChanged }: {
+function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onChanged, onRequestRemoveOrg }: {
   org: OrgWithSpaces
   activeSpace: SpaceSelection
   unread: Map<string, SpaceBadge>
   onOpenSpace: (orgId: string, spaceId: string) => void
   onOpenActivity?: (orgId: string) => void
   onChanged: () => void
+  onRequestRemoveOrg: (orgId: string, name: string) => void
 }) {
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -1853,7 +1892,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
     setSigningIn(true)
     try {
       await window.ipc.invoke('spaces:signInOrg', { orgId: org.id })
-      toast('Signed back in', 'success')
+      toast(`Signed back into ${org.name}`, 'success')
       onChanged()
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Sign-in failed', 'error')
@@ -1917,14 +1956,15 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
         markSelfDirectUnsupported(org.id)
         setSelfUnsupported(true)
       }
-      toast(selfDirectFailureMessage(err), 'error')
+      toast(selfDirectFailureMessage(org.name, err), 'error')
     }
   }
 
   return (
     <>
       <div className="group/org flex h-8 items-center gap-1.5 rounded-[9px] px-2 text-[11.5px] text-muted-foreground" title={`You are ${org.memberId}`}>
-        <span className="flex-1 truncate">Chats</span>
+        <OrgMonogram org={org} size="sm" />
+        <span className="flex-1 truncate">{org.name}</span>
         {needsSignIn ? (
           <button
             type="button"
@@ -1962,6 +2002,13 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
             {directsOn && <DropdownMenuItem onClick={() => setNewDirectOpen(true)}>
               <MessagesSquare className="mr-2 size-3.5" /> New message
             </DropdownMenuItem>}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => onRequestRemoveOrg(org.id, org.name)}
+            >
+              <Trash2 className="mr-2 size-3.5" /> Remove server
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -2043,7 +2090,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
           className="flex w-full items-center gap-2 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-xs text-muted-foreground hover:bg-accent"
         >
           <Plus className="size-3.5 shrink-0" />
-          <span className="flex-1 truncate">Create the first group</span>
+          <span className="flex-1 truncate">Create the first space</span>
         </button>
       )}
       {/* Direct messages — a DM is a space with a two-person roster; the row is the person. */}
@@ -2082,8 +2129,8 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, 
           type="button"
           onClick={() => void openSelf()}
           title={selfUnsupported
-            ? 'Notes to self need a newer server'
-            : 'Notes to self — only you (and your agents) can see this'}
+            ? `Notes to self need a newer server — ${org.name} hasn't been updated yet`
+            : 'Notes to self — only you (and your agent) can see this'}
           className={cn(
             'flex w-full items-center gap-2.5 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-[13.5px] text-foreground/90 hover:bg-accent',
             selfUnsupported && 'opacity-50',

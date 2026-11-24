@@ -134,7 +134,7 @@ In the app, open the Spaces dialog, choose *Add a dev server*, and point it at `
 |---|---|
 | `HARBOR_MODE=deployment` | Multi-org mode: resolve the org from the request host. |
 | `DATABASE_URL` | Postgres. Schema is a versioned, append-only migration ladder. |
-| `APEX_DOMAIN` | Orgs live at `<slug>.<APEX_DOMAIN>`; the apex itself serves create-org and my-orgs. |
+| `APEX_DOMAIN` | Orgs live at `<slug>.<APEX_DOMAIN>`; the apex serves org creation and discovery. A first sign-in provisions an org with an open `general` space. |
 | `AUTH_ISSUER` | The OIDC issuer whose tokens are trusted (JWKS-verified). Without it Harbor falls back to dev tokens, which must never be exposed publicly. |
 | `AUTH_PUBLISHABLE_KEY` | Enables the login/consent page (social sign-in only; Harbor never sees a credential). |
 | `HARBOR_ALLOWED_DOMAINS` | Comma-separated email domains allowed to accept invites (single-org mode). |

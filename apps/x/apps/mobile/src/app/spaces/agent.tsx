@@ -1,7 +1,7 @@
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import type { AgentListing, Space, SpaceMember } from '@rowboat/spaces-protocol';
+import type { AgentListing, Space, Member } from '@rowboat/spaces-protocol';
 
 import { Field, PersonalityFields } from '@/components/agent-form';
 import { Avatar } from '@/components/avatar';
@@ -10,13 +10,12 @@ import { StatusBanner } from '@/components/status-banner';
 import { HOSTING_POLL_MS, LOCAL_CONNECTION, MOVING_HOSTING, agentLabel, fundingLine, hostingLine } from '@/lib/spaces/agents';
 import { saveRoster } from '@/lib/spaces/cache';
 import { friendlyError } from '@/lib/spaces/errors';
-import { markSpacesChanged, useOrgClient } from '@/lib/spaces/invites';
+import { markSpacesChanged, useOrg, useOrgClient } from '@/lib/spaces/invites';
 import { useColors } from '@/theme/colors';
 import { type } from '@/theme/type';
 
-type Seat = 'owner' | 'members';
 /** One of your spaces, and the agent's seat there when it is in it; `admin` = you may take it out. */
-type Place = { space: Space; seat: Seat | null; admin: boolean };
+type Place = { space: Space; joined: boolean; admin: boolean };
 
 // One agent's page (2026-11-13, desktop agent-page.tsx Overview and Danger
 // zone): its owner renames it, edits its description and personality, picks
@@ -42,7 +41,7 @@ export default function AgentScreen() {
   const [listing, setListing] = useState<AgentListing | null | undefined>(undefined);
   const [places, setPlaces] = useState<Place[] | null>(null);
   /** Its row in a shared space's roster, and its owner's name there: how someone else's agent is seen. */
-  const [seen, setSeen] = useState<{ agent: SpaceMember; owner: string | null } | null>(null);
+  const [seen, setSeen] = useState<{ agent: Member; owner: string | null } | null>(null);
   const [error, setError] = useState<unknown>(null);
 
   const loadAgent = useCallback(async () => {
@@ -70,7 +69,7 @@ export default function AgentScreen() {
           if (!roster) return [];
           const row = roster.find((m) => m.id === params.agent);
           const mine = roster.find((m) => m.id === params.me);
-          return [{ space, seat: row ? (row.invocableBy ?? 'members') : null, admin: mine?.role === 'admin' }];
+          return [{ space, joined: !!row, admin: mine?.role === 'admin' }];
         }),
       );
     } catch (err) {
@@ -149,12 +148,13 @@ function AgentPage({ org, me, client, listing, ownerName, places, error, onChang
   const { agent, hosting } = listing;
   const mine = agent.ownerId === me;
   const gone = hosting?.status === 'deleting' || hosting?.status === 'deleted' || !!agent.deactivatedAt || !!agent.removedAt;
+  const orgAdmin = useOrg(org)?.role === 'admin';
   const editable = mine && !gone;
   const local = agent.agentConnection === LOCAL_CONNECTION;
   const moving = hosting ? MOVING_HOSTING.has(hosting.status) : false;
   const owner = mine ? 'you' : (ownerName ?? 'its owner');
   // Someone else's lists only the spaces you share with it.
-  const shownPlaces = mine ? places : (places?.filter((p) => p.seat !== null) ?? null);
+  const shownPlaces = mine ? places : (places?.filter((p) => p.joined) ?? null);
 
   const [name, setName] = useState(agent.displayName);
   const [title, setTitle] = useState(agent.title ?? '');
@@ -197,27 +197,20 @@ function AgentPage({ org, me, client, listing, ownerName, places, error, onChang
   };
 
   const openPlace = (place: Place) => {
-    const { space, seat, admin } = place;
+    const { space, joined, admin } = place;
     if (!editable) return;
-    if (seat === null) {
+    if (!joined) {
       void changePlace(space.id, () => client.addMembers(space.id, [agent.id]), `Couldn't add it to #${space.name}`);
       return;
     }
-    // A local agent's seat is its owner's alone wherever it sits: nothing to switch (desktop SeatsSection).
-    const seatButtons = local
-      ? []
-      : ([
-          { text: `${seat === 'members' ? '✓ ' : ''}Everyone here`, onPress: () => seat !== 'members' && void changePlace(space.id, () => client.setAgentAccess(space.id, agent.id, 'members'), 'Couldn’t change who can ask it') },
-          { text: `${seat === 'owner' ? '✓ ' : ''}Only me`, onPress: () => seat !== 'owner' && void changePlace(space.id, () => client.setAgentAccess(space.id, agent.id, 'owner'), 'Couldn’t change who can ask it') },
-        ] as const);
     const removeButton = admin
       ? [{ text: `Remove from #${space.name}`, style: 'destructive' as const, onPress: () => void changePlace(space.id, () => client.removeMember(space.id, agent.id), `Couldn't remove it from #${space.name}`) }]
       : [];
-    if (seatButtons.length === 0 && removeButton.length === 0) return;
+    if (removeButton.length === 0) return;
     Alert.alert(
       `#${space.name}`,
-      local ? 'It runs on your computer, so only you can ask it here.' : 'Who can ask it here? Everyone sees it and its replies.',
-      [...seatButtons, ...removeButton, { text: 'Cancel', style: 'cancel' }],
+      local ? 'It runs on your computer, so only you can ask it here.' : 'Remove the agent from this space?',
+      [...removeButton, { text: 'Cancel', style: 'cancel' }],
     );
   };
 
@@ -283,6 +276,11 @@ function AgentPage({ org, me, client, listing, ownerName, places, error, onChang
         </Group>
       ) : null}
 
+      {(mine || orgAdmin) && !gone && !local && <Group label="Access">
+        <Row first onPress={() => void changePlace(agent.id, async () => { await client.setAgentPersonal(agent.id, !agent.personal); await onChanged(); }, 'Could not change agent access')}>
+          <Text style={{ ...type.body, color: colors.label }}>{agent.personal ? 'Personal' : 'Channel'}</Text>
+        </Row>
+      </Group>}
       {mine && !gone ? (
         <Group>
           <Row first onPress={() => void message()} disabled={opening}>
@@ -325,7 +323,7 @@ function AgentPage({ org, me, client, listing, ownerName, places, error, onChang
                 ? `Who can ask it in each space. Only ${owner} can change that.`
                 : local
                   ? 'Tap a space to add it. It runs on your computer, so only you can ask it, wherever it is.'
-                  : 'Tap a space to add it, or to choose who can ask it there. Only a space’s admins can take it out.'
+                  : 'Tap a space to add it, or remove it. Org admins can take it out.'
             }
           >
             {shownPlaces.map((place, i) => (
@@ -335,8 +333,8 @@ function AgentPage({ org, me, client, listing, ownerName, places, error, onChang
                 {busySpace === place.space.id ? (
                   <ActivityIndicator />
                 ) : (
-                  <Text style={{ ...type.caption, color: place.seat ? colors.secondaryLabel : colors.tertiaryLabel }}>
-                    {place.seat === null ? (editable ? 'Add' : 'Not in it') : place.seat === 'owner' || local ? (mine ? 'Only you' : `Only ${owner}`) : 'Everyone'}
+                  <Text style={{ ...type.caption, color: place.joined ? colors.secondaryLabel : colors.tertiaryLabel }}>
+                    {!place.joined ? (editable ? 'Add' : 'Not in it') : agent.personal || local ? (mine ? 'Only you' : `Only ${owner}`) : 'Everyone'}
                   </Text>
                 )}
               </Row>

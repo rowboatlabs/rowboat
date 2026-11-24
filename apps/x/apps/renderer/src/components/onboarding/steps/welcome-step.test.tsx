@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OnboardingState } from '../use-onboarding-state'
 import { WelcomeStep } from './welcome-step'
 
-const refresh = vi.fn(async () => {})
-vi.mock('@/hooks/use-spaces', () => ({ refreshSpacesOrgs: () => refresh() }))
+vi.mock('@/lib/analytics', () => ({ spacesServerCreated: vi.fn() }))
+vi.mock('@/hooks/use-spaces', () => ({ refreshSpacesOrgs: vi.fn(async () => {}) }))
 const invoke = vi.fn()
 const makeState = (connected = false) => ({
   providerStates: { rowboat: { isConnected: connected, isLoading: false, isConnecting: false } },
@@ -30,13 +30,18 @@ describe('welcome sign-in', () => {
     expect(state.startConnect).toHaveBeenCalledWith('rowboat')
   })
 
-  // One server (2026-11-09): nothing is created on the way in; the account is a member on first contact.
-  it('finishes once signed in, after the server has been reached, creating nothing', async () => {
+  it('finishes once signed in, making a first space when you have none', async () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'spaces:listOrgs') return { orgs: [] }
+      if (channel === 'account:getRowboat') return { signedIn: true, accessToken: null }
+      return { org: { id: 'new' } }
+    })
     const state = makeState(true)
     render(<WelcomeStep state={state} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    const next = screen.getByRole('button', { name: 'Continue' })
+    await waitFor(() => expect(next).toBeEnabled())
+    fireEvent.click(next)
     await waitFor(() => expect(state.handleComplete).toHaveBeenCalled())
-    expect(refresh).toHaveBeenCalled()
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke).toHaveBeenCalledWith('spaces:createOrg', { name: 'My space' })
   })
 })

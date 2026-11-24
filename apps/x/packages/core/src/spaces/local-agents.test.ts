@@ -28,10 +28,11 @@ const h = await vi.hoisted(async () => {
 });
 vi.mock('../config/config.js', () => ({ WorkDir: h.workDir }));
 vi.mock('./orgs.js', () => ({
-  SPACES_SERVER_ID: 'server',
+  flatServerRecord: () => ({ baseUrl: h.harborUrl }),
+  listOrgs: () => [{ id: 'org-1', baseUrl: h.harborUrl, auth: { kind: 'session', memberId: 'gagan' } }],
   getOrg: (orgId: string) =>
     orgId === 'org-1'
-      ? { id: 'org-1', baseUrl: h.harborUrl, address: 'localhost' }
+      ? { id: 'org-1', baseUrl: h.harborUrl, address: 'localhost', auth: { memberId: 'gagan' } }
       : orgId === 'server'
         ? { id: 'server', baseUrl: 'https://spaces.x.rowboatlabs.com', address: 'spaces.x.rowboatlabs.com' }
         : undefined,
@@ -71,7 +72,7 @@ async function startTestHarbor(): Promise<RunningHarbor> {
   const db = await pgliteDb();
   const store = new PgStore(db);
   await store.init();
-  const started = await startHarbor({ store, name: 'Local Test Org', seedMembers: [{ id: 'gagan', displayName: 'Gagan' }, { id: 'harsh', displayName: 'Harsh' }] });
+  const started = await startHarbor({ store, orgName: 'Local Test Org', seedMembers: [{ id: 'gagan', displayName: 'Gagan' }, { id: 'harsh', displayName: 'Harsh' }] });
   return { ...started, close: async () => (await started.close(), await db.close()) };
 }
 
@@ -118,9 +119,9 @@ beforeEach(() => {
 });
 
 describe('adding one', () => {
-  it('makes a local agent (owner-only wherever it sits, 2026-11-09) and keeps its key on this computer only', async () => {
+  it('makes a personal local agent and keeps its key on this computer only', async () => {
     const [listing] = await gagan.listAgents();
-    expect(listing!.agent).toMatchObject({ agentKind: 'claude-code', agentConnection: 'local', ownerId: 'gagan' });
+    expect(listing!.agent).toMatchObject({ agentKind: 'claude-code', agentConnection: 'local', personal: true, ownerId: 'gagan' });
     const saved = JSON.parse(fs.readFileSync(path.join(workDir, 'config', 'spaces_local_agents.json'), 'utf-8'));
     expect(saved.agents[0]).toMatchObject({ orgId: 'org-1', agentId, kind: 'claude-code', cwd: workDir, policy: 'yolo' });
     expect(saved.agents[0].key).toMatch(/^rbk_/);
@@ -130,7 +131,7 @@ describe('adding one', () => {
   });
 
   it('is online on the roster while this computer runs it', async () => {
-    expect((await gagan.listContacts()).online).toEqual([agentId]);
+    expect((await gagan.orgRoster()).online).toEqual([agentId]);
   });
 
   it('offers Stop, and its engine’s models and efforts in the composer', async () => {
@@ -248,7 +249,7 @@ describe('forgetting it', () => {
     forgetLocalAgent({ orgId: 'org-1', agentId });
     expect(listLocalAgents()).toEqual([]);
     // Harbor waits out its grace before saying offline; the connection itself is gone at once.
-    await until(async () => (await gagan.listContacts()).online !== undefined, 'the contacts');
+    await until(async () => (await gagan.orgRoster()).online !== undefined, 'the roster');
   });
 });
 
@@ -300,7 +301,7 @@ describe('records from before one server (2026-11-13)', () => {
     expect(sameServer('not a url', 'https://spaces.x.rowboatlabs.com')).toBe(false);
   });
 
-  it('moves a record from an old org on this server onto it, and leaves another server’s alone', () => {
+  it('moves verified local agents from the flat server into their owner’s org', async () => {
     const file = path.join(workDir, 'config', 'spaces_local_agents.json');
     const legacy = path.join(workDir, 'config', 'spaces_orgs.json');
     const before = fs.readFileSync(file, 'utf-8');
@@ -318,11 +319,13 @@ describe('records from before one server (2026-11-13)', () => {
       );
       fs.writeFileSync(
         file,
-        JSON.stringify({ version: 1, agents: [record('org-old', 'a1'), record('org-dev', 'a2'), record('server', 'a3'), record('org-old', 'a3')], seen: { 'a1/t1': 4 } }),
+        JSON.stringify({ version: 1, agents: [record('org-old', 'a1'), record('org-dev', 'a2'), record('server', 'a3'), record('org-1', 'a3')], seen: { 'a1/t1': 4 } }),
       );
-      adoptLegacyRecords();
+      const roster = vi.spyOn(gagan, 'orgRoster').mockResolvedValueOnce({ members: [{ id: 'a3', displayName: 'My agent', kind: 'agent', agentConnection: 'local', ownerId: 'gagan', role: 'member' }] });
+      await adoptLegacyRecords();
+      roster.mockRestore();
       const saved = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      expect(saved.agents.map((r: { orgId: string; agentId: string }) => `${r.orgId}/${r.agentId}`)).toEqual(['server/a1', 'org-dev/a2', 'server/a3']);
+      expect(saved.agents.map((r: { orgId: string; agentId: string }) => `${r.orgId}/${r.agentId}`)).toEqual(['org-old/a1', 'org-dev/a2', 'org-1/a3']);
       expect(saved.seen).toEqual({ 'a1/t1': 4 });
     } finally {
       fs.writeFileSync(file, before);

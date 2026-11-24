@@ -9,7 +9,7 @@ const files = { promptPath: '/data/rowboat/p', outPath: '/data/rowboat/o', errPa
 
 describe('Claude Code on Maritime', () => {
   it('installs a current Claude Code on the volume and runs it before the template’s own', () => {
-    const script = claude.command({ serverUrl: 'https://spaces.example', agentKey: 'rbk_x', model: 'claude-opus-5-5', ...files });
+    const script = claude.command({ orgUrl: 'https://spaces.example', agentKey: 'rbk_x', model: 'claude-opus-5-5', ...files });
     const install = script.indexOf('npm install --prefix /data/rowboat/claude-code ');
     const ours = script.indexOf('CLI=/data/rowboat/claude-code/node_modules/.bin/claude');
     const template = script.indexOf('command -v claude');

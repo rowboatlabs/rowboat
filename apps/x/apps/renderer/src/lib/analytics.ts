@@ -206,6 +206,10 @@ export function emailSyncTriggered() {
 
 // --- Spaces ---------------------------------------------------------------
 
+export function spacesServerCreated() {
+  posthog.capture('spaces_server_created')
+}
+
 export function spacesSpaceCreated() {
   posthog.capture('spaces_space_created')
 }

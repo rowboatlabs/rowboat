@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ServerSpaceNavigation } from './spaces-sidebar-section'
+import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { forgetOrg } from '@/lib/spaces-read-state'
 import { applyMemberPresence } from '@/hooks/use-space-members'
@@ -10,19 +11,23 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 // pass): New space leads, Activity and Threads above, then Agents (highlighted),
 // Groups and People, each newest first with its own +; your link at the foot.
 
-const { org, topics, activity, permissions } = vi.hoisted(() => ({
+const { org, other, topics, activity, permissions } = vi.hoisted(() => ({
     org: {
-        id: 'server', name: 'Spaces', memberId: 'me', directLabels: {},
+        id: 'server', name: 'Our server', memberId: 'me', directLabels: {},
         spaces: [{ id: 'main', name: 'main', createdAt: '2026-09-01' }, { id: 'founders', name: 'founders', createdAt: '2026-09-02' }],
         directs: [{ id: 'dm0', name: 'Person 0', createdAt: '2026-09-03', participants: ['me', 'p0'] }, { id: 'dm1', name: 'Person 1', createdAt: '2026-09-04', participants: ['me', 'p1'] }, { id: 'bot', name: 'Claude', createdAt: '2026-09-05', participants: ['me', 'claude'] }],
+    },
+    other: {
+        id: 'other', name: 'Other server', memberId: 'me', directLabels: {},
+        spaces: [{ id: 'welcome', name: 'welcome', createdAt: '2026-09-01' }], directs: [],
     },
     topics: [{ id: 'archived', rootMessageId: 'archived', title: 'Archived discussion', lastActivityAt: '2026-09-05', archived: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: `topic${i}`, rootMessageId: `root${i}`, title: `Discussion ${i}`, lastActivityAt: `2026-09-0${i + 1}` }))],
     activity: {} as Record<string, string>,
     permissions: { role: 'admin' },
 }))
-vi.mock('@/hooks/use-spaces', () => ({ useSpacesOrgs: vi.fn(() => ({ orgs: [org], loading: false, refresh: vi.fn() })), useSpaceFeed: () => ({ topics, loaded: true }), openSelfDirect: vi.fn(), refreshSpacesOrgs: vi.fn() }))
+vi.mock('@/hooks/use-spaces', () => ({ useSpacesOrgs: vi.fn(() => ({ orgs: [org], loading: false, refresh: vi.fn() })), useSpaceFeed: () => ({ topics, loaded: true }), openSelfDirect: vi.fn() }))
 // The unread map is the ONE thing both surfaces read; here it is built from the
-// real server-owned read state, so a mark moving in the store must move both.
+// real org-owned read state, so a mark moving in the store must move both.
 vi.mock('@/hooks/use-space-chat', async () => {
     const read = await vi.importActual<typeof import('@/lib/spaces-read-state')>('@/lib/spaces-read-state')
     return {
@@ -31,8 +36,10 @@ vi.mock('@/hooks/use-space-chat', async () => {
         useSpacesUnreadCounts: () => {
             read.useReadStateVersion()
             const counts = new Map<string, ReturnType<typeof read.spaceBadge>>()
-            for (const space of org.spaces) counts.set(`${org.id}/${space.id}`, read.spaceBadge(org.id, space.id, false))
-            for (const dm of org.directs) counts.set(`${org.id}/${dm.id}`, read.spaceBadge(org.id, dm.id, true))
+            for (const server of [org, other]) {
+                for (const space of server.spaces) counts.set(`${server.id}/${space.id}`, read.spaceBadge(server.id, space.id, false))
+                for (const dm of server.directs) counts.set(`${server.id}/${dm.id}`, read.spaceBadge(server.id, dm.id, true))
+            }
             return counts
         },
     }
@@ -41,14 +48,15 @@ vi.mock('@/hooks/use-space-members', async importOriginal => ({
     ...await importOriginal<typeof import('@/hooks/use-space-members')>(),
     prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me',
     useSpaceMembers: () => [{ id: 'me', role: permissions.role }],
-    useOrgRoster: () => [{ id: 'p0', displayName: 'Person 0', kind: 'human' }, { id: 'p1', displayName: 'Person 1', kind: 'human' }, { id: 'claude', displayName: 'Claude', kind: 'agent', ownerId: 'me', agentKind: 'claude-code' }],
+    useOrgRoster: () => [{ id: 'me', kind: 'human', displayName: 'Me', role: permissions.role }, { id: 'p0', displayName: 'Person 0', kind: 'human' }, { id: 'p1', displayName: 'Person 1', kind: 'human' }, { id: 'claude', displayName: 'Claude', kind: 'agent', ownerId: 'me', agentKind: 'claude-code' }],
 }))
 vi.mock('@/components/spaces-view', () => ({}))
 vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: ({ name, online }: { name: string; online?: boolean }) => <span data-testid={`avatar-${name}`} data-online={online} />, MemberStatus: () => null }))
-vi.mock('@/components/spaces/new-chat-dialog', () => ({ NewChatDialog: ({ open, start }: { open: boolean; start?: string }) => open ? <div role="dialog" aria-label="New chat" data-start={start} /> : null }))
+vi.mock('@/components/spaces/new-direct-dialog', () => ({ NewDirectDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="New message" /> : null }))
 vi.mock('@/components/spaces/personal-link-dialog', () => ({ PersonalLinkDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Your link" /> : null }))
 vi.mock('@/components/spaces/remove-server-dialog', () => ({ RemoveServerDialog: () => null }))
-vi.mock('@/lib/spaces-direct', () => ({
+vi.mock('@/lib/spaces-direct', async importOriginal => ({
+    ...await importOriginal<typeof import('@/lib/spaces-direct')>(),
     directAvatarId: (dm: { participants: string[] }) => dm.participants[1], isSelfDirect: () => false, isSelfDirectUnsupported: () => false,
     markSelfDirectUnsupported: vi.fn(), selfDirectFailureMessage: () => '', selfDirectRefused: () => false,
     spaceDisplayName: (_org: unknown, dm: { name: string }) => dm.name,
@@ -64,7 +72,8 @@ afterEach(() => {
     sessionStorage.clear()
     localStorage.clear()
     forgetOrg(org.id)
-    for (const key of Object.keys(activity)) delete activity[key]
+    forgetOrg(other.id)
+    vi.mocked(useSpacesOrgs).mockImplementation(() => ({ orgs: [org] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() }))
     vi.unstubAllGlobals()
 })
 
@@ -98,7 +107,7 @@ describe('the chat list', () => {
         const openActivity = vi.fn()
         const openAgents = vi.fn()
         nav({ onOpenActivity: openActivity, onOpenAgents: openAgents, onOpenThreads: vi.fn() })
-        const order = [/^New space$/, 'Activity', 'Threads', 'View all agents', 'Share your link'].map((name) => screen.getAllByRole('button', { name })[0])
+        const order = [/^New space$/, 'Activity', 'Threads', 'View all agents', 'Invite people'].map((name) => screen.getAllByRole('button', { name })[0])
         for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         fireEvent.click(order[1])
         expect(openActivity).toHaveBeenCalledWith(org.id)
@@ -111,22 +120,16 @@ describe('the chat list', () => {
     it('opens the new-chat sheet on the screen the click meant: New space on the space form, New message on the picker', () => {
         nav()
         fireEvent.click(screen.getAllByRole('button', { name: /^New space$/ })[0])
-        expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute('data-start', 'group')
+        expect(screen.getByRole('dialog', { name: 'Create a space' })).toBeVisible()
         cleanup()
         nav()
         fireEvent.click(screen.getByRole('button', { name: 'New message' }))
-        expect(screen.getByRole('dialog', { name: 'New chat' })).toHaveAttribute('data-start', 'message')
+        expect(screen.getByRole('dialog', { name: 'New message' })).toBeVisible()
     })
-
-    it('shares your link from the foot row', () => {
-        nav()
-        fireEvent.click(screen.getByRole('button', { name: 'Share your link' }))
-        expect(screen.getByRole('dialog', { name: 'Your link' })).toBeInTheDocument()
-    })
-
-    it('folds archived groups under one row at the foot', () => {
+    it('folds archived spaces under one row at the foot of Spaces', () => {
         const withArchived = { ...org, spaces: [...org.spaces, { id: 'old', name: 'old', createdAt: '2026-08-01', archived: true }] }
-        render(<SidebarProvider><ServerSpaceNavigation org={withArchived as unknown as OrgWithSpaces} spaceId="main" onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
+        render(<SidebarProvider><ServerSpaceNavigation org={withArchived as unknown as OrgWithSpaces} spaceId="main"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
         const archived = screen.getByRole('button', { name: 'Archived (1)' })
         expect(archived).toHaveAttribute('aria-expanded', 'false')
         expect(screen.getByText('old').closest('[data-open]')).toHaveAttribute('inert')
@@ -134,9 +137,9 @@ describe('the chat list', () => {
         expect(archived).toHaveAttribute('aria-expanded', 'true')
         expect(screen.getByText('old').closest('[data-open]')).not.toHaveAttribute('inert')
     })
-
-    it('opens rename from the row’s options button as well as the context menu', () => {
-        nav()
+    it('opens rename from the row\'s options button as well as the context menu', () => {
+        render(<SidebarProvider><ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="main"
+            onOpenSpace={vi.fn()} showDiscussions={false} /></SidebarProvider>)
         fireEvent.keyDown(screen.getByRole('button', { name: 'Options for founders' }), { key: 'Enter' })
         fireEvent.click(screen.getByRole('menuitem', { name: 'Rename space' }))
         expect(screen.getByDisplayValue('founders')).toBeInTheDocument()

@@ -11,9 +11,9 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, Member, SpaceMember, SuperAgentResult, MemberRole, Membership, Message, SessionMark, ReactionEmoji, Space, SpaceKind, Topic, UpdateProfile } from './core.js';
+import { Attribution, InvitePolicy, Member, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
-import { CreateInviteResult } from './invite.js';
+import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 import { SpaceGraph } from './graph.js';
@@ -61,18 +61,18 @@ function tool<In extends z.ZodType, Out extends z.ZodType>(t: McpToolDef<In, Out
 export const whoami = tool({
   name: 'whoami',
   description:
-    'Who your person is: their memberId and display name, plus the server ' +
-    '(name and address — the host every link is minted on, e.g. a file link ' +
+    'Who your person is on this org: their memberId, display name, and role, plus the org itself ' +
+    '(name and address — the host every link on this org is minted on, e.g. a file link ' +
     'https://<address>/s/<spaceId>/a/<assetId>). Use it to recognise their own messages and ' +
     'reactions in what you read, and to open their notes-to-self DM (open_direct with their own memberId).',
   input: z.object({}),
-  output: z.object({ member: Member, server: z.object({ name: z.string(), address: z.string() }) }),
+  output: z.object({ member: Member, org: z.object({ name: z.string(), address: z.string() }) }),
 });
 
 export const updateProfile = tool({
   name: 'update_profile',
   description:
-    "Change your person's own display name or title (what they do, e.g. \"Design lead\") on this server. " +
+    "Change your person's own display name or title (what they do, e.g. \"Design lead\") on this org. " +
     'Pass only what changes; an empty title removes it. Only when they ask — it is how every teammate ' +
     'sees them. Availability can set manualAway, custom status with expiry, notification pauses and a timezone schedule. Nobody can change anyone else’s profile.',
   input: UpdateProfile,
@@ -82,21 +82,11 @@ export const updateProfile = tool({
 export const listMembers = tool({
   name: 'list_members',
   description:
-    "A space's members, people and agents, each with their role there (admin or member) and when they joined. " +
-    'This is how a name becomes a memberId — match displayName (case-insensitive, first name is usually enough); ' +
-    'if several match, say so and ask. Messages and reactions carry memberIds only; resolve them here before naming anyone. ' +
-    'For people outside this space, list_contacts.',
-  input: z.object({ spaceId: SpaceId }),
-  output: z.object({ members: z.array(SpaceMember) }),
-});
-
-export const listContacts = tool({
-  name: 'list_contacts',
-  description:
-    "Everyone your person can reach: the people they share a space with (DMs and archived spaces included) and the agents they own, sorted by display name. " +
-    'There is no list of everyone on the server; someone not here is reached by their invite link. ' +
-    'Use it to resolve a name to a memberId for open_direct or add_members.',
-  input: z.object({}),
+    'People and agents, with names. Omit spaceId for the whole org roster, sorted by display name. ' +
+    "Pass spaceId for that space's members only. This is how a name becomes a memberId — match displayName " +
+    '(case-insensitive, first name is usually enough); if several match, say so and ask. ' +
+    'Messages and reactions carry memberIds only; resolve them here before naming anyone.',
+  input: z.object({ spaceId: SpaceId.optional() }),
   output: z.object({ members: z.array(Member) }),
 });
 
@@ -105,7 +95,7 @@ export const listContacts = tool({
 export const listSpaces = tool({
   name: 'list_spaces',
   description:
-    'List the spaces you are a member of, each with its file listing. ' +
+    'List the spaces you are a member of on this org, each with its file listing. ' +
     'Call this first: it resolves a space name (e.g. "Roadboard") to the spaceId every other ' +
     'tool needs, and lists every file with its assetId (what read_asset and every file tool take) ' +
     'and its path (the display name). Discovery is mechanical — never guess a spaceId or an assetId. ' +
@@ -124,6 +114,7 @@ export const listSpaces = tool({
         id: SpaceId,
         name: z.string(),
         kind: SpaceKind,
+        visibility: SpaceVisibility.default('private'),
         /** Direct spaces only: the member ids (one = a self-DM). */
         participants: z.array(MemberId).optional(),
         /** Direct spaces only: true when the caller is the only participant — their notes to self. */
@@ -133,6 +124,8 @@ export const listSpaces = tool({
         assets: z.array(Asset.omit({ state: true })),
       }),
     ),
+    /** The org is a group chat (spec §4, 2026-10-07): one space, DMs off until a second space. */
+    groupChat: z.boolean(),
   }),
 });
 
@@ -156,13 +149,27 @@ export const listAssets = tool({
   output: z.object({ entries: z.array(Asset) }),
 });
 
+export const browseSpaces = tool({
+  name: 'browse_spaces',
+  description: 'Browse this org’s shared open spaces, including those already joined. Read any result without joining; call join_space before posting or other actions. Private spaces and DMs are never listed.',
+  input: z.object({}),
+  output: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
+});
+
+export const joinSpace = tool({
+  name: 'join_space',
+  description: 'Join a shared open space as your person before posting or other actions. Repeated joins are a no-op. Private spaces and DMs cannot be self-joined.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space, membership: Membership }),
+});
+
 export const createSpace = tool({
   name: 'create_space',
   description:
-    'Create a new shared space (a group: one message stream plus a file folder). Your person ' +
-    'becomes its first member and its admin; others arrive by invite link or by being added. Check list_spaces ' +
+    'Create a new shared space (a channel: one message stream plus a file folder). Your person ' +
+    'becomes its first member. Visibility defaults to private (invite required); open spaces allow org members to browse and self-join. Check list_spaces and browse_spaces ' +
     'first so you do not create a duplicate of a space that already exists.',
-  input: z.object({ name: z.string().min(1).max(128) }),
+  input: z.object({ name: z.string().min(1).max(128), visibility: SpaceVisibility.default('private') }),
   output: z.object({ space: Space }),
 });
 
@@ -225,44 +232,73 @@ export const deleteSpace = tool({
   output: z.object({ deleted: z.literal(true) }),
 });
 
+export const setSpaceVisibility = tool({
+  name: 'set_space_visibility',
+  description:
+    "Change a shared space's visibility (admins only, in a space they are in; DMs and archived " +
+    'spaces refuse). open: any org member can find, read and join it. private: members only, and ' +
+    'nobody else can see it. The same value is a no-op. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, visibility: SpaceVisibility }),
+  output: z.object({ space: Space }),
+});
+
 export const addMembers = tool({
   name: 'add_members',
   description:
-    'Add people or agents your person can reach to a shared space they are in. Take ' +
+    'Add existing org members, people or agents, to a shared space your person is in. Take ' +
     'memberIds from list_members. Anyone already in is a no-op. Direct messages cannot be added to. ' +
-    "An agent is added only by its owner; invocableBy sets who may ask it there (members, the default, or owner). " +
+    "Someone else's personal agent (personal: true) can be added only by its owner. " +
     'Only when your person asked for it.',
-  input: z.object({ spaceId: SpaceId, memberIds: z.array(MemberId).min(1).max(100), invocableBy: z.enum(['owner', 'members']).optional() }),
+  input: z.object({ spaceId: SpaceId, memberIds: z.array(MemberId).min(1).max(100) }),
   output: z.object({ memberships: z.array(Membership) }),
-});
-
-export const setAgentAccess = tool({
-  name: 'set_agent_access',
-  description:
-    "Change who may ask one of your person's agents in a space: everyone there (members) or your person only (owner). " +
-    'Only the agent’s owner may; an agent on its owner’s own computer stays owner-only. The same value is a no-op. Only when your person asked for it.',
-  input: z.object({ spaceId: SpaceId, agentId: MemberId, invocableBy: z.enum(['owner', 'members']) }),
-  output: z.object({ membership: Membership }),
 });
 
 export const removeMember = tool({
   name: 'remove_member',
   description:
-    "Remove someone, person or agent, from a shared space (the space's admins only; " +
+    'Remove someone, person or agent, from a shared space (admins only, in a space they are in; ' +
     'DMs refuse). Take the memberId from list_members. To take your person out, use leave_space. ' +
     'Someone not in the space is a no-op. Only when your person explicitly asked to remove them.',
   input: z.object({ spaceId: SpaceId, memberId: MemberId }),
   output: z.object({ removed: z.boolean() }),
 });
 
+export const removeOrgMember = tool({
+  name: 'remove_org_member',
+  description:
+    'Remove someone, person or agent, from the whole org (admins only; never your person). They ' +
+    'leave every shared space and can no longer sign in; their messages stay, attributed. A new ' +
+    'invite brings the same member back. Only when your person explicitly asked to remove this ' +
+    'person from the org by name — never as a step toward something else.',
+  input: z.object({ memberId: MemberId }),
+  output: z.object({ member: Member }),
+});
+
 export const setMemberRole = tool({
   name: 'set_member_role',
   description:
-    "Make a member of a space one of its admins, or a member again (the space's admins only). Agents can't be admins, " +
-    'the only admin cannot step down, and a DM has no admin. The same role is a no-op. Only when your person asked for it.',
-  input: z.object({ spaceId: SpaceId, memberId: MemberId, role: MemberRole }),
-  output: z.object({ membership: Membership }),
+    "Make a person an admin, or a member again (admins only). Agents can't be admins, and the org " +
+    'always keeps one admin. The same role is a no-op. Only when your person asked for it.',
+  input: z.object({ memberId: MemberId, role: MemberRole }),
+  output: z.object({ member: Member }),
 });
+
+export const getOrgSettings = tool({
+  name: 'get_org_settings',
+  description: "The org's settings: invitePolicy says who may create invite links (members, or admins only).",
+  input: z.object({}),
+  output: z.object({ settings: OrgSettings }),
+});
+
+export const setInvitePolicy = tool({
+  name: 'set_invite_policy',
+  description:
+    'Set who may create invite links: members (anyone) or admins (admins only). Admins only. ' +
+    'The same value is a no-op. Only when your person asked for it.',
+  input: z.object({ invitePolicy: InvitePolicy }),
+  output: z.object({ settings: OrgSettings }),
+});
+
 
 export const leaveSpace = tool({
   name: 'leave_space',
@@ -273,17 +309,28 @@ export const leaveSpace = tool({
   output: z.object({ left: z.literal(true) }),
 });
 
+export const setDefaultSpace = tool({
+  name: 'set_default_space',
+  description:
+    'Make a shared open space a default space, or take it off the defaults (admins only). ' +
+    'Everyone who accepts an invite to the org joins every default space. Private spaces and ' +
+    'DMs cannot be defaults. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, isDefault: z.boolean() }),
+  output: z.object({ space: Space }),
+});
+
 export const createInvite = tool({
   name: 'create_invite',
   description:
-    'Make an invite link: to one shared space your person is in (spaceId), or a personal link ' +
-    '(direct: true) that opens a DM with your person when accepted — the way to reach someone who ' +
-    'shares no space with them yet. Exactly one of the two. Anyone in a space may invite to it. Returns ' +
+    "Make an invite link to the org (any member may, unless the org's invite policy is admins only). " +
+    'The person who accepts joins the org, its ' +
+    'default spaces, and any spaceIds listed — each one a shared space your person is in. Returns ' +
     'the link to share — delivery is up to your person (paste it in a DM, an email, wherever they ' +
-    'said). Links are multi-use and expire, seven days by default.',
+    'said). The org may cap expiresInHours.',
   input: z.object({
+    spaceIds: z.array(SpaceId).max(MAX_INVITE_SPACES).optional(),
+    /** One space, the form before 2026-10-19: the same as `spaceIds: [spaceId]`. */
     spaceId: SpaceId.optional(),
-    direct: z.literal(true).optional(),
     expiresInHours: z.number().int().positive().max(24 * 30).optional(),
   }),
   output: CreateInviteResult,
@@ -355,7 +402,7 @@ export const readThread = tool({
 export const searchSpace = tool({
   name: 'search_space',
   description:
-    'Search a space, or every space your person is in when spaceId is omitted: messages, topic titles, and files (by extracted content or filename), ' +
+    'Search a space: messages, topic titles, and files (by extracted content or filename), ' +
     'returned as three independently-ranked lists. Query words are AND-ed; a word that is a ' +
     "member's name also matches @-mentions of them. Filters narrow message hits and work alone: " +
     'from:<name>, mentions:<name> (me is you), in:<thread title>, has:link|image|file; a ' +
@@ -365,8 +412,7 @@ export const searchSpace = tool({
     'rather than raising the limit. Use before posting a new root to avoid duplicating a ' +
     'conversation, and to locate files without listing everything.',
   input: z.object({
-    /** One space; omit it to search every space your person is in (2026-11-09) — each hit then says which. */
-    spaceId: SpaceId.optional(),
+    spaceId: SpaceId,
     query: z.string().min(1).max(512),
     /** Narrow to specific categories; omit for all three. */
     kinds: z.array(SearchKind).optional(),
@@ -638,7 +684,7 @@ export const readAsset = tool({
     'the version you read is your base version. Pass `version` to read an older version (time ' +
     'travel); omit for the current one. Binary files (images, pdfs, uploads) return empty content ' +
     'plus a `blob` {hash, size, mime}: no tool carries the bytes, which download by that hash from ' +
-    'GET /v1/spaces/{spaceId}/blobs/{hash} on the server\'s address.',
+    'GET /v1/spaces/{spaceId}/blobs/{hash} on the org\'s address.',
   input: z.object({ spaceId: SpaceId, assetId: AssetId, version: z.number().int().positive().optional() }),
   output: ReadAssetResult,
 });
@@ -753,7 +799,7 @@ export const diff = tool({
 /**
  * Activity (2026-09-10): the one call behind "what's new for me?". Everything
  * that involves the person across every space and DM, newest first, with the
- * server's read marks saying what is still unread.
+ * org's read marks saying what is still unread.
  */
 export const readActivity = tool({
   name: 'read_activity',
@@ -762,7 +808,7 @@ export const readActivity = tool({
     'messages that name them (`mention`), `@here` announcements (`here`), messages in their DMs (`dm`), ' +
     'replies in threads they follow (`reply`), and reactions on their own messages (`reaction`, folded per ' +
     "message and emoji). This is the one call for \"what's new for me?\", \"catch me up\", \"did anyone need " +
-    'me?\": call it once (`unread: true` for only what they have not read — the server\'s read marks decide), ' +
+    'me?\": call it once (`unread: true` for only what they have not read — the org\'s read marks decide), ' +
     'then summarise by space, name people by displayName, lead with the unread items, and offer to open or ' +
     'reply. Do not walk spaces one by one for this. `truncated` means more: pass `cursor` back to page.',
   input: z.object({
@@ -794,7 +840,7 @@ export const readActivity = tool({
 });
 
 /**
- * Mark everything read for the person — the server's "mark all as read" (2026-09-11).
+ * Mark everything read for the person — the org's "mark all as read" (2026-09-11).
  */
 export const markAllRead = tool({
   name: 'mark_all_read',
@@ -853,20 +899,25 @@ export const mcpTools = [
   whoami,
   updateProfile,
   listMembers,
-  listContacts,
   listSpaces,
+  browseSpaces,
   listAssets,
+  joinSpace,
   openDirect,
   createSpace,
   renameSpace,
   archiveSpace,
   unarchiveSpace,
+  setDefaultSpace,
   deleteSpace,
+  setSpaceVisibility,
   addMembers,
-  setAgentAccess,
   removeMember,
   leaveSpace,
+  removeOrgMember,
   setMemberRole,
+  getOrgSettings,
+  setInvitePolicy,
   createInvite,
   readStream,
   readThread,
@@ -913,8 +964,8 @@ export const agentOnlyMcpToolNames: ReadonlySet<string> = new Set([createAgent.n
 export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   whoami.name,
   listMembers.name,
-  listContacts.name,
   listSpaces.name,
+  browseSpaces.name,
   listAssets.name,
   readStream.name,
   readThread.name,
@@ -928,4 +979,5 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   assetHistory.name,
   diff.name,
   getInvocations.name,
+  getOrgSettings.name,
 ]);

@@ -25,7 +25,7 @@ const offsets = (events: StreamEvent[]) => events.map((e) => e.offset);
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    name: 'Rowboat Labs',
+    orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'harsh', displayName: 'Harsh' },

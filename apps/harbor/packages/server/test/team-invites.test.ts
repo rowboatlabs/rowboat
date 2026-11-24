@@ -4,20 +4,25 @@ import { mcpTools, routes, type Space } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { agentClient, liveClient, restClient, startTestHarbor } from './helpers.js';
 
-// Invites (spec §4 Invites, rewritten 2026-11-09): an invite is to one space,
-// or it is a person's link whose acceptance opens a DM with them. Anyone in a
-// space may invite to it. Accepting binds a newcomer, then joins the space the
-// inviter is still in, or opens the DM. The reach rule for DMs rides on it.
+// Team invites (spec §4 Invites and §5 answer 3, built 2026-10-19): an invite
+// is to the org, with an optional list of spaces the inviter is in.
+// Accepting joins the listed spaces, then the org's default spaces. A default
+// is a flag on a shared open space that only an admin sets; flipping it is one
+// `space_default_changed` event, and setting the flag a space has is a no-op.
 
 let harbor: RunningHarbor;
-let lobbyId: string;
-let launchId: string;
-let secretId: string; // gagan and ramnique
+let lobbyId: string; // open, the default
+let launchId: string; // open, not a default
+let secretId: string; // private, gagan and ramnique
 let ramAgent: Client;
 let gaganAgent: Client;
-const admin = () => restClient(harbor, 'dev-ramnique');
+const admin = () => restClient(harbor, 'dev-ramnique'); // the seed space's creator is the org's admin
 const gagan = () => restClient(harbor, 'dev-gagan');
 const prakhar = () => restClient(harbor, 'dev-prakhar');
+const setDefault = (id: string, isDefault: boolean, client = admin()) =>
+  client.post(`/v1/spaces/${id}/default`, { isDefault, actingMode: 'direct' });
+const defaultEvents = async (id: string) =>
+  (await harbor.store.listEventsAfter(id, 0)).filter((e) => e.event.type === 'space_default_changed');
 let newcomers = 0;
 /** A person new to the org: the dev driver makes the member on first sight, as a bind would. */
 const newcomer = () => {
@@ -43,7 +48,7 @@ async function refused(client: Client, name: string, args: Record<string, unknow
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    name: 'Rowboat Labs',
+    orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },
@@ -51,9 +56,9 @@ beforeAll(async () => {
     ],
     seedSpaces: [{ name: 'Seed', creator: 'ramnique' }],
   });
-  lobbyId = (await admin().post('/v1/spaces', { name: 'Lobby' })).body.space.id;
-  launchId = (await admin().post('/v1/spaces', { name: 'Launch' })).body.space.id;
-  await admin().post(`/v1/spaces/${launchId}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
+  lobbyId = (await harbor.store.listDefaultSpaces())[0]!.id;
+  await gagan().post(`/v1/spaces/${lobbyId}/join`);
+  launchId = (await admin().post('/v1/spaces', { name: 'Launch', visibility: 'open' })).body.space.id;
   secretId = (await gagan().post('/v1/spaces', { name: 'Secret' })).body.space.id;
   await gagan().post(`/v1/spaces/${secretId}/members`, { memberIds: ['ramnique'], actingMode: 'direct' });
   ramAgent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
@@ -66,126 +71,133 @@ afterAll(async () => {
   await harbor.close();
 });
 
-describe('an invite to one space', () => {
-  it('resolve names the space pre-auth; accepting binds a newcomer and joins it; again is a no-op', async () => {
-    const invite = (await gagan().post('/v1/invites', { spaceId: secretId })).body;
+describe('default spaces', () => {
+  it('keeps general open and permanent through every admin operation', async () => {
+    await admin().post(`/v1/spaces/${lobbyId}/join`);
+    for (const [action, input] of [['rename', { name: 'changed' }], ['archive', {}], ['visibility', { visibility: 'private' }], ['default', { isDefault: false }]] as const) {
+      expect((await admin().post(`/v1/spaces/${lobbyId}/${action}`, { ...input, actingMode: 'direct' })).status).toBe(400);
+    }
+    expect((await admin().delete(`/v1/spaces/${lobbyId}`)).status).toBe(400);
+    expect((await setDefault(launchId, true)).status).toBe(400);
+    expect((await setDefault(lobbyId, true)).body.space.isDefault).toBe(true);
+    expect(await defaultEvents(lobbyId)).toHaveLength(0);
+  });
+});
+
+describe('invites to the org', () => {
+  it('an invite listing nothing joins the defaults, and resolve names them pre-auth', async () => {
+    const invite = (await prakhar().post('/v1/invites', {})).body;
     const resolved = await restClient(harbor, '').post('/v1/invites/resolve', { token: invite.token });
     expect(resolved.status).toBe(200);
-    expect(routes.resolveInvite.response.parse(resolved.body)).toEqual({ state: 'ok', space: { id: secretId, name: 'Secret' }, invitedBy: 'Gagan' });
+    expect(routes.resolveInvite.response.parse(resolved.body)).toMatchObject({
+      state: 'ok',
+      org: { name: 'Rowboat Labs' },
+      space: { id: lobbyId, name: 'general' },
+      spaces: [{ id: lobbyId, name: 'general' }],
+      invitedBy: 'Prakhar',
+    });
 
     const { id, client } = newcomer();
     const accepted = await client.post('/v1/invites/accept', { token: invite.token });
     expect(accepted.status).toBe(200);
     const body = routes.acceptInvite.response.parse(accepted.body);
-    expect(body.space?.id).toBe(secretId);
-    expect(body.membership).toMatchObject({ spaceId: secretId, memberId: id, role: 'member' });
-    expect(await joinedIds(id)).toEqual([secretId]);
-    const joins = (await harbor.store.listEventsAfter(secretId, 0)).filter((e) => e.event.type === 'membership' && e.event.membership.memberId === id);
-    expect(joins).toHaveLength(1);
+    expect(body.space?.id).toBe(lobbyId);
+    expect(body.membership).toMatchObject({ spaceId: lobbyId, memberId: id });
+    expect(body.spaces.map((s) => s.id)).toEqual([lobbyId]);
+    expect(await joinedIds(id)).toEqual([lobbyId]);
+  });
 
+  it('listed spaces come first, in the order given, then the defaults; each join is one event', async () => {
+    await gagan().post(`/v1/spaces/${launchId}/join`);
+    const invite = (await gagan().post('/v1/invites', { spaceIds: [secretId, launchId] })).body;
+    const resolved = (await restClient(harbor, '').post('/v1/invites/resolve', { token: invite.token })).body;
+    expect(resolved.spaces.map((s: { id: string }) => s.id)).toEqual([secretId, launchId, lobbyId]);
+
+    const { id, client } = newcomer();
+    const body = (await client.post('/v1/invites/accept', { token: invite.token })).body;
+    expect(body.space.id).toBe(secretId);
+    expect(body.spaces.map((s: Space) => s.id)).toEqual([secretId, launchId, lobbyId]);
+    for (const spaceId of [secretId, launchId, lobbyId]) {
+      const joins = (await harbor.store.listEventsAfter(spaceId, 0))
+        .filter((e) => e.event.type === 'membership' && e.event.membership.memberId === id);
+      expect(joins, spaceId).toHaveLength(1);
+    }
+
+    // Accepting again writes nothing and answers the same.
     const head = await harbor.store.head(secretId);
     const again = (await client.post('/v1/invites/accept', { token: invite.token })).body;
-    expect(again.space.id).toBe(secretId);
+    expect(again.spaces.map((s: Space) => s.id)).toEqual([secretId, launchId, lobbyId]);
     expect(await harbor.store.head(secretId)).toBe(head);
   });
 
-  it('anyone in the space may invite; someone outside may not; a DM, an archived space and an unknown one refuse; one target exactly', async () => {
-    expect((await prakhar().post('/v1/invites', { spaceId: secretId })).body).toMatchObject({ code: 'forbidden' });
-    const dm = (await gagan().post('/v1/direct', { memberId: 'prakhar' })).body.space.id;
-    expect((await gagan().post('/v1/invites', { spaceId: dm })).body.code).toBe('invalid_request');
-    const archivedId = (await admin().post('/v1/spaces', { name: 'Old' })).body.space.id;
-    await admin().post(`/v1/spaces/${archivedId}/archive`, { actingMode: 'direct' });
-    expect((await admin().post('/v1/invites', { spaceId: archivedId })).status).toBe(403);
-    expect((await admin().post('/v1/invites', { spaceId: '01JZZZZZZZZZZZZZZZZZZZZZZZ' })).status).toBe(404);
-    expect((await admin().post('/v1/invites', {})).body.code).toBe('invalid_request');
-    expect((await admin().post('/v1/invites', { spaceId: secretId, direct: true })).body.code).toBe('invalid_request');
-  });
-
-  it('a space the inviter has left, or one archived since, joins nothing', async () => {
-    const tempId = (await gagan().post('/v1/spaces', { name: 'Temp' })).body.space.id;
-    const left = (await gagan().post('/v1/invites', { spaceId: tempId })).body;
-    await gagan().post(`/v1/spaces/${tempId}/members`, { memberIds: ['ramnique'], actingMode: 'direct' });
-    await gagan().post(`/v1/spaces/${tempId}/leave`);
-    expect((await restClient(harbor, '').post('/v1/invites/resolve', { token: left.token })).body).toEqual({ state: 'ok', invitedBy: 'Gagan' });
-    const { id, client } = newcomer();
-    expect((await client.post('/v1/invites/accept', { token: left.token })).body).toEqual({});
-    expect(await harbor.store.getMembership(tempId, id)).toBeUndefined();
-
-    const archivingId = (await admin().post('/v1/spaces', { name: 'Winding down' })).body.space.id;
-    const archived = (await admin().post('/v1/invites', { spaceId: archivingId })).body;
-    await admin().post(`/v1/spaces/${archivingId}/archive`, { actingMode: 'direct' });
-    expect((await client.post('/v1/invites/accept', { token: archived.token })).body).toEqual({});
-  });
-
-  it('a member accepting joins too, and the join reaches their other connections', async () => {
+  it('a member accepting joins the defaults too, and the joins reach their other connections', async () => {
+    await prakhar().post(`/v1/spaces/${lobbyId}/leave`);
     const live = await liveClient(harbor, 'dev-prakhar');
     try {
-      const invite = (await admin().post('/v1/invites', { spaceId: launchId })).body;
+      const invite = (await admin().post('/v1/invites', { spaceIds: [launchId] })).body;
       expect((await prakhar().post('/v1/invites/accept', { token: invite.token })).status).toBe(200);
-      await live.until((fs) => fs.some((f) => f.kind === 'space_added'));
-      expect(live.frames.filter((f) => f.kind === 'space_added').map((f) => (f as { spaceId: string }).spaceId)).toEqual([launchId]);
-      expect(await joinedIds('prakhar')).toEqual(expect.arrayContaining([launchId]));
+      await live.until((fs) => fs.filter((f) => f.kind === 'space_added').length >= 2);
+      expect(live.frames.filter((f) => f.kind === 'space_added').map((f) => (f as { spaceId: string }).spaceId).sort())
+        .toEqual([launchId, lobbyId].sort());
+      expect(await joinedIds('prakhar')).toEqual(expect.arrayContaining([launchId, lobbyId]));
     } finally {
       live.close();
     }
   });
 
-  it('the /join page names the space', async () => {
+  it('a per-space invite, as older clients make it, is the one-space case', async () => {
     const invite = (await gagan().post('/v1/invites', { spaceId: secretId })).body;
+    const { id, client } = newcomer();
+    const body = (await client.post('/v1/invites/accept', { token: invite.token })).body;
+    expect(body.space.id).toBe(secretId);
+    expect(await joinedIds(id)).toEqual(expect.arrayContaining([secretId, lobbyId]));
+  });
+
+  it('listing a space requires being in it; DMs and archived spaces refuse, nothing is written', async () => {
+    expect((await prakhar().post('/v1/invites', { spaceIds: [secretId] })).body).toMatchObject({ code: 'forbidden' });
+    const dm = (await gagan().post('/v1/direct', { memberId: 'prakhar' })).body.space.id;
+    expect((await gagan().post('/v1/invites', { spaceIds: [launchId, dm] })).body.code).toBe('invalid_request');
+    const archivedId = (await admin().post('/v1/spaces', { name: 'Old', visibility: 'open' })).body.space.id;
+    await admin().post(`/v1/spaces/${archivedId}/archive`, { actingMode: 'direct' });
+    expect((await admin().post('/v1/invites', { spaceIds: [archivedId] })).status).toBe(403);
+    expect((await admin().post('/v1/invites', { spaceIds: ['01JZZZZZZZZZZZZZZZZZZZZZZZ'] })).status).toBe(404);
+  });
+
+  it('a listed space the inviter has left, or one archived since, is not joined; the rest still are', async () => {
+    const tempId = (await gagan().post('/v1/spaces', { name: 'Temp' })).body.space.id;
+    const archivingId = (await admin().post('/v1/spaces', { name: 'Winding down', visibility: 'open' })).body.space.id;
+    await admin().post(`/v1/spaces/${archivingId}/members`, { memberIds: ['gagan'], actingMode: 'direct' });
+    const invite = (await gagan().post('/v1/invites', { spaceIds: [tempId, archivingId, secretId] })).body;
+    await gagan().post(`/v1/spaces/${tempId}/members`, { memberIds: ['ramnique'], actingMode: 'direct' });
+    await gagan().post(`/v1/spaces/${tempId}/leave`);
+    await admin().post(`/v1/spaces/${archivingId}/archive`, { actingMode: 'direct' });
+
+    const resolved = (await restClient(harbor, '').post('/v1/invites/resolve', { token: invite.token })).body;
+    expect(resolved.spaces.map((s: { id: string }) => s.id)).toEqual([secretId, lobbyId]);
+    const { id, client } = newcomer();
+    const body = (await client.post('/v1/invites/accept', { token: invite.token })).body;
+    expect(body.spaces.map((s: Space) => s.id)).toEqual([secretId, lobbyId]);
+    expect(await harbor.store.getMembership(tempId, id)).toBeUndefined();
+    expect(await harbor.store.getMembership(archivingId, id)).toBeUndefined();
+  });
+
+  it('the /join page names the org and the spaces it joins', async () => {
+    const invite = (await gagan().post('/v1/invites', { spaceIds: [secretId] })).body;
     const html = await (await fetch(`${harbor.url}/join/${invite.token}`)).text();
-    expect(html).toContain("You're invited to Secret");
-    expect(html).toContain('Invited by Gagan');
-  });
-});
-
-describe('a personal link, and the reach rule for DMs', () => {
-  it('a stranger cannot DM you; your link opens the DM, get-or-create; afterwards either side reaches the other', async () => {
-    const { id, client } = newcomer();
-    expect((await client.get('/v1/me')).status).toBe(200); // bound, in no space
-    const refused = await client.post('/v1/direct', { memberId: 'gagan' });
-    expect(refused.status).toBe(403);
-    expect(refused.body.message).toContain('share a space');
-    expect((await gagan().post('/v1/direct', { memberId: id })).status).toBe(403);
-
-    const link = (await gagan().post('/v1/invites', { direct: true })).body;
-    const resolved = (await restClient(harbor, '').post('/v1/invites/resolve', { token: link.token })).body;
-    expect(routes.resolveInvite.response.parse(resolved)).toEqual({ state: 'ok', direct: { id: 'gagan', displayName: 'Gagan' }, invitedBy: 'Gagan' });
-
-    const live = await liveClient(harbor, 'dev-gagan');
-    try {
-      const accepted = routes.acceptInvite.response.parse((await client.post('/v1/invites/accept', { token: link.token })).body);
-      expect(accepted.space).toMatchObject({ kind: 'direct', participants: [id, 'gagan'].sort() });
-      expect(accepted.membership).toMatchObject({ spaceId: accepted.space!.id, memberId: id });
-      await live.until((fs) => fs.some((f) => f.kind === 'space_added' && f.spaceKind === 'direct'));
-      expect((await client.post('/v1/invites/accept', { token: link.token })).body.space.id).toBe(accepted.space!.id);
-      expect((await gagan().post('/v1/direct', { memberId: id })).body.space.id).toBe(accepted.space!.id);
-      expect((await client.post('/v1/direct', { memberId: 'gagan' })).body.space.id).toBe(accepted.space!.id);
-    } finally {
-      live.close();
-    }
-  });
-
-  it('sharing a space is enough to DM; the maker’s own click opens nothing; the page names the person', async () => {
-    const { id, client } = newcomer();
-    const invite = (await admin().post('/v1/invites', { spaceId: launchId })).body;
-    await client.post('/v1/invites/accept', { token: invite.token });
-    expect((await client.post('/v1/direct', { memberId: 'ramnique' })).status).toBe(200);
-    expect((await client.post('/v1/direct', { memberId: id })).status).toBe(200); // notes to self, always
-
-    const link = (await admin().post('/v1/invites', { direct: true })).body;
-    expect((await admin().post('/v1/invites/accept', { token: link.token })).body).toEqual({});
-    const html = await (await fetch(`${harbor.url}/join/${link.token}`)).text();
-    expect(html).toContain('Ramnique invited you to message them');
+    expect(html).toContain("You're invited to Rowboat Labs");
+    expect(html).toContain("You'll join Secret and general");
   });
 });
 
 describe('the agent face', () => {
-  it('create_invite makes a space link or a personal link, and refuses both or neither', async () => {
-    const space = await call<{ token: string }>(gaganAgent, 'create_invite', { spaceId: secretId });
-    expect((await restClient(harbor, '').post('/v1/invites/resolve', { token: space.token })).body.space.id).toBe(secretId);
-    const personal = await call<{ token: string }>(gaganAgent, 'create_invite', { direct: true });
-    expect((await restClient(harbor, '').post('/v1/invites/resolve', { token: personal.token })).body.direct.id).toBe('gagan');
-    expect((await refused(gaganAgent, 'create_invite', { spaceId: lobbyId })).code).toBe('forbidden');
-    expect((await refused(gaganAgent, 'create_invite', {})).code).toBe('invalid_request');
+  it('set_default_space is the admin act on both faces; create_invite lists spaces', async () => {
+    expect((await refused(gaganAgent, 'set_default_space', { spaceId: launchId, isDefault: true })).code).toBe('forbidden');
+    expect((await refused(ramAgent, 'set_default_space', { spaceId: launchId, isDefault: true })).code).toBe('invalid_request');
+
+    const invite = await call<{ token: string }>(gaganAgent, 'create_invite', { spaceIds: [secretId] });
+    const resolved = (await restClient(harbor, '').post('/v1/invites/resolve', { token: invite.token })).body;
+    expect(resolved.spaces.map((s: { id: string }) => s.id)).toEqual([secretId, lobbyId]);
+    const adminsOnly = (await admin().post('/v1/spaces', { name: 'Admins only' })).body.space.id;
+    expect((await refused(gaganAgent, 'create_invite', { spaceIds: [lobbyId, adminsOnly] })).code).toBe('forbidden');
   });
 });

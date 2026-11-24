@@ -88,7 +88,7 @@ async function call<T>(client: Client, name: string, args: Record<string, unknow
 beforeAll(async () => {
   jev = new FakeJev();
   harbor = await startTestHarbor({
-    name: 'Rowboat Labs',
+    orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'ramnique', displayName: 'Ramnique' },
       { id: 'gagan', displayName: 'Gagan' },

@@ -35,7 +35,7 @@ let ramnique: ReturnType<typeof api>;
 describe('asset move/delete/restore', () => {
   beforeAll(async () => {
     harbor = await startTestHarbor({
-      name: 'Ops Test Org',
+      orgName: 'Ops Test Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
     });
     ramnique = api('dev-ramnique');

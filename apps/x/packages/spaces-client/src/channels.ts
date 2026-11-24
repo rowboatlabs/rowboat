@@ -7,24 +7,24 @@ import type { SpaceSubscriptions } from './subscriptions.js';
 // wherever they run. The desktop's main process and rowboat-server each
 // carried this table verbatim until 2026-10-09; one copy now, and the browser
 // host of the Spaces web-app plan serves it too. Channels that depend on the
-// host stay with the host: signing in, the server record, uploads by file
+// host stay with the host: signing in, the org registry, uploads by file
 // path, save dialogs, link previews, the local agent, scheduled sends.
 //
 // Everything a person does through these is attributed 'direct': the app is
-// the human surface; agents write through the server's MCP face.
+// the human surface; agents write through the org's MCP face.
 
 type IPCChannels = ipc.IPCChannels;
 
 export type HarborChannel =
   | 'spaces:getProfile' | 'spaces:updateProfile' | 'spaces:setAvatar' | 'spaces:clearAvatar' | 'spaces:getProfileImage'
-  | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:renameSpace'
-  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace'
-  | 'spaces:setSpaceGraph' | 'spaces:getSpaceGraph'
-  | 'spaces:removeMember' | 'spaces:setMemberRole' | 'spaces:setAgentAccess'
-  | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listContacts'
+  | 'spaces:listSpaces' | 'spaces:browseSpaces' | 'spaces:joinSpace' | 'spaces:createSpace' | 'spaces:renameSpace'
+  | 'spaces:archiveSpace' | 'spaces:unarchiveSpace' | 'spaces:deleteSpace' | 'spaces:setSpaceVisibility' | 'spaces:setDefaultSpace'
+  | 'spaces:removeMember' | 'spaces:removeOrgMember' | 'spaces:setMemberRole' | 'spaces:getOrgSettings' | 'spaces:setInvitePolicy' | 'spaces:deleteAgent'
+  | 'spaces:addMembers' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:listOrgMembers'
   | 'spaces:listAgents' | 'spaces:addAgent' | 'spaces:setAgentCredential' | 'spaces:setAgentHook' | 'spaces:clearAgentHook'
-  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
-  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:deleteAgent' | 'spaces:setHostingLlm'
+  | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
+  | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
+  | 'spaces:setSpaceGraph' | 'spaces:getSpaceGraph'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower' | 'spaces:getHostingSize' | 'spaces:setHostingSize'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
   | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
@@ -49,11 +49,11 @@ export type HarborChannelHandlers = {
 export interface HarborChannelDeps {
   /** Whether this host is active (desktop: system idle time); absent, the renderer's report stands (2026-11-11, shared Online/Away status). */
   isActive?: () => boolean;
-  /** The server's REST client; throws for an id the host doesn't know (SPACES_SERVER_ID since 2026-11-09). */
+  /** The org's REST client; throws for an org the host doesn't know. */
   getClient(orgId: string): SpacesClient;
-  /** The server's live socket. */
+  /** The org's live socket. */
   getLive(orgId: string): Pick<SpacesLive, 'activity' | 'presence' | 'whiteboard'>;
-  /** The host's per-space subscriptions. */
+  /** The host's per-space subscriptions (one per org and space). */
   subscriptions: SpaceSubscriptions;
   /** Where a subscribed space's frames go: every window on the desktop. */
   emit(event: spacesShared.SpacesBusEvent): void;
@@ -71,10 +71,17 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
       for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
       return { src: `data:${mime};base64,${btoa(binary)}` };
     },
-    'spaces:listSpaces': async (args) => getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false }),
+    'spaces:listSpaces': async (args) => {
+      const { spaces, groupChat } = await getClient(args.orgId).listing({ includeDirect: args.includeDirect ?? false });
+      return { spaces, ...(groupChat !== undefined ? { groupChat } : {}) };
+    },
+
+    'spaces:browseSpaces': async (args) => getClient(args.orgId).browseSpaces(),
+
+    'spaces:joinSpace': async (args) => getClient(args.orgId).joinSpace(args.spaceId),
 
     'spaces:createSpace': async (args) => ({
-      space: await getClient(args.orgId).createSpace(args.name),
+      space: await getClient(args.orgId).createSpace(args.name, args.visibility),
     }),
 
     'spaces:renameSpace': async (args) => ({
@@ -96,25 +103,42 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
       space: await getClient(args.orgId).unarchiveSpace(args.spaceId),
     }),
 
+    'spaces:setDefaultSpace': async (args) => ({
+      space: await getClient(args.orgId).setDefaultSpace(args.spaceId, args.isDefault),
+    }),
+
     'spaces:deleteSpace': async (args) => {
       await getClient(args.orgId).deleteSpace(args.spaceId);
       return { deleted: true as const };
     },
 
+    'spaces:setSpaceVisibility': async (args) => ({
+      space: await getClient(args.orgId).setSpaceVisibility(args.spaceId, args.visibility),
+    }),
+
     'spaces:removeMember': async (args) => ({
       removed: await getClient(args.orgId).removeMember(args.spaceId, args.memberId),
     }),
 
-    'spaces:setMemberRole': async (args) => ({
-      membership: await getClient(args.orgId).setSpaceRole(args.spaceId, args.memberId, args.role),
+    'spaces:removeOrgMember': async (args) => ({
+      member: await getClient(args.orgId).removeOrgMember(args.memberId),
     }),
 
-    'spaces:setAgentAccess': async (args) => ({
-      membership: await getClient(args.orgId).setAgentAccess(args.spaceId, args.agentId, args.invocableBy),
+    'spaces:setMemberRole': async (args) => ({
+      member: await getClient(args.orgId).setMemberRole(args.memberId, args.role),
     }),
+
+    'spaces:getOrgSettings': async (args) => ({
+      settings: await getClient(args.orgId).getOrgSettings(),
+    }),
+
+    'spaces:setInvitePolicy': async (args) => ({
+      settings: await getClient(args.orgId).setInvitePolicy(args.invitePolicy),
+    }),
+
 
     'spaces:addMembers': async (args) => ({
-      memberships: await getClient(args.orgId).addMembers(args.spaceId, args.memberIds, args.invocableBy),
+      memberships: await getClient(args.orgId).addMembers(args.spaceId, args.memberIds),
     }),
 
     'spaces:openDirect': async (args) => getClient(args.orgId).openDirect(args.memberId),
@@ -123,14 +147,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
       members: await getClient(args.orgId).listMembers(args.spaceId),
     }),
 
-    // The roster the app keeps is everyone it can address, you included (2026-11-09): the route
-    // lists the others, so your own record comes from `me`, first — the account row, the sidebar's
-    // self row and a profile update all look you up there.
-    'spaces:listContacts': async (args) => {
-      const client = getClient(args.orgId);
-      const [{ member: me }, contacts] = await Promise.all([client.me(), client.listContacts()]);
-      return { ...contacts, members: [me, ...contacts.members.filter((m) => m.id !== me.id)] };
-    },
+    'spaces:listOrgMembers': async (args) => getClient(args.orgId).orgRoster(),
 
     'spaces:listAgents': async (args) => ({ agents: await getClient(args.orgId).listAgents() }),
     'spaces:addAgent': async ({ orgId, ...input }) => getClient(orgId).addAgent(input),
@@ -144,6 +161,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
     'spaces:revokeAgentKey': async (args) => ({ key: await getClient(args.orgId).revokeAgentKey(args.agentId, args.keyId) }),
     'spaces:renameAgent': async (args) => ({ agent: await getClient(args.orgId).renameAgent(args.agentId, args.displayName) }),
     'spaces:setAgentProfile': async ({ orgId, agentId, ...profile }) => ({ agent: await getClient(orgId).setAgentProfile(agentId, profile) }),
+    'spaces:setAgentPersonal': async (args) => ({ agent: await getClient(args.orgId).setAgentPersonal(args.agentId, args.personal) }),
     'spaces:setAgentSuper': async (args) => ({ agent: await getClient(args.orgId).setAgentSuper(args.agentId, args.superAgent) }),
     'spaces:setupInstances': async (args) => ({ instances: await getClient(args.orgId).setupInstances(args.connection, args.key) }),
     'spaces:createSetupInstance': async ({ orgId, connection, ...input }) => ({ instance: await getClient(orgId).createSetupInstance(connection, input) }),
@@ -192,12 +210,11 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
     'spaces:deleteHostingTrigger': async (args) => ({ triggers: await getClient(args.orgId).deleteHostingTrigger(args.agentId, args.triggerId) }),
 
     'spaces:createInvite': async (args) => getClient(args.orgId).createInvite({
-      ...(args.spaceId ? { spaceId: args.spaceId } : {}),
-      ...(args.direct ? { direct: true as const } : {}),
+      ...(args.spaceIds ? { spaceIds: args.spaceIds } : {}),
       ...(args.expiresInHours !== undefined ? { expiresInHours: args.expiresInHours } : {}),
     }),
 
-    // Pre-auth: works before this install has signed in, so the join flow can show
+    // Pre-auth: works before the org has been added, so the join flow can show
     // what's being joined (spec §4). The token is unused on this route.
     'spaces:resolveInvite': async (args) =>
       new SpacesClient({ baseUrl: args.baseUrl, token: 'dev-preauth' }).resolveInvite(args.token),

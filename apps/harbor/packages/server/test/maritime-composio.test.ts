@@ -52,7 +52,7 @@ if (name === 'hermes' && args[0] === 'config' && args[1] === 'set') {
   chmodSync(join(root, 'bin', 'npm'), 0o755);
   writeFileSync(join(root, 'request.prompt'), 'List calendar events.');
   const script = RUNTIMES[kind]!.command({
-    serverUrl: 'https://spaces.rowboat.test', agentKey: 'rbk_spaces_identity',
+    orgUrl: 'https://spaces.rowboat.test', agentKey: 'rbk_spaces_identity',
     promptPath: join(root, 'request.prompt'), outPath: join(root, 'turn.jsonl'),
     errPath: join(root, 'turn.err'), lastPath: join(root, 'turn.last'), ...(session ? { session } : {}),
   }).replaceAll('/opt/data', root).replaceAll('/data', root).replaceAll('/etc/maritime-env', join(root, 'maritime-env'));

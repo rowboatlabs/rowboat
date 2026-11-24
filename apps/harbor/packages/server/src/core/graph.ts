@@ -116,8 +116,9 @@ export class Graph {
   // --- the switch -------------------------------------------------------------------
 
   async setEnabled(ctx: ActorCtx, spaceId: string, input: SetSpaceGraphInput): Promise<Space> {
-    const { space, membership } = await this.k.requireMembership(ctx, spaceId);
-    enforce(canSetSpaceGraph(membership, space));
+    const space = await this.k.requireMember(ctx, spaceId);
+    const actor = await this.k.store.getMember(ctx.memberId);
+    enforce(canSetSpaceGraph(actor, space));
     if (input.enabled && !this.jev) throw new HarborError('invalid_request', 'the space graph is not available on this server');
     this.k.guardWrite();
     const by = this.k.attributionOf(ctx, input);

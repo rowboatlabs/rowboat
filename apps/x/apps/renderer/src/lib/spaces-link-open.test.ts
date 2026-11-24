@@ -25,19 +25,32 @@ describe('resolving a spaces link', () => {
     afterEach(() => invoke.mockReset())
 
     it('hands an invite to the join dialog as the https link', async () => {
-        expect(await resolveSpacesLink({ address: 'acme.spaces.test', inviteToken: 'tok' }))
+        expect(await resolveSpacesLink({ orgAddress: 'acme.spaces.test', inviteToken: 'tok' }))
             .toEqual({ kind: 'invite', inviteUrl: 'https://acme.spaces.test/join/tok' })
-        expect(await resolveSpacesLink({ address: 'other.example', inviteToken: 'tok' }))
+        expect(await resolveSpacesLink({ orgAddress: 'other.example', inviteToken: 'tok' }))
             .toEqual({ kind: 'invite', inviteUrl: 'https://other.example/join/tok' })
     })
 
-    it('names a server other than the one this person is signed in to', async () => {
-        expect(await resolveSpacesLink({ address: 'other.example', spaceId: SPACE })).toEqual({ kind: 'unknown-server', address: 'other.example' })
+    it('names an org this person is not in', async () => {
+        expect(await resolveSpacesLink({ orgAddress: 'other.example', spaceId: SPACE })).toEqual({ kind: 'unknown-org', orgAddress: 'other.example' })
+    })
+
+    it('resolves a legacy space link only through the configured apex', async () => {
+        invoke.mockResolvedValue({ apexDomain: 'spaces.test' })
+        const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ address: org.address }))
+        try {
+            expect(await resolveSpacesLink({ orgAddress: 'test', spaceId: SPACE }))
+                .toEqual({ kind: 'unknown-org', orgAddress: 'test' })
+            expect(fetch).not.toHaveBeenCalled()
+            expect(await resolveSpacesLink({ orgAddress: 'spaces.test', spaceId: SPACE }))
+                .toEqual({ kind: 'place', place: { orgId: org.id, spaceId: SPACE, rail: { kind: 'general' } } })
+            expect(fetch).toHaveBeenCalledWith('https://spaces.test/v1/links/s/' + SPACE)
+        } finally { fetch.mockRestore() }
     })
 
     it('lands a reply in its thread, at its offset', async () => {
         invoke.mockResolvedValueOnce({ message: { threadRoot: '01ARZ3NDEKTSV4RRFFQ69G5FAW', offset: 42 } })
-        expect(await resolveSpacesLink({ address: 'acme.spaces.test', spaceId: SPACE, messageId: '01ARZ3NDEKTSV4RRFFQ69G5FAX' })).toEqual({
+        expect(await resolveSpacesLink({ orgAddress: 'acme.spaces.test', spaceId: SPACE, messageId: '01ARZ3NDEKTSV4RRFFQ69G5FAX' })).toEqual({
             kind: 'place',
             place: { orgId: 'org-1', spaceId: SPACE, rail: { kind: 'thread', rootMessageId: '01ARZ3NDEKTSV4RRFFQ69G5FAW' }, messageId: '01ARZ3NDEKTSV4RRFFQ69G5FAX', messageOffset: 42 },
         })
@@ -45,22 +58,22 @@ describe('resolving a spaces link', () => {
 
     it('opens a person as the DM with them', async () => {
         invoke.mockResolvedValueOnce({ space: { id: '01ARZ3NDEKTSV4RRFFQ69G5FAY' } })
-        expect(await resolveSpacesLink({ address: 'acme.spaces.test', memberId: 'm-1' }))
+        expect(await resolveSpacesLink({ orgAddress: 'acme.spaces.test', memberId: 'm-1' }))
             .toEqual({ kind: 'place', place: { orgId: 'org-1', spaceId: '01ARZ3NDEKTSV4RRFFQ69G5FAY', rail: { kind: 'general' } } })
         expect(invoke).toHaveBeenCalledWith('spaces:openDirect', { orgId: 'org-1', memberId: 'm-1' })
     })
 
     it('refuses a space it cannot see, landing on Activity instead', async () => {
-        expect(await resolveSpacesLink({ address: 'acme.spaces.test', spaceId: '01ARZ3NDEKTSV4RRFFQ69G5FAZ' })).toEqual({
+        expect(await resolveSpacesLink({ orgAddress: 'acme.spaces.test', spaceId: '01ARZ3NDEKTSV4RRFFQ69G5FAZ' })).toEqual({
             kind: 'refused',
             message: 'This space is unavailable or you do not have access',
             place: { orgId: 'org-1', view: 'activity' },
         })
     })
 
-    it('says what failed when the server refuses, and lands nowhere', async () => {
+    it('says what failed when the org refuses, and lands nowhere', async () => {
         invoke.mockRejectedValueOnce(new Error('message not found'))
-        expect(await resolveSpacesLink({ address: 'acme.spaces.test', spaceId: SPACE, messageId: '01ARZ3NDEKTSV4RRFFQ69G5FAX' }))
+        expect(await resolveSpacesLink({ orgAddress: 'acme.spaces.test', spaceId: SPACE, messageId: '01ARZ3NDEKTSV4RRFFQ69G5FAX' }))
             .toEqual({ kind: 'refused', message: 'message not found' })
     })
 })

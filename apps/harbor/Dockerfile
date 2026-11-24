@@ -1,15 +1,14 @@
-# Harbor — the spaces server.
+# Harbor — the spaces server (deployment mode).
 # Build context = apps/harbor (set Root Directory to apps/harbor on Render).
 #
 # Runtime env (see packages/server/src/main.ts):
-#   DATABASE_URL  HARBOR_ADDRESS (the public host)  AUTH_ISSUER
-#   HARBOR_NAME (optional; the server's name on the login page)
+#   HARBOR_MODE=deployment  DATABASE_URL  APEX_DOMAIN  AUTH_ISSUER
 #   AUTH_PUBLISHABLE_KEY (consent page)  PORT (set by the platform)
 #   DATABASE_POOL_MAX (optional; pg pool ceiling, default 10)
 #   HARBOR_WEB_ORIGINS (optional; comma-separated browser origins allowed to
-#     call Harbor cross-origin — the Spaces web app's)
+#     call the orgs and the apex cross-origin — the Spaces web app's)
 #   HARBOR_WEB_APP_URL (optional; the Spaces web app, e.g.
-#     https://spaces.rowboatlabs.com — a Spaces link opened in a browser offers
+#     https://spaces.rowboatlabs.com — an org link opened in a browser offers
 #     it beside the desktop app; without it, only the desktop app)
 #   HARBOR_INTERNAL_KEY (optional; bearer for GET /internal/stats — this
 #     instance's live counters; the once-a-minute log line prints regardless)
@@ -18,7 +17,7 @@
 #     agents can't be added. Rotate with HARBOR_INTEGRATION_KEY_ID and
 #     HARBOR_INTEGRATION_PREVIOUS_KEYS, a JSON map of old ids to old keys)
 #   HARBOR_JEV_OPENROUTER_KEY (optional; Rowboat's OpenRouter key for Jev —
-#     with it a space's admin can turn on its graph, and that space's
+#     with it an org admin can turn on its graph, and that space's
 #     messages are sent to Jev to be judged; without it no graph is offered)
 #   HARBOR_MARITIME_API_KEY (optional; Rowboat's Maritime key — with it the
 #     app offers agents Rowboat runs) HARBOR_MARITIME_LLM_CAP_CENTS (the

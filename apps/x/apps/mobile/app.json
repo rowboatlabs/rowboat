@@ -2,7 +2,7 @@
   "expo": {
     "name": "Rowboat",
     "slug": "rowboat-mobile",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rowboat",
@@ -22,7 +22,8 @@
         "ITSAppUsesNonExemptEncryption": false
       },
       "associatedDomains": [
-        "applinks:spaces.x.rowboatlabs.com"
+        "applinks:spaces.x.rowboatlabs.com",
+        "applinks:*.spaces.x.rowboatlabs.com"
       ]
     },
     "android": {

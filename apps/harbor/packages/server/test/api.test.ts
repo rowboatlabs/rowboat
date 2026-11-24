@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { memberUrl, messageUrl, serverUrl, onServer, parseSpacesUrl, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
+import { memberUrl, messageUrl, orgUrl, parseOrgUrl, onServer, spaceUrl, assetUrl, type ProposeChangeResult } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
 import { liveClient, startTestHarbor } from './helpers.js';
 
@@ -9,7 +9,7 @@ let harbor: RunningHarbor;
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    name: 'Test Org',
+    orgName: 'Test Org',
     // The web app the link landings offer beside the desktop app (2026-10-13).
     webAppUrl: 'https://web.test/',
     // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
@@ -131,7 +131,7 @@ describe('spaces, invites, membership', () => {
     expect(res.status).toBe(302);
     // The deep link's query, unchanged: the server by address and the token — the web app
     // rebuilds the https invite link from those two (spaces-navigation.ts) and shows its card.
-    const query = `type=spaces&server=${encodeURIComponent(harbor.service.server.address)}&invite=${encodeURIComponent(inv.body.token)}`;
+    const query = `type=spaces&org=${encodeURIComponent(harbor.service.org.address)}&invite=${encodeURIComponent(inv.body.token)}`;
     expect(res.headers.get('location')).toBe(`https://web.test/open?${query}`);
 
     // A dead invite: says so, launches nothing.
@@ -380,13 +380,13 @@ describe('feed: the stream, threads, and topic annotations', () => {
   });
 
   it('every org link opened in a browser lands on a hand-off page that deep-links into the app, without looking anything up', async () => {
-    const address = harbor.service.server.address;
+    const address = harbor.service.org.address;
     const cases: Array<[string, string]> = [
-      [serverUrl(address), `type=spaces&server=`],
-      [spaceUrl(address, spaceId), `spaceId=${spaceId}&server=`],
-      [messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'), `messageId=01JZZZZZZZZZZZZZZZZZZZZZZZ&server=`],
-      [assetUrl(address, spaceId, 'A%2Fx'), 'assetId=A%252Fx&server='],
-      [memberUrl(address, 'google|123'), 'memberId=google%7C123&server='],
+      [orgUrl(address), `type=spaces&org=`],
+      [spaceUrl(address, spaceId), `spaceId=${spaceId}&org=`],
+      [messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'), `messageId=01JZZZZZZZZZZZZZZZZZZZZZZZ&org=`],
+      [assetUrl(address, spaceId, 'A%2Fx'), 'assetId=A%252Fx&org='],
+      [memberUrl(address, 'google|123'), 'memberId=google%7C123&org='],
     ];
     for (const [link, expected] of cases) {
       // The links are minted on the server's public address; the test server answers on its local url.
@@ -404,16 +404,16 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(onServer(address.toUpperCase(), address)).toBe(true);
     expect(onServer(`evil-${address}`, address)).toBe(false);
     expect(onServer('other.example', address)).toBe(false);
-    expect(parseSpacesUrl(serverUrl(address))).toEqual({ kind: 'server', address });
-    expect(parseSpacesUrl(`https://${address}`)).toEqual({ kind: 'server', address });
-    expect(parseSpacesUrl(spaceUrl(address, spaceId))).toEqual({ kind: 'space', address, spaceId });
-    expect(parseSpacesUrl(messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'))).toEqual({ kind: 'message', address, spaceId, messageId: '01JZZZZZZZZZZZZZZZZZZZZZZZ' });
-    expect(parseSpacesUrl(assetUrl(address, spaceId, 'A/x'))).toEqual({ kind: 'asset', address, spaceId, assetId: 'A/x' });
-    expect(parseSpacesUrl(memberUrl(address, 'google|123'))).toEqual({ kind: 'member', address, memberId: 'google|123' });
-    expect(parseSpacesUrl(`https://${address}/s/${spaceId}/b/${'a'.repeat(64)}`)).toBeNull();
-    expect(parseSpacesUrl(`https://${address}/join/tok`)).toBeNull();
-    expect(parseSpacesUrl(`https://${address}/s/not-a-ulid`)).toBeNull();
-    expect(parseSpacesUrl('not a url')).toBeNull();
+    expect(parseOrgUrl(orgUrl(address))).toEqual({ kind: 'org', orgAddress: address });
+    expect(parseOrgUrl(`https://${address}`)).toEqual({ kind: 'org', orgAddress: address });
+    expect(parseOrgUrl(spaceUrl(address, spaceId))).toEqual({ kind: 'space', orgAddress: address, spaceId });
+    expect(parseOrgUrl(messageUrl(address, spaceId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'))).toEqual({ kind: 'message', orgAddress: address, spaceId, messageId: '01JZZZZZZZZZZZZZZZZZZZZZZZ' });
+    expect(parseOrgUrl(assetUrl(address, spaceId, 'A/x'))).toEqual({ kind: 'asset', orgAddress: address, spaceId, assetId: 'A/x' });
+    expect(parseOrgUrl(memberUrl(address, 'google|123'))).toEqual({ kind: 'member', orgAddress: address, memberId: 'google|123' });
+    expect(parseOrgUrl(`https://${address}/s/${spaceId}/b/${'a'.repeat(64)}`)).toBeNull();
+    expect(parseOrgUrl(`https://${address}/join/tok`)).toBeNull();
+    expect(parseOrgUrl(`https://${address}/s/not-a-ulid`)).toBeNull();
+    expect(parseOrgUrl('not a url')).toBeNull();
   });
 
   it('a phone\u2019s browser gets the hand-off page even with a web app: the phone app, the App Store, the browser; nothing launched', async () => {
@@ -421,7 +421,7 @@ describe('feed: the stream, threads, and topic annotations', () => {
     const res = await fetch(`${harbor.url}/s/${spaceId}`, { headers: { 'user-agent': ua }, redirect: 'manual' });
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain(`rowboat://open?type=spaces&amp;spaceId=${spaceId}&amp;server=`);
+    expect(html).toContain(`rowboat://open?type=spaces&amp;spaceId=${spaceId}&amp;org=`);
     expect(html).toContain('apps.apple.com');
     expect(html).toContain('href="https://web.test/open?');
     expect(html).not.toContain('location.replace(');

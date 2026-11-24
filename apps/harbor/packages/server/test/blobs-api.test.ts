@@ -61,7 +61,7 @@ let gagan: ReturnType<typeof api>;
 describe('blob uploads over the render face', () => {
   beforeAll(async () => {
     harbor = await startTestHarbor({
-      name: 'Blob Test Org',
+      orgName: 'Blob Test Org',
       seedMembers: [
         { id: 'ramnique', displayName: 'Ramnique' },
         { id: 'gagan', displayName: 'Gagan' },
@@ -386,7 +386,7 @@ describe('blob uploads over the render face', () => {
 describe('upload size cap', () => {
   it('refuses a body over maxBlobBytes with payload_too_large', async () => {
     const small = await startTestHarbor({
-      name: 'Tiny Cap Org',
+      orgName: 'Tiny Cap Org',
       seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
       maxBlobBytes: 16,
     });

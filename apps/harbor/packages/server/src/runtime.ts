@@ -2,7 +2,7 @@ import type { GraphOptions } from './core/graph.js';
 import { jevFromEnv, type JevApi } from './jev.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getRequestListener } from '@hono/node-server';
-import { bindAuth, type AuthDriver, type ServerAuth } from './auth.js';
+import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import { billingFromEnv, type BillingAccounts } from './billing.js';
 import type { BlobStore } from './blobs.js';
 import { HostedConnectors } from './connectors/host.js';
@@ -13,26 +13,30 @@ import type { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
 import { Notifier } from './notify.js';
 import { PushSender } from './push.js';
-import { HarborService, type ServerInfo } from './service.js';
+import { HarborService, type OrgInfo } from './service.js';
 import type { Store } from './store.js';
 import type { LiveDeps } from './ws.js';
 
-// The one place the server's object graph is assembled: the service core, the
+// The one place an org's object graph is assembled: the service core, the
 // notifier and its push sender, the store-bound auth handle, the render and
-// agent faces, and what the live face needs. server.ts builds the server
-// here, so the assembly that ships is the assembly every test exercises — and
-// there is exactly one answer to "how is the server wired". Until 2026-11-09
-// a multi-org deployment built one of these per org (spec §4).
+// agent faces, and what the live face needs. The single-org server
+// (server.ts) and the multi-org deployment (deployment.ts) both build their
+// orgs here, so the assembly that ships is the assembly every test
+// exercises — and there is exactly one answer to "how is an org wired".
 
-export interface RuntimeInput {
+export interface OrgRuntimeInput {
+  /** The org's store: a PgStore scoped to the org on a deployment, the whole store single-org. */
   store: Store;
+  /** The org’s hub keeps member-addressed notifications within its runtime. */
   hub: SpaceHub;
-  server: ServerInfo;
-  /** Token → identity. */
+  org: OrgInfo;
+  /** The org's id as the store knows it; push payloads carry it so phones route to the right org. */
+  orgId: string;
+  /** Token → identity. Per issuer: orgs on the same AS share one driver and its JWKS cache. */
   auth: AuthDriver;
-  /** Absent = uploads unconfigured (the routes refuse loudly, everything else works). */
+  /** Absent = uploads unconfigured on this org (the routes refuse loudly, everything else works). */
   blobs?: BlobStore;
-  /** Test injection; default = Expo push. */
+  /** Test injection; default = Expo push for this org. */
   pushSender?: PushSender;
   /** Mounts /oauth/consent; takes effect only with an oidc driver (the issuer comes from its metadata). */
   consentPublishableKey?: string;
@@ -40,7 +44,9 @@ export interface RuntimeInput {
   maxBlobBytes?: number;
   /** Browser origins allowed to call the render face cross-origin (cors.ts), and to use the session cookie (session.ts). */
   webOrigins?: readonly string[];
-  /** The Spaces web app, which a link opened in a browser offers beside the desktop app (http.ts, the landings). */
+  /** The session cookie's Domain: the apex on a deployment. */
+  sessionCookieDomain?: string;
+  /** The Spaces web app, which an org link opened in a browser offers beside the desktop app (http.ts, the landings). */
   webAppUrl?: string;
   /** Managed hosting (spec §8 Maritime, 2026-10-26): a stand-in provider and tick in tests; absent = from HARBOR_MARITIME_API_KEY. */
   hosting?: { provider: HostingProvider; tickMs?: number; trialMs?: number; billing?: BillingAccounts; settleEveryMs?: number };
@@ -63,32 +69,32 @@ function hostingFromEnv(): HostingProvider | undefined {
   });
 }
 
-export interface Runtime {
+export interface OrgRuntime {
   service: HarborService;
-  auth: ServerAuth;
-  /** Every HTTP request: /mcp to the agent face, the rest to the render face. */
+  auth: OrgAuth;
+  /** Every HTTP request addressed to this org: /mcp to the agent face, the rest to the render face. */
   handle(req: IncomingMessage, res: ServerResponse): void;
-  /** What the live face needs for a connection. */
+  /** What the live face needs for a connection to this org. */
   live: LiveDeps;
-  /** Stops the connectors Harbor runs. */
+  /** Stops the connectors Harbor runs for this org. */
   close(): Promise<void>;
 }
 
-export async function buildRuntime(input: RuntimeInput): Promise<Runtime> {
+export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntime> {
   const { store, hub } = input;
   const service = new HarborService(
     store,
     hub,
-    input.server,
+    input.org,
     input.blobs,
-    new Notifier(store, hub, input.pushSender ?? new PushSender(store)),
+    new Notifier(store, hub, input.pushSender ?? new PushSender(store, input.orgId)),
     input.agentPresenceGraceMs !== undefined ? { presenceGraceMs: input.agentPresenceGraceMs } : {},
   );
-  // The mentions backfill (service.migrateMentions): idempotent, ledgered once, before the faces serve.
+  // The mentions backfill (service.migrateMentions): idempotent, ledgered once per org, before the faces serve.
   await service.migrateMentions();
   // Connectors Harbor runs (spec §8 Connectors, 2026-09-30): one per agent whose
   // connection is a platform, from boot, and for each such agent added later.
-  const connectors = new HostedConnectors({ store, hub, service });
+  const connectors = new HostedConnectors({ store, hub, service, orgId: input.orgId });
   service.attachConnectors({
     verify: (connection, secret, target) => connectors.verify(connection, secret, target),
     save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
@@ -134,6 +140,7 @@ export async function buildRuntime(input: RuntimeInput): Promise<Runtime> {
       ...(input.consentPublishableKey && issuer ? { consent: { issuer, publishableKey: input.consentPublishableKey } } : {}),
       ...(input.maxBlobBytes !== undefined ? { maxBlobBytes: input.maxBlobBytes } : {}),
       ...(input.webOrigins ? { webOrigins: input.webOrigins } : {}),
+      ...(input.sessionCookieDomain ? { sessionCookieDomain: input.sessionCookieDomain } : {}),
       ...(input.webAppUrl ? { webAppUrl: input.webAppUrl } : {}),
     }).fetch,
   );
