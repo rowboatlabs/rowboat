@@ -72,10 +72,10 @@ export default function SpaceSearchScreen() {
       </View>
       {busy ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
       {error ? <Text selectable style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16 }}>{error}</Text> : null}
-      {!busy && results && noHits(results, spaceFor) ? (
+      {!busy && results && noHits(results, space, spaceFor) ? (
         <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>No results for “{query.trim()}”</Text>
       ) : null}
-      {results ? <SearchHits results={results} org={org} me={me} spaceFor={spaceFor} /> : null}
+      {results ? <SearchHits results={results} org={org} me={me} spaceId={space} spaceFor={spaceFor} /> : null}
     </ScrollView>
   );
 }
