@@ -31,7 +31,7 @@ let replyNamed: Message;
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    name: 'Rowboat Labs',
+    orgName: 'Rowboat Labs',
     seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
     seedSpaces: [{ name: 'Main', creator: 'ramnique' }],
   });

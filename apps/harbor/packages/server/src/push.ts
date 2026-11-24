@@ -49,6 +49,7 @@ export class PushSender {
 
   constructor(
     private readonly store: Store,
+    private readonly orgId: string,
     options: PushSenderOptions = {},
   ) {
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -56,7 +57,7 @@ export class PushSender {
   }
 
   /**
-   * Deliver the server's decided rows (notify.ts) to the recipients' phones,
+   * Deliver the org's decided rows (notify.ts) to the recipients' phones,
    * each gated on that member's level. Throws on transport failure; the
    * Notifier catches and logs.
    */
@@ -85,7 +86,7 @@ export class PushSender {
             title: s.title,
             body: s.body,
             sound: 'default',
-            data: { kind: 'space', spaceId: space.id, threadRootId: message.threadRoot ?? message.id },
+            data: { kind: 'space', orgId: this.orgId, spaceId: space.id, threadRootId: message.threadRoot ?? message.id },
           })),
         ),
       });

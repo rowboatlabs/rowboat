@@ -1,4 +1,4 @@
-import { HARBOR_RUN_CONNECTIONS, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, type Member, type ServerFrame } from '@rowboat/spaces-protocol';
 import type { ActorCtx } from '../core/kernel.js';
 import type { CredentialTarget, PlatformSetup } from '../core/agents.js';
 import type { HarborService } from '../service.js';
@@ -21,8 +21,8 @@ import { replicasPlatform } from './replicas/index.js';
 /** What Harbor hands a running connector: its agent, the contract, and the connector's own storage. */
 export interface ConnectorEnv {
   agent: Member;
-  /** The server's public address, with its scheme: links in prompts, and what an agent's tools call. */
-  serverUrl: string;
+  /** The org's public address, with its scheme: links in prompts, and what an agent's tools call. */
+  orgUrl: string;
   service: HarborService;
   /** The agent itself: `{ memberId: agent.id, agent: true }`, as its key would resolve. */
   ctx: ActorCtx;
@@ -76,7 +76,7 @@ export interface ConnectorPlatform {
   alert?(payload: unknown): string | undefined;
 }
 
-/** One entry per connection in HARBOR_RUN_CONNECTIONS. */
+/** One entry per connection in HARBOR_RUN_CONNECTIONS, and Jev's, the one built in (2026-10-07). */
 export const PLATFORMS: Record<string, ConnectorPlatform> = {
   replicas: replicasPlatform(),
   agent37: agent37Platform(),
@@ -87,5 +87,5 @@ export const PLATFORMS: Record<string, ConnectorPlatform> = {
   attio: attioPlatform(),
 };
 
-/** Every connection whose connector Harbor runs: the platforms it calls. */
-export const HOSTED_CONNECTIONS: readonly string[] = HARBOR_RUN_CONNECTIONS;
+/** Every connection whose connector Harbor runs: the platforms it calls, and the agent it is. */
+export const HOSTED_CONNECTIONS: readonly string[] = [...HARBOR_RUN_CONNECTIONS, BUILT_IN_CONNECTION];

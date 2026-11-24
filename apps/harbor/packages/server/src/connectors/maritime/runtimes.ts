@@ -16,8 +16,8 @@ import { activityOf, answerOf, failureOf, type AgentEvent } from '../common/agen
 // folder there, named by the invocation, so a restart finds them.
 
 export interface TurnInput {
-  /** The server's address with its scheme, and the agent's own Spaces key, for the runtime's MCP server and file downloads. */
-  serverUrl: string;
+  /** The org's address with its scheme, and the agent's own Spaces key, for the runtime's MCP server and file downloads. */
+  orgUrl: string;
   agentKey: string;
   /** The files for this turn, absolute on the VM: the request, the event stream, stderr, and the final message. */
   promptPath: string;
@@ -173,9 +173,9 @@ const signInOf = (err: string | undefined): 'chatgpt' | 'none' | undefined => {
 };
 
 /** 2026-11-11: billed VMs add Composio; configs hold references, never gateway credentials. */
-const mcpJson = (serverUrl: string, composio = false) =>
+const mcpJson = (orgUrl: string, composio = false) =>
   JSON.stringify({ mcpServers: {
-    rowboat: { type: 'http', url: `${serverUrl}/mcp`, headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } },
+    rowboat: { type: 'http', url: `${orgUrl}/mcp`, headers: { Authorization: 'Bearer ${ROWBOAT_AGENT_KEY}' } },
     ...(composio ? { composio: { type: 'http', url: '${ROWBOAT_COMPOSIO_MCP_URL}', headers: { Authorization: 'Bearer ${ROWBOAT_GATEWAY_KEY}' } } } : {}),
   } });
 
@@ -213,14 +213,14 @@ const hermes: Runtime = {
     // costs a grep. The `${…}`
     // placeholders are Hermes's own, and the check is for the placeholders, never for a literal
     // address: a VM set up by hand or an earlier probe can carry a different Rowboat (seen live
-    // 2026-10-26, posting to the wrong server). Hermes 0.22 runs the turn through its gateway, which
+    // 2026-10-26, posting to the wrong org). Hermes 0.22 runs the turn through its gateway, which
     // fills the placeholders from the profile's `.env`, not from the turn's environment (the
     // first managed agent on prod, 2026-10-26: "not set in this profile's .env or secret source"),
     // so the two values are written there too, with `hermes config set`, whenever they differ.
     return [
       'set -e',
       MARITIME_ENV,
-      `export HERMES_HOME=/opt/data HOME=/opt/data ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      `export HERMES_HOME=/opt/data HOME=/opt/data ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'export PATH="/command:/opt/hermes/bin:/opt/hermes/.venv/bin:$PATH"',
       'mkdir -p /opt/data/rowboat /opt/data/workspace',
       // The gateway runs as the hermes user; a turn run as root would leave root-owned session files behind.
@@ -297,14 +297,14 @@ const codex: Runtime = {
     const flags = [
       input.model ? `-m ${q(input.model)}` : '',
       input.effort ? `-c ${q(`model_reasoning_effort="${input.effort}"`)}` : '',
-      `-c ${q(`mcp_servers.rowboat.url="${input.serverUrl}/mcp"`)}`,
+      `-c ${q(`mcp_servers.rowboat.url="${input.orgUrl}/mcp"`)}`,
       `-c ${q('mcp_servers.rowboat.bearer_token_env_var="ROWBOAT_AGENT_KEY"')}`,
     ].filter(Boolean).join(' ');
     // The template's own flags (its server.js, read 2026-10-26): the VM is the sandbox, the final message goes to -o.
     return [
       'set -e',
       MARITIME_ENV,
-      `export CODEX_HOME=/data/.codex ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      `export CODEX_HOME=/data/.codex ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
       `PROMPT="$(cat ${q(input.promptPath)})"`,
@@ -397,10 +397,10 @@ const claudeCode: Runtime = {
     return [
       'set -e',
       MARITIME_ENV,
-      `export IS_SANDBOX=1 CLAUDE_CONFIG_DIR=/data/.claude ROWBOAT_URL=${q(input.serverUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
+      `export IS_SANDBOX=1 CLAUDE_CONFIG_DIR=/data/.claude ROWBOAT_URL=${q(input.orgUrl)} ROWBOAT_AGENT_KEY=${q(input.agentKey)}`,
       'mkdir -p /data/rowboat /data/workspace',
       'cd /data/workspace',
-      `if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then printf '%s' ${q(mcpJson(input.serverUrl, true))}; else printf '%s' ${q(mcpJson(input.serverUrl))}; fi > /data/rowboat/mcp.json`,
+      `if [ -n "$ROWBOAT_COMPOSIO_MCP_URL" ] && [ -n "$ROWBOAT_GATEWAY_KEY" ]; then printf '%s' ${q(mcpJson(input.orgUrl, true))}; else printf '%s' ${q(mcpJson(input.orgUrl))}; fi > /data/rowboat/mcp.json`,
       `if [ ! -x ${CLAUDE_CLI_BIN} ] && command -v npm >/dev/null 2>&1; then ${CLAUDE_CLI_INSTALL(CLAUDE_CLI_DIR)} >/dev/null 2>&1 && touch ${CLAUDE_CLI_DIR}/.checked || true; fi`,
       `CLI=""; if [ -x ${CLAUDE_CLI_BIN} ]; then CLI=${CLAUDE_CLI_BIN}; fi`,
       '[ -n "$CLI" ] || CLI="$(command -v claude 2>/dev/null || true)"',

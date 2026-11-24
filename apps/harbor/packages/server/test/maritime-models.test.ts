@@ -7,7 +7,7 @@ import { MARITIME_ENV, RUNTIMES } from '../src/connectors/maritime/runtimes.js';
 
 // Model lists come from the harness (2026-11-01), in a separate execution after the turn is settled.
 // The runtime reads them into the composer's choices, and nothing is listed in Harbor itself.
-const input = { serverUrl: 'http://localhost:1', agentKey: 'rbk_x', promptPath: '/p', outPath: '/o.jsonl', errPath: '/e.err', lastPath: '/l' };
+const input = { orgUrl: 'http://localhost:1', agentKey: 'rbk_x', promptPath: '/p', outPath: '/o.jsonl', errPath: '/e.err', lastPath: '/l' };
 const EFFORT = { type: 'select', key: 'effort', label: 'Effort', choices: [{ id: 'low', label: 'Low' }, { id: 'medium', label: 'Medium' }, { id: 'high', label: 'High' }] };
 
 describe('model lists from the harness', () => {
@@ -116,7 +116,7 @@ describe('Maritime’s environment file', () => {
 
   it('is what every runtime’s turn runs first', () => {
     for (const runtime of Object.values(RUNTIMES)) {
-      const script = runtime.command({ serverUrl: 'https://h.test', agentKey: 'rbk_x', promptPath: '/data/rowboat/p', outPath: '/data/rowboat/o', errPath: '/data/rowboat/e', lastPath: '/data/rowboat/l' });
+      const script = runtime.command({ orgUrl: 'https://h.test', agentKey: 'rbk_x', promptPath: '/data/rowboat/p', outPath: '/data/rowboat/o', errPath: '/data/rowboat/e', lastPath: '/data/rowboat/l' });
       expect(script).toContain(MARITIME_ENV);
       expect(script).not.toContain('then . /etc/maritime-env');
     }

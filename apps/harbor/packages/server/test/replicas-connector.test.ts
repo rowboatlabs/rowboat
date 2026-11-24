@@ -36,7 +36,7 @@ class Org {
   async start(): Promise<this> {
     this.harbor = await startHarbor({
       store: this.store.store,
-      name: 'Rowboat Labs',
+      orgName: 'Rowboat Labs',
       // A second space: a one-space org is a group chat, where DMs are off (2026-10-07).
       seedSpaces: [{ name: 'Lobby', creator: 'ramnique' }],
       seedMembers: [
@@ -368,12 +368,12 @@ describe('the Replicas connector starting up', () => {
     let releaseList!: () => void;
     const listHeld = new Promise<void>((r) => (releaseList = r));
     vi.spyOn(service, 'listAgentInvocations').mockImplementationOnce(async (...args) => (await listHeld, list(...args)));
-    const members = service.namesFor.bind(service);
+    const members = service.listOrgMembers.bind(service);
     let releasePrompt!: () => void;
     const promptHeld = new Promise<void>((r) => (releasePrompt = r));
     let first = true;
-    vi.spyOn(service, 'namesFor').mockImplementation(async (...args) => {
-      if (first) {
+    vi.spyOn(service, 'listOrgMembers').mockImplementation(async (...args) => {
+      if (args[0].agent && first) {
         first = false;
         await promptHeld;
       }

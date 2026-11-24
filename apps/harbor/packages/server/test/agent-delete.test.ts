@@ -15,7 +15,7 @@ const as = (token: string) => restClient(harbor, token);
 
 beforeAll(async () => {
   harbor = await startTestHarbor({
-    name: 'Rowboat Labs',
+    orgName: 'Rowboat Labs',
     seedMembers: [
       { id: 'harsh', displayName: 'Harsh' },
       { id: 'gagan', displayName: 'Gagan' },
@@ -51,7 +51,7 @@ describe('deleting an agent', () => {
     expect((await harbor.store.listAgentKeys([agent.id])).every((k) => k.revokedAt)).toBe(true);
     const members = (await as('dev-harsh').get(`/v1/spaces/${spaceId}/members`)).body.members as Array<{ member: Member } | Member>;
     expect(JSON.stringify(members)).not.toContain(agent.id);
-    expect((await as('dev-harsh').get('/v1/contacts')).body.members.map((m: Member) => m.id)).not.toContain(agent.id);
+    expect((await as('dev-harsh').get('/v1/members')).body.members.find((m: Member) => m.id === agent.id)?.deactivatedAt).toBeDefined();
     const listed = (await as('dev-harsh').get('/v1/agents')).body.agents as AgentListing[];
     expect(listed.find((a) => a.agent.id === agent.id)?.agent.deactivatedAt).toBeDefined();
   });
