@@ -7,6 +7,7 @@
     },
     "include": [
         "src",
-        "test"
+        "test",
+        "scripts/split-orgs.ts"
     ]
 }
