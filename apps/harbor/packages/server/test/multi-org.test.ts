@@ -80,6 +80,32 @@ describe('multi-org deployment', () => {
     expect((await org.get('/v1/spaces')).body.spaces).toMatchObject([{ name: 'general', visibility: 'open', isDefault: true }]);
   });
 
+  it('resolves flat links and authenticates a bare-apex agent key in its own org', async () => {
+    const token = await as.mint({ sub: 'sub-ram' });
+    const acme = http('acme.test', token);
+    const [space] = (await acme.get('/v1/spaces')).body.spaces;
+    const { agent, key } = (await acme.post('/v1/agents', { displayName: 'Hosted agent' })).body;
+    expect((await acme.post(`/v1/spaces/${space.id}/members`, { memberIds: [agent.id], actingMode: 'direct' })).status).toBe(200);
+    const apex = http('spaces.test', key.secret);
+    const posted = await apex.post(`/v1/spaces/${space.id}/messages`, { body: 'Checking in', actingMode: 'direct' });
+    expect(posted.body.message.author.memberId).toBe(agent.id);
+    const invite = (await acme.post('/v1/invites', {})).body;
+    for (const [kind, id, tail] of [['s', space.id, '/m/example?source=old'], ['u', agent.id, ''], ['join', invite.token, '']]) {
+      const path = `/${kind}/${id}${tail}`;
+      const res = await fetch(dep.url + path, { redirect: 'manual', headers: { 'x-forwarded-host': 'spaces.test' } });
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('https://acme.test' + path);
+      expect((await http('spaces.test').get(`/v1/links/${kind}/${id}`)).body).toEqual({ address: 'acme.test' });
+    }
+    const ws = new WebSocket(`ws://localhost:${dep.port}/v1/live?token=${encodeURIComponent(key.secret)}`, {
+      headers: { 'x-forwarded-host': 'spaces.test' },
+    });
+    await new Promise<void>((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
+    ws.close();
+    expect((await acme.post(`/v1/agents/${agent.id}/keys/${key.id}/revoke`)).status).toBe(200);
+    expect((await apex.get('/v1/me')).status).toBe(401);
+  });
+
   it('open-space discovery, reads and joins stay org-scoped', async () => {
     const token = await as.mint({ sub: 'sub-ram' });
     const acme = http('acme.test', token);

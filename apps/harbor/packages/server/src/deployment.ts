@@ -50,9 +50,9 @@ export interface DeploymentOptions {
   /** The deployment's AS — apex auth + the issuer every created org pins. */
   issuer?: string;
   /**
-   * Per-org blob stores (dedup scope is per org, never global — spec §6). The
-   * factory is called once per org runtime, typically an S3 driver with an
-   * org-scoped key prefix. Absent = uploads unconfigured on every org.
+   * Orgs share the deployment’s content-addressed bytes so existing flat keys
+   * remain readable after orgs return (2026-11-24). Each space checks its
+   * upload registry before serving a blob.
    */
   blobs?: (orgId: string) => BlobStore;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
@@ -175,6 +175,15 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
     return typeof forwarded === 'string' ? forwarded : req.headers.host;
   };
 
+  // Installed connectors can still use the bare November 9 host (2026-11-24).
+  // The selected runtime authenticates the credential again before serving it.
+  async function runtimeForKey(key: string): Promise<OrgRuntime | undefined> {
+    const [row] = await options.db.query<{ org_id: string }>(
+      'select org_id from agent_keys where hash = $1 and revoked_at is null', [hashAgentKey(key)]);
+    const org = row && await directory.getById(row.org_id);
+    return org ? runtimeForOrg(org) : undefined;
+  }
+
   const server = createServer((req, res) => {
     void (async () => {
       // Host-independent liveness for platform health checks (they probe the
@@ -185,8 +194,29 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
       }
       if (internal(req, res)) return;
       const host = hostOf(req);
+      const key = req.headers.authorization?.replace(/^Bearer /, '');
+      if (key?.startsWith(AGENT_KEY_PREFIX)) {
+        const runtime = await runtimeForKey(key);
+        if (runtime) runtime.handle(req, res);
+        else res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({
+          code: 'unauthorized', message: 'unknown or revoked agent key', retryable: false,
+        }));
+        return;
+      }
       if (apex && host && normalizeDomain(host) === apexDomain) {
         const url = new URL(req.url ?? '/', 'http://localhost');
+        const link = /^\/(s|u|join)\/([^/]+)(?:\/|$)/.exec(url.pathname);
+        if (link && req.method === 'GET') {
+          const target = await directory.domainForLink(link[1]!, decodeURIComponent(link[2]!));
+          if (target && normalizeDomain(target) !== apexDomain) {
+            res.writeHead(302, { location: `https://${target}${url.pathname}${url.search}` }).end();
+            return;
+          }
+          if (target) {
+            const runtime = await runtimeFor(target);
+            if (runtime) { runtime.handle(req, res); return; }
+          }
+        }
         // Migrated self-hosters can keep reaching their default org on the apex.
         if (/^\/(?:v1\/|mcp$)/.test(url.pathname) && !url.pathname.startsWith('/v1/links/') &&
             !['/v1/orgs', '/v1/orgs/ensure', '/v1/health', '/v1/session'].includes(url.pathname) &&
@@ -215,7 +245,9 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
     });
   });
 
-  const closeLive = attachLive(server, async (host) => (await runtimeFor(host))?.live, { stats });
+  const closeLive = attachLive(server, async (host, token) => (
+    await (token?.startsWith(AGENT_KEY_PREFIX) ? runtimeForKey(token) : runtimeFor(host))
+  )?.live, { stats });
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
 

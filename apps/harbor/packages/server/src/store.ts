@@ -99,13 +99,12 @@ export interface AssetVersionData {
 }
 
 /**
- * The space-level read gate for uploaded bytes (the analogue of Buzz's
- * per-community sidecar): bytes dedup per org in the BlobStore underneath,
- * but a blob is referencable and servable only in spaces it was uploaded to.
+ * Notify level (push.ts): what a member wants pushed, org-wide.
  */
-/** Notify level (push.ts): what a member wants pushed, org-wide. */
 export type PushLevel = 'off' | 'mentions' | 'dms' | 'all';
 
+/** Spaces authorize reads through their own upload registries because blob bytes
+ * are shared across the deployment (2026-11-24, orgs return). */
 export interface StoredSpaceBlob {
   spaceId: string;
   hash: string;

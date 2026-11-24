@@ -16,7 +16,7 @@ import { assertBlobHash, blobHash, type BlobStore } from './blobs.js';
 
 export interface S3BlobStoreOptions {
   bucket: string;
-  /** Key prefix inside the bucket; default 'blobs/'. Per-org prefixes scope dedup when multi-org arrives. */
+  /** Deployment-wide key prefix inside the bucket. Defaults to 'blobs/'. */
   prefix?: string;
   region?: string;
   /** Non-AWS endpoints (MinIO, R2, B2). */

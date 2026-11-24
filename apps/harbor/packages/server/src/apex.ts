@@ -143,6 +143,14 @@ export function buildApexApp(deps: ApexDeps): Hono {
     });
   });
 
+  app.get('/v1/links/:kind/:id', async (c) => {
+    const { kind, id } = c.req.param();
+    if (!['s', 'u', 'join'].includes(kind)) throw new HarborError('not_found', 'unknown link kind');
+    const address = await deps.directory.domainForLink(kind, id);
+    if (!address) throw new HarborError('not_found', 'unknown link');
+    return c.json({ address });
+  });
+
   app.post('/v1/orgs/ensure', async (c) => {
     const identity = await identityOf(c);
     const displayName = adminDisplayName(identity);
