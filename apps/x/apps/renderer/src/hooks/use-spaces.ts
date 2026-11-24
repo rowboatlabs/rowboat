@@ -1,10 +1,12 @@
 import { startActivityReporter } from '@/lib/spaces-availability-activity'
 import { memberLabel } from '@/lib/spaces-direct'
-import { setSpaceArchived } from '@/lib/spaces-access'
+import { setSpaceArchived, setSpacePreview } from '@/lib/spaces-access'
+import { invalidateSpaceDirectory, updateDirectoryMembership, loadSpaceDirectory, getDirectorySpace } from '@/hooks/use-space-directory'
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
-import { applyMemberPresence, applyAgentPresence, applyProfileUpdate, refreshMembers, refreshOrgRoster } from '@/hooks/use-space-members'
+import { applyMemberPresence, applyAgentPresence, applyProfileUpdate, refreshOrgRoster } from '@/hooks/use-space-members'
+import { refreshOrgSettings } from '@/hooks/use-org-settings'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
 import { getSpaceReadState, loadUnread, dropSpaceReadState } from '@/lib/spaces-read-state'
 
@@ -18,9 +20,10 @@ export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
     directs: spaces.Space[]
     /** DM space id → the other participant's current display name (resolved from the DM's own roster). */
     directLabels: Record<string, string>
-    /** DM participant kinds survive removal from active contacts (2026-11-12, inactive-agent sidebar fix). */
+    /** The org is a group chat — one space, no DMs, the same for every member (2026-10-07). Absent from older servers. */
     directKinds?: Record<string, spaces.Member['kind']>
-    /** Set when the server could not be reached and nothing was loaded before — the "unreachable" state. */
+    groupChat?: boolean
+    /** Set when the org could not be reached — the sidebar's "org unreachable" state. */
     error?: string
     /**
      * Set when a refresh failed but an earlier listing is still shown: the
@@ -38,10 +41,8 @@ export function findSpace(org: OrgWithSpaces, spaceId: string | undefined): spac
 }
 
 // ---------------------------------------------------------------------------
-// The server store — one fetch shared by the sidebar and the space view (both
-// render the same space list; one source keeps them in step). One server
-// since 2026-11-09: the list has one entry or none, and `orgId` everywhere is
-// core's SPACES_SERVER_ID; the shape kept its many-org names.
+// Orgs store — one fetch shared by the sidebar's SPACES section and the space
+// view (both render the same org/space list; one source keeps them in step).
 // ---------------------------------------------------------------------------
 
 interface OrgsState {
@@ -77,7 +78,7 @@ export function refreshSpacesOrgs(): Promise<void> {
                 records.map(async (org): Promise<OrgWithSpaces> => {
                     const previous = orgsState.orgs.find((o) => o.id === org.id)
                     try {
-                        const { spaces: list } = await window.ipc.invoke('spaces:listSpaces', { orgId: org.id, includeDirect: true })
+                        const { spaces: list, groupChat } = await window.ipc.invoke('spaces:listSpaces', { orgId: org.id, includeDirect: true })
                         const shared = list.filter((s) => s.kind !== 'direct')
                         const directs = list.filter((s) => s.kind === 'direct')
                         // A DM is labelled by the other person's CURRENT name — its
@@ -103,7 +104,7 @@ export function refreshSpacesOrgs(): Promise<void> {
                                 directLabels[dm.id] = previous?.directLabels[dm.id] ?? (self ? 'You' : who)
                             }
                         }))
-                        return { ...org, spaces: shared, directs, directLabels, directKinds }
+                        return { ...org, spaces: shared, directs, directLabels, directKinds, ...(groupChat !== undefined ? { groupChat } : {}) }
                     } catch (err) {
                         const message = err instanceof Error ? err.message : String(err)
                         // Keep what we already showed; only a first load with nothing to show is "unreachable".
@@ -118,8 +119,13 @@ export function refreshSpacesOrgs(): Promise<void> {
                 const current = new Set([...org.spaces, ...org.directs].map(s => s.id))
                 const previous = orgsState.orgs.find(o => o.id === org.id)
                 for (const old of [...(previous?.spaces ?? []), ...(previous?.directs ?? [])]) {
-                    if (!current.has(old.id)) dropSpaceReadState(org.id, old.id)
+                    if (!current.has(old.id)) {
+                        setSpacePreview(org.id, old.id, true)
+                        dropSpaceReadState(org.id, old.id)
+                        updateDirectoryMembership(org.id, old, false)
+                    }
                 }
+                for (const id of current) setSpacePreview(org.id, id, false)
                 for (const space of org.spaces) setSpaceArchived(org.id, space.id, space.archived === true)
             }
             orgsState = { orgs: withSpaces, loading: false }
@@ -463,7 +469,7 @@ function wireFeedBus(): void {
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') resyncListing()
         })
-        // A Rowboat sign-in or sign-out changes whether we hold Rowboat's server
+        // A Rowboat sign-in or sign-out changes which managed orgs we hold
         // (one session, two uses): refetch the listing outright — the
         // freshness window is for reconnects, not for this.
         window.ipc.on('oauth:didConnect', (event) => {
@@ -483,18 +489,28 @@ function wireFeedBus(): void {
         if (frame.kind === 'subscribed') {
             // A re-acknowledged subscription = the socket was down: anything
             // we were put in meanwhile was announced to nobody.
-            if (isReconnect(event.orgId, frame.spaceId, frame)) resyncListing()
+            if (isReconnect(event.orgId, frame.spaceId, frame)) { resyncListing(); void loadSpaceDirectory(event.orgId) }
             return
         }
         if (frame.kind === 'space_removed') {
             membershipRevision += 1
+            setSpacePreview(event.orgId, frame.spaceId, true)
             dropSpaceReadState(event.orgId, frame.spaceId)
+            const old = orgsState.orgs.find(o => o.id === event.orgId)?.spaces.find(s => s.id === frame.spaceId) ?? getDirectorySpace(event.orgId, frame.spaceId)?.space
+            if (old) updateDirectoryMembership(event.orgId, old, false)
+            else invalidateSpaceDirectory(event.orgId)
             orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
                 ...o, spaces: o.spaces.filter(s => s.id !== frame.spaceId), directs: o.directs.filter(s => s.id !== frame.spaceId),
             }) }
             emitOrgs()
             syncFeedSubscriptions()
-            void window.ipc.invoke('spaces:unsubscribeSpace', { orgId: event.orgId, spaceId: frame.spaceId }).catch(() => {})
+            void (async () => {
+                await window.ipc.invoke('spaces:unsubscribeSpace', { orgId: event.orgId, spaceId: frame.spaceId })
+                await loadSpaceDirectory(event.orgId)
+                if (getDirectorySpace(event.orgId, frame.spaceId) && liveRefs.has(liveKey(event.orgId, frame.spaceId))) {
+                    await window.ipc.invoke('spaces:subscribeSpace', { orgId: event.orgId, spaceId: frame.spaceId, afterOffset: liveHeads.get(liveKey(event.orgId, frame.spaceId)) })
+                }
+            })().catch(() => {})
             void refreshSpacesOrgs()
             return
         }
@@ -511,8 +527,20 @@ function wireFeedBus(): void {
             void refreshSpacesOrgs()
             return
         }
+        if (frame.kind === 'invite_policy_changed') {
+            void refreshOrgSettings(event.orgId)
+            return
+        }
+        if (frame.kind === 'space_directory_changed') {
+            invalidateSpaceDirectory(event.orgId)
+            void loadSpaceDirectory(event.orgId)
+            return
+        }
         if (frame.kind === 'space_added') {
             membershipRevision += 1
+            setSpacePreview(event.orgId, frame.spaceId, false)
+            invalidateSpaceDirectory(event.orgId)
+            void loadSpaceDirectory(event.orgId)
             // Someone opened a DM with us. The listing is how we learn its
             // label and start watching it — no per-space subscription can
             // exist for a space we did not know about.
@@ -521,10 +549,11 @@ function wireFeedBus(): void {
         }
         if (frame.kind !== 'event') return
         // A rename lands as a durable event on the space's log — refresh the
-        // listing so the sidebar label follows on every device.
+        // org listing so the sidebar label follows on every device.
         // Archived or back (harbor #1186, 2026-10-14): the event carries the
         // row, so the sidebar and the space's write lock move before the refetch.
-        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived') {
+        // A default flag or a visibility change (2026-10-19) carries the row the same way.
+        if (frame.event.type === 'space_archived' || frame.event.type === 'space_unarchived' || frame.event.type === 'space_default_changed' || frame.event.type === 'space_visibility_changed') {
             const updated = frame.event.space
             setSpaceArchived(event.orgId, updated.id, updated.archived === true)
             orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
@@ -532,20 +561,14 @@ function wireFeedBus(): void {
             }) }
             emitOrgs()
             void refreshSpacesOrgs()
+            invalidateSpaceDirectory(event.orgId)
+            void loadSpaceDirectory(event.orgId)
         }
-        if (frame.event.type === 'space_renamed') void refreshSpacesOrgs()
-        // The space graph was turned on or off (2026-11-12): the event carries
-        // the row, so the Graph tab appears or goes for every member at once.
-        if (frame.event.type === 'space_graph_changed') {
-            const updated = frame.event.space
-            orgsState = { ...orgsState, orgs: orgsState.orgs.map(o => o.id !== event.orgId ? o : {
-                ...o, spaces: o.spaces.map(s => s.id === updated.id ? updated : s),
-            }) }
-            emitOrgs()
+        if (frame.event.type === 'space_renamed') {
+            void refreshSpacesOrgs()
+            invalidateSpaceDirectory(event.orgId)
+            void loadSpaceDirectory(event.orgId)
         }
-        // A role or an agent's seat changed in this space (2026-11-09): the roster
-        // carries both, so the admin controls and the seat badges follow at once.
-        if (frame.event.type === 'role_changed' || frame.event.type === 'agent_access_changed') refreshMembers(event.orgId, frame.spaceId, { force: true })
         const key = liveKey(event.orgId, frame.spaceId)
         if (!liveRefs.has(key) || feedRefreshTimers.has(key)) return
         // Trailing debounce: a burst of events (an agent replying, a thread's

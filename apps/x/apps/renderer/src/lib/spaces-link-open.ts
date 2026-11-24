@@ -1,4 +1,5 @@
-import { onServer } from '@x/shared/dist/spaces.js'
+import { orgForFlatLink } from '@x/spaces-client'
+import { getDirectorySpace, loadSpaceDirectory } from '@/hooks/use-space-directory'
 import { findSpace, getSpacesOrgs, refreshSpacesOrgs } from '@/hooks/use-spaces'
 import type { SpacesLinkTarget } from '@/lib/spaces-navigation'
 import type { RailSelection } from '@/lib/spaces-selection'
@@ -6,10 +7,9 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // Where a spaces link opens (2026-10-13). The desktop gets a browser-opened
 // link as a rowboat:// deep link and the web app as its /open address, with
 // the same query, and both resolve it here; each then navigates its own way.
-// What the link names is checked before anything opens: the server by
-// address against the one this install is signed in to (2026-11-09), a
-// reply's thread from the server, a person's DM created on first use. An
-// invite is joined, not opened.
+// What the link names is checked before anything opens: the org by address
+// from the signed-in list, a reply's thread from the org, a person's DM
+// created on first use. An invite is joined, not opened.
 
 export interface SpacesPlace {
     orgId: string
@@ -25,21 +25,29 @@ export type SpacesLinkOutcome =
     | { kind: 'place'; place: SpacesPlace }
     /** The https invite link, for the join dialog, which resolves it pre-auth and shows the card. */
     | { kind: 'invite'; inviteUrl: string }
-    /** The link's server is not the one this person is signed in to. */
-    | { kind: 'unknown-server'; address: string }
-    /** The server could not open it; `place` is where to land instead, when anywhere. */
+    /** The link's org is not one this person is signed in to. */
+    | { kind: 'unknown-org'; orgAddress: string }
+    /** The org could not open it; `place` is where to land instead, when anywhere. */
     | { kind: 'refused'; message: string; place?: SpacesPlace }
 
 export async function resolveSpacesLink(target: SpacesLinkTarget): Promise<SpacesLinkOutcome> {
     if (getSpacesOrgs().length === 0) await refreshSpacesOrgs()
-    // A link from before 2026-11-09 names an org host under the server's address: still this server.
-    const org = getSpacesOrgs().find((o) => onServer(target.address, o.address))
+    let address = target.orgAddress
+    let org = getSpacesOrgs().find(o => o.address === address)
+    const id = target.inviteToken || target.spaceId || target.memberId
+    const possibleApex = !org && id && getSpacesOrgs().some(o => o.address.endsWith('.' + address))
+    if (possibleApex && (await window.ipc.invoke('spaces:apexInfo', null).catch(() => null))?.apexDomain === address) {
+        try {
+            address = await orgForFlatLink('https://' + address, target.inviteToken ? 'join' : target.spaceId ? 's' : 'u', id)
+            org = getSpacesOrgs().find(o => o.address === address)
+        } catch { return { kind: 'refused', message: 'This Spaces link is unavailable.' } }
+    }
     if (target.inviteToken) {
-        // Rebuilt from the signed-in server's own base URL, else https on the address.
-        const base = org?.baseUrl ?? `https://${target.address}`
+        // Rebuilt from a signed-in org's own base URL, else https on the address.
+        const base = org?.baseUrl ?? `https://${address}`
         return { kind: 'invite', inviteUrl: `${base}/join/${target.inviteToken}` }
     }
-    if (!org) return { kind: 'unknown-server', address: target.address }
+    if (!org) return { kind: 'unknown-org', orgAddress: target.orgAddress }
     try {
         if (target.memberId) {
             const { space } = await window.ipc.invoke('spaces:openDirect', { orgId: org.id, memberId: target.memberId })
@@ -47,14 +55,15 @@ export async function resolveSpacesLink(target: SpacesLinkTarget): Promise<Space
             return { kind: 'place', place: { orgId: org.id, spaceId: space.id, rail: { kind: 'general' } } }
         }
         if (!target.spaceId) return { kind: 'place', place: { orgId: org.id, view: 'activity' } }
-        if (!findSpace(org, target.spaceId)) {
+        if (!findSpace(org, target.spaceId)) await loadSpaceDirectory(org.id)
+        if (!findSpace(org, target.spaceId) && !getDirectorySpace(org.id, target.spaceId)) {
             return { kind: 'refused', message: 'This space is unavailable or you do not have access', place: { orgId: org.id, view: 'activity' } }
         }
         if (target.assetId) {
             return { kind: 'place', place: { orgId: org.id, spaceId: target.spaceId, rail: { kind: 'file', assetId: target.assetId } } }
         }
         if (target.messageId) {
-            // A reply lands in its thread; the server says which one.
+            // A reply lands in its thread; the org says which one.
             const { message } = await window.ipc.invoke('spaces:getMessage', { orgId: org.id, spaceId: target.spaceId, messageId: target.messageId })
             return {
                 kind: 'place',

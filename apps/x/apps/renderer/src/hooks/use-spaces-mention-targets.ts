@@ -9,17 +9,17 @@ import {
   type SpaceMentionTarget,
   type SpacesMentionTargets,
 } from '@/lib/mention-targets'
-import { isDeparted } from '@/lib/spaces-direct'
+import { isDeparted, isOthersPersonalAgent, isRetiredAgent } from '@/lib/spaces-direct'
 
 /**
  * What the assistant composer's @ menu can name in Spaces: every shared
- * space the user is in, the whiteboards in those spaces, and every contact
- * they can DM (2026-11-09: the people they share a space with and their own
- * agents). Reads the same stores the Spaces sidebar renders (the listing; contacts, cached then
+ * space the user is in, the whiteboards in those spaces, and every person
+ * they can DM, across every org this install is signed into. Reads the same
+ * stores the Spaces sidebar renders (orgs + listing; org rosters, cached then
  * refreshed; board listings, cached then refreshed), so the menu's first
  * frame is already full and nothing is fetched twice. Yourself is left out —
  * "@me" reads oddly in an ask, and the assistant knows who its person is.
- * With Spaces dark there is no server, so the result is simply empty.
+ * With Spaces dark there are no orgs, so the result is simply empty.
  */
 export function useSpacesMentionTargets(): SpacesMentionTargets {
   const { orgs } = useSpacesOrgs()
@@ -43,7 +43,8 @@ export function useSpacesMentionTargets(): SpacesMentionTargets {
         }
       }
       for (const member of rosters.get(org.id) ?? []) {
-        if (member.id === org.memberId || isDeparted(member)) continue
+        // Someone else's personal agent can't be messaged (2026-10-26), so it isn't offered; nor Ro while it is off (2026-10-30).
+        if (member.id === org.memberId || isDeparted(member) || isOthersPersonalAgent(member, org.memberId) || isRetiredAgent(member)) continue
         members.push({ kind: 'member', orgId: org.id, orgName: org.name, memberId: member.id, displayName: member.displayName })
       }
     }

@@ -2,8 +2,7 @@ import { Loader2, CheckCircle2 } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import type { OnboardingState } from "../use-onboarding-state"
-import { useState } from "react"
-import { refreshSpacesOrgs } from "@/hooks/use-spaces"
+import { useCompletionSpace } from "./completion-space"
 
 interface WelcomeStepProps {
   state: OnboardingState
@@ -11,27 +10,13 @@ interface WelcomeStepProps {
 
 // Onboarding is this one page (2026-11-09): sign in with Rowboat, and the
 // app opens in Spaces. ChatGPT sign-in, model providers, naming a space and
-// adding coding agents left it. Nothing is created here: the one server makes
-// you a member on first contact (harbor spec §4), which Continue triggers.
+// adding coding agents left it; a first space is still made, under its
+// suggested name, when you have none (completion-space.ts).
 export function WelcomeStep({ state }: WelcomeStepProps) {
   const rowboatState = state.providerStates['rowboat'] || { isConnected: false, isLoading: false, isConnecting: false }
   const connected = rowboatState.isConnected
   const loading = state.providersLoading || rowboatState.isLoading
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const complete = async () => {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      await refreshSpacesOrgs()
-      state.handleComplete()
-    } catch {
-      setError('Could not reach Spaces. Please try again.')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const space = useCompletionSpace(connected)
 
   return (
     <div className="flex flex-col items-center justify-center text-center flex-1">
@@ -78,15 +63,15 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
               <CheckCircle2 className="size-4" />
               Signed in to Rowboat
             </p>
-            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            {space.error && <p role="alert" className="text-sm text-destructive">{space.error}</p>}
             <Button
-              onClick={() => void complete()}
-              disabled={busy}
+              onClick={() => void space.complete(state.handleComplete)}
+              disabled={space.loading || space.busy}
               size="lg"
               aria-label="Continue"
               className="w-full h-12 text-base font-medium"
             >
-              {busy ? <Loader2 className="size-5 animate-spin" /> : "Continue"}
+              {space.loading || space.busy ? <Loader2 className="size-5 animate-spin" /> : "Continue"}
             </Button>
           </>
         ) : (

@@ -48,7 +48,7 @@ export function EmptySpaceStart({ orgId, space, onAddPeople, onOpenFiles }: {
             </div>
             {/* The space's link, minted on the spot: anyone with it is in. */}
             <div className="rounded-xl border border-dashed border-border p-2">
-                <InviteLinkPanel orgId={orgId} spaceId={space.id} />
+                <InviteLinkPanel orgId={orgId} spaceIds={[space.id]} />
             </div>
         </section>
     )

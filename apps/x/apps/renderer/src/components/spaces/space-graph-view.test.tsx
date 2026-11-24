@@ -9,7 +9,7 @@ import { SpaceGraphView } from './space-graph-view'
 vi.mock('force-graph', () => ({ default: class { } }))
 vi.mock('@/lib/spaces-read-state', () => ({ streamBadge: () => ({ unread: 0, forYou: 0 }), threadsBadge: () => ({ unread: 0, forYou: 0 }), useReadStateVersion: () => 0 }))
 
-const space = (graph: boolean): spaces.Space => ({ id: 'S1', name: 'Engineering', createdAt: '2026-11-12T00:00:00.000Z', kind: 'shared', archived: false, graph })
+const space = (graph: boolean): spaces.Space => ({ id: 'S1', name: 'Engineering', createdAt: '2026-11-12T00:00:00.000Z', kind: 'shared', visibility: 'private', isDefault: false, archived: false, graph })
 const answer = (status: spaces.SpaceGraph['status'], pending = 0): spaces.SpaceGraph => ({ status, now: '2026-11-12T00:00:00.000Z', pending, threads: [], entities: [], edges: [] })
 const invoke = vi.fn()
 const view = (admin: boolean, onOpenSettings = vi.fn()) => render(<SpaceGraphView orgId="O1" space={space(true)} members={[]} admin={admin} refreshTick={0} onOpenThread={vi.fn()} onOpenSettings={onOpenSettings} />)

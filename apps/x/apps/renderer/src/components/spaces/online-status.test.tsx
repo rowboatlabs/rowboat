@@ -27,7 +27,7 @@ function Surfaces() {
     return <SpaceRefsProvider refs={{ orgId: fixture.org.id, orgAddress: 'spaces.test', spaceId: 'space' }}>
         <SpaceProfilesProvider members={[fixture.member as spaces.Member]} here={new Set(['me'])} selfId="me">
             <div data-testid="sidebar-avatar"><MemberAvatar id="me" name="Harsh" online={online.has('me')} /></div>
-            <div data-testid="directory"><MemberDirectory members={[fixture.member as spaces.SpaceMember]} here={online} selfId="me" /></div>
+            <div data-testid="directory"><MemberDirectory members={[fixture.member as spaces.Member]} here={online} selfId="me" /></div>
             <div data-testid="account"><SpacesAccountMenu email={null} variant="row" /></div>
             <div data-testid="availability"><AvailabilityMenu /></div>
             <MemberProfilePopover id="me"><button>Open profile</button></MemberProfilePopover>

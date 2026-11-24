@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { AgentPage } from '@/components/spaces/agent-page'
 import { InstancePicker, type InstanceChoice } from '@/components/spaces/agent-instance-picker'
 import { MaritimeAgentPicker } from '@/components/spaces/agent-maritime-picker'
+import { AccessChoice, accessLabel } from '@/components/spaces/agent-access'
 import { AgentLogo, ConnectAgent } from '@/components/spaces/agent-setup'
 import { EngineCard, LocalAgentFields, useLocalAgents, useLocalEngine } from '@/components/spaces/local-agent'
 import { PersonalityFields, saveAgentProfile } from '@/components/spaces/agent-personality'
@@ -50,7 +51,7 @@ import { cn } from '@/lib/utils'
 // as "<your first name>'s <kind>".
 //
 // Local agents (2026-10-28): "On this computer" adds your own Claude Code or
-// Codex, which this app runs. Its seats are the owner's alone; Add asks where it works and
+// Codex, which this app runs. Always personal; Add asks where it works and
 // how it approves instead of a key, and there is nothing to connect, so it
 // goes straight to its page. Desktop only.
 
@@ -210,14 +211,13 @@ function parseEnv(text: string): { env: Array<{ key: string; value: string }> } 
  * all by default, each one a tick. `direct` null hides the DM row (a setup that
  * opens the DM itself).
  */
-function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange, ownerOnly = false }: {
+function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange, personal = false }: {
     spaces: spaces.Space[]
     skipped: ReadonlySet<string>
     onChange: (skipped: ReadonlySet<string>) => void
     direct: boolean | null
     onDirectChange: (on: boolean) => void
-    /** A local agent: its seats are the owner's alone (2026-11-09). */
-    ownerOnly?: boolean
+    personal?: boolean
 }) {
     if (list.length === 0 && direct === null) return null
     const allIn = skipped.size === 0
@@ -255,10 +255,10 @@ function SpacePicker({ spaces: list, skipped, onChange, direct, onDirectChange, 
                 })}
             </ul>
             <span className="text-[11px] text-muted-foreground">
-                {ownerOnly
-                    ? 'Everyone in these spaces sees it and its replies; only you can ask it.'
-                    : 'Anyone in these spaces can mention it; you can narrow that per space from the member list.'}
-                {' '}You can add it to more later from any group’s member list.
+                {personal
+                    ? 'Everyone in these spaces sees it and its replies; only you can mention it or DM it.'
+                    : 'Anyone in these spaces can mention it, or DM it.'}
+                {' '}You can add it to more later from its page.
             </span>
         </div>
     )
@@ -322,6 +322,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const spaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])
     const roster = useOrgRoster(org.id, spaceIds)
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
+    const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const [agents, setAgents] = useState<spaces.AgentListing[] | null>(null)
     const activeAgents = agents?.filter(({ agent, hosting }) => !agent.deactivatedAt && !agent.removedAt && hosting?.status !== 'deleting' && hosting?.status !== 'deleted') ?? null
     const [screen, setScreen] = useState<Screen>({ name: 'list' })
@@ -336,6 +337,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     // The spaces a new agent joins on Add: every one of yours unless unticked (2026-10-08).
     const [skippedSpaces, setSkippedSpaces] = useState<ReadonlySet<string>>(new Set())
     const [withDirect, setWithDirect] = useState(true)
+    const [personal, setPersonal] = useState(false)
     const [progress, setProgress] = useState<string | null>(null)
     // The super agent's setup card this completes, when the card opened the form (2026-11-02).
     const [request, setRequest] = useState<{ id: string; connection?: string } | null>(null)
@@ -364,11 +366,11 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     // An agent that is one platform instance (Agent37) runs whatever its instance runs.
     const kind = setup.bindsInstance ? instance?.kind ?? setup.kinds[0]! : chosenKind && setup.kinds.includes(chosenKind) ? chosenKind : setup.kinds[0]!
     // The name suggests the setup's own, or the kind's, until the person types
-    // one; a local one's is yours ("Gagan's Claude Code", 2026-10-26).
+    // one; a personal one's is yours ("Gagan's Claude Code", 2026-10-26).
     const baseName = setup.defaultName || kindInfo(kind).label
     const ownName = roster.find((m) => m.id === org.memberId)?.displayName
-    // A local agent runs on your computer: its seats are yours alone, and its name says whose it is.
-    const isPersonal = setup.local === true
+    // A local agent is always personal: it runs on your computer.
+    const isPersonal = personal || setup.local === true
     const shownName = nameEdited ? name : isPersonal ? personalAgentName(ownName, baseName) : baseName
     const shownCwd = localCwd || local?.defaultCwd || ''
     // Its engine: Add installs it when it isn't on this computer yet (2026-10-28), so nobody leaves for Settings.
@@ -402,6 +404,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setAddError(null)
         setSkippedSpaces(new Set())
         setWithDirect(true)
+        setPersonal(false)
         setProfileTitle('')
         setProfileInstructions('')
         setLocalCwd('')
@@ -419,6 +422,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
         setAddError(null)
         setSkippedSpaces(new Set())
         setWithDirect(true)
+        setPersonal(false)
         setProfileTitle('')
         setProfileInstructions('')
         setScreen({ name: 'create' })
@@ -486,7 +490,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
 
     const offeredKinds = MANAGED_KINDS.filter((m) => managedKinds.includes(m.kind))
     const chosenManaged = createKind && managedKinds.includes(createKind) ? createKind : offeredKinds[0]?.kind ?? 'hermes'
-    const createName = nameEdited ? name : kindInfo(chosenManaged).label
+    const createName = nameEdited ? name : personal ? personalAgentName(ownName, kindInfo(chosenManaged).label) : kindInfo(chosenManaged).label
     const parsedEnv = parseEnv(envText)
     const createReady = createName.trim() !== '' && (chosenManaged !== 'claude-code' || anthropicKey.trim() !== '') && !('bad' in parsedEnv)
 
@@ -524,6 +528,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 kind: chosenManaged,
                 ...(chosenManaged === 'claude-code' ? { anthropicApiKey: anthropicKey.trim() } : {}),
                 ...(parsedEnv.env.length > 0 ? { env: parsedEnv.env } : {}),
+                ...(personal ? { personal: true } : {}),
                 ...(request ? { request: request.id } : {}),
             })
             setAnthropicKey('')
@@ -591,6 +596,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                 connection: setup.connection,
                 ...(setup.credential ? { credential: credential.trim() } : {}),
                 ...(instanceId ? { instance: instanceId } : {}),
+                ...(personal ? { personal: true } : {}),
                 ...(request ? { request: request.id } : {}),
             })
             setCredential('')
@@ -622,7 +628,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                             ) : activeAgents.length === 0 ? (
                                 <div className="flex flex-col items-center gap-2 py-8 text-center">
                                     <Bot className="size-6 text-muted-foreground" />
-                                    <div className="text-sm font-medium">You have no agents or bots yet</div>
+                                    <div className="text-sm font-medium">{isAdmin ? 'No agents or bots in this server yet' : 'You have no agents or bots yet'}</div>
                                     <div className="max-w-xs text-xs text-muted-foreground">
                                         {offeredKinds.length > 0 ? 'Create an agent and Rowboat runs it for you, or add one you run: ' : 'Add an agent to connect '}
                                         Hermes, a coding agent in Replicas or Conductor, or anything that speaks the agent contract, or a bot for PostHog or Cal.com.
@@ -650,8 +656,9 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                                                         <div className="truncate text-sm font-medium">{agent.displayName}</div>
                                                                         <div className="truncate text-[11px] text-muted-foreground">
                                                                             {agentLabel(agent.agentKind, agent.agentConnection)}
-                                                                                            {' · '}
-                                                                            {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Built in'}
+                                                                            {accessLabel(agent) && ` · ${accessLabel(agent)}`}
+                                                                            {' · '}
+                                                                            {agent.ownerId ? (mine ? 'Yours' : `Owned by ${names.get(agent.ownerId) ?? 'another member'}`) : 'Managed by admins'}
                                                                             {' · '}
                                                                             {live.length === 0 ? 'no active keys' : live.length === 1 ? '1 key' : `${live.length} keys`}
                                                                             {credential?.rejectedAt && <span className="text-destructive">{' · '}Key rejected</span>}
@@ -756,10 +763,12 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                     <EngineCard engine={localEngine} />
                                 </div>
                             )}
-                            {setup.local && (
+                            {setup.local ? (
                                 <p className="mt-4 text-[11px] leading-snug text-muted-foreground">
-                                    It runs on your computer, so only you can ask it, wherever it is added. Others see it and its replies. It answers while Rowboat is open here.
+                                    Personal: it runs on your computer, so only you can mention it or DM it. Others see it and its replies. It answers while Rowboat is open here.
                                 </p>
+                            ) : (
+                                <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
                             )}
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
@@ -809,7 +818,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 onChange={setSkippedSpaces}
                                 direct={setup.wantsHomeChannel ? null : withDirect}
                                 onDirectChange={setWithDirect}
-                                ownerOnly={isPersonal}
+                                personal={isPersonal}
                             />
                             {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
@@ -857,6 +866,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 ))}
                             </div>
                             {managedBilling && <p className="mt-2 text-[11px] text-muted-foreground">{billingNote(chosenManaged)}</p>}
+                            <AccessChoice className="mt-4" personal={personal} onChange={setPersonal} note="You can change this later from its page." />
                             <label className="mt-4 flex flex-col gap-1.5">
                                 <span className="text-xs font-medium text-foreground">Name</span>
                                 <Input
@@ -931,6 +941,7 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                                 onChange={setSkippedSpaces}
                                 direct={withDirect}
                                 onDirectChange={setWithDirect}
+                                personal={personal}
                             />
                             {progress && <div className="mt-3 text-xs text-muted-foreground">{progress}</div>}
                             {addError && <div role="alert" className="mt-3 text-xs text-destructive">{addError}</div>}
@@ -979,17 +990,17 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
                     const listing = agents?.find((a) => a.agent.id === screen.agentId)
                     if (!listing) return null
                     const { agent } = listing
-                    const owner = agent.ownerId === org.memberId ? 'Yours' : agent.ownerId ? `Owned by ${names.get(agent.ownerId) ?? 'another member'}` : 'Built in'
+                    const owner = agent.ownerId === org.memberId ? 'Yours' : agent.ownerId ? `Owned by ${names.get(agent.ownerId) ?? 'another member'}` : 'Managed by admins'
                     return (
                         <>
                             <Header
                                 title={agent.displayName}
-                                description={`${agentLabel(agent.agentKind, agent.agentConnection)} · ${owner}`}
-                                icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-9 rounded-lg" />}
+                                description={`${agentLabel(agent.agentKind, agent.agentConnection)}${accessLabel(agent) ? ` · ${accessLabel(agent)}` : ''} · ${owner}`}
+                                icon={<AgentLogo logo={kindInfo(agent.agentKind ?? 'custom').logo ?? setupFor(agent).logo} className="size-5" />}
                                 onBack={back}
                             />
                             <Body>
-                                <AgentPage org={org} listing={listing} onChanged={load} />
+                                <AgentPage org={org} listing={listing} isAdmin={isAdmin} onChanged={load} />
                             </Body>
                             <Footer>
                                 <Button size="sm" onClick={back}>Done</Button>

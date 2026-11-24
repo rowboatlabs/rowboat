@@ -4877,7 +4877,7 @@ function App() {
       case 'apps': return 'Apps'
       case 'spaces': {
         const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
-        if (org && currentViewState.view) return currentViewState.view === 'agents' ? 'Agents' : currentViewState.view === 'threads' ? 'Threads' : 'Activity'
+        if (org && currentViewState.view) return currentViewState.view === 'browse' ? 'Browse spaces' : currentViewState.view === 'agents' ? 'Agents' : currentViewState.view === 'threads' ? 'Threads' : 'Activity'
         const space = org ? findSpace(org, currentViewState.spaceId) : undefined
         return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
@@ -5522,7 +5522,11 @@ function App() {
     void navigateToView({ type: 'spaces', orgId, spaceId, rail: railForOpening(orgId, spaceId, rail) })
   }, [navigateToView])
 
-  /** The Activity surface (layer 3): everything that involves you, newest first. */
+  /** The org's Activity surface (layer 3): everything that involves you, newest first. */
+  const openBrowse = useCallback((orgId: string) => {
+    void navigateToView({ type: 'spaces', orgId, view: 'browse' })
+  }, [navigateToView])
+
   const openActivity = useCallback((orgId: string) => {
     void navigateToView({ type: 'spaces', orgId, view: 'activity' })
   }, [navigateToView])
@@ -5709,8 +5713,8 @@ function App() {
         openServerDialog({ kind: 'join', inviteUrl: outcome.inviteUrl })
         void navigate({ type: 'spaces' })
         return
-      case 'unknown-server':
-        toast.error(`This link is for ${outcome.address}, which is not the server you are signed in to`)
+      case 'unknown-org':
+        toast.error(`Sign in to ${outcome.orgAddress} to open this link`)
         void navigate({ type: 'spaces' })
         return
       case 'refused':
@@ -7695,6 +7699,7 @@ function App() {
                     // Activity → a message: one navigation entry that opens the
                     // space (or thread) and lands on the row.
                     onOpenMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
+                    onOpenBrowse={openBrowse}
                     onOpenAgents={openAgents}
                     onOpenThreads={openThreads}
                     onOpenActivity={openActivity}
@@ -8199,9 +8204,9 @@ function App() {
         onOpenChange={setBillingErrorOpen}
       />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
-      {/* The one host for joining with a link (lib/server-dialog.ts): whatever
-          opened it, a finished dialog lands in the joined space, or the last
-          chat. */}
+      {/* The one host for Create / Join a server (lib/server-dialog.ts): whatever
+          opened it, a finished dialog lands in the org — the joined space, or
+          the server's landing space. */}
       <ServerDialogs
         onDone={(orgId, spaceId) => {
           const org = getSpacesOrgs().find((o) => o.id === orgId)
