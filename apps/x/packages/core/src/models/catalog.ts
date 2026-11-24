@@ -6,7 +6,7 @@ import container from "../di/container.js";
 import { IModelConfigRepo } from "./repo.js";
 import { listGatewayImageModels, listGatewayModels } from "./gateway.js";
 import { listCodexModels } from "./codex.js";
-import { listImageModelsForProvider, listModelsForProvider } from "./models.js";
+import { EDENAI_DEFAULT_BASE_URL, listImageModelsForProvider, listModelsForProvider } from "./models.js";
 import { getImageModelIds, listOnboardingModels } from "./models-dev.js";
 import { getDefaultModelAndProvider } from "./defaults.js";
 
@@ -61,6 +61,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
     google: "Gemini",
     openrouter: "OpenRouter",
     aigateway: "AI Gateway",
+    edenai: "Eden AI",
     ollama: "Ollama",
     "openai-compatible": "OpenAI-Compatible",
 };
@@ -150,6 +151,9 @@ async function discoverProviders(): Promise<DiscoveredProvider[]> {
         const config = { ...entry };
         if (config.flavor === "aigateway" && !config.baseURL) {
             config.baseURL = AIGATEWAY_DEFAULT_BASE_URL;
+        }
+        if (config.flavor === "edenai" && !config.baseURL) {
+            config.baseURL = EDENAI_DEFAULT_BASE_URL;
         }
         discovered.push({ id, flavor: entry.flavor, config });
     }

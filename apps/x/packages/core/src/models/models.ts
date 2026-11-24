@@ -23,6 +23,13 @@ import {
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
 
+/**
+ * Eden AI's OpenAI-compatible endpoint. The flavor exists so the user only
+ * supplies a key: unlike "openai-compatible" there is one known host, and
+ * its model list needs a query parameter (see listModelsForProvider).
+ */
+export const EDENAI_DEFAULT_BASE_URL = "https://api.edenai.run/v3";
+
 export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
     const { apiKey, baseURL, headers } = config;
     switch (config.flavor) {
@@ -36,6 +43,13 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
             return createGateway({
                 apiKey,
                 baseURL,
+                headers,
+            });
+        case "edenai":
+            return createOpenAICompatible({
+                name: "edenai",
+                apiKey,
+                baseURL: baseURL || EDENAI_DEFAULT_BASE_URL,
                 headers,
             });
         case "anthropic":
@@ -283,6 +297,16 @@ export async function listModelsForProvider(
             case "openai-compatible":
             case "aigateway":
                 url = `${(baseURL ?? "").replace(/\/$/, "")}/models`;
+                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+                break;
+            case "edenai":
+                // Eden AI lists two ways. The default response enumerates
+                // every provider-pinned endpoint (~1300 ids such as
+                // "anthropic/claude-haiku-5-5"); "?view=models" returns the
+                // routed names (~550 ids such as "claude-haiku-5.5"), which
+                // are the ones that fail over to another provider serving
+                // the same model. The picker wants the routed names.
+                url = `${(baseURL ?? EDENAI_DEFAULT_BASE_URL).replace(/\/$/, "")}/models?view=models`;
                 if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
                 break;
             default:
