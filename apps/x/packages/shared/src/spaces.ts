@@ -1,6 +1,6 @@
 export { blobDownloadName } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
-import { addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
+import { JEV_KIND, addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
 export { Availability, NotificationSchedule, currentStatus, notificationsPaused } from '@rowboat/spaces-protocol';
 export { LLM_PROVIDERS, ownerSetsUp } from '@rowboat/spaces-protocol';
 // The space graph (harbor spec §8 Space graph, 2026-11-12): the one computation of an edge's weight, so the app and the server agree.
@@ -52,7 +52,7 @@ import type {
   Member,
   Membership,
   MembershipEvent,
-  SpaceMember,
+  OrgSettings,
   Message,
   Poll,
   PollAnswer,
@@ -136,7 +136,7 @@ export type {
   Member,
   Membership,
   MembershipEvent,
-  SpaceMember,
+  OrgSettings,
   Message,
   Poll,
   PollAnswer,
@@ -185,17 +185,17 @@ export interface SpacesNewPollInput {
   allowMultiselect?: boolean;
 }
 
-/** The server this install is signed into — the renderer's view (auth details stay in core). One since 2026-11-09; `id` is core's SPACES_SERVER_ID. */
+/** An org this install is signed into — the renderer's view (auth details stay in core). */
 export const SpacesOrgSummary = z.object({
   id: z.string(),
   name: z.string(),
   address: z.string(),
   baseUrl: z.string(),
-  /** Who we are on this server (spec §4). */
+  /** Who we are on this org (org-scoped identity, spec §4). */
   memberId: z.string(),
-  /** `session` = Rowboat's server riding the Rowboat account session (one session, two uses — 2026-09-14). */
+  /** `session` = a managed org riding the Rowboat account session (one session, two uses — 2026-09-14). */
   authKind: z.enum(['dev', 'oauth', 'session']),
-  /** Present = the server needs a re-login (refresh dead, or no Rowboat session). Visible and gentle, never silent. */
+  /** Present = the org needs a re-login (refresh dead, or no Rowboat session). Visible and gentle, never silent. */
   authError: z.string().optional(),
 });
 export type SpacesOrgSummary = z.infer<typeof SpacesOrgSummary>;
@@ -424,23 +424,23 @@ export {
   parseMentions,
   relabelMentions,
   MENTION_TOKEN_RE,
-  // The Spaces link grammar (protocol ids.ts): builders and the one parser.
-  serverUrl,
+  // The org link grammar (protocol ids.ts): builders and the one parser.
+  orgUrl,
   spaceUrl,
   assetUrl,
   messageUrl,
   memberUrl,
-  parseSpacesUrl,
+  parseOrgUrl,
   onServer,
 } from '@rowboat/spaces-protocol';
-export type { MentionRef, MentionStamps, SpacesLink } from '@rowboat/spaces-protocol';
+export type { MentionRef, MentionStamps, OrgLink } from '@rowboat/spaces-protocol';
 
 /** Does the body deliberately address @rowboat — a token, never the bare word (spec §8)? */
 export function containsRowboatAddress(body: string): boolean {
   return addressesRowboat(body);
 }
 
-/** Does the body mention anyone: a member, @here or Rowboat? A reply that does follows up no agent (Harbor spec §8, 2026-10-27). */
+/** Does the body mention anyone: a member, @here or Ro? A reply that does follows up no agent (Harbor spec §8, 2026-10-27). */
 export function mentionsAnyone(body: string): boolean {
   const stamps = parseMentions(body);
   return stamps.members.length > 0 || stamps.here || stamps.rowboat;
@@ -449,17 +449,17 @@ export function mentionsAnyone(body: string): boolean {
 /**
  * The agent a person's reply in this thread goes to when it mentions nobody
  * (Harbor spec §8, 2026-10-27): the one they most recently invoked there, a
- * refused invocation aside. Harbor decides; the composer shows the same
+ * refused invocation and Ro aside. Harbor decides; the composer shows the same
  * answer so the person can see it and send to people only instead. Amended
  * 2026-11-05 ("reply ux" in Main): only while that conversation is the
  * thread's latest, so `thread` (its messages oldest first, root included)
- * must end in the agent's message or the person's to it. (Ro's cc lines, once
- * skipped here, went with the orgs, 2026-11-09.)
+ * must end, Ro's cc lines aside, in the agent's message or the person's to it.
  */
 export function followUpAgentId(
   invocations: Iterable<Invocation>,
   threadRootId: string,
   memberId: string,
+  members: ReadonlyMap<string, Pick<Member, 'agentKind'>>,
   thread: ReadonlyArray<{ id: string; author: { memberId: string } }>,
 ): string | undefined {
   const mine: Invocation[] = [];
@@ -468,11 +468,15 @@ export function followUpAgentId(
     if (i.conversation.threadRootId !== threadRootId || i.trigger.authorId !== memberId) continue;
     mine.push(i);
     if (i.state === 'refused') continue;
+    if (members.get(i.agentId)?.agentKind === JEV_KIND) continue;
     if (!latest || i.createdAt > latest.createdAt) latest = i;
   }
   if (!latest) return undefined;
   const agentId = latest.agentId;
-  const previous = thread[thread.length - 1];
+  let previous: (typeof thread)[number] | undefined;
+  for (let n = thread.length - 1; n >= 0 && !previous; n--) {
+    if (members.get(thread[n]!.author.memberId)?.agentKind !== JEV_KIND) previous = thread[n];
+  }
   if (!previous) return undefined;
   if (previous.author.memberId === agentId) return agentId;
   const toAgent = previous.author.memberId === memberId && mine.some((i) => i.agentId === agentId && i.trigger.messageId === previous.id);
