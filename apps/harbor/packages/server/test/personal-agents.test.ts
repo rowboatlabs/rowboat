@@ -138,8 +138,9 @@ describe('who may invoke it', () => {
 describe('switching it (2026-10-27)', () => {
   const setPersonal = (token: string, agent: Member, value: boolean) => as(token).put(`/v1/agents/${agent.id}/personal`, { personal: value });
 
-  it('reserves the personal switch to its owner', async () => {
-    expect((await setPersonal('dev-gagan', channel, true)).status).toBe(403);
+  it('allows an org admin to switch the agent and restore its access', async () => {
+    expect((await setPersonal('dev-gagan', channel, true)).status).toBe(200);
+    expect((await setPersonal('dev-gagan', channel, false)).status).toBe(200);
   });
 
   it('turns a channel agent personal: from then on only its owner can ask it', async () => {

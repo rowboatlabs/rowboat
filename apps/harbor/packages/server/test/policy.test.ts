@@ -210,7 +210,7 @@ describe('policy', () => {
     expect(canRenameAgent(other, hermes)).toMatchObject({ code: 'forbidden' });
     expect(canRenameAgent(owner, owner)).toMatchObject({ code: 'forbidden' });
     expect(canSetAgentPersonal(owner, hermes)).toBeNull();
-    expect(canSetAgentPersonal(admin, hermes)).toMatchObject({ code: 'forbidden' });
+    expect(canSetAgentPersonal(admin, hermes)).toBeNull();
     expect(canSetAgentPersonal(other, hermes)).toMatchObject({ code: 'forbidden' });
     // Its description and personality (2026-10-29): the owner's, as its name is.
     expect(canSetAgentProfile(owner, hermes)).toBeNull();

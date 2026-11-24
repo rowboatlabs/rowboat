@@ -296,8 +296,8 @@ export function canSetAgentProfile(actor: Member, agent: Member): Decision {
 
 /** Switching an agent between channel and personal (spec §4 Agent members, 2026-10-27): the owner, as with its name. */
 export function canSetAgentPersonal(actor: Member, agent: Member): Decision {
-  if (agent.kind === 'agent' && agent.ownerId !== undefined && agent.ownerId === actor.id) return null;
-  return { code: 'forbidden', message: 'only the agent’s owner can change who can use it' };
+  if (agent.kind === 'agent' && agent.ownerId !== undefined && (agent.ownerId === actor.id || actor.role === 'admin')) return null;
+  return { code: 'forbidden', message: 'only the owner or an org admin can change who can use it' };
 }
 
 /** Pointing an agent's alerts at a space (spec §8 Alerts, 2026-10-03): the owner, as with its keys. */
