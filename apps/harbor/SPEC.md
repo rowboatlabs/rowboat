@@ -1,5 +1,7 @@
 # Rowboat Spaces — Shared Spaces for Humans and Their Agents
 
+
+**Decision, 2026-11-24.** Restore host-routed organizations, org-local identities and org-wide admin roles. First sign-in creates a solo org for an account with no memberships. Every org gets one permanent open default space named `general`. Historical org domains and links return through the snapshot split.
 > A space is a shared container — files, a threaded feed, and members — that lives on a **server**: an OAuth-speaking server implementing the spaces protocol. The server stores bytes; every act of intelligence happens on a member's own machine, as that member.
 
 **Status:** v1 · live in production · first draft 2026-08-13 · amended through 2026-11-09 (orgs dissolved).
