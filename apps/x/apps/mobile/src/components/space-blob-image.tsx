@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StatusBar, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { onServer } from '@rowboat/spaces-protocol';
+
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { useColors } from '@/theme/colors';
 
@@ -12,6 +14,16 @@ import { useColors } from '@/theme/colors';
 // component swaps the URL and rides a bearer on the request (expo-image
 // forwards source.headers).
 const BLOB_LINK = /^https?:\/\/([^/]+)\/s\/([^/?#]+)\/b\/([0-9a-f]{64})(?:\?([^#]*))?/;
+
+/**
+ * The host that serves a link's bytes: this org's address when the link is
+ * the server's (protocol `onServer` — the address, an old org host under it,
+ * or the deployment's apex where the one server lived from 2026-11-09 to
+ * 2026-11-24), else the link's own host, for another server's link.
+ */
+export function blobHost(linkHost: string, org: string): string {
+  return onServer(linkHost, org) ? org : linkHost;
+}
 
 export function parseBlobLink(src: string): { host: string; spaceId: string; hash: string; dims: { width: number; height: number } | null } | null {
   const m = BLOB_LINK.exec(src);
@@ -28,7 +40,8 @@ export function parseBlobLink(src: string): { host: string; spaceId: string; has
 // frame instead of flashing a grey box while a token is fetched again.
 let lastToken: string | null = null;
 
-export function SpaceBlobImage({ src }: { src: string }) {
+/** `org`: the address of the org the message is read in, which serves its blobs whatever host the link carries. */
+export function SpaceBlobImage({ src, org }: { src: string; org: string }) {
   const colors = useColors();
   const account = useSpacesAccount();
   const { width: screenWidth } = useWindowDimensions();
@@ -79,7 +92,7 @@ export function SpaceBlobImage({ src }: { src: string }) {
   }
 
   const source = {
-    uri: `https://${link.host}/v1/spaces/${encodeURIComponent(link.spaceId)}/blobs/${link.hash}`,
+    uri: `https://${blobHost(link.host, org)}/v1/spaces/${encodeURIComponent(link.spaceId)}/blobs/${link.hash}`,
     headers: { authorization: `Bearer ${token}` },
     // Content-addressed: the hash IS the bytes, whatever token fetched them.
     cacheKey: link.hash,

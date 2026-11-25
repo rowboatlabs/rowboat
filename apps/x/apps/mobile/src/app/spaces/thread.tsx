@@ -589,10 +589,11 @@ export default function SpaceThreadScreen() {
             />
           ) : null}
           {rootMessage?.deletedAt ? (
-            <MessageRow message={rootMessage} me={me} onToggleReaction={toggleReaction} onLongPress={() => {}} />
+            <MessageRow message={rootMessage} org={org} me={me} onToggleReaction={toggleReaction} onLongPress={() => {}} />
           ) : rootMessage ? (
             <RootMessage
               message={rootMessage}
+              org={org}
               member={profiles.get(rootMessage.author.memberId)}
               memberNames={memberNames} fileNames={fileNames}
               me={me}
@@ -634,7 +635,7 @@ export default function SpaceThreadScreen() {
           {visibleReplies?.map((m, i) => (
             <Fragment key={m.id}>
               {dayKey((i === 0 ? rootMessage : visibleReplies[i - 1])?.postedAt ?? m.postedAt) !== dayKey(m.postedAt) ? <DayHeader iso={m.postedAt} /> : null}
-              <MessageRow message={m} member={profiles.get(m.author.memberId)} memberNames={memberNames} fileNames={fileNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
+              <MessageRow message={m} org={org} member={profiles.get(m.author.memberId)} memberNames={memberNames} fileNames={fileNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }} onOpenAsset={openAssetLink} onOpenBlob={openBlobLink}
                 onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} onVote={vote} onRemoveVote={removeVote} onEndPoll={endPoll}
                 approvalCard={cardFor(m)} invocationLines={linesFor(m)} />
             </Fragment>
@@ -725,8 +726,10 @@ export default function SpaceThreadScreen() {
 
 // The root, Slack-style: 40pt avatar, bold name with the timestamp UNDER it,
 // full-size body, then reaction pills + the always-on emoji+ pill.
-function RootMessage({ message, member, memberNames, fileNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset, onOpenBlob, approvalCard, invocationLines }: {
+function RootMessage({ message, org, member, memberNames, fileNames, me, onToggleReaction, onLongPress, onAddReaction, onVote, onRemoveVote, onEndPoll, onOpenAsset, onOpenBlob, approvalCard, invocationLines }: {
   message: Message;
+  /** As on MessageRow: the address of the org the thread is read in, which serves its attachments. */
+  org: string;
   member?: Member;
   memberNames: ReadonlyMap<string, string>;
   fileNames?: ReadonlyMap<string, string>;
@@ -751,10 +754,10 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
   const imageRule = useMemo(
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
-        node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} /> : null,
+        node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} org={org} /> : null,
       link: fileLinkRule(colors.label),
     }),
-    [colors.label],
+    [colors.label, org],
   );
   const posted = new Date(message.postedAt);
   const today = new Date().toDateString() === posted.toDateString();
@@ -792,6 +795,7 @@ function RootMessage({ message, member, memberNames, fileNames, me, onToggleReac
         <>
           <MessageBody
             body={body}
+            org={org}
             fileNames={fileNames}
             rules={imageRule}
             onLinkPress={(url) => {

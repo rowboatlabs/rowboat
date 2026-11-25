@@ -404,6 +404,14 @@ describe('feed: the stream, threads, and topic annotations', () => {
     expect(onServer(address.toUpperCase(), address)).toBe(true);
     expect(onServer(`evil-${address}`, address)).toBe(false);
     expect(onServer('other.example', address)).toBe(false);
+    // The deployment's apex (every link from 2026-11-09 to 2026-11-24, the one server) names this server too;
+    // another org under it, or anything above it, does not. An address without a parent has no apex.
+    expect(onServer('spaces.example.com', 'rowboat.spaces.example.com')).toBe(true);
+    expect(onServer('SPACES.example.com', 'rowboat.spaces.example.com')).toBe(true);
+    expect(onServer('acme.spaces.example.com', 'rowboat.spaces.example.com')).toBe(false);
+    expect(onServer('example.com', 'rowboat.spaces.example.com')).toBe(false);
+    expect(onServer('localhost:4272', 'localhost:4272')).toBe(true);
+    expect(onServer('localhost:4272', 'rowboat.localhost:4272')).toBe(true);
     expect(parseOrgUrl(orgUrl(address))).toEqual({ kind: 'org', orgAddress: address });
     expect(parseOrgUrl(`https://${address}`)).toEqual({ kind: 'org', orgAddress: address });
     expect(parseOrgUrl(spaceUrl(address, spaceId))).toEqual({ kind: 'space', orgAddress: address, spaceId });

@@ -126,8 +126,10 @@ function FileCard({ name, path, onPress }: { name: string; path?: string; onPres
 }
 
 /** A message body: markdown, with files on their own line as cards and videos as players. */
-export function MessageBody({ body, fileNames, rules, onLinkPress }: {
+export function MessageBody({ body, org, fileNames, rules, onLinkPress }: {
   body: string;
+  /** The address of the org the message is read in: it serves the body's attachments whatever host their links carry. */
+  org: string;
   /** asset id → path in the space. */
   fileNames?: ReadonlyMap<string, string>;
   rules: Record<string, unknown>;
@@ -142,7 +144,7 @@ export function MessageBody({ body, fileNames, rules, onLinkPress }: {
             {seg.text}
           </ChatMarkdown>
         ) : seg.kind === 'video' ? (
-          <MessageVideo key={i} src={seg.url} name={blobLinkName(seg.url, seg.name)} />
+          <MessageVideo key={i} src={seg.url} name={blobLinkName(seg.url, seg.name)} org={org} />
         ) : (
           <FileCard key={i} name={seg.name} path={fileNames?.get(parseAssetLink(seg.url)?.assetId ?? '')} onPress={() => void onLinkPress(seg.url)} />
         ),
@@ -348,8 +350,11 @@ export const MessageRow = memo(function MessageRow({
   onOpenBlob,
   approvalCard,
   invocationLines,
+  org,
 }: {
   message: Message;
+  /** The address of the org the message is read in: it serves the message's attachments whatever host their links carry. */
+  org: string;
   member?: Member;
   /** id → displayName for the whole space — resolves @<memberId> mentions. */
   memberNames?: ReadonlyMap<string, string>;
@@ -401,10 +406,10 @@ export const MessageRow = memo(function MessageRow({
   const imageRule = useMemo(
     () => ({
       image: (node: { key: string; attributes: { src?: string } }) =>
-        node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} /> : null,
+        node.attributes.src ? <SpaceBlobImage key={node.key} src={node.attributes.src} org={org} /> : null,
       link: fileLinkRule(colors.label),
     }),
-    [colors.label],
+    [colors.label, org],
   );
 
   // Deleted messages are filtered out by the screens (Slack); one that still
@@ -486,6 +491,7 @@ export const MessageRow = memo(function MessageRow({
           <>
             <MessageBody
               body={body}
+              org={org}
               fileNames={fileNames}
               rules={imageRule}
               onLinkPress={(url) => {
