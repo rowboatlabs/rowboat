@@ -682,7 +682,8 @@ function SpaceChip({ spaceId, orgAddress, fallback }: { spaceId: string; orgAddr
     const refs = useContext(SpaceRefsContext)
     const nav = useContext(SpaceNavContext)
     const { orgs } = useSpacesOrgs()
-    const org = orgAddress !== undefined ? orgs.find((o) => onServer(orgAddress, o.address)) : orgs.find((o) => o.id === refs?.orgId)
+    // A link on the deployment's apex (2026-11-09 to 2026-11-24) names its org by the space, so the org that has it wins.
+    const org = orgAddress !== undefined ? orgs.find((o) => onServer(orgAddress, o.address) && findSpace(o, spaceId)) : orgs.find((o) => o.id === refs?.orgId)
     const space = org ? findSpace(org, spaceId) : undefined
     if (!org || !space) {
         // A bare canonical URL is its own label; anything else reads as a #name.

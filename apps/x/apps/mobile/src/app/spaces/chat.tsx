@@ -667,6 +667,7 @@ export default function SpaceChatScreen() {
               {i === 0 || dayKey(visible[i - 1]!.postedAt) !== dayKey(m.postedAt) ? <DayHeader iso={m.postedAt} /> : null}
               <MessageRow
                 message={m}
+                org={org}
                 member={profiles.get(m.author.memberId)}
                 memberNames={memberNames} fileNames={fileNames}
                 members={profiles}

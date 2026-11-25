@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View, useWindowDimensions } from 'react-native';
 
 import { Image as SymbolImage } from '@/components/sf-image';
-import { parseBlobLink } from '@/components/space-blob-image';
+import { blobHost, parseBlobLink } from '@/components/space-blob-image';
 import { useSpacesAccount } from '@/lib/spaces/account';
 import { friendlyError } from '@/lib/spaces/errors';
 import { downloadBlob } from '@/lib/spaces/open-blob';
@@ -108,9 +108,10 @@ function Player({ uri }: { uri: string }) {
  * A video attached to a message, in the message like an image (2026-11-07):
  * the first frame with the player's controls, at the message column's width.
  * Links carry no dimensions for videos, so the box is 16:9 and the frame fits
- * inside it.
+ * inside it. `org`: the address of the org the message is read in, which
+ * serves the video whatever host the link carries (SpaceBlobImage).
  */
-export function MessageVideo({ src, name }: { src: string; name: string }) {
+export function MessageVideo({ src, name, org }: { src: string; name: string; org: string }) {
   const colors = useColors();
   const { width: screenWidth } = useWindowDimensions();
   const link = parseBlobLink(src);
@@ -120,7 +121,7 @@ export function MessageVideo({ src, name }: { src: string; name: string }) {
   return (
     <View style={{ marginVertical: 6, gap: 4 }}>
       <View style={{ width, height: width / aspect, borderRadius: 10, borderCurve: 'continuous', overflow: 'hidden', backgroundColor: '#000' }}>
-        <BlobVideo org={link.host} spaceId={link.spaceId} hash={link.hash} name={name} />
+        <BlobVideo org={blobHost(link.host, org)} spaceId={link.spaceId} hash={link.hash} name={name} />
       </View>
       <Text numberOfLines={1} style={{ fontSize: 12, color: colors.secondaryLabel, maxWidth: width }}>{name}</Text>
     </View>

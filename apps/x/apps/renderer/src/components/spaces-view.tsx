@@ -47,6 +47,7 @@ import { ThreadPane } from '@/components/spaces/thread-pane'
 import { loadOlderStreamMessages, STREAM_READ_KEY, useSpacePresence, useSpacesUnreadCounts, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useOrgRoster, useSpaceMembers, usePeopleOnline } from '@/hooks/use-space-members'
 import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { onServer } from '@x/shared/dist/spaces.js'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
 import { directAvatarId, directLabel, isSelfDirect, memberLabel } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
@@ -791,9 +792,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             .then((asset) => openFile(asset.id))
             .catch((err) => toast(err instanceof Error ? err.message : 'Could not create the todo list', 'error'))
     }
-    /** A canonical link into another space the reader is in: the org address names the org, App does the navigation. */
-    const resolveSpace = (orgAddress: string, _spaceId: string): string | null => {
-        const target = orgs.find((o) => o.address === orgAddress)
+    /**
+     * A canonical link into another space the reader is in: the org address names the org, App does the navigation.
+     * A link on the deployment's apex (2026-11-09 to 2026-11-24, protocol `onServer`) names its org by the space alone.
+     */
+    const resolveSpace = (orgAddress: string, spaceId: string): string | null => {
+        const target = orgs.find((o) => onServer(orgAddress, o.address) && findSpace(o, spaceId))
         return target?.id ?? null
     }
     const openSpaceFile = (orgId: string, spaceId: string, assetId: string) => {

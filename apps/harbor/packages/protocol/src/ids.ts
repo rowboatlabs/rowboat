@@ -156,13 +156,18 @@ export function parseOrgUrl(url: string): OrgLink | null {
 }
 
 /**
- * Whether a link's host names this server. Until 2026-11-09 every link was
- * minted on an org's host, `<org>.<address>`, and every message written
- * before carries such links; they still mean this server (spec §4, no
- * rewrite of the log). Hosts compare case-insensitively.
+ * Whether a link's host names this server. Every link is minted on the org's
+ * address; two eras of links still mean this server and are never rewritten
+ * in the log (spec §4). Until 2026-11-09 the address was the deployment's
+ * and links carried an org host under it, `<org>.<address>`. From 2026-11-09
+ * to 2026-11-24 (one server) links carried the deployment's apex, which the
+ * org's address now sits under, `<org>.<apex>`. An apex link names an org by
+ * its space, not its host, so a caller that holds the space resolves it
+ * there. Hosts compare case-insensitively.
  */
 export function onServer(host: string, address: string): boolean {
   const h = host.toLowerCase();
   const a = address.toLowerCase();
-  return h === a || h.endsWith(`.${a}`);
+  const apex = a.slice(a.indexOf('.') + 1);
+  return h === a || h.endsWith(`.${a}`) || (apex !== a && h === apex);
 }

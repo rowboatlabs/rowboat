@@ -282,19 +282,20 @@ export const isBlobAppUrl = (url: string): boolean => (LOCAL_RUNTIME ? url.start
  * Rewrite the server's blob links inside a markdown body to their app:// form so
  * plain <img>/<a> rendering just works. Any space on the server is matched — the
  * serving path re-checks membership; a link the viewer can't fetch 404s into
- * a broken image, never into leaked bytes. Code regions stay literal. A link
- * on an old org host, `<org>.<address>` (every message from before
- * 2026-11-09), is the server's too (protocol `onServer`).
+ * a broken image, never into leaked bytes. Code regions stay literal. Which
+ * hosts are the server's — the org address, an old org host under it (before
+ * 2026-11-09) and the deployment's apex (2026-11-09 to 2026-11-24, when the
+ * one server lived there) — is the protocol's `onServer`; the org is this
+ * space's, since the body is read inside it.
  */
 export function rewriteBlobLinks(body: string, refs: SpaceRefs): string {
-    const host = refs.orgAddress.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const re = new RegExp(`https://(?:[a-z0-9-]+\\.)*${host}/s/([0-9A-HJKMNP-TV-Z]{26})/b/([0-9a-f]{64})`, 'gi')
+    const re = /https:\/\/([a-z0-9.-]+(?::\d+)?)\/s\/([0-9A-HJKMNP-TV-Z]{26})\/b\/([0-9a-f]{64})/gi
     const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
     return parts
         .map((part, i) => {
             if (i % 2 === 1) return part // a code region — cite, not render
-            return part.replace(re, (_m, spaceId: string, hash: string) =>
-                blobAppUrl({ orgId: refs.orgId, spaceId }, hash),
+            return part.replace(re, (m, host: string, spaceId: string, hash: string) =>
+                onServer(host, refs.orgAddress) ? blobAppUrl({ orgId: refs.orgId, spaceId }, hash) : m,
             )
         })
         .join('')
@@ -322,7 +323,7 @@ export function formatBytes(size: number): string {
 // The token → person faces live in @x/shared (the phone renders through the
 // same code); re-exported to keep the renderer's import path.
 export { decorateMentions, resolveMentions } from '@x/shared/dist/spaces.js'
-import { mapMentionTokens, parseOrgUrl } from '@x/shared/dist/spaces.js'
+import { mapMentionTokens, onServer, parseOrgUrl } from '@x/shared/dist/spaces.js'
 
 /**
  * Mention tokens → app:// links the space anchor renders as chips (Streamdown's

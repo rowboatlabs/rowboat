@@ -431,3 +431,24 @@ describe('blob links on an old org host', () => {
         expect(rewriteBlobLinks(other, refs)).toBe(other)
     })
 })
+
+// Every message from 2026-11-09 to 2026-11-24 links its attachments on the
+// deployment's apex, where the one server lived; the org under it serves them.
+describe('blob links on the deployment apex', () => {
+    const refs = { orgId: 'org-rowboat', orgAddress: 'rowboat.spaces.x.rowboatlabs.com', spaceId: '01HXSPACE00000000000000000' } as unknown as Parameters<typeof rewriteBlobLinks>[1]
+    const hash = 'b'.repeat(64)
+    it('rewrite to this org, keeping the display query', () => {
+        const flat = `[clip.mp4](https://spaces.x.rowboatlabs.com/s/01HXSPACE00000000000000000/b/${hash}?name=clip.mp4)`
+        expect(rewriteBlobLinks(flat, refs)).toBe(`[clip.mp4](app://space-blob/org-rowboat/01HXSPACE00000000000000000/${hash}?name=clip.mp4)`)
+        // The org's own links and a dev address with a port still rewrite.
+        expect(rewriteBlobLinks(`![x](https://rowboat.spaces.x.rowboatlabs.com/s/01HXSPACE00000000000000000/b/${hash})`, refs)).toContain('app://space-blob/')
+        const dev = { ...refs, orgAddress: 'rowboat.localhost:4272' }
+        expect(rewriteBlobLinks(`![x](https://localhost:4272/s/01HXSPACE00000000000000000/b/${hash})`, dev)).toContain('app://space-blob/')
+    })
+    it('leave another org and anything above the apex alone', () => {
+        for (const host of ['acme.spaces.x.rowboatlabs.com', 'x.rowboatlabs.com', 'spaces.x.rowboatlabs.com.evil.example']) {
+            const body = `![x](https://${host}/s/01HXSPACE00000000000000000/b/${hash})`
+            expect(rewriteBlobLinks(body, refs)).toBe(body)
+        }
+    })
+})
