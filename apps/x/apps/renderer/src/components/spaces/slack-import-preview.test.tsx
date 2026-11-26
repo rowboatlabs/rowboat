@@ -50,7 +50,22 @@ it('starts only selected channels after explicit confirmation and shows durable 
     fireEvent.click(await screen.findByLabelText('Select general'))
     fireEvent.change(screen.getByLabelText('Slack workspace domain'), { target: { value: 'team.slack.com' } })
     fireEvent.click(screen.getByRole('button', { name: 'Import 1 channels as new spaces' }))
-    await screen.findByText('team.slack.com · queued · 0/1 channels')
+    await screen.findByText('Import queued')
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuetext')).toBe('0 of 1 channel processed')
     expect(invoke).toHaveBeenCalledWith('spaces:startSlackImport', { orgId: 'server', bytes: 'emlw', workspace: 'team.slack.com', channelIds: ['C1'], existingChannels: 'skip' })
     expect(screen.queryByLabelText('Select general')).toBeNull()
+})
+
+it('shows live progress within a single channel before it commits', async () => {
+    invoke.mockResolvedValueOnce({ jobs: [{ id: 'job', workspace: 'team.slack.com', status: 'running',
+        currentChannel: { id: 'C1', processed: 12 }, channels: [{ id: 'C1', name: 'general', messages: 30, status: 'pending' }] }] })
+    invoke.mockResolvedValue({ jobs: [{ id: 'job', workspace: 'team.slack.com', status: 'completed',
+        channels: [{ id: 'C1', name: 'general', messages: 30, status: 'imported' }] }] })
+    render(<SlackImportPreviewPanel orgId="server" />)
+    const bar = await screen.findByRole('progressbar', { name: 'Import progress for team.slack.com' })
+    expect(bar.getAttribute('aria-valuenow')).toBe('40')
+    expect(bar.getAttribute('aria-valuetext')).toContain('#general · 12 of 30 messages checked')
+    await screen.findByText('Import complete', {}, { timeout: 4000 })
+    expect(bar.getAttribute('aria-valuenow')).toBe('100')
+    expect(bar.getAttribute('aria-valuetext')).toBe('1 of 1 channel processed')
 })

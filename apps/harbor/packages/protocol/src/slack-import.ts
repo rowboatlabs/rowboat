@@ -31,6 +31,7 @@ export const SlackImportJob = z.object({
   id: z.string(), workspace: z.string(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
   status: z.enum(['queued', 'running', 'completed', 'failed']),
   channels: z.array(z.object({ id: z.string(), name: z.string(), spaceId: z.string(), existing: z.boolean().optional(), messages: Count, source: z.object({ private: z.boolean(), archived: z.boolean(), topic: z.string(), purpose: z.string(), memberIds: z.array(z.string()) }), status: z.enum(['pending', 'imported', 'skipped']) })),
+  currentChannel: z.object({ id: z.string(), processed: Count }).optional(),
   warnings: SlackImportPreview.shape.warnings,
   error: z.string().optional(),
 });

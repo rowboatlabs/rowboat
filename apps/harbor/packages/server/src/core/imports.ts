@@ -9,6 +9,16 @@ import type { ActorCtx, Kernel } from './kernel.js';
 const date = (timestamp: string) => new Date(Number(timestamp) * 1000).toISOString();
 export class Imports {
   private active = 0;
+  // 2026-11-26: expose work inside the channel transaction without persisting uncommitted progress.
+  private currentChannel?: { jobId: string; id: string; processed: number };
+
+  private progress(job: SlackImportJob): SlackImportJob {
+    const current = this.currentChannel;
+    if (current?.jobId === job.id && job.channels.some(c => c.id === current.id && c.status === 'pending') && job.status !== 'failed') {
+      return { ...job, status: 'running', currentChannel: { id: current.id, processed: current.processed } };
+    }
+    return job;
+  }
   private timer?: ReturnType<typeof setInterval>;
   private running?: Promise<void>;
   private stopped = true;
@@ -84,7 +94,7 @@ export class Imports {
   }
   async list(ctx: ActorCtx) {
     await this.k.requireActiveMember(ctx);
-    return { jobs: (await this.k.store.listSlackJobs(ctx.memberId)).map(r => r.job) };
+    return { jobs: (await this.k.store.listSlackJobs(ctx.memberId)).map(r => this.progress(r.job)) };
   }
   private async owned(ctx: ActorCtx, id: string) {
     await this.k.requireActiveMember(ctx);
@@ -92,7 +102,7 @@ export class Imports {
     enforce(canManageSlackImport(ctx.memberId, record?.ownerId));
     return record!;
   }
-  async get(ctx: ActorCtx, id: string) { return (await this.owned(ctx, id)).job; }
+  async get(ctx: ActorCtx, id: string) { return this.progress((await this.owned(ctx, id)).job); }
   async retry(ctx: ActorCtx, id: string) {
     this.k.guardWrite();
     const job = await this.k.store.withSpaceLock(`slack-owner:${ctx.memberId}`, async () => {
@@ -135,7 +145,9 @@ export class Imports {
                 const { membership } = await this.k.requireMembership({ memberId: r.ownerId }, existing);
                 enforce(canAppendSlackImport(membership));
               }
-              await this.importChannel(r, source, target.spaceId, !!existing);
+              const progress = { jobId: r.job.id, id: target.id, processed: 0 };
+              this.currentChannel = progress;
+              await this.importChannel(r, source, target.spaceId, !!existing, progress);
               if (!existing) await this.k.store.putSlackSource(r.ownerId, r.job.workspace, source.id, target.spaceId);
               target.status = 'imported';
             }
@@ -146,8 +158,10 @@ export class Imports {
             r.job.updatedAt = this.k.now();
             await this.k.store.putSlackJob(r);
           });
+          this.currentChannel = undefined;
         }
       } catch (error) {
+        this.currentChannel = undefined;
         await this.k.store.withSpaceLock(`slack-owner:${entry.ownerId}`, async () => {
           const r = await this.k.store.getSlackJob(entry.job.id);
           if (!r || r.job.status === 'completed') return;
@@ -158,7 +172,7 @@ export class Imports {
       }
     }
   }
-  private async importChannel(r: StoredSlackJob, channel: SlackChannel, spaceId: string, append = false) {
+  private async importChannel(r: StoredSlackJob, channel: SlackChannel, spaceId: string, append: boolean, progress: { processed: number }) {
     const now = this.k.now();
     if (!channel.name || channel.name.length > 128) throw new HarborError('invalid_request', 'Channel name must contain 1–128 characters');
     if (!append) {
@@ -194,9 +208,11 @@ export class Imports {
       await write({ id: m.parentId, timestamp: m.parentId, authorId: 'unknown', text: 'Earlier Slack message unavailable in this export.', textFormat: 'slack', deleted: false, files: [], reactions: [] }, true);
     }
     for (const m of [...channel.messages].sort((a,b) => Number(a.timestamp)-Number(b.timestamp))) {
-      if (imported.has(m.timestamp)) continue;
-      await write(m);
-      if (m.parentId) roots.add(ids.get(m.parentId)!);
+      if (!imported.has(m.timestamp)) {
+        await write(m);
+        if (m.parentId) roots.add(ids.get(m.parentId)!);
+      }
+      progress.processed++;
     }
     for (const id of roots) await this.k.store.refreshReplyStats(spaceId, id);
   }

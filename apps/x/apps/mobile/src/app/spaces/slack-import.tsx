@@ -3,8 +3,9 @@ import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
 import { MAX_SLACK_ZIP_BYTES, type SlackImportJob, type SlackImportPreview } from '@rowboat/spaces-protocol';
+import { spaces } from '@x/shared';
 import { PrimaryButton } from '@/components/grouped';
 import { markSpacesChanged, useOrgClient } from '@/lib/spaces/invites';
 import { friendlyError } from '@/lib/spaces/errors';
@@ -22,7 +23,9 @@ export default function SlackImportScreen() {
   const [selected, setSelected] = useState<string[]>([]);
   const [append, setAppend] = useState(false);
   const [jobs, setJobs] = useState<SlackImportJob[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [expandedJob, setExpandedJob] = useState<string | null>(null);
+  const [operation, setOperation] = useState<'preview' | 'start' | 'retry' | null>(null);
+  const busy = operation !== null;
   const [error, setError] = useState('');
   useEffect(() => {
     let disposed = false;
@@ -36,7 +39,7 @@ export default function SlackImportScreen() {
     return () => { disposed = true; clearTimeout(timer); };
   }, [client]);
   const pick = async () => {
-    setBusy(true); setError(''); setPreview(null); setBytes(''); setSelected([]); setPage(0); setQuery('');
+    setOperation('preview'); setError(''); setPreview(null); setBytes(''); setSelected([]); setPage(0); setQuery('');
     try {
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, type: ['application/zip', 'application/x-zip-compressed'] });
       if (result.canceled) return;
@@ -46,30 +49,52 @@ export default function SlackImportScreen() {
       const summary = await client.previewSlackImport(data);
       setBytes(await file.base64()); setPreview(summary);
     } catch (e) { setError(friendlyError(e)); }
-    finally { setBusy(false); }
+    finally { setOperation(null); }
   };
   const start = async () => {
-    setBusy(true); setError('');
+    setOperation('start'); setError('');
     try {
       const job = await client.startSlackImport({ bytes, workspace: workspace.trim().toLowerCase(), channelIds: selected, existingChannels: append ? 'append' : 'skip' });
       setJobs(current => [job, ...current.filter(j => j.id !== job.id)]);
       setBytes(''); setPreview(null); setSelected([]); markSpacesChanged(org);
     } catch (e) { setError(friendlyError(e)); }
-    finally { setBusy(false); }
+    finally { setOperation(null); }
   };
   const retry = async (id: string) => {
-    setBusy(true); setError('');
-    try { const job = await client.retrySlackImport(id); setJobs(current => current.map(j => j.id === id ? job : j)); }
+    setOperation('retry'); setError('');
+    try { const job = await client.retrySlackImport(id); setJobs(current => [job, ...current.filter(j => j.id !== id)]); }
     catch (e) { setError(friendlyError(e)); }
-    finally { setBusy(false); }
+    finally { setOperation(null); }
   };
   const label = { color: colors.label, fontSize: 15 };
   const input = { ...label, padding: 12, borderRadius: 10, backgroundColor: colors.card };
+  const renderJob = (job: SlackImportJob) => {
+    const { status, count, detail, percent } = spaces.slackImportProgress(job);
+    const active = job.status === 'queued' || job.status === 'running';
+    return <View key={job.id} style={{ gap: 8, padding: 12, borderRadius: 10, backgroundColor: colors.card }}>
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        {active && <ActivityIndicator color={colors.label} size="small" />}
+        <Text style={{ ...label, fontWeight: '600', flex: 1 }}>{status}</Text>
+      </View>
+      <Text style={{ color: colors.secondaryLabel }}>{job.workspace}</Text>
+      <View accessible accessibilityRole="progressbar" accessibilityLabel={`Import progress for ${job.workspace}`} accessibilityValue={{ min: 0, max: 100, now: percent, text: [count, detail].filter(Boolean).join('. ') }} style={{ height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: colors.separator }}>
+        <View style={{ width: `${percent}%`, height: '100%', backgroundColor: colors.accent }} />
+      </View>
+      <Text accessibilityLiveRegion="polite" style={{ color: colors.secondaryLabel }}>{count}{detail && `\n${detail}`}</Text>
+      {job.error && <Text style={{ color: colors.destructive }}>{job.error}</Text>}
+      {job.status === 'failed' && <PrimaryButton label="Retry remaining channels" busy={busy} onPress={() => void retry(job.id)} />}
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: expandedJob === job.id }} onPress={() => setExpandedJob(expandedJob === job.id ? null : job.id)} style={{ minHeight: 44, justifyContent: 'center' }}>
+        <Text style={label}>{expandedJob === job.id ? 'Hide channel details' : 'Show channel details'}</Text>
+      </Pressable>
+      {expandedJob === job.id && job.channels.map(c => <Pressable key={c.id} disabled={c.status === 'pending'} onPress={() => { markSpacesChanged(org); router.push({ pathname: '/spaces/chat', params: { org, me, space: c.spaceId, title: c.name } }); }}><Text style={label}>#{c.name} · {c.status}{c.status !== 'pending' ? ' →' : ''}</Text></Pressable>)}
+    </View>;
+  };
   return <ScrollView style={{ flex: 1, backgroundColor: colors.groupedBackground }} contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }}>
     <Stack.Screen options={{ title: 'Import from Slack' }} />
     <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}><Image source={require('../../../assets/images/slack.svg')} style={{ width: 28, height: 28 }} /><Text style={{ ...label, fontWeight: '600' }}>Import from Slack</Text></View>
+    {jobs[0] && renderJob(jobs[0])}
     <Text style={label}>Each channel becomes a new space, initially accessible only to you. Imports continue after you leave this screen.</Text>
-    <PrimaryButton label="Choose Slack export ZIP" busy={busy} onPress={() => void pick()} />
+    <PrimaryButton label={operation === 'preview' ? 'Checking export' : 'Choose Slack export ZIP'} busy={operation === 'preview'} disabled={busy} onPress={() => void pick()} />
     {error ? <Text accessibilityRole="alert" style={{ color: colors.destructive }}>{error}</Text> : null}
     {preview && <>
       <Text style={label}>{preview.channels.length} channels · {preview.records.accepted} accepted records · {preview.records.skipped} skipped</Text>
@@ -88,13 +113,8 @@ export default function SlackImportScreen() {
       <TextInput accessibilityLabel="Slack workspace domain" placeholder="team.slack.com" placeholderTextColor={colors.tertiaryLabel} autoCapitalize="none" autoCorrect={false} style={input} value={workspace} onChangeText={setWorkspace} />
       <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}><Switch accessibilityLabel="Append new messages" value={append} onValueChange={setAppend} /><Text style={{ ...label, flex: 1 }}>Append new messages to previously imported channels</Text></View>
       <Text style={{ color: colors.secondaryLabel }}>Use the same workspace domain on repeat imports. Existing messages stay unchanged. File links are preserved; attachments are not downloaded.</Text>
-      <PrimaryButton label={`Import ${selected.length} channels`} busy={busy} disabled={!selected.length || selected.length > 100 || !workspace.trim() || jobs.some(j => ['queued', 'running'].includes(j.status))} onPress={() => void start()} />
+      <PrimaryButton label={operation === 'start' ? 'Starting import' : `Import ${selected.length} channels`} busy={operation === 'start'} disabled={busy || !selected.length || selected.length > 100 || !workspace.trim() || jobs.some(j => ['queued', 'running'].includes(j.status))} onPress={() => void start()} />
     </>}
-    {jobs.map(job => <View key={job.id} style={{ gap: 8, padding: 12, borderRadius: 10, backgroundColor: colors.card }}>
-      <Text style={label}>{job.workspace} · {job.status}</Text>
-      {job.error && <Text style={{ color: colors.destructive }}>{job.error}</Text>}
-      {job.status === 'failed' && <PrimaryButton label="Retry remaining channels" busy={busy} onPress={() => void retry(job.id)} />}
-      {job.channels.map(c => <Pressable key={c.id} disabled={c.status === 'pending'} onPress={() => { markSpacesChanged(org); router.push({ pathname: '/spaces/chat', params: { org, me, space: c.spaceId, title: c.name } }); }}><Text style={label}>#{c.name} · {c.status}{c.status !== 'pending' ? ' →' : ''}</Text></Pressable>)}
-    </View>)}
+    {jobs.slice(1).map(renderJob)}
   </ScrollView>;
 }

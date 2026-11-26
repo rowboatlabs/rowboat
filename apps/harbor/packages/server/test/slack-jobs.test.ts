@@ -64,9 +64,20 @@ it('rolls back a failed channel and resumes queued jobs after worker restart', a
   expect(await harbor.store.getSpace(job.channels[0]!.spaceId)).toBeUndefined();
   const original = harbor.store.appendMessage.bind(harbor.store);
   let count = 0;
-  const fault = vi.spyOn(harbor.store, 'appendMessage').mockImplementation(async message => { if (++count === 2) throw new Error('Injected failure'); await original(message); });
+  let live: SlackImportJob | undefined;
+  const fault = vi.spyOn(harbor.store, 'appendMessage').mockImplementation(async message => {
+    if (++count === 2) {
+      const result = await harbor.service.listSlackImports({ memberId: 'importer' });
+      live = result.jobs.find(item => item.id === job.id);
+      throw new Error('Injected failure');
+    }
+    await original(message);
+  });
   harbor.service.startImports();
-  expect((await settled(job.id)).status).toBe('failed');
+  const failed = await settled(job.id);
+  expect(live).toMatchObject({ status: 'running', currentChannel: { id: 'C1', processed: 1 } });
+  expect(failed.status).toBe('failed');
+  expect(failed.currentChannel).toBeUndefined();
   expect(await harbor.store.getSpace(job.channels[0]!.spaceId)).toBeUndefined();
   fault.mockRestore();
   await harbor.service.stopImports();
