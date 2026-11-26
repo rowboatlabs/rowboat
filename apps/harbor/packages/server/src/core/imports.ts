@@ -71,10 +71,8 @@ export class Imports {
     const key = createHash('sha256').update(JSON.stringify([ctx.memberId, input.workspace, [...ids].sort(), input.existingChannels ?? 'skip'])).update(bytes).digest('hex');
     const job = await this.k.store.withSpaceLock(`slack-owner:${ctx.memberId}`, async () => {
       await this.k.requireActiveMember(ctx);
-      const jobs = await this.k.store.listSlackJobs(ctx.memberId);
       const existing = await this.k.store.getSlackJobByKey(key);
       if (existing) return existing.job;
-      if (jobs.some(j => j.job.status === 'queued' || j.job.status === 'running')) throw new HarborError('rate_limited', 'An import is already active. Wait for it to finish.');
       const now = this.k.now();
       const job: SlackImportJob = { id: this.k.ulid(), existingChannels: input.existingChannels ?? 'skip', workspace: input.workspace, createdAt: now, updatedAt: now, status: 'queued', warnings: payload.warnings,
         channels: payload.channels.map(c => ({ id: c.id, name: c.name, spaceId: this.k.ulid(), messages: c.messages.length, source: { private: c.private, archived: c.archived, topic: c.topic, purpose: c.purpose, memberIds: c.memberIds }, status: 'pending' })) };
@@ -108,7 +106,6 @@ export class Imports {
     const job = await this.k.store.withSpaceLock(`slack-owner:${ctx.memberId}`, async () => {
       const r = await this.owned(ctx, id);
       if (r.job.status !== 'failed') return r.job;
-      if ((await this.k.store.listSlackJobs(ctx.memberId)).some(j => ['queued','running'].includes(j.job.status))) throw new HarborError('rate_limited', 'An import is already active');
       r.job.status = 'queued'; delete r.job.error; r.job.updatedAt = this.k.now();
       await this.k.store.putSlackJob(r); return r.job;
     });
@@ -127,7 +124,11 @@ export class Imports {
         for (const channel of entry.job.channels) {
           if (this.stopped) return;
           if (channel.status !== 'pending') continue;
-          await this.k.locked(channel.spaceId, async () => {
+          const destination = entry.job.existingChannels === 'append'
+            ? await this.k.store.getSlackSource(entry.ownerId, entry.job.workspace, channel.id)
+            : undefined;
+          const spaceId = destination ?? channel.spaceId;
+          await this.k.locked(spaceId, async () => {
             const r = await this.k.store.getSlackJob(entry.job.id);
             if (!r || !['queued', 'running'].includes(r.job.status)) return;
             const target = r.job.channels.find(c => c.id === channel.id)!;
@@ -140,8 +141,9 @@ export class Imports {
             else {
               const source = r.payload?.channels.find(c => c.id === target.id);
               if (!source) throw new Error('Missing import payload');
-              if (existing && existing !== target.spaceId) throw new HarborError('invalid_request', 'Import destination changed. Start a new import.');
+              if (existing && existing !== spaceId) throw new HarborError('invalid_request', 'Import destination changed. Start a new import.');
               if (existing) {
+                target.spaceId = existing;
                 const { membership } = await this.k.requireMembership({ memberId: r.ownerId }, existing);
                 enforce(canAppendSlackImport(membership));
               }

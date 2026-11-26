@@ -149,8 +149,16 @@ describe('Slack ZIP preview', () => {
       message({ subtype: 'message_changed', ts: '1767225602.000001' }),
     ]) await expect(previewSlackExport(zip(basic([message(), edit])))).rejects.toMatchObject({ code: 'invalid_export' });
   });
+  it('continues parsing after the warning list fills up', async () => {
+    const archive = zip(fixture('enterprise'));
+    const full = await previewSlackExport(archive);
+    expect(full.warnings.length).toBeGreaterThan(1);
+    expect(await previewSlackExport(archive, { warnings: 1 })).toEqual({
+      ...full, warnings: full.warnings.slice(0, 1),
+    });
+  });
   it.each([
-    { zipBytes: 1 }, { entries: 1 }, { entryBytes: 1 }, { expandedBytes: 1 }, { records: 1 }, { warnings: 1 },
+    { zipBytes: 1 }, { entries: 1 }, { entryBytes: 1 }, { expandedBytes: 1 }, { records: 1 },
   ])('enforces bounded resources: %j', async limits => {
     await expect(previewSlackExport(zip(fixture('enterprise')), limits)).rejects.toMatchObject({ code: 'limit_exceeded' });
   });

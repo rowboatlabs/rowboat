@@ -793,7 +793,7 @@ The account menu offers active/away, a status emoji and message with optional ex
 
 ### Slack migration (2026-11-16)
 
-An authenticated member can preview a Slack JSON-export ZIP from New space or Settings → Imports. Selection plus an explicit Import action creates a durable job: each selected channel becomes a separate new membership-only space, initially with the importer as its sole admin. Importing from settings never merges history into the current space. Up to 100 channels per job and one active job per importing member; archive safety limits are independent of Slack subscription tiers.
+An authenticated member can preview a Slack JSON-export ZIP from New space or Settings → Imports. Selection plus an explicit Import action creates a durable job: each selected channel becomes a separate new membership-only space, initially with the importer as its sole admin. Importing from settings never merges history into the current space. Members can queue additional imports while a job is active. Each job accepts up to 100 channels; archive safety limits are independent of Slack subscription tiers.
 
 Jobs continue after the dialog closes and resume at startup. A channel is atomic; a failure rolls back that channel, preserves earlier channels, and offers retry for the remaining work. Workspace domain plus source channel ID identifies previously imported channels for this importer; re-importing skips them rather than incrementally updating history. The same archive/selection returns the same job. Different importers have independent destinations.
 

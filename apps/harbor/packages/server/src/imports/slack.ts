@@ -92,7 +92,7 @@ export async function previewSlackExport(bytes: Buffer, overrides: Partial<Slack
   const files = await readArchive(bytes, limits);
   const result: SlackPreview = { channels: [], identities: [], warnings: [], records: { read: 0, accepted: 0, skipped: 0, superseded: 0 } };
   const warn = (code: string, path: string, detail: string, record?: number) => {
-    if (result.warnings.length >= limits.warnings) fail('limit_exceeded', 'Too many import warnings.');
+    if (result.warnings.length >= limits.warnings) return;
     result.warnings.push({ code, path, detail, ...(record !== undefined ? { record } : {}) });
   };
   let parsedRecords = 0;
