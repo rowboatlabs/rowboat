@@ -4,6 +4,7 @@ import { SlackIcon } from '@/components/onboarding/provider-icons'
 import { useEffect, useRef, useState } from 'react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { Input } from '@/components/ui/input'
 import { refreshSpacesOrgs } from '@/hooks/use-spaces'
 
@@ -19,6 +20,32 @@ function date(ts?: string) {
     if (!ts) return '—'
     const value = new Date(Number(ts) * 1000)
     return Number.isNaN(value.getTime()) ? '—' : value.toISOString().slice(0, 10)
+}
+
+function ImportJob({ job, retry, onOpenSpace }: {
+    job: spaces.SlackImportJob
+    retry: (id: string) => void
+    onOpenSpace?: (id: string) => void
+}) {
+    const { status, count, detail, percent } = spaces.slackImportProgress(job)
+    const active = job.status === 'queued' || job.status === 'running'
+    return <article className="min-w-0 space-y-2 rounded-lg border border-border p-4 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <h3 className="flex items-center gap-2 font-medium">{active && <Loader2 aria-hidden className="size-4 motion-safe:animate-spin" />}{status}</h3>
+            <span className="break-all text-xs text-muted-foreground">{job.workspace}</span>
+        </div>
+        <Progress value={percent} aria-label={`Import progress for ${job.workspace}`} aria-valuetext={[count, detail].filter(Boolean).join('. ')} className="h-1.5" />
+        <p role="status" className="text-[13px] leading-[18px] tabular-nums text-muted-foreground">{count}{detail && <span className="block break-words">{detail}</span>}</p>
+        {job.error && <p role="alert" className="text-destructive">{job.error}</p>}
+        {job.status === 'failed' && <Button variant="outline" size="sm" onClick={() => retry(job.id)}>Retry remaining channels</Button>}
+        <details><summary className="cursor-pointer py-1">Channel details</summary>
+            <ul className="max-h-56 divide-y divide-border overflow-y-auto">{job.channels.map(c => <li key={c.id} className="flex items-center gap-2 py-1.5">
+                <span className="min-w-0 flex-1 break-all">#{c.name}</span><span className="text-xs capitalize text-muted-foreground">{c.status}</span>
+                {c.status !== 'pending' && onOpenSpace && <Button variant="link" size="sm" aria-label={`Open space for #${c.name}`} onClick={() => onOpenSpace(c.spaceId)}>Open space</Button>}
+            </li>)}</ul>
+        </details>
+        {job.warnings?.length > 0 && <details><summary className="cursor-pointer">{job.warnings.length} import warnings</summary><ul className="max-h-48 overflow-auto text-xs">{job.warnings.slice(0, 100).map((w, i) => <li key={i}>{w.path}: {w.detail}</li>)}</ul>{job.warnings.length > 100 && <p>Showing the first 100 warnings.</p>}</details>}
+    </article>
 }
 
 // 2026-11-16: preview first, then explicit durable import; shared by creation and settings.
@@ -57,7 +84,7 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
         finally { setStarting(false) }
     }
     const retry = async (jobId: string) => {
-        try { const job = await window.ipc.invoke('spaces:retrySlackImport', { orgId, jobId }); setJobs(current => current.map(j => j.id === job.id ? job : j)) }
+        try { const job = await window.ipc.invoke('spaces:retrySlackImport', { orgId, jobId }); setJobs(current => [job, ...current.filter(j => j.id !== job.id)]) }
         catch (err) { setError(err instanceof Error ? err.message : 'Could not retry import.') }
     }
     const [preview, setPreview] = useState<spaces.SlackImportPreview | null>(null)
@@ -103,8 +130,9 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
                 <p className="mt-1 text-sm text-muted-foreground">Choose the conversations to bring with you. Each channel gets its own Rowboat space.</p></div>
         </div>
         <ol aria-label="Import steps" className="grid grid-cols-3 gap-2 text-xs">
-            {['Upload ZIP', 'Choose channels', 'Import history'].map((step, index) => <li key={step} aria-current={(starting ? 2 : preview ? 1 : 0) === index ? 'step' : undefined} className="flex items-center gap-2 rounded-lg bg-muted/40 p-2 text-muted-foreground aria-[current=step]:bg-muted aria-[current=step]:text-foreground"><span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-current">{index + 1}</span>{step}</li>)}
+            {['Upload ZIP', 'Choose channels', 'Import history'].map((step, index) => <li key={step} aria-current={(starting || jobs.some(job => job.status === 'queued' || job.status === 'running') ? 2 : preview ? 1 : 0) === index ? 'step' : undefined} className="flex items-center gap-2 rounded-lg bg-muted/40 p-2 text-muted-foreground aria-[current=step]:bg-muted aria-[current=step]:text-foreground"><span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-current">{index + 1}</span>{step}</li>)}
         </ol>
+        {jobs[0] && <ImportJob job={jobs[0]} retry={retry} onOpenSpace={onOpenSpace} />}
         <SlackImportGuide />
         <div className="rounded-xl border border-dashed border-border bg-muted/10 p-4">
             <label className="block text-sm font-medium"><span className="flex items-center gap-2"><FileArchive className="size-4" aria-hidden />Slack export ZIP (up to 100 MiB)</span>
@@ -140,14 +168,8 @@ export function SlackImportPreviewPanel({ orgId, onOpenSpace }: { orgId: string;
             </div>}
             {preview.warnings.length > 0 && <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-sm">{preview.warnings.length} warnings — review before importing</summary><ul className="mt-2 max-h-48 space-y-2 overflow-auto text-xs">{preview.warnings.slice(0, 100).map((w, i) => <li key={i} className="break-words"><strong>{w.code}</strong>: {w.path}{w.record !== undefined ? ` (record ${w.record})` : ''} — {w.detail}</li>)}</ul>{preview.warnings.length > 100 && <p className="text-xs">Showing the first 100 warnings.</p>}</details>}
         </>}
-        {jobs.length > 0 && <div className="space-y-3"><h3 className="text-sm font-medium">Recent imports</h3>{jobs.map(job => <div key={job.id} className="rounded-lg border p-3 text-sm">
-            <p className="break-words font-medium">{job.workspace} · {job.status} · {job.channels.filter(c => c.status !== 'pending').length}/{job.channels.length} channels</p>
-            <progress aria-label={`Import progress for ${job.workspace}`} max={Math.max(1, job.channels.length)} value={job.channels.filter(c => c.status !== 'pending').length} className="my-3 h-1.5 w-full accent-primary" />
-            <p className="mb-2 text-xs text-muted-foreground">{job.status === 'completed' ? 'Finished. Your imported history is ready.' : job.status === 'failed' ? 'Import paused after an error. Completed channels are kept; retry the remaining channels below.' : 'You can leave this screen. Your import will continue in the background.'}</p>
-            {job.warnings?.length > 0 && <details><summary>{job.warnings.length} import warnings</summary><ul className="max-h-48 overflow-auto text-xs">{job.warnings.slice(0, 100).map((w, i) => <li key={i}>{w.path}: {w.detail}</li>)}</ul>{job.warnings.length > 100 && <p>Showing the first 100 warnings.</p>}</details>}
-            {job.error && <p role="alert">{job.error}</p>}
-            {job.status === 'failed' && <Button variant="outline" size="sm" onClick={() => void retry(job.id)}>Retry remaining channels</Button>}
-            <ul className="mt-2 divide-y divide-border">{job.channels.map(c => <li className="flex flex-wrap items-center gap-2 py-2" key={c.id}>#{c.name} · {c.status}{c.status !== 'pending' && onOpenSpace && <Button variant="link" size="sm" onClick={() => onOpenSpace(c.spaceId)}>Open space</Button>}</li>)}</ul>
-        </div>)}</div>}
+        {jobs.length > 1 && <details><summary className="cursor-pointer text-sm">Previous imports ({jobs.length - 1})</summary>
+            <div className="mt-2 space-y-2">{jobs.slice(1).map(job => <ImportJob key={job.id} job={job} retry={retry} onOpenSpace={onOpenSpace} />)}</div>
+        </details>}
     </section>
 }
