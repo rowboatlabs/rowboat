@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { finished } from 'node:stream/promises';
 import yauzl from 'yauzl';
 import {
     RowboatAppManifestSchema,
@@ -68,24 +69,27 @@ const DOWNLOAD_TOTAL_TIMEOUT_MS = 180_000;
 // Bundle download + extraction (shared by catalog + URL installs)
 // ---------------------------------------------------------------------------
 
-async function downloadBundle(url: string, destDir: string): Promise<{ zipPath: string; sha256: string }> {
+export async function downloadBundle(url: string, destDir: string): Promise<{ zipPath: string; sha256: string }> {
     await fsp.mkdir(destDir, { recursive: true });
     const zipPath = path.join(destDir, 'bundle.zip');
     const controller = new AbortController();
     const totalTimer = setTimeout(() => controller.abort(), DOWNLOAD_TOTAL_TIMEOUT_MS);
+    const connectTimer = setTimeout(() => controller.abort(), DOWNLOAD_CONNECT_TIMEOUT_MS);
     let out: fs.WriteStream | undefined;
     try {
         const res = await fetch(url, {
             redirect: 'follow',
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(DOWNLOAD_CONNECT_TIMEOUT_MS)]),
+            signal: controller.signal,
         });
+        // 2026-11-26: fetch keeps its signal attached to the response body.
+        // Disarm the header deadline so the total deadline governs the transfer.
+        clearTimeout(connectTimer);
         if (!res.ok) throw new InstallError('download_failed', `bundle download: HTTP ${res.status}`);
 
         const hash = crypto.createHash('sha256');
         out = fs.createWriteStream(zipPath);
         const reader = res.body?.getReader();
         if (!reader) throw new InstallError('download_failed', 'empty response body');
-        controller.signal.addEventListener('abort', () => { void reader.cancel().catch(() => {}); });
         let received = 0;
         for (;;) {
             const { done, value } = await reader.read();
@@ -100,17 +104,23 @@ async function downloadBundle(url: string, destDir: string): Promise<{ zipPath: 
             await new Promise<void>((resolve, reject) => out!.write(value, (e) => (e ? reject(e) : resolve())));
         }
         await new Promise<void>((resolve, reject) => out!.end((e?: Error | null) => (e ? reject(e) : resolve())));
+        controller.signal.throwIfAborted();
         return { zipPath, sha256: hash.digest('hex') };
     } catch (err) {
         if (err instanceof InstallError) throw err;
         const aborted = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
         if (aborted) {
-            out?.destroy();
+            if (out) {
+                const closed = finished(out).catch(() => {});
+                out.destroy();
+                await closed;
+            }
             await fsp.rm(zipPath, { force: true });
             throw new InstallError('download_failed', 'bundle download timed out — check your connection and try again');
         }
         throw err;
     } finally {
+        clearTimeout(connectTimer);
         clearTimeout(totalTimer);
     }
 }
