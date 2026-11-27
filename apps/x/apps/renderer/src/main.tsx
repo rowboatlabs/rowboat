@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { PostHogProvider } from 'posthog-js/react'
-import type { CaptureResult } from 'posthog-js'
+import posthog, { type CaptureResult, type PostHog } from 'posthog-js'
 import { ThemeProvider } from '@/contexts/theme-context'
 import { configureAnalyticsContext } from './lib/analytics'
 import { MeetingDetectedPopup } from '@/components/meeting-detected-popup'
@@ -33,13 +33,13 @@ async function bootstrap() {
   let installationId: string | undefined
   let apiUrl: string | undefined
   let appVersion: string | undefined
-  let telemetryOptOut = false
+  let analyticsEnabled = false
   try {
     const result = await window.ipc.invoke('analytics:bootstrap', null)
     installationId = result.installationId
     apiUrl = result.apiUrl
     appVersion = result.appVersion
-    telemetryOptOut = Boolean(result.telemetryOptOut)
+    analyticsEnabled = result.analyticsEnabled !== false && !result.telemetryOptOut
   } catch (err) {
     console.error('[Analytics] Failed to bootstrap from main:', err)
   }
@@ -49,10 +49,12 @@ async function bootstrap() {
   const options = {
     api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
     defaults: '2025-11-30' as const,
-    opt_out_capturing_by_default: telemetryOptOut,
+    // The user's Settings → Advanced choice; honoured before any event fires.
+    opt_out_capturing_by_default: !analyticsEnabled,
     ...(installationId ? { bootstrap: { distinctID: installationId } } : {}),
     before_send: (event: CaptureResult | null) => {
-      if (telemetryOptOut) return null
+      // 2026-10-16 (#1202): live SDK consent allows opt-in without a restart.
+      if (posthog.has_opted_out_capturing()) return null
       if (!event) return event
       if (appVersion) {
         event.properties = {
@@ -62,17 +64,17 @@ async function bootstrap() {
       }
       return event
     },
-    loaded: (posthogInstance?: { opt_out_capturing?: () => void }) => {
-      if (telemetryOptOut && posthogInstance?.opt_out_capturing) {
-        posthogInstance.opt_out_capturing()
-      }
+    loaded: (client: Pick<PostHog, 'opt_in_capturing' | 'opt_out_capturing'>) => {
+      // 2026-10-15 (#415): the shared setting overrides stale SDK consent.
+      if (analyticsEnabled) client.opt_in_capturing({ captureEventName: false })
+      else client.opt_out_capturing()
       configureAnalyticsContext({ apiUrl, appVersion })
     },
   }
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <PostHogProvider apiKey={telemetryOptOut ? '' : (import.meta.env.VITE_PUBLIC_POSTHOG_KEY ?? '')} options={options}>
+      <PostHogProvider apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_KEY} options={options}>
         <ThemeProvider defaultTheme="system">
           <App />
         </ThemeProvider>

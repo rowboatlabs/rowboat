@@ -34,7 +34,7 @@ export function isTelemetryOptedOut(): boolean {
 
   try {
     const settings = loadAppSettings();
-    if (settings.telemetryOptOut === true) return true;
+    if (settings.telemetryOptOut === true || settings.analyticsEnabled === false) return true;
   } catch {
     // Non-fatal if settings cannot be read
   }
@@ -47,7 +47,8 @@ export function isTelemetryOptedOut(): boolean {
  * (2026-10-13, #415)
  */
 export function setTelemetryOptedOut(optOut: boolean): void {
-  saveAppSettings({ telemetryOptOut: optOut });
+  // 2026-10-16 (#1202): sync both settings surfaces; environment opt-outs still win.
+  saveAppSettings({ telemetryOptOut: optOut, analyticsEnabled: !optOut });
   if (optOut) {
     if (client) {
       try {
@@ -71,6 +72,16 @@ export function _resetStateForTesting(): void {
   initAttempted = false;
   identifiedUserId = null;
   loggedOptOut = false;
+}
+
+export function getAnalyticsEnabled(): boolean {
+  // 2026-10-16 (#1202): re-read settings so child processes honour live changes.
+  return !isTelemetryOptedOut();
+}
+
+/** Apply the Advanced setting through the shared telemetry preference. */
+export async function setAnalyticsEnabled(enabled: boolean): Promise<void> {
+  setTelemetryOptedOut(!enabled);
 }
 
 function getClient(): PostHog | null {

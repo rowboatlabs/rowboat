@@ -124,7 +124,7 @@ import { findSpaceMessage } from '@x/core/dist/typesafe/find_message.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
-import { capture, isTelemetryOptedOut, setTelemetryOptedOut } from '@x/core/dist/analytics/posthog.js';
+import { capture, getAnalyticsEnabled, setAnalyticsEnabled, isTelemetryOptedOut, setTelemetryOptedOut } from '@x/core/dist/analytics/posthog.js';
 import { recordAppVersion, isVersionUpgrade } from '@x/core/dist/config/app_version.js';
 import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate } from './updater.js';
 import { setSpacesDockBadge } from './dock-badge.js';
@@ -1166,8 +1166,16 @@ export function setupIpcHandlers() {
         installationId: getInstallationId(),
         apiUrl: API_URL,
         appVersion: app.getVersion(),
+        analyticsEnabled: getAnalyticsEnabled(),
         telemetryOptOut: isTelemetryOptedOut(),
       };
+    },
+    'analytics:getSettings': async () => {
+      return { enabled: getAnalyticsEnabled() };
+    },
+    'analytics:setSettings': async (_event, args) => {
+      await setAnalyticsEnabled(args.enabled);
+      return { success: true };
     },
     'workspace:getRoot': async () => {
       return workspace.getRoot();
