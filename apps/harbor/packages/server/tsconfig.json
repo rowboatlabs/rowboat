@@ -8,6 +8,7 @@
     "include": [
         "src",
         "test",
-        "scripts/split-orgs.ts"
+        "scripts/split-orgs.ts",
+        "scripts/managed-hermes-smoke.ts"
     ]
 }

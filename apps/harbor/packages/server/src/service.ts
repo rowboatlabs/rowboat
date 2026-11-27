@@ -208,6 +208,9 @@ export class HarborService {
     const gate = isManagedHermesPlugin(member) ? () => this.hosting.adapterTurnRefusal(member.id) : undefined;
     return this.invocations.acknowledge(ctx, invocationId, gate);
   }
+  failPendingInvocation(ctx: ActorCtx, invocationId: string, error: string): Promise<Invocation> {
+    return this.invocations.update(ctx, invocationId, { state: 'failed', error }, true);
+  }
   async updateInvocation(ctx: ActorCtx, invocationId: string, update: InvocationUpdate): Promise<Invocation> {
     if (ctx.agent && update.state === 'failed' && update.error) {
       const member = await this.k.store.getMember(ctx.memberId);

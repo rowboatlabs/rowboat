@@ -12,7 +12,7 @@ export function wakeForPlugin(env: ConnectorEnv, api: () => Promise<MaritimeApi>
     const online = env.service.agentConnected(env.agent.id);
     const refusal = online ? undefined : await env.service.adapterTurnRefusal(env.agent.id);
     if (refusal) {
-      for (const i of work) await env.service.updateInvocation(env.ctx, i.id, { state: 'failed', error: refusal });
+      for (const i of work) await env.service.failPendingInvocation(env.ctx, i.id, refusal);
       return;
     }
     await env.service.ensureHermesConnection(env.agent.id);
@@ -25,7 +25,7 @@ export function wakeForPlugin(env: ConnectorEnv, api: () => Promise<MaritimeApi>
       for (const invocation of work) {
         const expired = Date.now() - Date.parse(invocation.updatedAt) > 10 * 60_000;
         if (err.gone || err.rejectsKey || expired) {
-          await env.service.updateInvocation(env.ctx, invocation.id, { state: 'failed', error: ('Maritime could not start this agent: ' + err.message).slice(0, 1000) });
+          await env.service.failPendingInvocation(env.ctx, invocation.id, ('Maritime could not start this agent: ' + err.message).slice(0, 1000));
         }
       }
       if (!err.mustWait) throw err;

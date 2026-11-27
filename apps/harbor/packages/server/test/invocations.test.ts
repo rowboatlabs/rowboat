@@ -119,6 +119,8 @@ describe('progress', () => {
       const { invocations } = await post('dev-harsh', `${mention(hermes.agent)} run the tests`);
       const id = invocations[0]!.id;
       expect((await hermes.ack(id)).body.invocation.state).toBe('working');
+      const lateWake = await harbor.service.failPendingInvocation({ memberId: hermes.agent.id, agent: true }, id, 'VM start timed out');
+      expect(lateWake.state).toBe('working');
       expect((await hermes.report(id, { state: 'working', activity: 'Running tests' })).body.invocation.activity).toBe('Running tests');
       expect((await hermes.report(id, { state: 'done' })).body.invocation).toMatchObject({ state: 'done' });
       const states = () =>

@@ -282,11 +282,13 @@ export class Invocations {
   }
 
   /** The connector's report: working (a heartbeat, with an activity line), waiting on a person, or an end state. */
-  async update(ctx: ActorCtx, id: string, update: InvocationUpdate): Promise<Invocation> {
+  async update(ctx: ActorCtx, id: string, update: InvocationUpdate, onlyPending = false): Promise<Invocation> {
     const found = await this.own(ctx, id);
     const out: InvocationOutbox = [];
     const result = await this.k.locked(found.conversation.spaceId, async () => {
       const current = (await this.k.store.getInvocation(id))!;
+      // 2026-11-27: the gateway may have claimed a pending message while Maritime was trying to wake it.
+      if (onlyPending && current.state !== 'pending') return current;
       if (TERMINAL.has(current.state) || current.state === 'queued') {
         throw new HarborError('invalid_request', `this invocation is ${current.state}: it takes no reports`);
       }
