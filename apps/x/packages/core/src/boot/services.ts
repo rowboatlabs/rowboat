@@ -32,6 +32,7 @@ import { registerAppsHostApi } from '../apps/host-api.js';
 import { cleanInstallTmp } from '../apps/installer.js';
 import { startSpacesScheduler } from '../spaces/scheduler.js';
 import { flags } from '@x/shared';
+import { initSystemCertificates } from '../security/system-ca.js';
 
 // The headless-safe half of Rowboat's boot: everything that runs schedulers,
 // sync services, and background agents against the workdir. Extracted from
@@ -101,6 +102,9 @@ let servicesStarted = false;
 export async function initCoreServices(): Promise<void> {
   if (servicesStarted) return;
   servicesStarted = true;
+
+  // Initialize system CA certificates so all network services trust enterprise root stores
+  initSystemCertificates();
 
   startRetentionSweep();
   startModelsDevRefresh();
