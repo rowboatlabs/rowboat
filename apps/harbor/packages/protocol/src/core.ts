@@ -126,7 +126,6 @@ export function isManagedHermesPlugin(member: Member | undefined): member is Mem
   return member?.agentKind === 'hermes' && member.agentConnection === 'plugin' && !!member.agentInstance;
 }
 
-
 /**
  * Who may create invites (spec §4 Invites and Roles, built 2026-10-19): any
  * member, Slack's default, or admins only. An admin sets it.

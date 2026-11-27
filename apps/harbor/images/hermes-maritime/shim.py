@@ -185,10 +185,6 @@ def current_gateway_env(user):
     return env
 
 
-def adapter_settings(env):
-    return {k: v for k, v in env.items() if k.startswith(("ROWBOAT_", "OPENAI_", "OPENROUTER_", "ANTHROPIC_"))}
-
-
 def supervise(user: pwd.struct_passwd | None) -> None:
     global _gateway
     backoff = 2.0
@@ -217,7 +213,7 @@ def supervise(user: pwd.struct_passwd | None) -> None:
             updated = environment_version()
             if updated != version:
                 try:
-                    if adapter_settings(current_gateway_env(user)) != adapter_settings(env):
+                    if current_gateway_env(user) != env:
                         p.terminate()
                         break
                     version = updated

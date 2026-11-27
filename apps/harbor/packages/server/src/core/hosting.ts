@@ -1,4 +1,5 @@
 import {
+  isManagedHermesPlugin,
   LLM_PROVIDERS,
   MARITIME_AGENTS,
   TRIAL_KINDS,
@@ -26,7 +27,6 @@ import { HarborError } from '../errors.js';
 import { canAddAgent, canRevokeAgentKey, canSuperAgentCreate, canSuperAgentDelete, enforce } from '../policy.js';
 import { hashAgentKey } from '../agent-keys.js';
 import { credentialHint } from '../sealing.js';
-import { isManagedHermesPlugin } from '@rowboat/spaces-protocol';
 import type { StoredAgentHosting } from '../store.js';
 import type { Agents } from './agents.js';
 import type { ActorCtx, Kernel } from './kernel.js';
