@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ensureMember } from '../src/auth.js';
 import { SpaceHub } from '../src/hub.js';
 import { PgStore } from '../src/pg-store.js';
-import { extractSearchText } from '../src/search.js';
+import { extractSearchText, parseSearchQuery, snippetAround } from '../src/search.js';
 import { HarborService } from '../src/service.js';
 import type { SqlDb } from '../src/sql.js';
 import { pgliteDb } from '../src/sql-pglite.js';
@@ -307,5 +307,31 @@ describe('extractSearchText', () => {
     expect(out).toContain('Budget 2027');
     expect(out).toContain('draft only');
     expect(out).not.toContain('count');
+  });
+});
+
+// UX-002 (2026-11-18): a snippet window cut through an emoji's surrogate pair
+// and serialized as a lone \uD83D, which strict JSON decoders reject.
+const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+describe('snippetAround', () => {
+  it('never splits a surrogate pair at either edge of the window', () => {
+    const q = parseSearchQuery('spaces-ux', []);
+    for (let pad = 0; pad < 8; pad++) {
+      const body = `${'x'.repeat(pad)}${'📋'.repeat(40)} spaces-ux ${'🚀'.repeat(120)}`;
+      const snippet = snippetAround(body, q);
+      expect(snippet).toContain('spaces-ux');
+      expect(snippet).not.toMatch(loneSurrogate);
+      expect(() => JSON.parse(JSON.stringify(snippet))).not.toThrow();
+      expect(JSON.stringify(snippet)).not.toMatch(/\\ud[89ab]/i);
+    }
+  });
+});
+
+describe('extractSearchText cap', () => {
+  it('does not orphan a high surrogate at the cap', () => {
+    const out = extractSearchText('a.md', `${'a'.repeat(99_999)}🚀tail`);
+    expect(out).not.toMatch(loneSurrogate);
+    expect(out.length).toBe(99_999);
   });
 });
