@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolveSkill, availableSkills, skillToolNames, setBuiltinToolsSkillTools } from "../assembly/skills/index.js";
+import { withLearnedNotes } from "../assembly/skills/agent-skills.js";
 import { COPILOT_BASE_TOOLS } from "../assembly/copilot/base-tools.js";
 import { builtinToolDescriptor } from "./descriptors.js";
 import { TOOL_ADDITIONS_KEY } from "./tool-additions.js";
@@ -32,6 +33,7 @@ import { spreadsheetTools } from "./domains/spreadsheet.js";
 import { imageTools } from "./domains/image.js";
 import { spacesTools } from "./domains/spaces.js";
 import { whiteboardTools } from "./domains/whiteboard.js";
+import { skillTools } from "./domains/skills.js";
 import { BuiltinToolsSchema } from "./types.js";
 export { coalesceCodeRunEvents } from "./domains/code.js";
 
@@ -72,7 +74,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 success: true,
                 skillName: resolved.id,
                 path: resolved.catalogPath,
-                content: resolved.content,
+                // Learned notes (agent-skills.ts) ride on top of the skill
+                // without editing it, so app updates still reach bundled skills.
+                content: withLearnedNotes(resolved.id, resolved.content),
                 ...(additions.length > 0
                     ? {
                           attachedTools: additions.map((tool) => tool.name),
@@ -117,6 +121,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...imageTools,
     ...spacesTools,
     ...whiteboardTools,
+    // Appended last (2026-10-05) so earlier tools keep their prefix bytes.
+    ...skillTools,
 
     [SPAWN_AGENT_TOOL_NAME]: {
         permission: "none",
