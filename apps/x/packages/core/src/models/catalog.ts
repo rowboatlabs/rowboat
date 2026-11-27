@@ -9,6 +9,7 @@ import { listCodexModels } from "./codex.js";
 import { listImageModelsForProvider, listModelsForProvider } from "./models.js";
 import { getImageModelIds, listOnboardingModels } from "./models-dev.js";
 import { getDefaultModelAndProvider } from "./defaults.js";
+import { AIMLAPI_BASE_URL } from "./aimlapi.js";
 
 /**
  * The unified model catalog: one function that answers "which providers are
@@ -61,6 +62,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
     google: "Gemini",
     openrouter: "OpenRouter",
     aigateway: "AI Gateway",
+    aimlapi: "aimlapi.com",
     ollama: "Ollama",
     "openai-compatible": "OpenAI-Compatible",
 };
@@ -82,6 +84,9 @@ const MODELS_DEV_FLAVORS = new Set(["openai", "anthropic", "google"]);
 // listModelsForProvider builds aigateway's URL from baseURL; apply the
 // service default here so a keyed-but-URL-less config still lists.
 const AIGATEWAY_DEFAULT_BASE_URL = "https://ai-gateway.vercel.sh/v1";
+// Same for aimlapi: the flavor has one hosted endpoint, so a config that
+// carries only a key is complete. createProvider applies the same default,
+// and both read it from models/aimlapi.ts.
 
 // Successful lists are cached until the provider's credentials change or an
 // explicit refresh; failures retry after a short TTL so a temporarily-down
@@ -150,6 +155,9 @@ async function discoverProviders(): Promise<DiscoveredProvider[]> {
         const config = { ...entry };
         if (config.flavor === "aigateway" && !config.baseURL) {
             config.baseURL = AIGATEWAY_DEFAULT_BASE_URL;
+        }
+        if (config.flavor === "aimlapi" && !config.baseURL) {
+            config.baseURL = AIMLAPI_BASE_URL;
         }
         discovered.push({ id, flavor: entry.flavor, config });
     }
