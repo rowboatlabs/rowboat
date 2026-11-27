@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { UserMessageContext } from "@x/shared/dist/message.js";
-import { convertFromMessages } from "./message-encoding.js";
+import { convertFromMessages, demoteReasoningInModelMessages } from "./message-encoding.js";
 import type { z } from "zod";
 
 // The middle-pane block is how the assistant learns what the user is looking
@@ -259,5 +259,129 @@ describe("UserMessageContext schema", () => {
         ]) {
             expect(UserMessageContext.safeParse({ middlePane }).success).toBe(true);
         }
+    });
+});
+
+describe("reasoning demotion for OpenAI-compatible providers (#463)", () => {
+    const assistantWithReasoning = [
+        {
+            role: "assistant" as const,
+            content: [
+                { type: "reasoning" as const, text: "thinking steps" },
+                { type: "text" as const, text: "final answer" },
+            ],
+        },
+    ];
+
+    it("preserves reasoning parts when demoteReasoning is not set", () => {
+        const messages = convertFromMessages(assistantWithReasoning);
+        expect(messages).toEqual([
+            {
+                role: "assistant",
+                content: [
+                    { type: "reasoning", text: "thinking steps" },
+                    { type: "text", text: "final answer" },
+                ],
+                providerOptions: undefined,
+            },
+        ]);
+    });
+
+    it("demotes reasoning parts to text parts when demoteReasoning is true", () => {
+        const messages = convertFromMessages(assistantWithReasoning, { demoteReasoning: true });
+        expect(messages).toEqual([
+            {
+                role: "assistant",
+                content: [
+                    { type: "text", text: "thinking steps" },
+                    { type: "text", text: "final answer" },
+                ],
+                providerOptions: undefined,
+            },
+        ]);
+    });
+
+    it("drops empty reasoning parts and preserves tool-calls", () => {
+        const messages = convertFromMessages(
+            [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "reasoning", text: "   " },
+                        {
+                            type: "tool-call",
+                            toolCallId: "call_1",
+                            toolName: "read_file",
+                            arguments: { path: "a.txt" },
+                        },
+                    ],
+                },
+            ] as Parameters<typeof convertFromMessages>[0],
+            { demoteReasoning: true },
+        );
+        expect(messages).toEqual([
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "tool-call",
+                        toolCallId: "call_1",
+                        toolName: "read_file",
+                        input: { path: "a.txt" },
+                        providerOptions: undefined,
+                    },
+                ],
+                providerOptions: undefined,
+            },
+        ]);
+    });
+
+    it("falls back to empty string when all parts are empty reasoning parts", () => {
+        const messages = convertFromMessages(
+            [
+                {
+                    role: "assistant",
+                    content: [{ type: "reasoning", text: "  " }],
+                },
+            ] as Parameters<typeof convertFromMessages>[0],
+            { demoteReasoning: true },
+        );
+        expect(messages).toEqual([
+            {
+                role: "assistant",
+                content: "",
+                providerOptions: undefined,
+            },
+        ]);
+    });
+
+    it("demoteReasoningInModelMessages demotes reasoning in ModelMessages", () => {
+        const input = [
+            {
+                role: "user" as const,
+                content: "hello",
+            },
+            {
+                role: "assistant" as const,
+                content: [
+                    { type: "reasoning" as const, text: "thought" },
+                    { type: "text" as const, text: "hello back" },
+                ],
+            },
+        ];
+        const demoted = demoteReasoningInModelMessages(input as never);
+        expect(demoted).toEqual([
+            {
+                role: "user",
+                content: "hello",
+            },
+            {
+                role: "assistant",
+                content: [
+                    { type: "text", text: "thought" },
+                    { type: "text", text: "hello back" },
+                ],
+            },
+        ]);
     });
 });
