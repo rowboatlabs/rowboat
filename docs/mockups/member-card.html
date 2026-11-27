@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: Discord-style member card on mobile</title>
+<!--
+  Review mockup (2026-11-26, huddle with sparta-ios): a Discord-style profile
+  card for the Rowboat mobile app, opened by tapping a name or avatar. Static
+  HTML so it opens in any browser with no build. Colors are the mobile
+  palette (apps/x/apps/mobile/src/theme/colors.ts). Every field shown exists
+  on Member / SpaceMember today unless the table marks it "new".
+-->
+<style>
+  :root {
+    --l-label: #1c1b19; --l-sec: #45423c; --l-ter: #8f8b84; --l-sep: rgba(66,56,40,0.16);
+    --l-bg: #faf9f6; --l-bg2: #f1efea; --l-card: #faf9f6;
+    --d-label: #f2efe9; --d-sec: #c4c0b8; --d-ter: #86827b; --d-sep: rgba(255,244,225,0.10);
+    --d-bg: #171614; --d-bg2: #24221f; --d-card: #1b1a18;
+    --green: #34c759; --amber: #ff9f0a; --grey: #8f8b84;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px; background: #e9e6df; color: #1c1b19;
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .lede { color: #45423c; margin: 0 0 28px; max-width: 760px; }
+  .row { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { font-size: 13px; color: #45423c; margin-top: 10px; text-align: center; max-width: 320px; }
+
+  /* Phone frame */
+  .phone {
+    --label: var(--l-label); --sec: var(--l-sec); --ter: var(--l-ter); --sep: var(--l-sep);
+    --bg: var(--l-bg); --bg2: var(--l-bg2); --card: var(--l-card);
+    width: 320px; height: 660px; border-radius: 44px; border: 10px solid #111; background: var(--bg);
+    position: relative; overflow: hidden; color: var(--label); box-shadow: 0 20px 50px rgba(0,0,0,0.18);
+  }
+  .phone.dark {
+    --label: var(--d-label); --sec: var(--d-sec); --ter: var(--d-ter); --sep: var(--d-sep);
+    --bg: var(--d-bg); --bg2: var(--d-bg2); --card: var(--d-card);
+  }
+  .statusbar { height: 40px; display: flex; justify-content: space-between; align-items: center; padding: 0 26px; font-size: 13px; font-weight: 600; }
+  .header { height: 44px; display: flex; align-items: center; justify-content: center; font-weight: 600; border-bottom: 0.5px solid var(--sep); }
+
+  /* Stream behind the sheet */
+  .msg { display: flex; gap: 10px; padding: 8px 12px; }
+  .msg .av { width: 36px; height: 36px; border-radius: 6px; flex: none; display: grid; place-items: center; color: #fff; font-weight: 600; }
+  .msg .name { font-weight: 700; }
+  .msg .time { color: var(--ter); font-size: 12px; margin-left: 6px; font-weight: 400; }
+  .msg .body { color: var(--label); }
+  .tap { outline: 2px dashed #0a84ff; outline-offset: 2px; border-radius: 6px; }
+
+  /* Sheet */
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.35); }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; background: var(--card);
+    border-radius: 16px 16px 0 0; overflow: hidden; padding-bottom: 28px;
+  }
+  .grabber { position: absolute; top: 6px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 3px; background: rgba(255,255,255,0.7); z-index: 2; }
+  .banner { height: 84px; }
+  .avatar-wrap { position: relative; margin: -40px 0 0 16px; width: 80px; height: 80px; }
+  .avatar {
+    width: 80px; height: 80px; border-radius: 40px; border: 5px solid var(--card);
+    display: grid; place-items: center; color: #fff; font-size: 28px; font-weight: 700;
+  }
+  .avatar.agent { border-radius: 22px; }
+  .dot { position: absolute; right: 2px; bottom: 2px; width: 22px; height: 22px; border-radius: 11px; border: 4px solid var(--card); }
+  .dot.here { background: var(--green); }
+  .dot.away { background: var(--grey); }
+  .dot.paused { background: var(--amber); }
+  .dot.working { background: var(--green); box-shadow: 0 0 0 3px rgba(52,199,89,0.25); }
+  .bubble {
+    position: absolute; left: 92px; top: 44px; background: var(--bg2); border-radius: 12px; padding: 6px 10px;
+    font-size: 13px; color: var(--label); max-width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .who { padding: 8px 16px 0; }
+  .who h2 { margin: 0; font-size: 20px; line-height: 26px; }
+  .who .sub { color: var(--sec); font-size: 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; }
+  .chip { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: var(--bg2); color: var(--sec); display: inline-flex; gap: 5px; align-items: center; }
+  .chip i { width: 8px; height: 8px; border-radius: 4px; display: inline-block; }
+  .panel { margin: 12px 16px 0; background: var(--bg2); border-radius: 12px; padding: 10px 12px; }
+  .panel h3 { margin: 0 0 2px; font-size: 12px; font-weight: 600; color: var(--ter); }
+  .panel p { margin: 0 0 8px; font-size: 14px; }
+  .panel p:last-child { margin-bottom: 0; }
+  .actions { display: flex; gap: 8px; padding: 12px 16px 0; }
+  .btn { flex: 1; text-align: center; padding: 10px 0; border-radius: 12px; font-weight: 600; font-size: 14px; background: var(--bg2); color: var(--label); }
+  .btn.primary { background: var(--label); color: var(--bg); }
+  .new { outline: 2px dashed #ff9f0a; outline-offset: -2px; }
+
+  /* Notes */
+  section { margin-top: 44px; max-width: 980px; }
+  h2.sec { font-size: 18px; margin: 0 0 10px; }
+  table { border-collapse: collapse; width: 100%; background: #faf9f6; border-radius: 10px; overflow: hidden; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid rgba(66,56,40,0.12); vertical-align: top; }
+  th { background: #f1efea; font-weight: 600; }
+  .have { color: #1e7a34; font-weight: 600; }
+  .gap { color: #b26a00; font-weight: 600; }
+  ol, ul { padding-left: 20px; }
+  code { font: 13px ui-monospace, Menlo, monospace; background: #f1efea; padding: 1px 4px; border-radius: 4px; }
+  .legend { font-size: 13px; color: #45423c; margin-top: 8px; }
+  .legend span { outline: 2px dashed #ff9f0a; padding: 0 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Member card on mobile, Discord-style</h1>
+<p class="lede">Tap a name or avatar in a space and a card slides up: who they are, whether they're around, their role here, and one tap to message them. Today that tap does nothing on the phone. Four frames: a person and an agent, light and dark.</p>
+
+<div class="row">
+
+  <!-- 1. Person, light -->
+  <figure>
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="header"># rowboat</div>
+      <div class="msg"><div class="av tap" style="background:#5b7cfa">AK</div><div><div class="name">Arjun<span class="time">10:02</span></div><div class="body">Shipping the orgs fix today.</div></div></div>
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="grabber"></div>
+        <div class="banner" style="background:linear-gradient(135deg,#5b7cfa,#8a6cf0)"></div>
+        <div class="avatar-wrap">
+          <div class="avatar" style="background:#5b7cfa">AK</div>
+          <div class="dot here" title="Here"></div>
+        </div>
+        <div class="bubble" style="left:108px;top:92px">🚢 Shipping 1.2.1</div>
+        <div class="who">
+          <h2>Arjun</h2>
+          <div class="sub">Co-founder · Here</div>
+        </div>
+        <div class="chips">
+          <span class="chip"><i style="background:#ff9f0a"></i>Admin</span>
+          <span class="chip">Joined Aug 2026</span>
+        </div>
+        <div class="panel new">
+          <h3>About</h3>
+          <p>Product and growth. Ping me for anything App Store.</p>
+        </div>
+        <div class="actions">
+          <div class="btn primary">Message</div>
+          <div class="btn">Mention</div>
+          <div class="btn" style="flex:0 0 44px">⋯</div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>Person.</b> Status bubble, presence dot, role chip, Message opens the DM.</figcaption>
+  </figure>
+
+  <!-- 2. Agent, light -->
+  <figure>
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="header"># rowboat</div>
+      <div class="msg"><div class="av tap" style="background:#1f9d74;border-radius:9px">S</div><div><div class="name">sparta-ios<span class="time">10:04</span></div><div class="body">Done: 1. Member card mockup</div></div></div>
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="grabber"></div>
+        <div class="banner" style="background:linear-gradient(135deg,#1f9d74,#47c2a0)"></div>
+        <div class="avatar-wrap">
+          <div class="avatar agent" style="background:#1f9d74">S</div>
+          <div class="dot working" title="Working"></div>
+        </div>
+        <div class="bubble" style="left:108px;top:92px">Working in 2 threads</div>
+        <div class="who">
+          <h2>sparta-ios</h2>
+          <div class="sub">iOS engineer · Gagan's agent</div>
+        </div>
+        <div class="chips">
+          <span class="chip"><i style="background:#1f9d74"></i>Agent</span>
+          <span class="chip">Claude Code</span>
+          <span class="chip">Anyone here can ask</span>
+        </div>
+        <div class="panel">
+          <h3>Personality</h3>
+          <p>Concise, straight to the point. Opens PRs for the mobile app.</p>
+        </div>
+        <div class="actions">
+          <div class="btn primary">Ask in a thread</div>
+          <div class="btn" style="flex:0 0 44px">⋯</div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>Agent.</b> Rounded-square avatar like the stream, owner and kind, live "working" state, who can call it.</figcaption>
+  </figure>
+
+  <!-- 3. Person, dark, paused -->
+  <figure>
+    <div class="phone dark">
+      <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="header"># rowboat</div>
+      <div class="msg"><div class="av tap" style="background:#e0675a">RS</div><div><div class="name">Ramneek<span class="time">09:40</span></div><div class="body">Backend for orgs is merged.</div></div></div>
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="grabber"></div>
+        <div class="banner" style="background:linear-gradient(135deg,#e0675a,#f0a35a)"></div>
+        <div class="avatar-wrap">
+          <div class="avatar" style="background:#e0675a">RS</div>
+          <div class="dot paused" title="Notifications paused"></div>
+        </div>
+        <div class="bubble" style="left:108px;top:92px">🎧 Heads down</div>
+        <div class="who">
+          <h2>Ramneek</h2>
+          <div class="sub">Backend · Notifications paused until 2 pm</div>
+        </div>
+        <div class="chips">
+          <span class="chip">Member</span>
+          <span class="chip">Joined Sep 2026</span>
+        </div>
+        <div class="panel new">
+          <h3>Spaces you share</h3>
+          <p># rowboat · # harbor · # mobile</p>
+        </div>
+        <div class="actions">
+          <div class="btn primary">Message</div>
+          <div class="btn">Mention</div>
+          <div class="btn" style="flex:0 0 44px">⋯</div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>Dark, paused.</b> Amber dot and the "until" line come from availability (pause / schedule).</figcaption>
+  </figure>
+
+  <!-- 4. Agent, dark, owner view -->
+  <figure>
+    <div class="phone dark">
+      <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="header"># rowboat</div>
+      <div class="msg"><div class="av tap" style="background:#8a6cf0;border-radius:9px">H</div><div><div class="name">Herald<span class="time">08:15</span></div><div class="body">Weekly product update is up.</div></div></div>
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="grabber"></div>
+        <div class="banner" style="background:linear-gradient(135deg,#8a6cf0,#5b7cfa)"></div>
+        <div class="avatar-wrap">
+          <div class="avatar agent" style="background:#8a6cf0">H</div>
+          <div class="dot away" title="Idle"></div>
+        </div>
+        <div class="who" style="padding-top:12px">
+          <h2>Herald</h2>
+          <div class="sub">Release notes · Your agent</div>
+        </div>
+        <div class="chips">
+          <span class="chip"><i style="background:#8a6cf0"></i>Super agent</span>
+          <span class="chip">Hermes</span>
+          <span class="chip">Only you can ask</span>
+        </div>
+        <div class="panel">
+          <h3>Personality</h3>
+          <p>Writes the weekly update every Monday from merged PRs.</p>
+        </div>
+        <div class="actions">
+          <div class="btn primary">Ask in a thread</div>
+          <div class="btn">Edit</div>
+          <div class="btn" style="flex:0 0 44px">⋯</div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b>Your own agent.</b> Owner sees Edit (opens the existing agent screen); idle agents get a grey dot.</figcaption>
+  </figure>
+
+</div>
+<p class="legend">Dashed blue: the tap target. <span>Dashed orange</span>: needs data the server doesn't send today.</p>
+
+<section>
+  <h2 class="sec">Discord card → Rowboat, piece by piece</h2>
+  <table>
+    <tr><th>Discord card</th><th>Rowboat on the phone</th><th>Data</th></tr>
+    <tr><td>Banner</td><td>Gradient from the member's avatar color (same hash as <code>avatar.tsx</code>). No upload.</td><td class="have">Have</td></tr>
+    <tr><td>Avatar + status dot</td><td>Round for people, rounded square for agents. Green here, grey away, amber paused; agents green while working.</td><td class="have">Have: <code>availability</code>, presence, invocations</td></tr>
+    <tr><td>Custom status bubble</td><td>Emoji + text, hidden once expired.</td><td class="have">Have: <code>availability.status</code></td></tr>
+    <tr><td>Display name, username</td><td>Name, then title and state on one line.</td><td class="have">Have: <code>displayName</code>, <code>title</code></td></tr>
+    <tr><td>Roles</td><td>Admin / Member; Agent / Super agent; agent kind; who can ask it.</td><td class="have">Have: <code>role</code>, <code>kind</code>, <code>superAgent</code>, <code>agentKind</code>, <code>invocableBy</code></td></tr>
+    <tr><td>Member since</td><td>"Joined Aug 2026" for this space.</td><td class="have">Have: <code>joinedAt</code></td></tr>
+    <tr><td>About me</td><td>Agents: their personality. People: a short About.</td><td>Agents <span class="have">have</span> <code>instructions</code>; people <span class="gap">new field</span></td></tr>
+    <tr><td>Mutual servers</td><td>Spaces you share.</td><td class="gap">New: server doesn't return it</td></tr>
+    <tr><td>Message box at the bottom</td><td>Message (opens the DM), Mention (drops a token in the composer), Ask in a thread for agents. A text box in a sheet fights the keyboard on iOS, so buttons instead.</td><td class="have">Have: <code>openDirect</code>, composer insert</td></tr>
+    <tr><td>Badges, Nitro, profile effects</td><td>Left out: no Rowboat meaning.</td><td>—</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2 class="sec">How it would go into the app</h2>
+  <ol>
+    <li><b>One component</b>, <code>components/member-card.tsx</code>, on the existing <code>bottom-sheet.tsx</code>. Takes a <code>SpaceMember</code>; no new server calls for the "Have" rows.</li>
+    <li><b>Open it from</b> the avatar and name in <code>space-message.tsx</code> (stream and threads), the Members screen rows, and mention chips. Reading still doesn't navigate: only the avatar/name are targets, the message body isn't.</li>
+    <li><b>Owner actions</b> (Edit, Rename) reuse <code>spaces/agent.tsx</code>; the ⋯ menu holds Copy link (<code>/u/&lt;id&gt;</code>), Report, and admin role changes.</li>
+    <li><b>Desktop parity</b>: the renderer already has <code>MemberProfilePopover</code> (<code>components/spaces/atoms.tsx</code>); this card is the phone's version of it, so a later PR can align the two.</li>
+    <li><b>Later, server-side</b>: a person's About field and "spaces you share" are Harbor changes and would be separate PRs.</li>
+  </ol>
+  <p><b>Recommendation:</b> ship the card with the "Have" rows only (frames 2 and 4 are fully buildable today; 1 and 3 minus the orange panels), then decide on About and shared spaces after review.</p>
+</section>
+
+</body>
+</html>
