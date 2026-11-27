@@ -16,6 +16,7 @@ const BACKLOG_LIMIT = 400_000; // chars (~400KB) of scrollback replay
 interface TerminalEntry {
   proc: pty.IPty;
   cwd: string;
+  requestedCwd: string;
   backlog: string;
   running: boolean;
 }
@@ -79,7 +80,7 @@ function defaultShell(): { file: string; args: string[] } {
   return { file: process.env.SHELL || '/bin/zsh', args: ['-l'] };
 }
 
-function spawnEntry(id: string, cwd: string, cols: number, rows: number): TerminalEntry {
+function spawnEntry(id: string, requestedCwd: string, cwd: string, cols: number, rows: number): TerminalEntry {
   ensureSpawnHelperExecutable();
   const { file, args } = defaultShell();
   let proc: pty.IPty;
@@ -96,7 +97,7 @@ function spawnEntry(id: string, cwd: string, cols: number, rows: number): Termin
     const where = helperPath ? `; spawn-helper: ${helperPath}` : '';
     throw new Error(`Could not start a terminal (${reason}) — shell: ${file}, cwd: ${cwd}${where}`);
   }
-  const entry: TerminalEntry = { proc, cwd, backlog: '', running: true };
+  const entry: TerminalEntry = { proc, cwd, requestedCwd, backlog: '', running: true };
   proc.onData((data) => {
     entry.backlog = (entry.backlog + data).slice(-BACKLOG_LIMIT);
     broadcast('terminal:data', { id, data });
@@ -114,15 +115,17 @@ function spawnEntry(id: string, cwd: string, cols: number, rows: number): Termin
 // caller repaints from the backlog.
 export function ensureTerminal(id: string, cwd: string, cols: number, rows: number): { backlog: string; running: boolean } {
   const existing = terminals.get(id);
-  if (existing && existing.running && existing.cwd === cwd) {
+  const effectiveCwd = fs.existsSync(cwd) ? cwd : os.homedir();
+  // 2026-11-26: preserve the fallback shell across reattaches, but restart
+  // in the worktree if it becomes available again.
+  if (existing?.running && existing.requestedCwd === cwd && existing.cwd === effectiveCwd) {
     existing.proc.resize(cols, rows);
     return { backlog: existing.backlog, running: true };
   }
   if (existing) {
     disposeTerminal(id);
   }
-  const fallbackCwd = fs.existsSync(cwd) ? cwd : os.homedir();
-  const entry = spawnEntry(id, fallbackCwd, cols, rows);
+  const entry = spawnEntry(id, cwd, effectiveCwd, cols, rows);
   return { backlog: entry.backlog, running: entry.running };
 }
 
