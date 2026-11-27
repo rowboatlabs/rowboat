@@ -288,7 +288,7 @@ export interface Store {
   listSlackJobs(ownerId?: string): Promise<StoredSlackJob[]>;
   getSlackSource(ownerId: string, workspace: string, channelId: string): Promise<string | undefined>;
   putSlackSource(ownerId: string, workspace: string, channelId: string, spaceId: string): Promise<void>;
-  // members (server-level)
+  // members (org-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
   patchAvailability(id: string, patch: NonNullable<Member['availability']>): Promise<void>;

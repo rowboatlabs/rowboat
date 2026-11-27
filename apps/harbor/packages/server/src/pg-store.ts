@@ -435,31 +435,31 @@ export class PgStore implements Store {
   }
   async putSlackProfileLink(spaceId: string, workspace: string, userId: string, memberId: string | null): Promise<void> {
     if (memberId === null) { await this.sql.query('delete from slack_profile_links where space_id=$1 and workspace=$2 and user_id=$3', [spaceId, workspace, userId]); return; }
-    await this.sql.query('insert into slack_profile_links(space_id,workspace,user_id,member_id) values($1,$2,$3,$4) on conflict(space_id,workspace,user_id) do update set member_id=excluded.member_id', [spaceId,workspace,userId,memberId]);
+    await this.sql.query('insert into slack_profile_links(space_id,workspace,user_id,member_id,org_id) values($1,$2,$3,$4,$5) on conflict(space_id,workspace,user_id) do update set member_id=excluded.member_id', [spaceId,workspace,userId,memberId,this.orgId]);
   }
   async getSlackJobByKey(key: string): Promise<import('./store.js').StoredSlackJob | undefined> {
-    const rows = await this.sql.query<{id:string}>('select id from slack_import_jobs where dedupe_key=$1', [key]);
+    const rows = await this.sql.query<{id:string}>('select id from slack_import_jobs where dedupe_key=$1 and org_id=$2', [key,this.orgId]);
     return rows[0] ? this.getSlackJob(rows[0].id) : undefined;
   }
   async putSlackJob(r: import('./store.js').StoredSlackJob): Promise<void> {
-    await this.sql.query(`insert into slack_import_jobs(id, owner_id, dedupe_key, job, payload) values ($1,$2,$3,$4::jsonb,$5::jsonb)
-      on conflict(id) do update set job=excluded.job, payload=excluded.payload`, [r.job.id, r.ownerId, r.key, JSON.stringify(r.job), r.payload ? JSON.stringify(r.payload) : null]);
+    await this.sql.query(`insert into slack_import_jobs(id, owner_id, dedupe_key, job, payload, org_id) values ($1,$2,$3,$4::jsonb,$5::jsonb,$6)
+      on conflict(id) do update set job=excluded.job, payload=excluded.payload`, [r.job.id, r.ownerId, r.key, JSON.stringify(r.job), r.payload ? JSON.stringify(r.payload) : null,this.orgId]);
   }
   async getSlackJob(id: string): Promise<import('./store.js').StoredSlackJob | undefined> {
-    const rows = await this.sql.query<{owner_id:string;dedupe_key:string;job:import('@rowboat/spaces-protocol').SlackImportJob;payload:import('./imports/slack.js').SlackPreview|null}>('select * from slack_import_jobs where id=$1',[id]);
+    const rows = await this.sql.query<{owner_id:string;dedupe_key:string;job:import('@rowboat/spaces-protocol').SlackImportJob;payload:import('./imports/slack.js').SlackPreview|null}>('select * from slack_import_jobs where id=$1 and org_id=$2',[id,this.orgId]);
     const r=rows[0]; return r ? {ownerId:r.owner_id,key:r.dedupe_key,job:r.job,payload:r.payload} : undefined;
   }
   async listSlackJobs(ownerId?: string): Promise<import('./store.js').StoredSlackJob[]> {
     const rows = await this.sql.query<{owner_id:string;dedupe_key:string;job:import('@rowboat/spaces-protocol').SlackImportJob}>(ownerId === undefined
-      ? `select owner_id,dedupe_key,job from slack_import_jobs where job->>'status' in ('queued','running') order by job->>'createdAt' limit 20`
-      : `select owner_id,dedupe_key,job from slack_import_jobs where owner_id=$1 order by (job->>'status' in ('queued','running')) desc, job->>'createdAt' desc limit 100`, ownerId === undefined ? [] : [ownerId]);
+      ? `select owner_id,dedupe_key,job from slack_import_jobs where org_id=$1 and job->>'status' in ('queued','running') order by job->>'createdAt' limit 20`
+      : `select owner_id,dedupe_key,job from slack_import_jobs where owner_id=$1 and org_id=$2 order by (job->>'status' in ('queued','running')) desc, job->>'createdAt' desc limit 100`, ownerId === undefined ? [this.orgId] : [ownerId,this.orgId]);
     return rows.map(r=>({ownerId:r.owner_id,key:r.dedupe_key,job:r.job,payload:null}));
   }
   async getSlackSource(ownerId:string, workspace:string, channelId:string): Promise<string|undefined> {
-    return (await this.sql.query<{space_id:string}>('select space_id from slack_import_sources where owner_id=$1 and workspace=$2 and channel_id=$3',[ownerId,workspace,channelId]))[0]?.space_id;
+    return (await this.sql.query<{space_id:string}>('select space_id from slack_import_sources where owner_id=$1 and workspace=$2 and channel_id=$3 and org_id=$4',[ownerId,workspace,channelId,this.orgId]))[0]?.space_id;
   }
   async putSlackSource(ownerId:string, workspace:string, channelId:string, spaceId:string): Promise<void> {
-    await this.sql.query('insert into slack_import_sources(owner_id,workspace,channel_id,space_id) values($1,$2,$3,$4)',[ownerId,workspace,channelId,spaceId]);
+    await this.sql.query('insert into slack_import_sources(owner_id,workspace,channel_id,space_id,org_id) values($1,$2,$3,$4,$5)',[ownerId,workspace,channelId,spaceId,this.orgId]);
   }
 
   private readonly als = new AsyncLocalStorage<SqlExecutor>();

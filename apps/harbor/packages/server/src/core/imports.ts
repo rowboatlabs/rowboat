@@ -49,7 +49,7 @@ export class Imports {
     });
   }
   private async parse(ctx: ActorCtx, bytes: Uint8Array): Promise<SlackPreview> {
-    await this.k.requireActiveMember(ctx);
+    await this.k.requireOrgMember(ctx);
     if (this.active >= 2) throw new HarborError('rate_limited', 'Two archives are already being parsed. Try again shortly.');
     this.active++;
     try { return await previewSlackExport(Buffer.from(bytes)); }
@@ -70,7 +70,7 @@ export class Imports {
     if (payload.channels.length !== ids.size) throw new HarborError('invalid_request', 'A selected channel is missing from the archive');
     const key = createHash('sha256').update(JSON.stringify([ctx.memberId, input.workspace, [...ids].sort(), input.existingChannels ?? 'skip'])).update(bytes).digest('hex');
     const job = await this.k.store.withSpaceLock(`slack-owner:${ctx.memberId}`, async () => {
-      await this.k.requireActiveMember(ctx);
+      await this.k.requireOrgMember(ctx);
       const existing = await this.k.store.getSlackJobByKey(key);
       if (existing) return existing.job;
       const now = this.k.now();
@@ -91,11 +91,11 @@ export class Imports {
     return job;
   }
   async list(ctx: ActorCtx) {
-    await this.k.requireActiveMember(ctx);
+    await this.k.requireOrgMember(ctx);
     return { jobs: (await this.k.store.listSlackJobs(ctx.memberId)).map(r => this.progress(r.job)) };
   }
   private async owned(ctx: ActorCtx, id: string) {
-    await this.k.requireActiveMember(ctx);
+    await this.k.requireOrgMember(ctx);
     const record = await this.k.store.getSlackJob(id);
     enforce(canManageSlackImport(ctx.memberId, record?.ownerId));
     return record!;
@@ -134,7 +134,7 @@ export class Imports {
             const target = r.job.channels.find(c => c.id === channel.id)!;
             if (target.status !== 'pending') return;
             this.k.guardWrite();
-            await this.k.requireActiveMember({ memberId: r.ownerId });
+            await this.k.requireOrgMember({ memberId: r.ownerId });
             const existing = await this.k.store.getSlackSource(r.ownerId, r.job.workspace, target.id);
             if (target.existing && !existing) throw new HarborError('not_found', 'The previous import destination no longer exists');
             if (existing && r.job.existingChannels !== 'append') { target.spaceId = existing; target.status = 'skipped'; }
@@ -178,7 +178,7 @@ export class Imports {
     const now = this.k.now();
     if (!channel.name || channel.name.length > 128) throw new HarborError('invalid_request', 'Channel name must contain 1–128 characters');
     if (!append) {
-      await this.k.store.putSpace({ id: spaceId, name: channel.name, kind: 'shared', createdAt: now, archived: channel.archived, graph: false });
+      await this.k.store.putSpace({ id: spaceId, name: channel.name, kind: 'shared', visibility: 'private', isDefault: false, createdAt: now, archived: channel.archived, graph: false });
       const membership = { spaceId, memberId: r.ownerId, joinedAt: now, role: 'admin' as const };
       await this.k.store.putMembership(membership);
       await this.k.appendNext(spaceId, now, { type: 'membership', membership, action: 'joined' });

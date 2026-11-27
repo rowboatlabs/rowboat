@@ -428,6 +428,17 @@ export const routes = {
     // Raw ZIP body; no persistent upload or import job is created.
     response: SlackImportPreview,
   },
+  browseSpaces: {
+    method: 'GET',
+    path: '/v1/spaces/browse',
+    response: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
+  },
+  joinSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/join',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ space: Space, membership: Membership }),
+  },
   createSpace: {
     method: 'POST',
     path: '/v1/spaces',

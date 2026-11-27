@@ -1,3 +1,4 @@
+import { SlackImportPreviewPanel } from './spaces/slack-import-preview'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useSpaceDirectory, invalidateSpaceDirectory } from '@/hooks/use-space-directory'
 import { canInvite, useOrgSettings } from '@/hooks/use-org-settings'
@@ -61,6 +62,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenSettings, onOpe
     let forYou = 0
     for (const [key, badge] of unread) if (key.startsWith(`${org.id}/`)) forYou += badge.forYou
     // The New chat sheet, opened on the screen the click meant: a group, a message, or the menu.
+    const [importing, setImporting] = useState(false)
     const [creating, setCreating] = useState(false)
     const [newName, setNewName] = useState('')
     const [visibility, setVisibility] = useState<'private' | 'open'>('private')
@@ -428,6 +430,7 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenSettings, onOpe
             <Dialog open={creating} onOpenChange={(open) => { if (!submitting) { setCreating(open); if (!open) { setNewName(''); setVisibility('private') } } }}>
                 <DialogContent>
                     <DialogHeader><DialogTitle>Create a space</DialogTitle><DialogDescription>Choose who can discover and read this space.</DialogDescription></DialogHeader>
+                    <Button variant="outline" onClick={() => { setCreating(false); setImporting(true) }}>Import from Slack</Button>
                     <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void createSpace() }}>
                         <label className="text-sm">Name<Input autoFocus maxLength={128} value={newName} onChange={event => setNewName(event.target.value)} placeholder="Space name" /></label>
                         <fieldset className="space-y-3" disabled={submitting}><legend className="mb-2 text-sm font-medium">Visibility</legend>
@@ -438,6 +441,12 @@ function ChatList({ org, activeSpace, unread, onOpenSpace, onOpenSettings, onOpe
                         {directory.loaded && !directory.supported && <p className="text-sm text-muted-foreground">Update this server to create open spaces.</p>}
                         <Button type="submit" disabled={!newName.trim() || submitting}>{submitting ? 'Creating…' : 'Create space'}</Button>
                     </form>
+                </DialogContent>
+            </Dialog>
+            <Dialog open={importing} onOpenChange={setImporting}>
+                <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader><DialogTitle>Import from Slack</DialogTitle><DialogDescription>Choose a Slack export and the channels to import.</DialogDescription></DialogHeader>
+                    <SlackImportPreviewPanel orgId={org.id} onOpenSpace={id => { setImporting(false); onOpenSpace(org.id, id) }} />
                 </DialogContent>
             </Dialog>
             <NewDirectDialog org={org} open={newDirectOpen} onOpenChange={setNewDirectOpen} onOpened={onOpenSpace} />

@@ -1,4 +1,7 @@
 import { Imports } from './core/imports.js';
+import { Graph, type GraphOptions, type SetSpaceGraphInput } from './core/graph.js';
+import type { JevApi } from './jev.js';
+import type { SpaceGraph } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 import type { BlobStore } from './blobs.js';
 import { Agents, type AgentConnectorHooks } from './core/agents.js';
@@ -111,7 +114,7 @@ export class HarborService {
     /** Test knob: how long an agent may be away before it is announced offline (default 15s). */
     options: { presenceGraceMs?: number } = {},
   ) {
-    this.k = new Kernel(store, hub, server);
+    this.k = new Kernel(store, hub, org);
     this.imports = new Imports(this.k);
     this.spaces = new Spaces(this.k, blobs);
     this.assets = new Assets(this.k, blobs);
@@ -430,8 +433,14 @@ export class HarborService {
     return this.imports.previewSlack(ctx, bytes);
   }
 
-  createSpace(ctx: ActorCtx, name: string): Promise<Space> {
-    return this.spaces.createSpace(ctx, name);
+  browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
+    return this.spaces.browseSpaces(ctx);
+  }
+  joinSpace(ctx: ActorCtx, spaceId: string): Promise<{ space: Space; membership: Membership }> {
+    return this.spaces.joinSpace(ctx, spaceId);
+  }
+  createSpace(ctx: ActorCtx, name: string, visibility: Space['visibility'] = 'private', opts: { isDefault?: boolean } = {}): Promise<Space> {
+    return this.spaces.createSpace(ctx, name, visibility, opts);
   }
   renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
     return this.spaces.renameSpace(ctx, spaceId, input);

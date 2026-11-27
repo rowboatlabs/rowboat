@@ -164,6 +164,20 @@ export const previewSlackImport = tool({
   output: SlackImportPreview,
 });
 
+export const browseSpaces = tool({
+  name: 'browse_spaces',
+  description: 'Browse this org’s shared open spaces, including those already joined. Read any result without joining; call join_space before posting or other actions. Private spaces and DMs are never listed.',
+  input: z.object({}),
+  output: z.object({ spaces: z.array(z.object({ space: Space, joined: z.boolean() })) }),
+});
+
+export const joinSpace = tool({
+  name: 'join_space',
+  description: 'Join a shared open space as your person before posting or other actions. Repeated joins are a no-op. Private spaces and DMs cannot be self-joined.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ space: Space, membership: Membership }),
+});
+
 export const createSpace = tool({
   name: 'create_space',
   description:
