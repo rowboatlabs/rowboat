@@ -17,6 +17,7 @@ const FLAVOR_NAMES: Record<string, string> = {
   google: 'Google',
   openrouter: 'OpenRouter',
   aigateway: 'AI Gateway',
+  edenai: 'Eden AI',
   ollama: 'Ollama',
   rowboat: 'Rowboat',
   codex: 'ChatGPT',

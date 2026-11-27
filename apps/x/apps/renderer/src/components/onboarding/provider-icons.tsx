@@ -48,6 +48,15 @@ export function OpenRouterIcon({ className }: IconProps) {
   )
 }
 
+export function EdenAIIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={cn("size-5", className)}>
+      <path d="M12 2l9 5.5v9L12 22l-9-5.5v-9z" opacity="0.25" />
+      <path d="M12 6.2l5.4 3.3v5.4L12 18.2l-5.4-3.3V9.5z" />
+    </svg>
+  )
+}
+
 export function VercelIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={cn("size-5", className)}>
