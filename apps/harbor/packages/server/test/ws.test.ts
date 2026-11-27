@@ -73,6 +73,32 @@ function eventFrames(frames: ServerFrame[]) {
 }
 
 describe('live face', () => {
+  it('isolates a malformed protocol frame and continues serving live clients', async () => {
+    const ws = new WebSocket(`ws://localhost:${harbor.port}/v1/live?token=dev-ramnique`);
+    ws.on('error', () => {});
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', resolve);
+      ws.once('error', reject);
+    });
+    const closed = new Promise<number>((resolve) => ws.once('close', resolve));
+    try {
+      // 2026-11-07: exercise receiver errors below JSON validation; a masked
+      // reserved opcode must close this peer without an unhandled error.
+      const transport = ws as unknown as { _socket: { write(data: Buffer): void } };
+      transport._socket.write(Buffer.from([0x83, 0x80, 0, 0, 0, 0]));
+      expect(await closed).toBe(1002);
+      const healthy = await connect('dev-ramnique');
+      try {
+        healthy.send({ kind: 'subscribe', spaceId });
+        await healthy.until((frames) => frames.some((frame) => frame.kind === 'subscribed'));
+      } finally {
+        healthy.close();
+      }
+    } finally {
+      ws.terminate();
+    }
+  });
+
   it('rejects upgrades without a token', async () => {
     const ws = new WebSocket(`ws://localhost:${harbor.port}/v1/live`);
     const err = await new Promise<Error>((resolve) => ws.once('error', resolve));
