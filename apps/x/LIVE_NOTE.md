@@ -34,7 +34,7 @@ live:
 3. [Technical Flows](#technical-flows)
 4. [Schema Reference](#schema-reference)
 5. [Body Structure](#body-structure)
-6. [Daily-Note Template & Migrations](#daily-note-template--migrations)
+6. [Default Note Policy](#default-note-policy)
 7. [Renderer UI](#renderer-ui)
 8. [Prompts Catalog](#prompts-catalog)
 9. [File Map](#file-map)
