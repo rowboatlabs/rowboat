@@ -43,8 +43,8 @@ export function stampsEqual(a: MentionStamps, b: MentionStamps): boolean {
   );
 }
 
-/** Fenced and inline code — a mention inside one is a cite, not an address. */
-const CODE_REGIONS = /(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g;
+/** Complete backtick regions or a tilde-fence opener; code contains cites, not addresses. */
+const CODE_REGIONS = /```[\s\S]*?(?:```|$)|`[^`\n]*`|(?:^|(?<=\n)) {0,3}(~{3,})[^\r\n]*(?:\r?\n|$)/g;
 
 /**
  * One token: label = anything but "]" or a newline; an id = anything but ")"
@@ -71,15 +71,27 @@ function refOf(label: string, id: string | undefined, here: string | undefined, 
 
 /** Rewrite every token outside code regions through `fn` (return `raw` to keep one as is). */
 export function mapMentionTokens(body: string, fn: (ref: MentionRef, raw: string) => string): string {
-  return body
-    .split(CODE_REGIONS)
-    .map((part, i) => {
-      if (i % 2 === 1) return part; // a code region — cite, not address
-      return part.replace(MENTION_TOKEN_RE, (raw: string, label: string, id?: string, here?: string, _rowboat?: string, spaceLabel?: string, spaceId?: string) =>
-        fn(refOf(label, id, here, spaceLabel, spaceId), raw),
-      );
-    })
-    .join('');
+  const rewrite = (part: string) => part.replace(MENTION_TOKEN_RE, (raw: string, label: string, id?: string, here?: string, _rowboat?: string, spaceLabel?: string, spaceId?: string) =>
+    fn(refOf(label, id, here, spaceLabel, spaceId), raw),
+  );
+  const regions = new RegExp(CODE_REGIONS);
+  let result = '';
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regions.exec(body)) !== null) {
+    let end = regions.lastIndex;
+    if (match[1]) {
+      // Tilde-fenced examples are cites too (2026-11-01). A shorter run or
+      // a run followed by text cannot close them; an unclosed fence owns EOF.
+      const close = new RegExp(`^ {0,3}~{${match[1].length},}[ \t]*(?:\\r?\\n|$)`, 'gm');
+      close.lastIndex = end;
+      end = close.exec(body) ? close.lastIndex : body.length;
+      regions.lastIndex = end;
+    }
+    result += rewrite(body.slice(cursor, match.index)) + body.slice(match.index, end);
+    cursor = end;
+  }
+  return result + rewrite(body.slice(cursor));
 }
 
 /** The addresses in a body: member ids (deduped, in order of first appearance) and the two fixed addresses. Space tokens refer, never address. */
