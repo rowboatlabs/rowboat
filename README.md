@@ -315,9 +315,29 @@ The result is memory that compounds, rather than retrieval that starts cold ever
 ### Bring your own model
 
 Rowboat works with the model setup you prefer:
-- **Local models** via Ollama or LM Studio
+- **Local models** via Ollama, LM Studio, or [Rapid-MLX](#example-rapid-mlx-on-apple-silicon)
 - **Hosted models** (bring your own API key/provider)
 - Swap models anytime — your data stays in your local Markdown vault
+
+#### Example: Rapid-MLX on Apple Silicon
+
+[Rapid-MLX](https://github.com/raullenchai/Rapid-MLX) is an Apache-2.0 local inference server for macOS on Apple Silicon (M-series). Connect it through Rowboat's **OpenAI-Compatible** provider.
+
+Install Rapid-MLX and start a tool-capable chat model in a terminal:
+
+```bash
+pip install rapid-mlx
+rapid-mlx serve qwen3.5-4b-4bit
+```
+
+The first start downloads the model. Keep the server running while using Rowboat.
+
+1. Open **Settings → Models → Add provider → OpenAI-Compatible**.
+2. Set the endpoint URL to `http://127.0.0.1:8000/v1` and leave the API key blank; Rapid-MLX does not require one.
+3. Enter `mlx-community/Qwen3.5-4B-MLX-4bit` in **Model id (optional)** and connect. Rowboat also discovers available model IDs from `http://127.0.0.1:8000/v1/models`.
+4. Select that model in the chat composer and send a message, for example: "What is 12 × 7?"
+
+The loopback URL assumes Rowboat's desktop app or headless server runs on the same Mac as Rapid-MLX. Chat requests go to this local endpoint; any tools you enable may contact their configured services. To disconnect, use **Manage** on the OpenAI-Compatible provider in **Settings → Models**.
 
 ### Extend Rowboat with tools (MCP)
 
