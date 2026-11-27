@@ -1,3 +1,7 @@
+import { SlackReactions } from './slack-reactions'
+import { SlackMessageBody } from './slack-message-body'
+import { useSlackSender } from '@/hooks/use-slack-sender'
+import { SlackProfile } from './slack-profile'
 import { useSpaceAccess } from '@/lib/spaces-access'
 import { SessionPill } from '@/components/spaces/session-status'
 import { useReactionReadMark } from '@/hooks/use-reaction-read-mark'
@@ -237,7 +241,11 @@ function MessageRowImpl({
         onRemovePollVote = undefined
         onEndPoll = undefined
     }
-    const name = memberNames.get(message.author.memberId) ?? message.author.memberId
+    const mappedSender = useSlackSender(orgId, message)
+    const displayMemberId = mappedSender ?? message.author.memberId
+    const name = message.author.slack
+        ? (mappedSender ? memberNames.get(mappedSender) ?? 'Rowboat member' : message.author.slack.name)
+        : memberNames.get(displayMemberId) ?? displayMemberId
     const viaAgent = message.author.actingMode !== 'direct'
     const avatarSize = 'xl'
     const gutter = 'w-9'
@@ -246,13 +254,13 @@ function MessageRowImpl({
     const deleted = !!message.deletedAt
     // A session's first message always shows its name line, where its pill sits (2026-11-06).
     const startsSession = !!message.session && message.threadRoot === undefined && !deleted
-    const continuation = groupedWithPrevious && !startsSession
+    const continuation = groupedWithPrevious && !startsSession && !message.author.slack
     // Unconfirmed sends (pending or failed) have no server id yet — nothing
     // can act on them either.
     const unconfirmed = !!message.pending || !!message.failed
     const canDelete = !!onDelete && !deleted && !unconfirmed && selfMemberId === message.author.memberId
     // Poll messages are immutable once posted (the org refuses too).
-    const canEdit = !!onEdit && !deleted && !unconfirmed && !message.poll && selfMemberId === message.author.memberId
+    const canEdit = !message.author.slack && !!onEdit && !deleted && !unconfirmed && !message.poll && selfMemberId === message.author.memberId
     // The inline editor: null = not editing. Images live beside the text, not
     // in it — the box edits prose while the embeds show as removable
     // thumbnails (the Slack model); split/joinImageEmbeds carry the round trip.
@@ -345,10 +353,10 @@ function MessageRowImpl({
                 <span title={formatFullTimestamp(message.postedAt)} className={cn('shrink-0 pt-1 text-right text-[11px] leading-[22px] tabular-nums text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
                     {formatFeedTime(message.postedAt).replace(/^Yesterday /, '')}
                 </span>
-            ) : (
-                <MemberProfilePopover id={message.author.memberId}>
+            ) : message.author.slack && !mappedSender ? <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm" title="Imported Slack profile">{name.slice(0, 1)}</span> : (
+                <MemberProfilePopover id={displayMemberId}>
                     <button type="button" aria-label={`${name}’s profile`} className="mt-0.5 shrink-0 cursor-pointer rounded-full">
-                        <MemberAvatar id={message.author.memberId} name={name} size={avatarSize} />
+                        <MemberAvatar id={displayMemberId} name={name} size={avatarSize} orgId={orgId} />
                     </button>
                 </MemberProfilePopover>
             )}
@@ -363,10 +371,10 @@ function MessageRowImpl({
                 )}
                 {!continuation && (
                     <div className="flex flex-wrap items-baseline gap-x-2 text-xs">
-                        <MemberProfilePopover id={message.author.memberId}>
+                        {message.author.slack ? <SlackProfile message={message} orgId={orgId} selfMemberId={selfMemberId} mappedMemberId={mappedSender} mappedName={name} /> : <MemberProfilePopover id={message.author.memberId}>
                             <button type="button" className="cursor-pointer text-[15px] font-bold leading-[22px] text-foreground hover:underline">{name}</button>
-                        </MemberProfilePopover>
-                        <AgentMark id={message.author.memberId} />
+                        </MemberProfilePopover>}
+                        {!message.author.slack && <AgentMark id={message.author.memberId} />}
                         {viaAgent && (
                             canOpenResponseChat ? (
                                 // Your own Rowboat's post: the label is the subtle way in
@@ -449,11 +457,11 @@ function MessageRowImpl({
                         ) : null}
                         {collapsed && !message.summary ? (
                             <div data-clamped className="relative max-h-[13.5rem] overflow-hidden">
-                                <SpaceMarkdown body={message.body} />
+                                {message.author.slack ? <SlackMessageBody body={message.body} /> : <SpaceMarkdown body={message.body} />}
                                 <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent" />
                             </div>
                         ) : !collapsed ? (
-                            <SpaceMarkdown body={message.body} />
+                            message.author.slack ? <SlackMessageBody body={message.body} /> : <SpaceMarkdown body={message.body} />
                         ) : null}
                         {long && (
                             <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}
@@ -464,7 +472,7 @@ function MessageRowImpl({
                         {message.editedAt && (
                             <span title={formatFullTimestamp(message.editedAt)} className="ml-1 text-[10.5px] text-muted-foreground/70">(edited)</span>
                         )}
-                        {!collapsed && <MessageLinkPreview body={message.body} messageId={message.id} />}
+                        {!collapsed && !message.author.slack && <MessageLinkPreview body={message.body} messageId={message.id} />}
                     </div>
                 )}
                 {!deleted && <MessageSecretsCard orgId={orgId} message={message} memberNames={memberNames} selfMemberId={selfMemberId} />}
@@ -483,6 +491,7 @@ function MessageRowImpl({
                         )}
                     </div>
                 )}
+                {!deleted && message.author.slack?.reactions?.length ? <SlackReactions message={message} onReact={onReact} /> : null}
                 {!deleted && !unconfirmed && <InvocationLines messageId={message.id} />}
                 {!deleted && !unconfirmed && (
                     <ReactionChips

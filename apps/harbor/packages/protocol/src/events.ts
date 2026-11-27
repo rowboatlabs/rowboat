@@ -144,6 +144,7 @@ export const SpaceEvent = z.discriminatedUnion('type', [
    * it, so clients update their listings and the feed can render an
    * attributed "renamed the space" line. Identical-name renames emit nothing.
    */
+  z.object({ type: z.literal('slack_profile_linked'), workspace: z.string(), userId: z.string(), memberId: z.string().nullable(), by: Attribution }),
   z.object({
     type: z.literal('space_renamed'),
     space: Space,

@@ -1,3 +1,4 @@
+import { Imports } from './core/imports.js';
 import { Graph, type GraphOptions, type SetSpaceGraphInput } from './core/graph.js';
 import type { JevApi } from './jev.js';
 import type { SpaceGraph } from '@rowboat/spaces-protocol';
@@ -88,6 +89,7 @@ export type { ActingMode };
 
 export class HarborService {
   private readonly k: Kernel;
+  private readonly imports: Imports;
   private readonly spaces: Spaces;
   private readonly assets: Assets;
   private readonly images: Images;
@@ -113,6 +115,7 @@ export class HarborService {
     options: { presenceGraceMs?: number } = {},
   ) {
     this.k = new Kernel(store, hub, org);
+    this.imports = new Imports(this.k);
     this.spaces = new Spaces(this.k, blobs);
     this.assets = new Assets(this.k, blobs);
     this.images = new Images(this.k, blobs);
@@ -418,6 +421,18 @@ export class HarborService {
   listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return this.spaces.listSpaces(ctx, opts);
   }
+  startImports() { this.imports.startWorker(); }
+  stopImports() { return this.imports.stopWorker(); }
+  getSlackProfile(ctx: ActorCtx, spaceId: string, messageId: string) { return this.imports.getProfile(ctx, spaceId, messageId); }
+  linkSlackProfile(ctx: ActorCtx, spaceId: string, messageId: string, memberId: string | null) { return this.imports.linkProfile(ctx, spaceId, messageId, memberId); }
+  startSlackImport(ctx: ActorCtx, input: import('@rowboat/spaces-protocol').SlackImportSelection & { bytes: string }) { return this.imports.start(ctx, Buffer.from(input.bytes, 'base64'), input); }
+  listSlackImports(ctx: ActorCtx) { return this.imports.list(ctx); }
+  getSlackImport(ctx: ActorCtx, id: string) { return this.imports.get(ctx, id); }
+  retrySlackImport(ctx: ActorCtx, id: string) { return this.imports.retry(ctx, id); }
+  previewSlackImport(ctx: ActorCtx, bytes: Uint8Array) {
+    return this.imports.previewSlack(ctx, bytes);
+  }
+
   browseSpaces(ctx: ActorCtx): Promise<Array<{ space: Space; joined: boolean }>> {
     return this.spaces.browseSpaces(ctx);
   }

@@ -366,6 +366,22 @@ export class SpacesClient {
     return this.request('POST', routes.openDirect.path, routes.openDirect.response, { memberId });
   }
 
+  getSlackProfile(spaceId: string, messageId: string) {
+    return this.request('GET', this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/slack-profile`), routes.getSlackProfile.response);
+  }
+  linkSlackProfile(spaceId: string, messageId: string, memberId: string | null) {
+    return this.request('PUT', this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/slack-profile`), routes.linkSlackProfile.response, { memberId });
+  }
+  startSlackImport(input: import('@rowboat/spaces-protocol').SlackImportSelection & { bytes: string }) {
+    return this.request('POST', routes.startSlackImport.path, routes.startSlackImport.response, input);
+  }
+  listSlackImports() { return this.request('GET', routes.listSlackImports.path, routes.listSlackImports.response); }
+  getSlackImport(jobId: string) { return this.request('GET', routes.getSlackImport.path.replace(':jobId', encodeURIComponent(jobId)), routes.getSlackImport.response); }
+  retrySlackImport(jobId: string) { return this.request('POST', routes.retrySlackImport.path.replace(':jobId', encodeURIComponent(jobId)), routes.retrySlackImport.response); }
+  async previewSlackImport(bytes: Uint8Array) {
+    return this.putBytes(routes.previewSlackImport.path, routes.previewSlackImport.response, bytes, { 'content-type': 'application/zip' });
+  }
+
   async browseSpaces() {
     try {
       const result = await this.request('GET', routes.browseSpaces.path, routes.browseSpaces.response);

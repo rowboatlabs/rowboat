@@ -1,4 +1,4 @@
-import { Availability } from '@rowboat/spaces-protocol';
+import { SlackProfileLink, LinkSlackProfileInput, StartSlackImportInput, SlackImportJob, SlackImportPreview, SlackPreviewInput, Availability } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
 import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
@@ -3919,6 +3919,17 @@ export const ipcSchemas = {
   'spaces:joinSpace': {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>(), membership: z.custom<SpacesTypes.Membership>() }),
+  },
+  // A new group: its creator is its admin (spec §4 Roles, 2026-11-09).
+  'spaces:getSlackProfile': { req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string() }), res: SlackProfileLink },
+  'spaces:linkSlackProfile': { req: LinkSlackProfileInput.extend({ orgId: z.string(), spaceId: z.string(), messageId: z.string() }), res: SlackProfileLink },
+  'spaces:startSlackImport': { req: StartSlackImportInput.extend({ orgId: z.string() }), res: SlackImportJob },
+  'spaces:listSlackImports': { req: z.object({ orgId: z.string() }), res: z.object({ jobs: z.array(SlackImportJob) }) },
+  'spaces:getSlackImport': { req: z.object({ orgId: z.string(), jobId: z.string() }), res: SlackImportJob },
+  'spaces:retrySlackImport': { req: z.object({ orgId: z.string(), jobId: z.string() }), res: SlackImportJob },
+  'spaces:previewSlackImport': {
+    req: SlackPreviewInput.extend({ orgId: z.string() }),
+    res: SlackImportPreview,
   },
   'spaces:createSpace': {
     req: z.object({ orgId: z.string(), name: z.string(), visibility: z.enum(['private', 'open']).optional() }),

@@ -461,3 +461,16 @@ export function canStopInvocation(actor: Member, invocation: Invocation, stopDec
   if (!stopDeclared) return { code: 'invalid_request', message: 'this agent can’t be stopped from Spaces; open it in its own app' };
   return null;
 }
+
+/** 2026-11-16: an upload and its job belong only to the importing member. */
+export function canManageSlackImport(memberId: string, ownerId: string | undefined): Decision {
+  return memberId === ownerId ? null : { code: 'not_found', message: 'No such Slack import' };
+}
+
+export function canLinkSlackProfile(membership: Membership | undefined): Decision {
+  return isAdmin(membership) ? null : { code: 'forbidden', message: 'Only space admins can link Slack profiles' };
+}
+
+export function canAppendSlackImport(membership: Membership | undefined): Decision {
+  return isAdmin(membership) ? null : { code: 'forbidden', message: 'Only space admins can append imported history' };
+}

@@ -142,6 +142,8 @@ export function isContinuation(prev: spaces.Message | undefined, next: spaces.Me
     if (!prev) return false
     const a = prev.author
     const b = next.author
+    // 2026-11-16: the importing actor is not the historical Slack author.
+    if (a.slack || b.slack) return false
     if (a.memberId !== b.memberId || a.actingMode !== b.actingMode || (a.agentName ?? '') !== (b.agentName ?? '')) return false
     return new Date(next.postedAt).getTime() - new Date(prev.postedAt).getTime() <= windowMs
 }

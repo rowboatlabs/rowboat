@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SlackProfileLink, LinkSlackProfileInput, StartSlackImportInput, SlackImportJob, SlackImportPreview } from './slack-import.js';
 import { BlobInfo } from './blob.js';
 import {
   Asset,
@@ -414,6 +415,18 @@ export const routes = {
     path: '/v1/push/unregister',
     request: z.object({ token: z.string().min(1).max(200) }),
     response: z.object({ ok: z.literal(true) }),
+  },
+  getSlackProfile: { method: 'GET', path: '/v1/spaces/:spaceId/messages/:messageId/slack-profile', params: z.object({ spaceId: z.string(), messageId: z.string() }), response: SlackProfileLink },
+  linkSlackProfile: { method: 'PUT', path: '/v1/spaces/:spaceId/messages/:messageId/slack-profile', params: z.object({ spaceId: z.string(), messageId: z.string() }), request: LinkSlackProfileInput, response: SlackProfileLink },
+  startSlackImport: { method: 'POST', path: '/v1/imports/slack/jobs', request: StartSlackImportInput, response: SlackImportJob },
+  listSlackImports: { method: 'GET', path: '/v1/imports/slack/jobs', response: z.object({ jobs: z.array(SlackImportJob) }) },
+  getSlackImport: { method: 'GET', path: '/v1/imports/slack/jobs/:jobId', params: z.object({ jobId: z.string() }), response: SlackImportJob },
+  retrySlackImport: { method: 'POST', path: '/v1/imports/slack/jobs/:jobId/retry', params: z.object({ jobId: z.string() }), response: SlackImportJob },
+  previewSlackImport: {
+    method: 'PUT',
+    path: '/v1/imports/slack/preview',
+    // Raw ZIP body; no persistent upload or import job is created.
+    response: SlackImportPreview,
   },
   browseSpaces: {
     method: 'GET',

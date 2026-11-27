@@ -1,3 +1,4 @@
+export { MAX_SLACK_ZIP_BYTES, type SlackImportJob, type SlackImportPreview } from '@rowboat/spaces-protocol';
 export { blobDownloadName } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { JEV_KIND, addressesRowboat, mapMentionTokens, mentionsAsText, parseMentions } from '@rowboat/spaces-protocol';
@@ -502,4 +503,20 @@ export function decorateMentions(body: string, memberNames: ReadonlyMap<string, 
  */
 export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>, spaceNames?: ReadonlyMap<string, string>): string {
   return mentionsAsText(body, memberNames, spaceNames);
+}
+
+
+// 2026-11-26: both clients count skipped channels as processed and distinguish live work from committed history.
+export function slackImportProgress(job: import('@rowboat/spaces-protocol').SlackImportJob) {
+  const finished = job.channels.filter(channel => channel.status !== 'pending').length;
+  const total = job.channels.length;
+  const current = job.channels.find(channel => channel.id === job.currentChannel?.id);
+  const processed = job.currentChannel?.processed ?? 0;
+  const status = { queued: 'Import queued', running: 'Importing', failed: 'Import interrupted', completed: 'Import complete' }[job.status];
+  const count = `${finished} of ${total} ${total === 1 ? 'channel' : 'channels'} processed`;
+  const detail = current
+    ? `#${current.name} · ${processed.toLocaleString()} of ${current.messages.toLocaleString()} messages checked`
+    : undefined;
+  const fraction = current && current.messages > 0 ? processed / current.messages : 0;
+  return { status, count, detail, percent: total ? Math.min(job.status === 'completed' ? 100 : 99, Math.floor((finished + fraction) / total * 100)) : 0 };
 }

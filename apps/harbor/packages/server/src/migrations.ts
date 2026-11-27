@@ -1565,6 +1565,14 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    id: '067-slack-prepare-org-members',
+    statements: [
+      'alter table if exists slack_import_jobs drop constraint if exists slack_import_jobs_owner_id_fkey',
+      'alter table if exists slack_import_sources drop constraint if exists slack_import_sources_owner_id_fkey',
+      'alter table if exists slack_profile_links drop constraint if exists slack_profile_links_member_id_fkey',
+    ],
+  },
+  {
     // Orgs return (2026-11-24). Adopt flat data in one org so self-hosters can
     // upgrade without a snapshot. Rowboat splits its orgs after this transaction.
     id: '067-orgs-return',
@@ -1720,6 +1728,25 @@ export const MIGRATIONS: Migration[] = [
         select 'org-default', $1, 'general', $2, 'shared', 'open', true
         where not exists (select 1 from spaces where org_id = 'org-default' and is_default)`, [ulid(), now]);
     },
+  },
+  {
+    id: '068-org-slack-imports',
+    statements: [
+      `create table if not exists slack_import_jobs (id text primary key, owner_id text not null, dedupe_key text not null, job jsonb not null, payload jsonb)`,
+      `create table if not exists slack_import_sources (owner_id text not null, workspace text not null, channel_id text not null, space_id text not null references spaces(id) on delete cascade, primary key(owner_id, workspace, channel_id))`,
+      `create table if not exists slack_profile_links (space_id text not null references spaces(id) on delete cascade, workspace text not null, user_id text not null, member_id text not null, primary key(space_id,workspace,user_id))`,
+      `alter table slack_import_jobs add column org_id text not null default 'org-default'`,
+      `alter table slack_import_jobs add foreign key (org_id,owner_id) references members(org_id,id) on delete cascade`,
+      `alter table slack_import_sources add column org_id text not null default 'org-default'`,
+      `alter table slack_import_sources add foreign key (org_id,owner_id) references members(org_id,id) on delete cascade`,
+      `alter table slack_profile_links add column org_id text not null default 'org-default'`,
+      `alter table slack_profile_links add foreign key (org_id,member_id) references members(org_id,id) on delete cascade`,
+      `alter table slack_import_jobs drop constraint if exists slack_import_jobs_dedupe_key_key`,
+      `create unique index slack_import_jobs_org_key on slack_import_jobs(org_id,dedupe_key)`,
+      `create index if not exists slack_import_jobs_owner on slack_import_jobs(org_id,owner_id)`,
+      `alter table slack_import_sources drop constraint slack_import_sources_pkey`,
+      `alter table slack_import_sources add primary key(org_id,owner_id,workspace,channel_id)`,
+    ],
   },
 ];
 

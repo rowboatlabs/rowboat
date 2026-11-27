@@ -797,6 +797,7 @@ export class Feed {
       if (message.deletedAt) throw new HarborError('invalid_request', 'cannot edit a deleted message');
       // The Discord posture: a poll message is immutable once posted — its
       // body is the poll's fallback rendering, and votes were cast on it.
+      if (message.author.slack) throw new HarborError('invalid_request', 'Imported history cannot be edited');
       if (message.poll) throw new HarborError('invalid_request', 'poll messages cannot be edited');
       // The summary (2026-10-25): left out = kept, null = removed.
       const summary = input.summary === undefined ? message.summary : (input.summary ?? undefined);

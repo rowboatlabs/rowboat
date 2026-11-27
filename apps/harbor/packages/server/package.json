@@ -12,7 +12,8 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "dev": "tsx src/main.ts"
+    "dev": "tsx src/main.ts",
+    "preview:slack": "tsx src/imports/preview-slack.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",
@@ -28,6 +29,7 @@
     "pg": "^8.23.0",
     "ulid": "^3.0.1",
     "ws": "^8.18.0",
+    "yauzl": "^3.4.0",
     "zod": "4.2.1"
   },
   "devDependencies": {
@@ -35,6 +37,7 @@
     "@types/node": "^24.0.0",
     "@types/pg": "^8.21.0",
     "@types/ws": "^8.18.1",
+    "@types/yauzl": "^3.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.0"

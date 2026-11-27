@@ -731,7 +731,7 @@ export function ThreadPane({
     // Quote-reply, mirroring the stream's: the quoted copy seeds the reply
     // composer — plain markdown on the wire; image embeds drop, names not ids.
     const quoteReply = (message: spaces.Message) => {
-        const name = memberNames.get(message.author.memberId) ?? message.author.memberId
+        const name = message.author.slack?.name ?? memberNames.get(message.author.memberId) ?? message.author.memberId
         const text = resolveMentions(message.body, memberNames, spaceNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
         if (!text) return
         const quote = text.split('\n').map((l) => `> ${l}`).join('\n')
@@ -1039,7 +1039,7 @@ export function ThreadPane({
     }
 
     const typingNames = (presence.typing.get(rootMessageId) ?? []).map((id) => memberNames.get(id) ?? id)
-    const parentName = root ? memberNames.get(root.author.memberId) ?? root.author.memberId : ''
+    const parentName = root ? root.author.slack?.name ?? memberNames.get(root.author.memberId) ?? root.author.memberId : ''
     // Reply-to-activity-row provenance: the change-set this root answers.
     const anchorChange = root?.anchorChangeSetId ? changeSets.find((c) => c.id === root.anchorChangeSetId) ?? null : null
     const replyCountLabel = Math.max(visibleReplies.length, root?.replyCount ?? 0)
