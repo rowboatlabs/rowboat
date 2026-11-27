@@ -587,6 +587,25 @@ function stripLeadingFrontmatter(content: string): string {
 }
 
 /**
+ * Write a thread's freshly rendered markdown body, leaving the file untouched
+ * when its body is already this one.
+ *
+ * 2026-11-05 (#1239): the sync used to overwrite the file without frontmatter
+ * every cycle, so the follow-up stamp always re-wrote it with a fresh
+ * classified_at. The graph builder hashes the whole file, so every synced
+ * thread re-queued note_creation each cycle. A changed body is still written
+ * without frontmatter, so the graph builder holds it until it is re-classified.
+ */
+export function writeEmailMarkdown(mdPath: string, body: string): void {
+    try {
+        if (stripLeadingFrontmatter(fs.readFileSync(mdPath, 'utf-8')) === body) return;
+    } catch {
+        // first sync of this thread
+    }
+    fs.writeFileSync(mdPath, body);
+}
+
+/**
  * Stamp the classification verdict into the thread's gmail_sync markdown as
  * YAML frontmatter. The knowledge-graph builder holds any email file without
  * frontmatter (it can't tell noise from signal yet), so this stamp is what

@@ -23,6 +23,7 @@ import {
     mirrorThreadReadState,
     mirrorThreadDraft,
     stampClassificationFrontmatter,
+    writeEmailMarkdown,
     notifyNewEmailThreads,
     publishEmailSyncEvent,
     emailMarkdownPath,
@@ -630,7 +631,7 @@ async function processConversation(conversationId: string): Promise<SyncedThread
             mdContent += '\n---\n\n';
         }
 
-        fs.writeFileSync(emailMarkdownPath(conversationId), mdContent);
+        writeEmailMarkdown(emailMarkdownPath(conversationId), mdContent);
         console.log(`[Outlook] Synced conversation: ${subject}`);
 
         try {

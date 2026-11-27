@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -10,6 +10,8 @@ import path from "path";
 process.env.ROWBOAT_WORKDIR = fs.mkdtempSync(path.join(os.tmpdir(), "x-classification-stamp-test-"));
 const { stampClassificationFrontmatter } = await import("./sync_gmail.js");
 const { emailAdmission } = await import("./build_graph.js");
+const { writeEmailMarkdown, emailMarkdownPath } = await import("./email/store.js");
+const { markFileAsProcessed, hasFileChanged } = await import("./graph_state.js");
 type GmailThreadSnapshot = import("./sync_gmail.js").GmailThreadSnapshot;
 
 const SYNC_DIR = path.join(process.env.ROWBOAT_WORKDIR, "gmail_sync");
@@ -87,5 +89,41 @@ describe("stampClassificationFrontmatter", () => {
 
     it("is a no-op when the thread has no markdown mirror", () => {
         expect(() => stampClassificationFrontmatter("missing-thread", snapshot())).not.toThrow();
+    });
+});
+
+// 2026-11-05 (#1239): each sync cycle rewrote the mirror without frontmatter
+// and the stamp then re-wrote it with a fresh classified_at, so every synced
+// thread looked changed to the graph builder and re-queued note_creation.
+describe("sync cycle over an unchanged thread", () => {
+    it("leaves the markdown byte-identical, so the graph builder does not re-queue it", () => {
+        vi.useFakeTimers();
+        try {
+            const p = emailMarkdownPath("t-cycle");
+            fs.mkdirSync(SYNC_DIR, { recursive: true });
+            vi.setSystemTime(new Date("2026-11-05T09:00:00Z"));
+            // One cycle: render the body, then stamp from the (cached) verdict.
+            writeEmailMarkdown(p, BODY);
+            stampClassificationFrontmatter("t-cycle", snapshot());
+            const first = fs.readFileSync(p, "utf-8");
+            expect(emailAdmission(first)).toBe("process");
+            const state = { processedFiles: {}, lastBuildTime: new Date(0).toISOString() };
+            markFileAsProcessed(p, state);
+
+            vi.setSystemTime(new Date("2026-11-05T09:03:00Z"));
+            writeEmailMarkdown(p, BODY);
+            stampClassificationFrontmatter("t-cycle", snapshot());
+            expect(fs.readFileSync(p, "utf-8")).toBe(first);
+            expect(hasFileChanged(p, state)).toBe(false);
+
+            // A changed body is written bare, so the graph builder holds it
+            // until the new verdict is stamped.
+            const changed = BODY + "\n### From: Sarah\n\nFollow-up.\n";
+            writeEmailMarkdown(p, changed);
+            expect(fs.readFileSync(p, "utf-8")).toBe(changed);
+            expect(emailAdmission(changed)).toBe("wait");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
