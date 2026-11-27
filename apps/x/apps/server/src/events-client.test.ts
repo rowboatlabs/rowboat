@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEventsClient, type EventsClient } from '@x/client';
 import type { TurnBusEvent } from '@x/shared/dist/turns.js';
+import { loadOrCreateServerKey } from './auth.js';
 import type { RpcHandlers } from './channels.js';
 import { RPC_CHANNELS } from './channels.js';
 import { createRowboatServer, type EventSources, type RowboatServer } from './server.js';
@@ -179,6 +181,60 @@ describe('reverse calls (capability requests)', () => {
 
     cap.close();
     failing.close();
+    await server.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('reconnectNow while a connect attempt is in flight', () => {
+  it('keeps exactly one live socket — the superseded attempt must not trigger a retry', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-reconnect-'));
+    const key = await loadOrCreateServerKey(dir);
+    const turnBus = makeEmitter<TurnBusEvent>();
+
+    // A TCP listener that accepts the connection but never answers the
+    // upgrade: the client's first socket stays CONNECTING, which is where a
+    // phone sits mid-handshake when the app returns to the foreground.
+    const holeSockets: net.Socket[] = [];
+    const hole = net.createServer((sock) => {
+      holeSockets.push(sock);
+      sock.on('error', () => {});
+    });
+    await new Promise<void>((resolve) => hole.listen(0, '127.0.0.1', resolve));
+    const port = (hole.address() as net.AddressInfo).port;
+
+    const client = createEventsClient({ baseUrl: `http://127.0.0.1:${port}`, token: key, clientName: 'test' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(client.status()).toBe('connecting');
+
+    // Free the port (the accepted socket stays open, so the in-flight attempt
+    // is still CONNECTING) and bring the real server up on it.
+    hole.close();
+    const server = await createRowboatServer({
+      workDir: dir,
+      handlers: stubHandlers,
+      events: { subscribeTurnEvents: turnBus.subscribe, subscribeSessionEvents: () => () => {} },
+      resolveWorkspacePath: (rel) => path.join(dir, rel),
+      serverVersion: 'test',
+      port,
+    });
+
+    client.reconnectNow();
+    await waitFor(() => client.status() === 'connected');
+    // The superseded socket's close lands after this; its retry (BACKOFF_MIN
+    // = 1s) must not open a third socket behind the live one.
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const received: TurnBusEvent[] = [];
+    client.on('turns:events', (p) => received.push(p as TurnBusEvent));
+    turnBus.emit(durable('t1', 1));
+    await waitFor(() => received.length >= 1);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(received).toHaveLength(1);
+    expect(server.hub.connectionCount()).toBe(1);
+
+    client.close();
+    for (const s of holeSockets) s.destroy();
     await server.close();
     await fs.rm(dir, { recursive: true, force: true });
   });
