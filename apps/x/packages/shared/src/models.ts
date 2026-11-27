@@ -16,7 +16,7 @@ export const LlmProvider = z.object({
   // "rowboat" (signed-in gateway) and "codex" (ChatGPT subscription via
   // "Sign in with ChatGPT") are credential-less flavors: they never appear
   // in models.json's providers map — auth lives in their own token stores.
-  flavor: z.enum(["openai", "anthropic", "google", "openrouter", "aigateway", "ollama", "openai-compatible", "rowboat", "codex"]),
+  flavor: z.enum(["openai", "anthropic", "google", "openrouter", "aigateway", "atlascloud", "ollama", "openai-compatible", "rowboat", "codex"]),
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
   headers: z.record(z.string(), z.string()).optional(),
