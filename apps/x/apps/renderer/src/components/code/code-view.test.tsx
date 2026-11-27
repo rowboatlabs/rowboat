@@ -68,3 +68,113 @@ it('opens a directory from an old Projects link and restores its existing sessio
   expect(invoke).not.toHaveBeenCalledWith('codeSession:create', expect.anything())
   expect(consumed).toHaveBeenCalled()
 })
+
+it('opens native directory dialog in local/child mode and adds project', async () => {
+  const row: ProjectRow = { project: { id: 'p2', path: '/local/dir', name: 'dir', addedAt: '2026-09-01T00:00:00Z' },
+    git: { isGitRepo: false, hasCommits: false, branch: null, dirtyCount: 0, root: null, subpath: null } }
+  const invoke = vi.fn(async (channel: string) => {
+    if (channel === 'server:getConnection') return { mode: 'child', url: null, fromEnv: false }
+    if (channel === 'dialog:openDirectory') return { path: '/local/dir' }
+    if (channel === 'codeProject:add') return row
+    if (channel === 'codeSession:create') return { session: { id: 'new' } }
+    return null
+  })
+  Object.assign(window, { ipc: { invoke } })
+  render(<CodeView />)
+  fireEvent.click(screen.getByRole('button', { name: 'Add a project to get started' }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('server:getConnection', null))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('dialog:openDirectory', { title: 'Choose a project folder' }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('codeProject:add', { path: '/local/dir' }))
+})
+
+it('opens remote path dialog in remote mode and adds project on submit', async () => {
+  const row: ProjectRow = { project: { id: 'p3', path: '/home/user/project', name: 'project', addedAt: '2026-09-01T00:00:00Z' },
+    git: { isGitRepo: false, hasCommits: false, branch: null, dirtyCount: 0, root: null, subpath: null } }
+  const invoke = vi.fn(async (channel: string) => {
+    if (channel === 'server:getConnection') return { mode: 'remote', url: 'http://remote:3000', fromEnv: false }
+    if (channel === 'codeProject:add') return row
+    if (channel === 'codeSession:create') return { session: { id: 'new' } }
+    return null
+  })
+  Object.assign(window, { ipc: { invoke } })
+  render(<CodeView />)
+  fireEvent.click(screen.getByRole('button', { name: 'Add a project to get started' }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('server:getConnection', null))
+  expect(invoke).not.toHaveBeenCalledWith('dialog:openDirectory', expect.anything())
+
+  expect(screen.getByRole('heading', { name: 'Add remote project' })).toBeInTheDocument()
+  const input = screen.getByPlaceholderText('/home/user/project')
+  const submitButton = screen.getByRole('button', { name: 'Add project' })
+
+  // Button disabled on empty input
+  expect(submitButton).toBeDisabled()
+
+  // Whitespace input keeps submit button disabled
+  fireEvent.change(input, { target: { value: '   ' } })
+  expect(submitButton).toBeDisabled()
+
+  // Enter valid remote path and submit
+  fireEvent.change(input, { target: { value: ' /home/user/project ' } })
+  expect(submitButton).not.toBeDisabled()
+  fireEvent.click(submitButton)
+
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('codeProject:add', { path: '/home/user/project' }))
+})
+
+it('keeps remote project dialog open when adding the project fails', async () => {
+  const invoke = vi.fn(async (channel: string) => {
+    if (channel === 'server:getConnection') {
+      return { mode: 'remote', url: 'http://remote:3000', fromEnv: false }
+    }
+
+    if (channel === 'codeProject:add') {
+      throw new Error('Project path does not exist on remote server')
+    }
+
+    return null
+  })
+
+  Object.assign(window, { ipc: { invoke } })
+
+  render(<CodeView />)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add a project to get started' }))
+
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { name: 'Add remote project' })).toBeInTheDocument(),
+  )
+
+  const input = screen.getByPlaceholderText('/home/user/project')
+
+  fireEvent.change(input, {
+    target: { value: '/home/user/missing-project' },
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add project' }))
+
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith('codeProject:add', {
+      path: '/home/user/missing-project',
+    }),
+  )
+
+  expect(screen.getByRole('heading', { name: 'Add remote project' })).toBeInTheDocument()
+})
+
+it('canceling remote project dialog does not add project', async () => {
+  const invoke = vi.fn(async (channel: string) => {
+    if (channel === 'server:getConnection') return { mode: 'remote', url: 'http://remote:3000', fromEnv: false }
+    return null
+  })
+  Object.assign(window, { ipc: { invoke } })
+  render(<CodeView />)
+  fireEvent.click(screen.getByRole('button', { name: 'Add a project to get started' }))
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Add remote project' })).toBeInTheDocument())
+
+  const input = screen.getByPlaceholderText('/home/user/project')
+  fireEvent.change(input, { target: { value: '/home/user/project' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Add remote project' })).toBeNull())
+  expect(invoke).not.toHaveBeenCalledWith('codeProject:add', expect.anything())
+})

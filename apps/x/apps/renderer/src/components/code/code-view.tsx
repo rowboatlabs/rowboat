@@ -5,6 +5,15 @@ import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -67,6 +76,9 @@ export function CodeView({
   }, [focusSessionId, onFocusConsumed])
   const [branchDialog, setBranchDialog] = useState<{ projectId: string; mode: 'switch' } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CodeSession | null>(null)
+  const [remoteDialogOpen, setRemoteDialogOpen] = useState(false)
+  const [remotePath, setRemotePath] = useState('')
+  const [remoteSubmitting, setRemoteSubmitting] = useState(false)
 
   // Warm the agent probe so a quick-create doesn't pay for it on the click.
   const [agentsStatus, setAgentsStatus] = useState<CodeAgentsStatus | null>(null)
@@ -124,20 +136,44 @@ export function CodeView({
     }
   }, [projects, sessions, agentsStatus, refresh])
 
-  const handleAddProject = useCallback(async () => {
-    const res = await window.ipc.invoke('dialog:openDirectory', { title: 'Choose a project folder' })
-    const dir = res.path
-    if (!dir) return
+  const addProjectByPath = useCallback(async (dir: string) => {
+    const trimmed = dir.trim()
+    if (!trimmed) return false
     try {
-      const added = await window.ipc.invoke('codeProject:add', { path: dir })
+      const added = await window.ipc.invoke('codeProject:add', { path: trimmed })
       await refresh()
       // Use the returned row directly: the refreshed React snapshot may not
       // have rendered yet when a project is first added.
       await handleNewSession(added.project.id, undefined, added)
+      return true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add project')
+      return false
     }
   }, [refresh, handleNewSession])
+
+  const handleAddProject = useCallback(async () => {
+    let isRemote = false
+    try {
+      const conn = await window.ipc.invoke('server:getConnection', null)
+      if (conn?.mode === 'remote') {
+        isRemote = true
+      }
+    } catch {
+      // If querying connection state fails, assume local
+    }
+
+    if (isRemote) {
+      setRemotePath('')
+      setRemoteDialogOpen(true)
+      return
+    }
+
+    const res = await window.ipc.invoke('dialog:openDirectory', { title: 'Choose a project folder' })
+    const dir = res.path
+    if (!dir) return
+    await addProjectByPath(dir)
+  }, [addProjectByPath])
 
   useEffect(() => {
     if (!focusProjectPath) return
@@ -148,7 +184,7 @@ export function CodeView({
         await refresh()
         if (cancelled) return
         const existing = await window.ipc.invoke('codeSession:list', null)
-        const session = existing.sessions.find((s) => s.projectId === row.project.id && !s.doneAt)
+        const session = existing.sessions.find((s: CodeSession) => s.projectId === row.project.id && !s.doneAt)
         if (session) setSelectedSessionId(session.id)
         else await handleNewSession(row.project.id, undefined, row)
         onProjectFocusConsumed?.()
@@ -257,6 +293,61 @@ export function CodeView({
           await window.ipc.invoke('codeProject:switchBranch', { projectId: branchDialog.projectId, branch })
           await refresh()
         }} />}
+      <Dialog open={remoteDialogOpen} onOpenChange={(open) => {
+        setRemoteDialogOpen(open)
+        if (!open) setRemotePath('')
+      }}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Add remote project</DialogTitle>
+            <DialogDescription>
+              Enter the absolute path to the project directory on the remote server.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              const trimmed = remotePath.trim()
+              if (!trimmed || remoteSubmitting) return
+              setRemoteSubmitting(true)
+              void (async () => {
+                try {
+                  const success = await addProjectByPath(trimmed)
+                  if (success) {
+                    setRemoteDialogOpen(false)
+                    setRemotePath('')
+                  }
+                } finally {
+                  setRemoteSubmitting(false)
+                }
+              })()
+            }}
+            className="space-y-4"
+          >
+            <Input
+              placeholder="/home/user/project"
+              value={remotePath}
+              onChange={(e) => setRemotePath(e.target.value)}
+              autoFocus
+            />
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setRemoteDialogOpen(false)
+                  setRemotePath('')
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!remotePath.trim() || remoteSubmitting}>
+                {remoteSubmitting ? 'Adding...' : 'Add project'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
