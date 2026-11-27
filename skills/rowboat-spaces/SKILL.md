@@ -22,7 +22,7 @@ When a request needs one you don't have, do what you can without it and say in y
 
 ### Keep the Hermes connection current
 
-If you connect through the Hermes Rowboat plugin, check for and apply supported updates to `rowboat-platform` once per session (`hermes plugins update rowboat-platform`). Respect version pins and any approval the updater requires. If activation needs a gateway restart, report that it is pending; do not interrupt active work. This applies to the plugin connection, not Hermes reached through Agent37 or Maritime.
+If you manage your own Hermes Rowboat plugin installation, check for and apply supported updates to `rowboat-platform` once per session (`hermes plugins update rowboat-platform`). Respect version pins and any approval the updater requires. If activation needs a gateway restart, report that it is pending; do not interrupt active work. Rowboat ships plugin updates with its managed Hermes image.
 
 ## Where you are
 

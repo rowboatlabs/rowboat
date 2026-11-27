@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Invocation, ServerFrame } from '@rowboat/spaces-protocol';
+import WebSocket from 'ws';
 import type { AddressInfo } from 'node:net';
 
 // A stand-in for Maritime's API, built from its OpenAPI and what was measured
@@ -91,7 +93,51 @@ export class FakeMaritime {
     return this;
   }
 
+  readonly adapters = new Map<string, WebSocket>();
+  simulateAdapters = true;
+
+  private connectAdapter(vm: string): void {
+    const env = this.env.get(vm);
+    const url = env?.get('ROWBOAT_URL')?.value;
+    const key = env?.get('ROWBOAT_AGENT_KEY')?.value;
+    const previous = this.adapters.get(vm);
+    if (!this.simulateAdapters || !url || !key || !url.startsWith('http://localhost:')) return;
+    if (previous && (previous.readyState === WebSocket.OPEN || previous.readyState === WebSocket.CONNECTING)) return;
+    const post = (path: string, body: unknown) => fetch(url + path, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const ws = new WebSocket(url.replace('http:', 'ws:') + '/v1/live', { headers: { Authorization: 'Bearer ' + key } });
+    this.adapters.set(vm, ws);
+    const seen = new Set<string>();
+    const deliver = async (i: Invocation) => {
+      if (i.state !== 'pending' || seen.has(i.id)) return;
+      seen.add(i.id);
+      const base = '/v1/agent/invocations/' + i.id;
+      if (!(await post(base + '/ack', {})).ok) return;
+      const turn = this.nextTurn;
+      this.nextTurn = undefined;
+      if (turn?.exitCode) {
+        await post(base + '/update', { state: 'failed', error: turn.stderr });
+      } else {
+        const answer = turn?.lines.map(line => JSON.parse(line)).find(e => e.type === 'result')?.text ?? 'Hello from Hermes.';
+        await post('/v1/spaces/' + i.conversation.spaceId + '/messages', { threadRoot: i.conversation.threadRootId, body: answer, actingMode: 'direct' });
+        await post(base + '/update', { state: 'done' });
+      }
+    };
+    ws.on('open', () => {
+      void (async () => {
+        await post('/v1/agent/capabilities', { stop: true, options: [] });
+        const response = await fetch(url + '/v1/agent/invocations', { headers: { Authorization: 'Bearer ' + key } });
+        if (response.ok) for (const i of (await response.json()).invocations) await deliver(i);
+      })().catch(() => {});
+    });
+    ws.on('message', raw => {
+      const frame: ServerFrame = JSON.parse(raw.toString());
+      if (frame.kind === 'invocation') void deliver(frame.invocation).catch(() => {});
+    });
+    ws.on('error', () => {});
+  }
+
   async close(): Promise<void> {
+    for (const ws of this.adapters.values()) ws.terminate();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
   }
 
@@ -233,6 +279,8 @@ export class FakeMaritime {
     };
     if (req.method === 'POST' && (rest === 'restart' || rest === 'sleep' || rest === 'stop' || rest === 'reload-env')) {
       this.power.push({ agentId: agentId!, action: rest });
+      if (rest === 'reload-env') this.connectAdapter(agentId!);
+      if (rest === 'sleep') this.adapters.get(agentId!)?.close();
       if (rest === 'sleep') setStatus('sleeping');
       else if (rest === 'stop') setStatus('stopped');
       else setStatus('active');
@@ -398,6 +446,7 @@ export class FakeMaritime {
       // Maritime refuses to start an agent that is awake (seen live 2026-10-26).
       if (record.status === 'active') return send(409, { detail: `Agent ${record.id} is already running` });
       record.status = 'active';
+      this.connectAdapter(agentId!);
       return send(200, managed ? { ...managed, reads: undefined, endUser: undefined } : this.agent);
     }
     if (req.method === 'POST' && rest === 'exec') {

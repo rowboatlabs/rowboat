@@ -259,7 +259,8 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   // where someone has added it to a space are woken for it.
   const connectorOrgs = await options.db.query<{ org_id: string }>(
     `select distinct m.org_id from members m
-     where m.kind = 'agent' and m.removed_at is null and m.deactivated_at is null and m.agent_connection = any($1::text[])
+     where m.kind = 'agent' and m.removed_at is null and m.deactivated_at is null and (m.agent_connection = any($1::text[])
+       or (m.agent_connection = 'plugin' and m.agent_kind = 'hermes' and m.agent_instance is not null))
      union select org_id from spaces where graph`,
     [[...HARBOR_RUN_CONNECTIONS]],
   );

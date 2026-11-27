@@ -28,6 +28,10 @@ export class AgentPresence {
     return members.filter((m) => this.hasPresence(m) && this.isOnline(m.id)).map((m) => m.id);
   }
 
+  connected(agentId: string): boolean {
+    return (this.connections.get(agentId) ?? 0) > 0;
+  }
+
   private isOnline(agentId: string): boolean {
     return (this.connections.get(agentId) ?? 0) > 0 || this.leaving.has(agentId);
   }

@@ -24,7 +24,9 @@ import {
 import type { BillingAccounts } from '../billing.js';
 import { HarborError } from '../errors.js';
 import { canAddAgent, canRevokeAgentKey, canSuperAgentCreate, canSuperAgentDelete, enforce } from '../policy.js';
+import { hashAgentKey } from '../agent-keys.js';
 import { credentialHint } from '../sealing.js';
+import { isManagedHermesPlugin } from '@rowboat/spaces-protocol';
 import type { StoredAgentHosting } from '../store.js';
 import type { Agents } from './agents.js';
 import type { ActorCtx, Kernel } from './kernel.js';
@@ -86,6 +88,8 @@ export interface HostingProvider {
   provision(input: ProvisionInput): Promise<{ externalId: string }>;
   /** Where the platform's agent stands. `up` includes asleep: a sleeping agent answers a command. */
   status(externalId: string): Promise<'deploying' | 'up' | 'error' | 'gone'>;
+  /** Bind the image's gateway to the managed member after its identity and model credentials exist. */
+  connectHermes(externalId: string, url: string, key: string, home: string): Promise<void>;
   /** Whether the agent takes a command yet. */
   check(externalId: string): Promise<boolean>;
   /** Remove the agent and its end user from the platform; done when absent. */
@@ -168,6 +172,9 @@ export class PlatformRefusal extends Error {
 
 /** What the connector host does for managed agents: seal their credential, start and stop their connector. */
 export interface HostingHooks {
+  agentKey(agentId: string): Promise<string>;
+  orgUrl(): string;
+  connected(agentId: string): boolean;
   save(agentId: string, secret: string, setBy: string): Promise<AgentCredential>;
   added(agent: Member): void;
   stop(agentId: string): Promise<void>;
@@ -248,6 +255,7 @@ export class Hosting {
   private settleEveryMs = SETTLE_EVERY_MS;
   private composioConfigured = new Set<string>();
   private repairedDeletions = false;
+  private readonly configuredAdapters = new Map<string, string>();
 
   constructor(
     private readonly k: Kernel,
@@ -410,7 +418,7 @@ export class Hosting {
       displayName,
       ownerId,
       agentKind: input.kind,
-      agentConnection: 'maritime',
+      agentConnection: input.kind === 'hermes' ? 'plugin' : 'maritime',
       agentInstance: externalId,
       // Channel or personal, as on Add (spec §4 Agent members, 2026-10-27).
       ...(input.personal ? { personal: true } : {}),
@@ -459,6 +467,7 @@ export class Hosting {
   }
 
   private async remove(agentId: string, row: StoredAgentHosting): Promise<AgentHosting> {
+    this.configuredAdapters.delete(row.id);
     if (row.status === 'deleted' || row.status === 'deleting') {
       await this.spaces.deactivateAgent(agentId);
       return publicShape(row);
@@ -612,6 +621,39 @@ export class Hosting {
     if (row.funding === 'credits' && GATEWAY_REFUSAL.test(failure)) return outOfCreditsMessage(await this.billing.upgradeUrl());
     if (row.kind === 'codex' && row.funding === 'own' && !row.llm && signIn !== 'chatgpt') return NEEDS_OWN_LLM_MESSAGE;
     return failure;
+  }
+
+  async adapterTurnRefusal(agentId: string): Promise<string | undefined> {
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (!row || row.status !== 'ready') throw new HarborError('invalid_request', 'The managed agent is not ready yet.');
+    const refusal = await this.turnRefusal(agentId);
+    if (refusal || row.funding !== 'trial') return refusal;
+    const closed = row.trial?.closedReason;
+    if (closed === 'expired' || closed === 'exhausted') return trialOverMessage(closed);
+    if (row.trial && Date.parse(row.trial.endsAt) <= Date.now()) {
+      await this.closeTrial(agentId, 'expired');
+      return trialOverMessage('expired');
+    }
+    if (this.provider && row.externalId && (await this.provider.manage(row.externalId, row.externalUserId).spend()).limitReached) {
+      await this.closeTrial(agentId, 'exhausted');
+      return trialOverMessage('exhausted');
+    }
+    return undefined;
+  }
+
+  async ensureHermesConnection(agentId: string): Promise<void> {
+    const row = await this.k.store.getAgentHosting(agentId);
+    if (row?.status === 'ready') await this.connectHermes(row);
+  }
+
+  private async connectHermes(row: StoredAgentHosting): Promise<void> {
+    if (!this.provider || !this.hooks || !row.agentId || !row.externalId) throw new Error('Missing managed Hermes identity');
+    const key = await this.hooks.agentKey(row.agentId);
+    const fingerprint = hashAgentKey(key);
+    if (this.configuredAdapters.get(row.id) === fingerprint) return;
+    const { space } = await this.spaces.openDirect({ memberId: row.createdBy, agent: false }, row.agentId);
+    await this.provider.connectHermes(row.externalId, this.hooks.orgUrl(), key, space.id);
+    this.configuredAdapters.set(row.id, fingerprint);
   }
 
   /** The connector saw the platform at the cap: the trial is over, for good. */
@@ -946,6 +988,17 @@ export class Hosting {
       return;
     }
     if (row.status === 'checking') {
+      const member = row.agentId ? await this.k.store.getMember(row.agentId) : undefined;
+      if (isManagedHermesPlugin(member)) {
+        if (age > CHECK_TIMEOUT_MS) return this.fail(row, 'The Hermes gateway did not connect to Spaces within 10 minutes.');
+        await this.fundOnReady(provider, row);
+        await this.connectHermes(row);
+        if (this.hooks?.connected(member.id) && await this.k.store.getAgentCapabilities(member.id)) {
+          await this.move(row, 'ready');
+          this.hooks.added(member);
+        }
+        return;
+      }
       if (await provider.check(row.externalId!)) {
         await this.fundOnReady(provider, row);
         await this.move(row, 'ready');

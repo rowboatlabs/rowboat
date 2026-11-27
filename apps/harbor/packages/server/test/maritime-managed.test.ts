@@ -123,7 +123,7 @@ describe('managed Maritime agents', () => {
     const r = await org.as('dev-ramnique').post('/v1/agents/managed', { displayName: 'Scout', kind: 'hermes' });
     expect(r.status).toBe(200);
     const { agent, key, hosting } = r.body as { agent: Member; key: { secret: string }; hosting: { status: string; externalId: string } };
-    expect(agent).toMatchObject({ kind: 'agent', ownerId: 'ramnique', agentKind: 'hermes', agentConnection: 'maritime' });
+    expect(agent).toMatchObject({ kind: 'agent', ownerId: 'ramnique', agentKind: 'hermes', agentConnection: 'plugin' });
     expect(agent.agentInstance).toMatch(/^agt-m\d+$/);
     expect(key.secret).toMatch(/^rbk_/);
     expect(hosting).toMatchObject({ status: 'deploying', externalId: agent.agentInstance });
@@ -157,14 +157,36 @@ describe('managed Maritime agents', () => {
     const agent = r.body.agent as Member;
     const ready = await org.hostingStatus(agent.id, 'ready');
     expect(ready.hosting?.error).toBeUndefined();
-    expect(fake.received.some((x) => x.method === 'POST' && x.path === `/api/agents/${agent.agentInstance}/exec` && /rowboat-ready/.test(String((x.body?.command as string[])?.[2])))).toBe(true);
+    expect(fake.received.some((x) => x.method === 'POST' && x.path === `/api/agents/${agent.agentInstance}/exec` && /rowboat-ready/.test(String((x.body?.command as string[])?.[2])))).toBe(false);
 
     await org.as('dev-ramnique').post(`/v1/spaces/${org.spaceId}/members`, { memberIds: [agent.id], actingMode: 'direct' });
     fake.nextTurn = hermesTurn('Hello from a managed VM.');
     const { message, invocations } = await org.post(`${mention(agent)} say hello`);
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
     expect((await org.thread(message.id)).find((m) => m.author.memberId === agent.id)!.body).toBe('Hello from a managed VM.');
-    expect(fake.submits().at(-1)!.script).toContain('hermes chat --query-file');
+    expect(fake.submits().some(x => x.script.includes('hermes chat --query-file'))).toBe(false);
+  });
+
+  it('waits for the authenticated adapter, then wakes it to deliver a queued mention after disconnect', async () => {
+    fake.simulateAdapters = false;
+    try {
+      const me = org.as('dev-ramnique');
+      const { agent } = (await me.post('/v1/agents/managed', { displayName: 'Gateway', kind: 'hermes' })).body as { agent: Member };
+      const vm = agent.agentInstance!;
+      await until(async () => fake.env.get(vm)?.has('ROWBOAT_AGENT_KEY'), 'managed credentials');
+      expect((await org.listing(agent.id))?.hosting?.status).toBe('checking');
+      fake.simulateAdapters = true;
+      await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'reload' });
+      await org.hostingStatus(agent.id, 'ready');
+      await me.post(`/v1/spaces/${org.spaceId}/members`, { memberIds: [agent.id], actingMode: 'direct' });
+      await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'sleep' });
+      await until(async () => !org.harbor.service.agentConnected(agent.id), 'adapter disconnect');
+      const { invocations } = await org.post(`${mention(agent)} check in`);
+      expect((await org.ended(invocations[0]!.id)).state).toBe('done');
+      expect(fake.submits().some(run => run.script.includes('hermes chat --query-file'))).toBe(false);
+    } finally {
+      fake.simulateAdapters = true;
+    }
   });
 
   it('creates Codex from Maritime’s template, and Claude Code with the person’s Anthropic key in its environment', async () => {
@@ -202,23 +224,24 @@ describe('managed Maritime agents', () => {
     expect(page.body.hosting.status).toBe('ready');
     // The readiness check ran a command, which woke the VM: the page shows the platform's word as it is.
     expect(page.body.machine).toEqual({ status: 'active' });
-    expect(page.body.env).toEqual([
+    expect(page.body.env).toEqual(expect.arrayContaining([
       { key: 'REPO', secret: false, value: 'rowboat' },
-    ]);
+      { key: 'ROWBOAT_AGENT_KEY', secret: true },
+    ]));
 
     // A secret is kept by the platform and never read back; a plain value is; a second put replaces.
     expect((await me.put(`/v1/agents/${agent.id}/hosting/env/GH_TOKEN`, { value: 'ghp_x', secret: true })).body.env).toContainEqual({ key: 'GH_TOKEN', secret: true });
     expect((await me.put(`/v1/agents/${agent.id}/hosting/env/REPO`, { value: 'spaces' })).body.env).toContainEqual({ key: 'REPO', secret: false, value: 'spaces' });
     expect((await me.put(`/v1/agents/${agent.id}/hosting/env/bad-key`, { value: 'x' })).status).toBe(400);
     const afterDelete = await me.delete(`/v1/agents/${agent.id}/hosting/env/REPO`);
-    expect(afterDelete.body.env.map((v: { key: string }) => v.key)).toEqual(['GH_TOKEN']);
+    expect(afterDelete.body.env.map((v: { key: string }) => v.key)).toEqual([...page.body.env.filter((v: { key: string }) => v.key !== 'REPO').map((v: { key: string }) => v.key), 'GH_TOKEN']);
 
     // Power: the platform's word for the machine comes back each time.
     expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'sleep' })).body.machine.status).toBe('sleeping');
     expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'wake' })).body.machine.status).toBe('active');
     expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'restart' })).body.machine.status).toBe('active');
     expect((await me.post(`/v1/agents/${agent.id}/hosting/power`, { action: 'reload' })).status).toBe(200);
-    expect(fake.power.filter((p) => p.agentId === agent.agentInstance).map((p) => p.action)).toEqual(['sleep', 'start', 'restart', 'reload-env']);
+    expect(fake.power.filter((p) => p.agentId === agent.agentInstance).map((p) => p.action).slice(-4)).toEqual(['sleep', 'start', 'restart', 'reload-env']);
 
     // Harsh is a member, not the owner: nothing of this is his.
     expect((await org.as('dev-harsh').get(`/v1/agents/${agent.id}/hosting`)).status).toBe(403);
@@ -364,12 +387,7 @@ describe('managed Maritime agents', () => {
     fake.nextTurn = hermesTurn('On my own key.');
     const { invocations } = await org.post(`${mention(agent)} hi`);
     expect((await org.ended(invocations[0]!.id)).state).toBe('done');
-    expect(fake.submits().at(-1)!.script).toContain('hermes config set model.provider "$HP"');
-    // On the trial, with no provider of the owner's, the same turn points Hermes at the platform's proxy from the
-    // OPENAI_BASE_URL and OPENAI_API_KEY the platform set, with the template's model when none is configured
-    // (Rowboat's own image gets no boot-time rewrite from Maritime, 2026-11-11).
-    expect(fake.submits().at(-1)!.script).toContain('"") if [ -n "$OPENAI_BASE_URL" ]; then HP=openai; LB="$OPENAI_BASE_URL"; LK="$OPENAI_API_KEY"; LN=OPENAI_API_KEY;');
-    expect(fake.submits().at(-1)!.script).toContain("MD='gpt-5.4'");
+    expect(fake.adapters.has(agent.agentInstance!)).toBe(true);
 
     // Codex takes OpenAI only, and gets OpenAI's address where the template had the platform's proxy.
     const codex = (await me.post('/v1/agents/managed', { displayName: 'Cx', kind: 'codex' })).body as { agent: Member };

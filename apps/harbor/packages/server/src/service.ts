@@ -1,3 +1,4 @@
+import { isManagedHermesPlugin } from '@rowboat/spaces-protocol';
 import { Graph, type GraphOptions, type SetSpaceGraphInput } from './core/graph.js';
 import type { JevApi } from './jev.js';
 import type { SpaceGraph } from '@rowboat/spaces-protocol';
@@ -202,10 +203,18 @@ export class HarborService {
   listAgentInvocations(ctx: ActorCtx): Promise<Invocation[]> {
     return this.invocations.listForAgent(ctx);
   }
-  acknowledgeInvocation(ctx: ActorCtx, invocationId: string): Promise<Invocation> {
-    return this.invocations.acknowledge(ctx, invocationId);
+  async acknowledgeInvocation(ctx: ActorCtx, invocationId: string): Promise<Invocation> {
+    const member = ctx.agent ? await this.k.store.getMember(ctx.memberId) : undefined;
+    const gate = isManagedHermesPlugin(member) ? () => this.hosting.adapterTurnRefusal(member.id) : undefined;
+    return this.invocations.acknowledge(ctx, invocationId, gate);
   }
-  updateInvocation(ctx: ActorCtx, invocationId: string, update: InvocationUpdate): Promise<Invocation> {
+  async updateInvocation(ctx: ActorCtx, invocationId: string, update: InvocationUpdate): Promise<Invocation> {
+    if (ctx.agent && update.state === 'failed' && update.error) {
+      const member = await this.k.store.getMember(ctx.memberId);
+      if (isManagedHermesPlugin(member)) {
+        update = { ...update, error: await this.hosting.explainFailure(member.id, update.error) };
+      }
+    }
     return this.invocations.update(ctx, invocationId, update);
   }
   declareCapabilities(ctx: ActorCtx, capabilities: ConnectorCapabilities): Promise<ConnectorCapabilities> {
@@ -484,6 +493,15 @@ export class HarborService {
   /** A live connection opened or closed for a member (ws.ts): an agent's presence follows its connections. */
   reportActivity(memberId: string, session: object, active: boolean): Promise<void> {
     return this.humanPresence.activity(memberId, session, active);
+  }
+  agentConnected(memberId: string): boolean {
+    return this.presence.connected(memberId);
+  }
+  adapterTurnRefusal(memberId: string) {
+    return this.hosting.adapterTurnRefusal(memberId);
+  }
+  ensureHermesConnection(memberId: string) {
+    return this.hosting.ensureHermesConnection(memberId);
   }
   liveOpened(memberId: string): Promise<void> {
     return this.presence.opened(memberId);

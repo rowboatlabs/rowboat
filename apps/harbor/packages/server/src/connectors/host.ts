@@ -1,4 +1,4 @@
-import { type AgentCredential, type Member } from '@rowboat/spaces-protocol';
+import { isManagedHermesPlugin, type AgentCredential, type Member } from '@rowboat/spaces-protocol';
 import { ulid } from 'ulid';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
@@ -51,13 +51,14 @@ export class HostedConnectors {
   }
 
   async startAll(): Promise<void> {
-    for (const agent of await this.deps.store.listAgentsByConnection(HOSTED_CONNECTIONS)) this.ensure(agent);
+    for (const agent of await this.deps.store.listAgentsByConnection([...HOSTED_CONNECTIONS, 'plugin'])) this.ensure(agent);
   }
 
   /** Start the agent's connector if Harbor runs one for its connection and it isn't running yet. */
   ensure(agent: Member): void {
     if (agent.deactivatedAt || agent.removedAt || this.running.has(agent.id) || !agent.agentConnection) return;
-    const platform = PLATFORMS[agent.agentConnection];
+    const platform = isManagedHermesPlugin(agent)
+      ? PLATFORMS.maritime : PLATFORMS[agent.agentConnection];
     if (!platform) return;
     this.running.set(agent.id, platform.start(this.env(agent)));
   }
@@ -107,7 +108,7 @@ export class HostedConnectors {
    * owner revoked it. Created by the agent itself, so the agent page lists it
    * beside the owner's keys.
    */
-  private agentKey(agentId: string): Promise<string> {
+  agentKey(agentId: string): Promise<string> {
     const inFlight = this.minting.get(agentId);
     if (inFlight) return inFlight;
     const work = (async () => {

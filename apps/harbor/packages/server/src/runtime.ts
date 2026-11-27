@@ -5,7 +5,7 @@ import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import { billingFromEnv, type BillingAccounts } from './billing.js';
 import type { BlobStore } from './blobs.js';
-import { HostedConnectors } from './connectors/host.js';
+import { HostedConnectors, orgUrl } from './connectors/host.js';
 import { maritimeProvisioner } from './connectors/maritime/provisioning.js';
 import type { HostingProvider } from './core/hosting.js';
 import { buildHttpApp } from './http.js';
@@ -111,6 +111,9 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     service.attachHosting(
       provider,
       {
+        agentKey: (id) => connectors.agentKey(id),
+        orgUrl: () => orgUrl(service.org.address),
+        connected: (id) => service.agentConnected(id),
         save: (agentId, secret, setBy) => connectors.save(agentId, secret, setBy),
         added: (agent) => connectors.ensure(agent),
         stop: (agentId) => connectors.stop(agentId),

@@ -262,19 +262,22 @@ export class Invocations {
   }
 
   /** pending → working. Idempotent for one already acknowledged; a cancelled one must be dropped. */
-  async acknowledge(ctx: ActorCtx, id: string): Promise<Invocation> {
+  async acknowledge(ctx: ActorCtx, id: string, gate?: () => Promise<string | undefined>): Promise<Invocation> {
     const found = await this.own(ctx, id);
+    const refusal = found.state === 'pending' ? await gate?.() : undefined;
     const out: InvocationOutbox = [];
     const result = await this.k.locked(found.conversation.spaceId, async () => {
       const current = (await this.k.store.getInvocation(id))!;
       if (current.state === 'working' || current.state === 'waiting') return current;
       if (current.state !== 'pending') throw new HarborError('invalid_request', `this invocation is ${current.state}: drop it`);
+      if (refusal) return this.apply(current, { state: 'failed', error: refusal }, out);
       const next: Invocation = { ...current, state: 'working', updatedAt: this.k.now() };
       await this.k.store.putInvocation(next);
       this.announce(next, out);
       return next;
     });
     this.flush(out);
+    if (result.state === 'failed') throw new HarborError('invalid_request', result.error ?? 'The invocation failed.');
     return result;
   }
 

@@ -144,22 +144,23 @@ function shapeEnv(rows: Array<{ key: string; value: string; isSecret: boolean; w
   return rows.map((r) => ({ key: r.key, secret: r.isSecret, ...(r.isSecret ? {} : { value: r.value }), ...(r.warning ? { warning: r.warning } : {}) }));
 }
 
+/** Environment variables set or replaced, after one listing. */
+async function environmentWriter(api: MaritimeApi, agentId: string) {
+  const have = new Set((await api.listEnv(agentId)).map((v) => v.key));
+  return async (key: string, value: string, isSecret: boolean) => {
+    if (have.has(key)) await api.updateEnv(agentId, key, { value, isSecret });
+    else {
+      await api.createEnv(agentId, { key, value, isSecret });
+      have.add(key);
+    }
+  };
+}
+
 /** The management calls on one Maritime agent, in the protocol's shapes. */
 export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: string): HostingOps {
   const machine = async () => {
     const a = await api.agent(agentId);
     return { status: a.status, ...(a.tier ? { tier: a.tier } : {}) };
-  };
-  /** Environment variables set or replaced, after one listing. */
-  const putter = async () => {
-    const have = new Set((await api.listEnv(agentId)).map((v) => v.key));
-    return async (key: string, value: string, isSecret: boolean) => {
-      if (have.has(key)) await api.updateEnv(agentId, key, { value, isSecret });
-      else {
-        await api.createEnv(agentId, { key, value, isSecret });
-        have.add(key);
-      }
-    };
   };
   /** The gateway and the templates read the new environment without waiting for a restart; asleep, the next start reads it anyway. */
   const reload = async () => {
@@ -244,7 +245,7 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
     setLlm: ({ provider, apiKey, model }) =>
       refusing(async () => {
         if (provider === 'chatgpt') throw new MaritimeError(0, undefined, 'a ChatGPT plan takes no key');
-        const put = await putter();
+        const put = await environmentWriter(api, agentId);
         const { keyVar, baseUrl } = LLM_SETUP[provider];
         await put(keyVar, apiKey, true);
         if (provider === 'openai') await put('OPENAI_BASE_URL', baseUrl, false);
@@ -260,7 +261,7 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
     // billed to Rowboat's platform account, and the cap is lifted for the same reason as there.
     useGateway: ({ baseUrl, apiKey, model }) =>
       refusing(async () => {
-        const put = await putter();
+        const put = await environmentWriter(api, agentId);
         await put('OPENROUTER_API_KEY', apiKey, true);
         await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
         await put('ROWBOAT_LLM_PROVIDER', 'rowboat', false);
@@ -271,7 +272,7 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
       }),
     useComposio: ({ url, apiKey }) =>
       refusing(async () => {
-        const put = await putter();
+        const put = await environmentWriter(api, agentId);
         await put('ROWBOAT_COMPOSIO_MCP_URL', url, false);
         if (apiKey) await put('ROWBOAT_GATEWAY_KEY', apiKey, true);
         await reload();
@@ -280,7 +281,7 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
     // token is a dud from the start and the agent runs once its owner signs in or adds a key.
     withoutPlatformLlm: () =>
       refusing(async () => {
-        const put = await putter();
+        const put = await environmentWriter(api, agentId);
         await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
         await api.setSpendLimit(agentId, null);
         await reload();
@@ -327,7 +328,7 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
       }),
     useSignIn: ({ kind }) =>
       refusing(async () => {
-        const put = await putter();
+        const put = await environmentWriter(api, agentId);
         await put('OPENAI_API_KEY', PROXY_TOKEN_DUD, true);
         await put('ROWBOAT_LLM_PROVIDER', 'chatgpt', false);
         await put('ROWBOAT_LLM_MODEL', '', false);
@@ -338,7 +339,7 @@ export function maritimeOps(api: MaritimeApi, agentId: string, externalUserId: s
     signOut: (kind) =>
       refusing(async () => {
         if (kind === 'codex') await api.exec(agentId, ['sh', '-c', CODEX_SIGN_OUT], { detached: false, timeoutSeconds: SIGN_IN_TIMEOUT_S });
-        const put = await putter();
+        const put = await environmentWriter(api, agentId);
         await put('ROWBOAT_LLM_PROVIDER', '', false);
         await reload();
       }),
@@ -352,7 +353,11 @@ export function creationFor(kind: string, input: { name: string; anthropicApiKey
   if (kind === 'hermes') {
     // Rowboat's own Hermes image as a Maritime "custom" container (2026-11-11): no web UI for Maritime to wait for,
     // and no PATH variable, since the image names its program by its full path. Maritime's proxy funds the trial as before.
-    return { name: input.name, framework: 'custom', imageName: HERMES_IMAGE, useMaritimeLlm: true, hasWebUi: false, env, ...idle };
+    // 2026-11-27: only the member created after the VM can supply its gateway identity.
+    const reserved = ['ROWBOAT_MANAGED_HERMES', 'ROWBOAT_URL', 'ROWBOAT_AGENT_KEY', 'ROWBOAT_HOME_CHANNEL'];
+    const hermesEnv = env.filter(v => !reserved.includes(v.key));
+    hermesEnv.push({ key: 'ROWBOAT_MANAGED_HERMES', value: '1', secret: false });
+    return { name: input.name, framework: 'custom', imageName: HERMES_IMAGE, useMaritimeLlm: true, hasWebUi: false, env: hermesEnv, ...idle };
   }
   if (kind === 'codex') return { name: input.name, templateId: 'codex', env, ...idle };
   if (kind === 'claude-code') {
@@ -403,6 +408,18 @@ export function maritimeProvisioner(options: MaritimeProvisionerOptions): Hostin
       if (agent.status === 'deploying') return 'deploying';
       if (agent.status === 'error') return 'error';
       return 'up';
+    },
+    async connectHermes(externalId, url, key, home) {
+      const put = await environmentWriter(api, externalId);
+      await put('ROWBOAT_URL', url, false);
+      await put('ROWBOAT_HOME_CHANNEL', home, false);
+      await put('ROWBOAT_AGENT_KEY', key, true);
+      try {
+        await api.start(externalId);
+      } catch (err) {
+        if (!(err instanceof MaritimeError && err.alreadyRunning)) throw err;
+      }
+      await api.reloadEnv(externalId);
     },
     async check(externalId) {
       try {
