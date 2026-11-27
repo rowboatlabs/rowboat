@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Browser fixture form</title>
+    <style>body { min-height: 2400px; font: 16px sans-serif; padding: 24px; }</style>
+    <script src="/form.js" defer></script>
+  </head>
+  <body>
+    <h1>Local browser fixture</h1>
+    <button id="increment" type="button">Increment</button>
+    <p id="counter">Count: 0</p>
+    <form id="form">
+      <label for="name">Name</label>
+      <input id="name" name="name" autocomplete="off">
+      <button type="submit">Submit</button>
+    </form>
+    <p id="result" aria-live="polite"></p>
+    <p id="key" aria-live="polite"></p>
+    <a href="/second">Second page</a>
+  </body>
+</html>

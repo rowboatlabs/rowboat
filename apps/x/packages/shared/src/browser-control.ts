@@ -1,5 +1,20 @@
 import { z } from 'zod';
 
+// Keep the existing partition: changing it would sign users out of every site.
+export const DEFAULT_BROWSER_PROFILE_ID = 'default';
+export const DEFAULT_BROWSER_PARTITION = 'persist:rowboat-browser';
+
+export const BrowserSettingsSchema = z.object({
+  tabRailOpen: z.boolean(),
+}).strict();
+export const BrowserSettingsPatchSchema = BrowserSettingsSchema.partial();
+export const BrowserSettingsResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), settings: BrowserSettingsSchema }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
+export type BrowserSettingsPatch = z.infer<typeof BrowserSettingsPatchSchema>;
+
 export const BrowserTabStateSchema = z.object({
   id: z.string(),
   url: z.string(),
@@ -54,6 +69,8 @@ export const BrowserPageElementSchema = z.object({
 });
 
 export const BrowserPageSnapshotSchema = z.object({
+  // Optional for compatibility with older stored tool results.
+  tabId: z.string().optional(),
   snapshotId: z.string(),
   url: z.string(),
   title: z.string(),

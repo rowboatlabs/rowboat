@@ -105,6 +105,9 @@ These skills are written against a Python harness, so treat them as **reference 
 
 ## Important Rules
 
+- Pass the intended tabId for page actions. If omitted, the active tab is captured when the command starts. Returned page snapshots include their tabId even if the user switched tabs.
+- Native clicks and key presses require that target tab to remain active; if it changes or closes, inspect browser state before retrying.
+
 - Prefer ` + "`read-page`" + ` before interacting.
 - Prefer element ` + "`index`" + ` over CSS selectors.
 - If the tool says the snapshot is stale, call ` + "`read-page`" + ` again.

@@ -9,6 +9,7 @@ import type {
   DisplayMediaRequest,
   HttpAuthRequest,
 } from '@x/shared/dist/browser-control.js';
+import { DEFAULT_BROWSER_PARTITION } from '@x/shared/dist/browser-control.js';
 import { normalizeNavigationTarget } from './navigation.js';
 import { buildBrowserContextMenu } from './context-menu.js';
 import {
@@ -37,7 +38,7 @@ export type { BrowserPageSnapshot, BrowserState, BrowserTabState, DisplayMediaRe
  * standard Chrome UA so sites like Google (OAuth) don't reject it.
  */
 
-export const BROWSER_PARTITION = 'persist:rowboat-browser';
+export const BROWSER_PARTITION = DEFAULT_BROWSER_PARTITION;
 
 // Spoof a real Chrome UA so OAuth servers don't reject the embedded browser.
 // The Chrome major version is derived from the running Chromium at startup:
@@ -376,6 +377,36 @@ export class BrowserViewManager extends EventEmitter {
 
   private getActiveTab(): BrowserTab | null {
     return this.getTab(this.activeTabId);
+  }
+
+  private requireTab(tabId?: string, createIfMissing = false): BrowserTab {
+    const tab = tabId !== undefined
+      ? this.getTab(tabId)
+      : this.getActiveTab() ?? (createIfMissing ? this.ensureInitialTab() : null);
+    if (!tab || tab.view.webContents.isDestroyed()) {
+      throw new Error(tabId !== undefined
+        ? `Browser tab ${tabId} is no longer available.`
+        : 'No active browser tab is open.');
+    }
+    return tab;
+  }
+
+  private assertTabAvailable(tab: BrowserTab): void {
+    if (this.getTab(tab.id) !== tab || tab.view.webContents.isDestroyed()) {
+      throw new Error(`Browser tab ${tab.id} is no longer available.`);
+    }
+  }
+
+  private assertInputTarget(tab: BrowserTab): void {
+    this.assertTabAvailable(tab);
+    if (this.activeTabId !== tab.id) {
+      throw new Error(`Browser tab ${tab.id} is no longer active. Switch to it before sending native input.`);
+    }
+  }
+
+  // Capture once at the command boundary, before any async operation.
+  resolveTabId(tabId?: string, createIfMissing = false): string {
+    return this.requireTab(tabId, createIfMissing).id;
   }
 
   private invalidateSnapshot(tabId: string): void {
@@ -772,13 +803,14 @@ export class BrowserViewManager extends EventEmitter {
     idleMs = POST_ACTION_IDLE_MS,
     timeoutMs = NAVIGATION_TIMEOUT_MS,
   ): Promise<void> {
+    this.assertTabAvailable(tab);
     const wc = tab.view.webContents;
     const startedAt = Date.now();
     let sawLoading = wc.isLoading();
 
     while (Date.now() - startedAt < timeoutMs) {
       abortIfNeeded(signal);
-      if (wc.isDestroyed()) return;
+      this.assertTabAvailable(tab);
       if (tab.loadError) {
         throw new Error(tab.loadError);
       }
@@ -798,6 +830,7 @@ export class BrowserViewManager extends EventEmitter {
       }
 
       await sleep(sawLoading ? idleMs : Math.min(idleMs, 200), signal);
+      this.assertTabAvailable(tab);
       if (tab.loadError) {
         throw new Error(tab.loadError);
       }
@@ -806,18 +839,23 @@ export class BrowserViewManager extends EventEmitter {
     }
   }
 
-  private async executeOnActiveTab<T>(
+  private async executeOnTab<T>(
+    activeTab: BrowserTab,
     script: string,
     signal?: AbortSignal,
     options?: { waitForReady?: boolean },
   ): Promise<T> {
     abortIfNeeded(signal);
-    const activeTab = this.getActiveTab() ?? this.ensureInitialTab();
+    this.assertTabAvailable(activeTab);
     if (options?.waitForReady !== false) {
       await this.waitForWebContentsSettle(activeTab, signal);
+      this.assertTabAvailable(activeTab);
     }
     abortIfNeeded(signal);
-    return activeTab.view.webContents.executeJavaScript(script, true) as Promise<T>;
+    this.assertTabAvailable(activeTab);
+    const result = await activeTab.view.webContents.executeJavaScript(script, true) as T;
+    this.assertTabAvailable(activeTab);
+    return result;
   }
 
   private cacheSnapshot(tabId: string, rawSnapshot: RawBrowserPageSnapshot, loading: boolean): BrowserPageSnapshot {
@@ -840,6 +878,7 @@ export class BrowserViewManager extends EventEmitter {
     });
 
     return {
+      tabId,
       snapshotId,
       url: rawSnapshot.url,
       title: rawSnapshot.title,
@@ -903,9 +942,10 @@ export class BrowserViewManager extends EventEmitter {
     }
   }
 
-  async ensureActiveTabReady(signal?: AbortSignal): Promise<void> {
-    const activeTab = this.getActiveTab() ?? this.ensureInitialTab();
+  async ensureActiveTabReady(signal?: AbortSignal, tabId?: string): Promise<void> {
+    const activeTab = this.requireTab(tabId, true);
     await this.waitForWebContentsSettle(activeTab, signal);
+    this.assertTabAvailable(activeTab);
   }
 
   async newTab(rawUrl?: string): Promise<{ ok: boolean; tabId?: string; error?: string }> {
@@ -954,51 +994,61 @@ export class BrowserViewManager extends EventEmitter {
     return { ok: true };
   }
 
-  async navigate(rawUrl: string): Promise<{ ok: boolean; error?: string }> {
+  async navigate(rawUrl: string, tabId?: string): Promise<{ ok: boolean; error?: string }> {
     try {
-      const activeTab = this.getActiveTab() ?? this.ensureInitialTab();
+      const activeTab = this.requireTab(tabId, true);
       this.invalidateSnapshot(activeTab.id);
       await activeTab.view.webContents.loadURL(normalizeNavigationTarget(rawUrl));
+      this.assertTabAvailable(activeTab);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  back(): { ok: boolean } {
-    const activeTab = this.getActiveTab();
-    if (!activeTab) return { ok: false };
-    const history = activeTab.view.webContents.navigationHistory;
-    if (!history.canGoBack()) return { ok: false };
-    this.invalidateSnapshot(activeTab.id);
-    history.goBack();
-    return { ok: true };
+  back(tabId?: string): { ok: boolean; error?: string } {
+    return this.navigateHistory('back', tabId);
   }
 
-  forward(): { ok: boolean } {
-    const activeTab = this.getActiveTab();
-    if (!activeTab) return { ok: false };
-    const history = activeTab.view.webContents.navigationHistory;
-    if (!history.canGoForward()) return { ok: false };
-    this.invalidateSnapshot(activeTab.id);
-    history.goForward();
-    return { ok: true };
+  forward(tabId?: string): { ok: boolean; error?: string } {
+    return this.navigateHistory('forward', tabId);
   }
 
-  reload(tabId?: string): void {
-    const activeTab = tabId ? this.tabs.get(tabId) : this.getActiveTab();
-    if (!activeTab) return;
-    this.invalidateSnapshot(activeTab.id);
-    activeTab.view.webContents.reload();
+  private navigateHistory(direction: 'back' | 'forward', tabId?: string): { ok: boolean; error?: string } {
+    try {
+      const tab = this.requireTab(tabId);
+      const history = tab.view.webContents.navigationHistory;
+      if (!(direction === 'back' ? history.canGoBack() : history.canGoForward())) {
+        return { ok: false, error: `Browser tab ${tab.id} cannot go ${direction}.` };
+      }
+      this.invalidateSnapshot(tab.id);
+      if (direction === 'back') history.goBack();
+      else history.goForward();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Navigation failed.' };
+    }
+  }
+
+  reload(tabId?: string): { ok: boolean; error?: string } {
+    try {
+      const tab = this.requireTab(tabId);
+      this.invalidateSnapshot(tab.id);
+      tab.view.webContents.reload();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Reload failed.' };
+    }
   }
 
   async readPage(
-    options?: { maxElements?: number; maxTextLength?: number; waitForReady?: boolean },
+    options?: { maxElements?: number; maxTextLength?: number; waitForReady?: boolean; tabId?: string },
     signal?: AbortSignal,
   ): Promise<{ ok: boolean; page?: BrowserPageSnapshot; error?: string }> {
     try {
-      const activeTab = this.getActiveTab() ?? this.ensureInitialTab();
-      const rawSnapshot = await this.executeOnActiveTab<RawBrowserPageSnapshot>(
+      const activeTab = this.requireTab(options?.tabId, true);
+      const rawSnapshot = await this.executeOnTab<RawBrowserPageSnapshot>(
+        activeTab,
         buildReadPageScript(
           options?.maxElements ?? DEFAULT_READ_MAX_ELEMENTS,
           options?.maxTextLength ?? DEFAULT_READ_MAX_TEXT_LENGTH,
@@ -1020,30 +1070,27 @@ export class BrowserViewManager extends EventEmitter {
 
   async readPageSummary(
     signal?: AbortSignal,
-    options?: { waitForReady?: boolean },
+    options?: { waitForReady?: boolean; tabId?: string },
   ): Promise<BrowserPageSnapshot | null> {
     const result = await this.readPage(
       {
         maxElements: POST_ACTION_MAX_ELEMENTS,
         maxTextLength: POST_ACTION_MAX_TEXT_LENGTH,
         waitForReady: options?.waitForReady,
+        tabId: options?.tabId,
       },
       signal,
     );
     return result.ok ? result.page ?? null : null;
   }
 
-  async click(target: ElementTarget, signal?: AbortSignal): Promise<{ ok: boolean; error?: string; description?: string }> {
-    const activeTab = this.getActiveTab();
-    if (!activeTab) {
-      return { ok: false, error: 'No active browser tab is open.' };
-    }
-
-    const resolved = this.resolveElementSelector(activeTab.id, target);
-    if (!resolved.ok) return resolved;
-
+  async click(target: ElementTarget, signal?: AbortSignal, tabId?: string): Promise<{ ok: boolean; error?: string; description?: string }> {
     try {
-      const result = await this.executeOnActiveTab<{
+      const activeTab = this.requireTab(tabId);
+      this.assertInputTarget(activeTab);
+      const resolved = this.resolveElementSelector(activeTab.id, target);
+      if (!resolved.ok) return resolved;
+      const result = await this.executeOnTab<{
         ok: boolean;
         error?: string;
         description?: string;
@@ -1056,6 +1103,7 @@ export class BrowserViewManager extends EventEmitter {
           targetSelector: string | null;
         };
       }>(
+        activeTab,
         buildClickScript(resolved.selector),
         signal,
       );
@@ -1067,6 +1115,8 @@ export class BrowserViewManager extends EventEmitter {
         };
       }
 
+      abortIfNeeded(signal);
+      this.assertInputTarget(activeTab);
       this.window?.focus();
       activeTab.view.webContents.focus();
       activeTab.view.webContents.sendInputEvent({
@@ -1093,9 +1143,11 @@ export class BrowserViewManager extends EventEmitter {
 
       this.invalidateSnapshot(activeTab.id);
       await this.waitForWebContentsSettle(activeTab, signal);
+      this.assertTabAvailable(activeTab);
 
       if (result.verification) {
-        const verification = await this.executeOnActiveTab<{ changed: boolean; reasons: string[] }>(
+        const verification = await this.executeOnTab<{ changed: boolean; reasons: string[] }>(
+          activeTab,
           buildVerifyClickScript(result.verification.targetSelector, result.verification.before),
           signal,
           { waitForReady: false },
@@ -1119,23 +1171,20 @@ export class BrowserViewManager extends EventEmitter {
     }
   }
 
-  async type(target: ElementTarget, text: string, signal?: AbortSignal): Promise<{ ok: boolean; error?: string; description?: string }> {
-    const activeTab = this.getActiveTab();
-    if (!activeTab) {
-      return { ok: false, error: 'No active browser tab is open.' };
-    }
-
-    const resolved = this.resolveElementSelector(activeTab.id, target);
-    if (!resolved.ok) return resolved;
-
+  async type(target: ElementTarget, text: string, signal?: AbortSignal, tabId?: string): Promise<{ ok: boolean; error?: string; description?: string }> {
     try {
-      const result = await this.executeOnActiveTab<{ ok: boolean; error?: string; description?: string }>(
+      const activeTab = this.requireTab(tabId);
+      const resolved = this.resolveElementSelector(activeTab.id, target);
+      if (!resolved.ok) return resolved;
+      const result = await this.executeOnTab<{ ok: boolean; error?: string; description?: string }>(
+        activeTab,
         buildTypeScript(resolved.selector, text),
         signal,
       );
       if (!result.ok) return result;
       this.invalidateSnapshot(activeTab.id);
       await this.waitForWebContentsSettle(activeTab, signal);
+      this.assertTabAvailable(activeTab);
       return result;
     } catch (error) {
       return {
@@ -1149,10 +1198,14 @@ export class BrowserViewManager extends EventEmitter {
     key: string,
     target?: ElementTarget,
     signal?: AbortSignal,
+    tabId?: string,
   ): Promise<{ ok: boolean; error?: string; description?: string }> {
-    const activeTab = this.getActiveTab();
-    if (!activeTab) {
-      return { ok: false, error: 'No active browser tab is open.' };
+    let activeTab: BrowserTab;
+    try {
+      activeTab = this.requireTab(tabId);
+      this.assertInputTarget(activeTab);
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
     }
 
     let description = 'active element';
@@ -1162,7 +1215,8 @@ export class BrowserViewManager extends EventEmitter {
       if (!resolved.ok) return resolved;
 
       try {
-        const focusResult = await this.executeOnActiveTab<{ ok: boolean; error?: string; description?: string }>(
+        const focusResult = await this.executeOnTab<{ ok: boolean; error?: string; description?: string }>(
+          activeTab,
           buildFocusScript(resolved.selector),
           signal,
         );
@@ -1177,6 +1231,8 @@ export class BrowserViewManager extends EventEmitter {
     }
 
     try {
+      abortIfNeeded(signal);
+      this.assertInputTarget(activeTab);
       const wc = activeTab.view.webContents;
       const keyCode = normalizeKeyCode(key);
       wc.sendInputEvent({ type: 'keyDown', keyCode });
@@ -1187,6 +1243,7 @@ export class BrowserViewManager extends EventEmitter {
 
       this.invalidateSnapshot(activeTab.id);
       await this.waitForWebContentsSettle(activeTab, signal);
+      this.assertTabAvailable(activeTab);
 
       return {
         ok: true,
@@ -1200,21 +1257,19 @@ export class BrowserViewManager extends EventEmitter {
     }
   }
 
-  async scroll(direction: 'up' | 'down' = 'down', amount = 700, signal?: AbortSignal): Promise<{ ok: boolean; error?: string }> {
-    const activeTab = this.getActiveTab();
-    if (!activeTab) {
-      return { ok: false, error: 'No active browser tab is open.' };
-    }
-
+  async scroll(direction: 'up' | 'down' = 'down', amount = 700, signal?: AbortSignal, tabId?: string): Promise<{ ok: boolean; error?: string }> {
     try {
+      const activeTab = this.requireTab(tabId);
       const offset = Math.max(1, amount) * (direction === 'up' ? -1 : 1);
-      const result = await this.executeOnActiveTab<{ ok: boolean; error?: string }>(
+      const result = await this.executeOnTab<{ ok: boolean; error?: string }>(
+        activeTab,
         buildScrollScript(offset),
         signal,
       );
       if (!result.ok) return result;
       this.invalidateSnapshot(activeTab.id);
       await sleep(250, signal);
+      this.assertTabAvailable(activeTab);
       return result;
     } catch (error) {
       return {
@@ -1224,11 +1279,11 @@ export class BrowserViewManager extends EventEmitter {
     }
   }
 
-  async wait(ms = 1000, signal?: AbortSignal): Promise<void> {
+  async wait(ms = 1000, signal?: AbortSignal, tabId?: string): Promise<void> {
+    const activeTab = this.requireTab(tabId);
     await sleep(ms, signal);
-    const activeTab = this.getActiveTab();
-    if (!activeTab) return;
     await this.waitForWebContentsSettle(activeTab, signal);
+    this.assertTabAvailable(activeTab);
   }
 
   getState(): BrowserState {
