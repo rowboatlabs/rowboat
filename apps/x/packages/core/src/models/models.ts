@@ -19,6 +19,7 @@ import {
     DEFAULT_OLLAMA_CONTEXT_LENGTH,
     DEFAULT_OLLAMA_REASONING_EFFORT,
 } from "./local.js";
+import { makeGbnfSafeFetch } from "./gbnf-sanitize.js";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
@@ -73,6 +74,13 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
                 apiKey,
                 baseURL: baseURL || "",
                 headers,
+                // llama.cpp-backed servers (LM Studio, llama-server) compile
+                // JSON-Schema `pattern`s in tool/response_format schemas into
+                // GBNF grammar. GBNF rejects PCRE shorthands (\d \w \s \b), and
+                // the failure kills the whole request with HTTP 400
+                // ("failed to parse grammar"). Rewrite the wire body to
+                // GBNF-safe character classes first. See gbnf-sanitize.ts.
+                fetch: makeGbnfSafeFetch(),
             });
         case "openrouter":
             return createOpenRouter({
