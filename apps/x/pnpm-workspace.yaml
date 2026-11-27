@@ -16,6 +16,13 @@ allowBuilds:
 
 blockExoticSubdeps: false
 
+# appdmg (pulled in by @electron-forge/maker-dmg via electron-installer-dmg)
+# treats an `hdiutil detach` that reports the mount point as already gone as a
+# fatal error; that killed the v1.0.4 mac release build on 2026-09-22. appdmg is
+# unmaintained (0.6.6 is the last release, 2023), so fix it here.
+patchedDependencies:
+  appdmg@0.6.6: patches/appdmg@0.6.6.patch
+
 overrides:
   vscode-jsonrpc: 8.2.0
 

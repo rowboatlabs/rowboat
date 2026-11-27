@@ -1,0 +1,26 @@
+diff --git a/lib/hdiutil.js b/lib/hdiutil.js
+index a85a3af..e01b139 100644
+--- a/lib/hdiutil.js
++++ b/lib/hdiutil.js
+@@ -60,12 +60,21 @@ exports.attach = function (path, cb) {
+   })
+ }
+ 
++// A detach that reports the mount point as missing already reached the state we
++// asked for. macOS can complete a deferred eject while we sleep between the busy
++// retries below, and the next `hdiutil detach` then exits 1 with
++// "detach failed - No such file or directory".
++const ALREADY_DETACHED = /No such file or directory|not attached|no such device/i
++
+ exports.detach = function (path, cb) {
+   const args = ['detach', path]
+ 
+   let attempts = 0
+   function attemptDetach (err) {
+     attempts += 1
++    if (err && ALREADY_DETACHED.test(`${err.stderr || ''}\n${err.message || ''}`)) {
++      return cb(null)
++    }
+     if (err && (err.exitCode === 16 || err.code === 16) && attempts <= 8) {
+       setTimeout(function () {
+         util.sh('hdiutil', args, attemptDetach)
