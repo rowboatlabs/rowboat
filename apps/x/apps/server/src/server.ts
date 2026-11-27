@@ -29,6 +29,7 @@ export interface EventSources {
   subscribeOAuthEvents?(listener: (e: unknown) => void): () => void;
   subscribeComposioEvents?(listener: (e: unknown) => void): () => void;
   subscribeChatgptEvents?(listener: (e: unknown) => void): () => void;
+  subscribeAntigravityEvents?(listener: (e: unknown) => void): () => void;
   subscribeTerminalEvents?(listener: (e: { channel: 'terminal:data' | 'terminal:exit'; payload: unknown }) => void): () => void;
   subscribeTtsChunks?(listener: (e: unknown) => void): () => void;
   subscribeSpacesEvents?(listener: (e: unknown) => void): () => void;
@@ -198,6 +199,7 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
     opts.events.subscribeOAuthEvents?.((e) => hub.broadcast('oauth:didConnect', e)),
     opts.events.subscribeComposioEvents?.((e) => hub.broadcast('composio:didConnect', e)),
     opts.events.subscribeChatgptEvents?.((e) => hub.broadcast('chatgpt:statusChanged', e)),
+    opts.events.subscribeAntigravityEvents?.((e) => hub.broadcast('antigravity:statusChanged', e)),
     opts.events.subscribeTerminalEvents?.((e) => hub.broadcast(e.channel, e.payload)),
     opts.events.subscribeTtsChunks?.((e) => hub.broadcast('voice:tts-chunk', e)),
   ];

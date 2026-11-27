@@ -110,7 +110,7 @@ export class FSModelConfigRepo implements IModelConfigRepo {
         // their auth token store (oauth.json / chatgpt-auth.json), and the
         // catalog derives their presence from auth state — a providers-map
         // entry would double-list them.
-        if (provider.flavor === "rowboat" || provider.flavor === "codex") {
+        if (provider.flavor === "rowboat" || provider.flavor === "codex" || provider.flavor === "antigravity") {
             throw new Error(`Provider flavor '${provider.flavor}' is auth-derived and cannot be stored in models.json`);
         }
         const config = await this.read();
