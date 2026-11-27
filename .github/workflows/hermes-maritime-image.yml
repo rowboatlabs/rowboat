@@ -67,6 +67,7 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
+          build-contexts: rowboat-spaces=./skills/rowboat-spaces
           context: apps/harbor/images/hermes-maritime
           platforms: linux/amd64
           push: ${{ steps.push.outputs.push == 'true' }}
@@ -78,3 +79,29 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  watcher:
+    name: managed Hermes watcher
+    needs: image
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/harbor/pnpm-lock.yaml
+      - name: Verify the published image with a fresh managed member
+        working-directory: apps/harbor
+        env:
+          IMAGE: ghcr.io/rowboatlabs/hermes-maritime:sha-${{ github.sha }}
+        run: |
+          docker pull "$IMAGE"
+          pnpm install --frozen-lockfile
+          pnpm -r build
+          pnpm --filter @rowboat/harbor exec tsx scripts/managed-hermes-smoke.ts "$IMAGE"

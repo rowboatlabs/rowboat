@@ -186,12 +186,12 @@ describe('managed agents on a deployment that bills', () => {
     expect(env.get('ROWBOAT_LLM_MODEL')?.value).toBe('Auto');
   });
 
-  it('runs a turn with credits, the turn script taking the gateway as Hermes’s OpenRouter', async () => {
+  it('runs an adapter turn on the managed gateway credentials', async () => {
     await harbor.service.addMembers({ memberId: 'ramnique' }, spaceId, { memberIds: [hermes.id], actingMode: 'direct' });
     fake.nextTurn = hermesTurn('On credits.');
     const { invocations } = await post(`${mention(hermes)} hi`);
     expect((await ended(invocations[0]!.id)).state).toBe('done');
-    expect(fake.submits().at(-1)!.script).toContain('rowboat) HP=openrouter; LB="$ROWBOAT_LLM_BASE_URL"');
+    expect(fake.adapters.has(hermes.agentInstance!)).toBe(true);
   });
 
   it('answers with the agent’s sentence, without waking the VM, when the owner has no credits', async () => {

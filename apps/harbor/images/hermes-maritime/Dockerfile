@@ -16,7 +16,10 @@
 # ghcr.io/rowboatlabs/hermes-maritime:<VERSION>. Bump FROM and VERSION together.
 FROM nousresearch/hermes-agent:v0.22.5
 
-COPY shim.py /app/shim.py
+# 2026-11-27: pin the adapter with its Hermes version so a new VM needs no network install.
+ADD https://github.com/rowboatlabs/hermes-rowboat.git#b2d98ad62de55d84be02a9aa080a600194d7434f /app/rowboat-platform
+COPY --from=rowboat-spaces . /app/rowboat-spaces
+COPY shim.py managed.py /app/
 
 # Maritime's volume is /data (HOME there too); the shim links /opt/data to it so
 # Harbor's turn script, written for the template's layout, keeps its paths.

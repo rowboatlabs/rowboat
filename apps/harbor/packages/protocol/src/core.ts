@@ -79,7 +79,7 @@ export const Member = z.object({
    * The platform instance the agent is, for a connection in
    * INSTANCE_CONNECTIONS (2026-10-05): Agent37's instance id. Not a secret.
    * Fixed at creation like the kind and connection: another instance is
-   * another agent. Absent for every other agent and for people.
+   * another agent. Managed Hermes plugin members also carry their Maritime VM id (2026-11-27).
    */
   agentInstance: z.string().min(1).max(128).optional(),
   /**
@@ -120,6 +120,11 @@ export const Member = z.object({
   removedAt: z.string().optional(),
 });
 export type Member = z.infer<typeof Member>;
+
+/** Managed creation alone assigns an instance to a plugin member (2026-11-27). */
+export function isManagedHermesPlugin(member: Member | undefined): member is Member & { agentInstance: string } {
+  return member?.agentKind === 'hermes' && member.agentConnection === 'plugin' && !!member.agentInstance;
+}
 
 /**
  * Who may create invites (spec §4 Invites and Roles, built 2026-10-19): any

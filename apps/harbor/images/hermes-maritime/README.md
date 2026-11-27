@@ -31,8 +31,13 @@ What the shim does, in order:
    wake kills the frozen run and skips its own. One minute, not two: the sweep runs every
    two minutes and checkpoints at about 115 s idle, so a two-minute trigger lost every other toss.
 
-Harbor drives turns through Maritime's exec API exactly as before; nothing here is on
-that path except the gateway being up.
+New managed Hermes members use the Rowboat platform plugin pinned in the Dockerfile.
+The image carries the Spaces skill. Harbor supplies the org URL, member key and owner DM after
+creating the member and provisioning model access. On the managed image the shim applies the
+profile configuration before starting the gateway and reloads it when the relevant environment
+changes. Harbor waits for capabilities and an authenticated live connection before marking the
+member ready. The plugin owns replies, including native background notifications. Existing
+members with a Maritime connection continue through the CLI.
 
 ## Releasing
 
@@ -42,3 +47,13 @@ let the workflow push `ghcr.io/rowboatlabs/hermes-maritime:<VERSION>`. Point
 Maritime to pull it.
 
 Tests: `python3 -m unittest discover -s apps/harbor/images/hermes-maritime`.
+
+From the monorepo root, exercise fresh managed creation, first reply and native watcher delivery with a local Harbor, a simulated Maritime API, the built image and a scripted model endpoint:
+
+```sh
+docker buildx build --load --platform linux/amd64 -t rowboat-hermes-managed:local --build-context rowboat-spaces=./skills/rowboat-spaces apps/harbor/images/hermes-maritime
+cd apps/harbor
+pnpm install --frozen-lockfile
+pnpm -r build
+pnpm --filter @rowboat/harbor exec tsx scripts/managed-hermes-smoke.ts
+```

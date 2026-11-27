@@ -163,14 +163,43 @@ def hermes_env() -> dict[str, str]:
 
 # --- the gateway -----------------------------------------------------------------------------
 
+def environment_version():
+    try:
+        st = os.stat("/etc/maritime-env")
+        return (st.st_ino, st.st_mtime_ns)
+    except FileNotFoundError:
+        return None
+
+
+def current_gateway_env(user):
+    env = hermes_env()
+    if environment_version() is not None:
+        # 2026-11-27: Maritime reloads its bash export file without replacing PID 1's environment.
+        with open("/etc/maritime-env", "rb") as exports:
+            raw = subprocess.check_output(
+                ["/bin/bash", "-e"], env=env, input=exports.read() + b"\nexec /usr/bin/env -0\n",
+                preexec_fn=as_hermes(user), stderr=subprocess.DEVNULL,
+            )
+        env.update(os.fsdecode(item).split("=", 1) for item in raw.split(b"\0") if b"=" in item)
+    env.update(HOME=HOME, HERMES_HOME=HOME, PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:" + env.get("PATH", ""))
+    return env
+
+
 def supervise(user: pwd.struct_passwd | None) -> None:
     global _gateway
     backoff = 2.0
     while not _stopping.is_set():
         started = time.time()
         try:
-            p = subprocess.Popen(["hermes", "gateway", "run"], env=hermes_env(), preexec_fn=as_hermes(user), cwd=HOME)
-        except OSError as e:
+            version = environment_version()
+            env = current_gateway_env(user)
+            if env.get("ROWBOAT_MANAGED_HERMES") == "1":
+                if not all(env.get(k) for k in ("ROWBOAT_URL", "ROWBOAT_AGENT_KEY", "ROWBOAT_HOME_CHANNEL")):
+                    _stopping.wait(2)
+                    continue
+                subprocess.run([sys.executable, "/app/managed.py"], check=True, env=env, preexec_fn=as_hermes(user))
+            p = subprocess.Popen(["hermes", "gateway", "run"], env=env, preexec_fn=as_hermes(user), cwd=HOME)
+        except (OSError, subprocess.SubprocessError) as e:
             log(f"gateway spawn failed: {e}; retrying in {backoff:.0f}s")
             time.sleep(backoff)
             backoff = min(backoff * 2, 30)
@@ -180,6 +209,16 @@ def supervise(user: pwd.struct_passwd | None) -> None:
             STATE["gateway_pid"] = p.pid
             STATE["gateway_starts"] += 1
         log(f"gateway started pid={p.pid} start#{STATE['gateway_starts']}")
+        while env.get("ROWBOAT_MANAGED_HERMES") == "1" and p.poll() is None and not _stopping.wait(2):
+            updated = environment_version()
+            if updated != version:
+                try:
+                    if current_gateway_env(user) != env:
+                        p.terminate()
+                        break
+                    version = updated
+                except (OSError, subprocess.SubprocessError):
+                    continue
         rc = p.wait()
         with _lock:
             _gateway = None
