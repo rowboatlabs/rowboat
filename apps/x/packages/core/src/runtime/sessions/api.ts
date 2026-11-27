@@ -87,11 +87,11 @@ export interface ISessions {
         sessionId: string,
         queueId: string,
         message: z.infer<typeof UserMessage>,
-    ): void;
+    ): Promise<void>;
     removeQueued(
         sessionId: string,
         queueId: string,
-    ): QueuedSessionMessage | undefined;
+    ): Promise<QueuedSessionMessage | undefined>;
 
     // External inputs, one advanceTurn each. These settle with that
     // invocation's outcome; turn-runtime input rejections pass through.

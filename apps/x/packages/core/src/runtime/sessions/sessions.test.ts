@@ -1576,6 +1576,39 @@ describe("pending queue (sendOrQueueMessage, steering, promotion)", () => {
         ).toEqual([user("third")]);
     });
 
+    it("does not remove a different message when the head is already starting", async () => {
+        const { sessions, fake } = makeSessions();
+        let settle!: (outcome: TurnOutcome) => void;
+        fake.script = () => ({
+            pending: new Promise<TurnOutcome>((resolve) => { settle = resolve; }),
+        });
+        const sessionId = await sessions.createSession();
+        const config = { agent: { agentId: "copilot" } };
+        const { turnId } = await sessions.sendMessage(sessionId, user("running"), config);
+        const head = await sessions.sendOrQueueMessage(sessionId, user("head"), config);
+        const next = await sessions.sendOrQueueMessage(sessionId, user("next"), config);
+        if (!head.queued || !next.queued) throw new Error("expected queued");
+
+        let starting!: () => void;
+        const started = new Promise<void>((resolve) => { starting = resolve; });
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        const create = fake.createTurn.bind(fake);
+        fake.createTurn = async (input) => {
+            starting();
+            await gate;
+            return create(input);
+        };
+        fake.setLog(turnId, turnLog(turnId, sessionId, "completed"));
+        settle(completedOutcome());
+        await started;
+        const removal = sessions.removeQueued(sessionId, head.queueId);
+        release();
+
+        expect(await removal).toBeUndefined();
+        expect(sessions.listQueued(sessionId).map(entry => entry.queueId)).toEqual([next.queueId]);
+    });
+
     it("edits and removes pending entries before delivery", async () => {
         const { sessions } = makeSessions();
         const sessionId = await sessions.createSession();
@@ -1590,17 +1623,17 @@ describe("pending queue (sendOrQueueMessage, steering, promotion)", () => {
         });
         if (!a.queued || !b.queued) throw new Error("expected queued");
 
-        sessions.editQueued(sessionId, a.queueId, user("a, but sharper"));
+        await sessions.editQueued(sessionId, a.queueId, user("a, but sharper"));
         expect(sessions.listQueued(sessionId)[0].message).toEqual(
             user("a, but sharper"),
         );
-        expect(() =>
+        await expect(
             sessions.editQueued(sessionId, "nope", user("x")),
-        ).toThrowError(/no queued message/);
+        ).rejects.toThrowError(/no queued message/);
 
-        const removed = sessions.removeQueued(sessionId, b.queueId);
+        const removed = await sessions.removeQueued(sessionId, b.queueId);
         expect(removed?.message).toEqual(user("b"));
-        expect(sessions.removeQueued(sessionId, b.queueId)).toBeUndefined();
+        await expect(sessions.removeQueued(sessionId, b.queueId)).resolves.toBeUndefined();
         expect(sessions.listQueued(sessionId)).toHaveLength(1);
     });
 
