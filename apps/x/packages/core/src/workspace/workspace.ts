@@ -24,12 +24,12 @@ export function assertSafeRelPath(relPath: string): void {
   if (path.isAbsolute(relPath)) {
     throw new Error('Absolute paths are not allowed');
   }
-  if (relPath.includes('..')) {
+  if (relPath.split(/[\\/]+/).includes('..')) {
     throw new Error('Path traversal (..) is not allowed');
   }
   // Normalize and check again after normalization
   const normalized = path.normalize(relPath);
-  if (normalized.includes('..') || path.isAbsolute(normalized)) {
+  if (normalized.split(/[\\/]+/).includes('..') || path.isAbsolute(normalized)) {
     throw new Error('Invalid path');
   }
 }
@@ -50,6 +50,23 @@ export function resolveWorkspacePath(relPath: string): string {
     throw new Error('Path outside workspace boundary');
   }
   return resolved;
+}
+
+function isInsidePath(root: string, target: string): boolean {
+  const rel = path.relative(root, target);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+export async function resolveExistingWorkspacePath(relPath: string): Promise<string> {
+  const resolved = resolveWorkspacePath(relPath);
+  const [realRoot, realTarget] = await Promise.all([
+    fs.realpath(WorkDir),
+    fs.realpath(resolved),
+  ]);
+  if (!isInsidePath(realRoot, realTarget)) {
+    throw new Error('Path outside workspace boundary');
+  }
+  return realTarget;
 }
 
 /**
@@ -185,7 +202,7 @@ export async function readFile(
   relPath: string,
   encoding: z.infer<typeof workspace.Encoding> = 'utf8'
 ): Promise<z.infer<typeof workspace.ReadFileResult>> {
-  const filePath = resolveWorkspacePath(relPath);
+  const filePath = await resolveExistingWorkspacePath(relPath);
   const stats = await fs.lstat(filePath);
 
   let data: string;
