@@ -78,6 +78,45 @@ function editsAgainstBase(baseLines: string[], sideLines: string[], side: Side):
   return edits;
 }
 
+/**
+ * Canonicalize a side's edits across runs of identical lines. A line diff is
+ * not unique when base lines repeat: deleting one of several equal lines can
+ * be recorded at any of their positions, and the arbitrary choice can make a
+ * side's edit appear to overlap the other side's edit even when the intended
+ * regions are disjoint. Sliding every hunk to its earliest equivalent
+ * position (the same normalization git's xdl applies) removes that false
+ * coupling. (2026-11-28: pinned by fixture 07.)
+ *
+ * One-line slide up, output-preserving:
+ * - hunk with additions: the last added line equals the line after the hunk
+ *   (lines[e.end - 1]); the added block rotates right by one.
+ * - pure deletion: baseLines[e.start - 1] === baseLines[e.end - 1].
+ * Pure insertions keep the position the diff chose: sliding them can move two
+ * sides' distinct insertions onto the same base point, manufacturing a false
+ * same-point conflict.
+ * Never slide past the previous same-side hunk: edits stay ordered with at
+ * least one untouched base line between them.
+ */
+function normalizeEdits(baseLines: string[], edits: Edit[]): Edit[] {
+  let prevEnd = 0;
+  for (const e of edits) {
+    if (e.start === e.end) {
+      prevEnd = e.end;
+      continue; // pure insertion: see above
+    }
+    while (e.start > prevEnd && e.start > 0) {
+      const unit =
+        e.lines.length > 0 ? e.lines[e.lines.length - 1] : baseLines[e.start - 1];
+      if (unit !== baseLines[e.end - 1]) break;
+      if (e.lines.length > 0) e.lines.unshift(e.lines.pop()!);
+      e.start--;
+      e.end--;
+    }
+    prevEnd = e.end;
+  }
+  return edits;
+}
+
 /** Cross-side interaction: overlapping base ranges, or two insertions at the same point. */
 function interacts(a: Edit, b: Edit): boolean {
   if (a.side === b.side) return false;
@@ -119,8 +158,8 @@ export function merge3(base: string, current: string, proposed: string): MergeRe
   const p = splitLines(proposed);
 
   const edits = [
-    ...editsAgainstBase(b.lines, c.lines, 'current'),
-    ...editsAgainstBase(b.lines, p.lines, 'proposed'),
+    ...normalizeEdits(b.lines, editsAgainstBase(b.lines, c.lines, 'current')),
+    ...normalizeEdits(b.lines, editsAgainstBase(b.lines, p.lines, 'proposed')),
   ].sort((x, y) => x.start - y.start || x.end - y.end || (x.side === y.side ? 0 : x.side === 'current' ? -1 : 1));
 
   // Group transitively interacting edits. Sorted by start, interval-connected

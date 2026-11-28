@@ -1,0 +1,11 @@
+{
+  "name": "deletion-across-identical-lines",
+  "description": "One side deletes a run of lines, and the deleted lines repeat further down; the other side edits the last line of the file. A raw line diff may pin the deletion at the wrong position among the repeats and make it falsely overlap the edit, surfacing a conflict where the intended regions are disjoint (spec §6: non-overlapping change-sets auto-merge). The engine canonicalizes each side's edit positions across identical lines (normalizeEdits, 2026-11-28), so the two edits compose cleanly: the deletion lands and the last line becomes c. The EOF newline also merges here: only the proposed side dropped it, so the merged content keeps no trailing newline.",
+  "base": "y\ny\nx\nb\na\nd\na\na\n",
+  "current": "y\ny\na\na\n",
+  "proposed": "y\ny\nx\nb\na\nd\na\nc",
+  "expected": {
+    "outcome": "merged",
+    "content": "y\ny\na\nc"
+  }
+}
