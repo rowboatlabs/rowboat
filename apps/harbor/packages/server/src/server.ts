@@ -67,6 +67,8 @@ export interface HarborOptions {
   hosting?: OrgRuntimeInput['hosting'];
   /** The space graph: a stand-in Jev and faster clocks for tests (runtime.ts). */
   graph?: OrgRuntimeInput['graph'];
+  /** Space connections: stand-ins for the control plane, billing and the model in tests (runtime.ts). */
+  connections?: OrgRuntimeInput['connections'];
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -114,6 +116,7 @@ export async function startHarbor(options: HarborOptions): Promise<RunningHarbor
     ...(options.webAppUrl ? { webAppUrl: options.webAppUrl } : {}),
     ...(options.hosting ? { hosting: options.hosting } : {}),
     ...(options.graph ? { graph: options.graph } : {}),
+    ...(options.connections ? { connections: options.connections } : {}),
     ...(options.agentPresenceGraceMs !== undefined ? { agentPresenceGraceMs: options.agentPresenceGraceMs } : {}),
   });
   await seedOrg(runtime.service, store, options);

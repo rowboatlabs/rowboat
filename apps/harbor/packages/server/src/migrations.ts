@@ -1721,6 +1721,58 @@ export const MIGRATIONS: Migration[] = [
         where not exists (select 1 from spaces where org_id = 'org-default' and is_default)`, [ulid(), now]);
     },
   },
+  {
+    // Space connections (spec §8 Space connections, 2026-11-28): an app an
+    // admin connected to a space, and the events it sent. `sealed_key` is the
+    // connection's gateway key for the model that words its posts, sealed
+    // like a platform credential. An event keeps its payload only until it is
+    // decided, then what it was about. Both cascade from the space.
+    id: '068-space-connections',
+    statements: [
+      `create table space_connections (
+        id text primary key,
+        space_id text not null,
+        member_id text not null,
+        app_slug text not null,
+        app_name text not null,
+        app_logo text,
+        name text not null,
+        status text not null check (status in ('pending','active','failed')),
+        problem text,
+        account_id text,
+        triggers jsonb not null default '[]',
+        filter boolean not null default true,
+        paused boolean not null default false,
+        customer text not null,
+        sealed_key text,
+        created_by text not null,
+        created_at text not null,
+        constraint space_connections_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create index space_connections_space on space_connections (space_id)`,
+      `create table space_connection_events (
+        connection_id text not null,
+        space_id text not null,
+        event_id text not null,
+        trigger_slug text not null,
+        received_at text not null,
+        outcome text not null check (outcome in ('pending','posted','skipped','failed')),
+        score double precision,
+        title text,
+        url text,
+        subject text,
+        message_id text,
+        root_message_id text,
+        payload jsonb,
+        attempts integer not null default 0,
+        primary key (connection_id, event_id),
+        constraint space_connection_events_connection_fk foreign key (connection_id) references space_connections(id) on delete cascade,
+        constraint space_connection_events_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create index space_connection_events_recent on space_connection_events (connection_id, received_at desc)`,
+      `create index space_connection_events_pending on space_connection_events (received_at) where outcome = 'pending'`,
+    ],
+  },
 ];
 
 /**

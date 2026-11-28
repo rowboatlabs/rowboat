@@ -234,6 +234,20 @@ export const BUILT_IN_CONNECTION = 'builtin';
 export const JEV_KIND = 'jev';
 
 /**
+ * A space connection's member (spec §8 Space connections, 2026-11-28): the
+ * author of the updates a connected app posts in one space. Made by Harbor
+ * when an admin connects the app and gone with the connection, so never in
+ * AGENT_PAIRS: no person adds one, holds a key for it, or asks it anything.
+ * Clients draw it with its app's logo and leave it out of pickers.
+ */
+export const CONNECTION_KIND = 'connection';
+export const COMPOSIO_CONNECTION = 'composio';
+/** Whether a member is a space connection's. */
+export function isConnectionMember(member: { kind?: string; agentKind?: string | undefined } | undefined): boolean {
+  return member?.kind === 'agent' && member.agentKind === CONNECTION_KIND;
+}
+
+/**
  * What a super agent may ask for (spec §4 Agent members, 2026-11-02): an
  * agent Rowboat runs (no connection, one of MARITIME_AGENTS), or any pair in
  * AGENT_PAIRS but a local one, which is personal and so can't be handed work.

@@ -1,4 +1,4 @@
-import { BUILT_IN_CONNECTION, HARBOR_RUN_CONNECTIONS, type Member } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION, COMPOSIO_CONNECTION, HARBOR_RUN_CONNECTIONS, type Member } from '@rowboat/spaces-protocol';
 import type { Kernel } from './kernel.js';
 
 /**
@@ -76,8 +76,8 @@ export class AgentPresence {
 
   private hasPresence(member: Member | undefined): member is Member {
     const connection = member?.kind === 'agent' ? member.agentConnection : undefined;
-    // Ro is Harbor itself, like an agent Harbor runs: always there.
-    return connection !== undefined && connection !== BUILT_IN_CONNECTION && !HARBOR_RUN_CONNECTIONS.includes(connection);
+    // Ro is Harbor itself, like an agent Harbor runs: always there. So is a space connection's member, which Harbor posts as (2026-11-28).
+    return connection !== undefined && connection !== BUILT_IN_CONNECTION && connection !== COMPOSIO_CONNECTION && !HARBOR_RUN_CONNECTIONS.includes(connection);
   }
 
   private async announce(memberId: string, online: boolean): Promise<void> {

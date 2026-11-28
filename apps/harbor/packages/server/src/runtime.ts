@@ -4,6 +4,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getRequestListener } from '@hono/node-server';
 import { bindAuth, type AuthDriver, type OrgAuth } from './auth.js';
 import { billingFromEnv, type BillingAccounts } from './billing.js';
+import { connectionsBackendFromEnv, type ConnectionsBackend } from './connections/backend.js';
+import { gatewayWriter, type UpdateWriter } from './connections/writer.js';
+import { DEFAULT_CONNECTION_APPS, type ConnectionsOptions } from './core/connections.js';
+import { seal, unseal } from './sealing.js';
 import type { BlobStore } from './blobs.js';
 import { HostedConnectors, orgUrl } from './connectors/host.js';
 import { maritimeProvisioner } from './connectors/maritime/provisioning.js';
@@ -54,6 +58,28 @@ export interface OrgRuntimeInput {
   agentPresenceGraceMs?: number;
   /** The space graph (spec §8 Space graph, 2026-11-12): a stand-in Jev and faster clocks in tests; absent = from HARBOR_JEV_OPENROUTER_KEY. */
   graph?: { jev: JevApi } & GraphOptions;
+  /**
+   * Space connections (spec §8 Space connections, 2026-11-28): stand-ins for
+   * the control plane, billing and the model in tests, with faster clocks;
+   * absent = from HARBOR_BILLING_URL and HARBOR_BILLING_KEY, and none without them.
+   */
+  connections?: { backend: ConnectionsBackend; billing: Pick<BillingAccounts, 'accountFor' | 'mintGatewayKey' | 'revokeGatewayKey'>; writer: UpdateWriter; apps?: readonly string[] | '*' } & ConnectionsOptions;
+}
+
+/** The apps a space may connect: the operator's list (HARBOR_CONNECTION_APPS, comma-separated slugs, or `*` for all), else the default pair. */
+function connectionAppsFromEnv(): readonly string[] | '*' {
+  const raw = process.env.HARBOR_CONNECTION_APPS?.trim();
+  if (!raw) return DEFAULT_CONNECTION_APPS;
+  if (raw === '*') return '*';
+  return raw.split(',').map((slug) => slug.trim().toLowerCase()).filter(Boolean);
+}
+
+/** What space connections run on in production: the control plane's routes, billing's accounts and its LLM gateway, or nothing when the deployment names no control plane. */
+function connectionsFromEnv(): OrgRuntimeInput['connections'] {
+  const backend = connectionsBackendFromEnv();
+  const billing = billingFromEnv();
+  if (!backend || !billing) return undefined;
+  return { backend, billing, writer: gatewayWriter(billing.gatewayUrl), apps: connectionAppsFromEnv() };
 }
 
 /** The managed-hosting provider the deployment's own Maritime key makes, or none. */
@@ -134,6 +160,26 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
     service.attachGraph(jev, graphOptions);
     service.startGraph();
   }
+  // Space connections (spec §8 Space connections, 2026-11-28): apps reached through the control plane, when the deployment has one.
+  const connections = input.connections ?? connectionsFromEnv();
+  if (connections) {
+    const { backend, billing, writer, apps, ...connectionOptions } = connections;
+    // The gateway key is sealed like a platform credential, bound to the org and to the connection, never to an agent's id.
+    const scope = (connectionId: string) => `connection:${connectionId}`;
+    service.attachConnections(
+      {
+        backend,
+        billing,
+        writer,
+        apps: apps ?? DEFAULT_CONNECTION_APPS,
+        seal: (secret, connectionId) => seal(secret, input.orgId, scope(connectionId)),
+        unseal: (sealed, connectionId) => unseal(sealed, input.orgId, scope(connectionId)),
+        deliverUrl: () => `${orgUrl(service.org.address)}/v1/connections/events`,
+      },
+      connectionOptions,
+    );
+    service.startConnections();
+  }
   const auth = bindAuth(input.auth, store);
   const issuer = input.auth.metadata?.()?.authorizationServers[0];
   const render = getRequestListener(
@@ -162,6 +208,7 @@ export async function buildOrgRuntime(input: OrgRuntimeInput): Promise<OrgRuntim
       service.closePresence();
       await service.stopHosting();
       await service.stopGraph();
+      await service.stopConnections();
       await connectors.stopAll();
     },
   };

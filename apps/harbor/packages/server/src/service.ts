@@ -1,5 +1,7 @@
 import { isManagedHermesPlugin } from '@rowboat/spaces-protocol';
 import { Graph, type GraphOptions, type SetSpaceGraphInput } from './core/graph.js';
+import { Connections, type ConnectionsDeps, type ConnectionsOptions } from './core/connections.js';
+import type { ConnectionApp, ConnectionEvent, ConnectionEventOutcome, ConnectionTriggerType, SpaceConnection, routes as protocolRoutes } from '@rowboat/spaces-protocol';
 import type { JevApi } from './jev.js';
 import type { SpaceGraph } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
@@ -101,6 +103,7 @@ export class HarborService {
   private readonly humanPresence: HumanPresence;
   private readonly superAgents: SuperAgents;
   private readonly graph: Graph;
+  private readonly connections: Connections;
 
   constructor(
     store: Store,
@@ -126,6 +129,7 @@ export class HarborService {
     this.presence = new AgentPresence(this.k, options.presenceGraceMs);
     this.superAgents = new SuperAgents(this.k, this.hosting, this.spaces, this.feed, this.invocations);
     this.graph = new Graph(this.k);
+    this.connections = new Connections(this.k, this.spaces, this.feed);
   }
 
   /** The kernel's clock, for code outside the core that stamps rows (connectors/host.ts). */
@@ -153,6 +157,48 @@ export class HarborService {
   /** The space graph (spec §8 Space graph, 2026-11-12): the Jev it judges with, when the deployment has its key (runtime.ts). */
   attachGraph(jev: JevApi, options: GraphOptions = {}): void {
     this.graph.attach(jev, options);
+    // The same Jev decides which of a connection's events are worth a post (spec §8 Space connections, 2026-11-28).
+    this.connections.attachJev(jev);
+  }
+
+  /** Space connections (spec §8 Space connections, 2026-11-28): the control plane they reach apps through, when the deployment has one (runtime.ts). */
+  attachConnections(deps: ConnectionsDeps, options: ConnectionsOptions = {}): void {
+    this.connections.attach(deps, options);
+  }
+  /** The connections worker: decides and posts the events that were taken. */
+  startConnections(): void {
+    this.connections.start();
+  }
+  stopConnections(): Promise<void> {
+    return this.connections.stop();
+  }
+  listConnectionApps(ctx: ActorCtx, search?: string): Promise<{ apps: ConnectionApp[]; available: boolean }> {
+    return this.connections.apps(ctx, search);
+  }
+  listConnectionTriggers(ctx: ActorCtx, app: string): Promise<ConnectionTriggerType[]> {
+    return this.connections.triggerTypes(ctx, app);
+  }
+  listSpaceConnections(ctx: ActorCtx, spaceId: string): Promise<{ connections: SpaceConnection[]; available: boolean; filterAvailable: boolean }> {
+    return this.connections.list(ctx, spaceId);
+  }
+  createSpaceConnection(ctx: ActorCtx, spaceId: string, input: z.infer<(typeof protocolRoutes)['createSpaceConnection']['request']>): Promise<{ connection: SpaceConnection; authorizeUrl: string }> {
+    return this.connections.create(ctx, spaceId, input);
+  }
+  authorizeSpaceConnection(ctx: ActorCtx, spaceId: string, connectionId: string, input: z.infer<(typeof protocolRoutes)['authorizeSpaceConnection']['request']>): Promise<{ connection: SpaceConnection; authorizeUrl: string }> {
+    return this.connections.authorize(ctx, spaceId, connectionId, input);
+  }
+  updateSpaceConnection(ctx: ActorCtx, spaceId: string, connectionId: string, input: z.infer<(typeof protocolRoutes)['updateSpaceConnection']['request']>): Promise<SpaceConnection> {
+    return this.connections.update(ctx, spaceId, connectionId, input);
+  }
+  deleteSpaceConnection(ctx: ActorCtx, spaceId: string, connectionId: string): Promise<void> {
+    return this.connections.remove(ctx, spaceId, connectionId);
+  }
+  listConnectionEvents(ctx: ActorCtx, spaceId: string, connectionId: string, opts: { outcome?: ConnectionEventOutcome; limit?: number } = {}): Promise<ConnectionEvent[]> {
+    return this.connections.events(ctx, spaceId, connectionId, opts);
+  }
+  /** One event from the control plane (pre-auth: its signature is the credential). */
+  receiveConnectionEvent(delivery: { timestamp: string | undefined; signature: string | undefined; body: string }): Promise<void> {
+    return this.connections.receive(delivery);
   }
   /** The graph worker: keeps every graph space's judgments current. */
   startGraph(): void {
@@ -451,8 +497,11 @@ export class HarborService {
   setDefaultSpace(ctx: ActorCtx, spaceId: string, input: SetDefaultSpaceInput): Promise<Space> {
     return this.spaces.setDefaultSpace(ctx, spaceId, input);
   }
-  deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
-    return this.spaces.deleteSpace(ctx, spaceId);
+  async deleteSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
+    // A space's connections hold an authorisation and triggers outside Harbor, which no cascade reaches (spec §8 Space connections, 2026-11-28).
+    const connections = await this.connections.forSpace(spaceId);
+    await this.spaces.deleteSpace(ctx, spaceId);
+    await this.connections.cleanUp(connections);
   }
   setSpaceVisibility(ctx: ActorCtx, spaceId: string, input: SetSpaceVisibilityInput): Promise<Space> {
     return this.spaces.setSpaceVisibility(ctx, spaceId, input);

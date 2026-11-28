@@ -27,6 +27,7 @@ import type {
 } from '@rowboat/spaces-protocol';
 import type { SearchQuery } from './search.js';
 import type { GraphTopicCategory } from '@rowboat/spaces-protocol';
+import type { ConnectionEventOutcome, ConnectionStatus, ConnectionTrigger } from '@rowboat/spaces-protocol';
 import type { ThreadJudgment } from './graph/questions.js';
 
 // Data-access boundary. The stub implements it in memory (memory-store.ts); the
@@ -50,6 +51,53 @@ import type { ThreadJudgment } from './graph/questions.js';
  * `limit` rows. Both exclusive. The service composes an "around" window
  * from one of each.
  */
+/** A trigger a connection listens for, with the id of its instance on the control plane. */
+export interface StoredConnectionTrigger extends ConnectionTrigger {
+  triggerId: string;
+}
+
+/**
+ * A space connection as stored (spec §8 Space connections, 2026-11-28): what
+ * the wire shows, plus the app's account on the control plane, who its use
+ * bills to, and its gateway key, sealed.
+ */
+export interface StoredConnection {
+  id: string;
+  spaceId: string;
+  memberId: string;
+  app: { slug: string; name: string; logo?: string };
+  name: string;
+  status: ConnectionStatus;
+  problem?: string;
+  accountId?: string;
+  triggers: StoredConnectionTrigger[];
+  filter: boolean;
+  paused: boolean;
+  customer: string;
+  sealedKey?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** One event a connection received. `payload` is kept only while the event is `pending`. */
+export interface StoredConnectionEvent {
+  connectionId: string;
+  spaceId: string;
+  eventId: string;
+  triggerSlug: string;
+  receivedAt: string;
+  outcome: ConnectionEventOutcome;
+  score?: number;
+  title?: string;
+  url?: string;
+  /** What ties it to other events about the same thing (connections/payload.ts subjectOf). */
+  subject?: string;
+  messageId?: string;
+  rootMessageId?: string;
+  payload?: unknown;
+  attempts: number;
+}
+
 /** One judged thread of a space graph: Jev's judgment and the thread's edges, as of `fingerprint`. */
 
 export interface StoredGraphThread {
@@ -666,6 +714,25 @@ export interface Store {
   backfillDone(id: string): Promise<boolean>;
   markBackfillDone(id: string, at: string): Promise<void>;
 
+  // space connections (spec §8 Space connections, 2026-11-28): settings and received events, never part of the log
+  putConnection(connection: StoredConnection): Promise<void>;
+  /** This org's connection, or undefined: the id alone must never reach another org's. */
+  getConnection(id: string): Promise<StoredConnection | undefined>;
+  listConnections(spaceId: string): Promise<StoredConnection[]>;
+  /** Every connection in the org, for the worker. */
+  listAllConnections(): Promise<StoredConnection[]>;
+  deleteConnection(id: string): Promise<void>;
+  /** Take an event once: false when this connection already has its id. Keeps the newest `keep` per connection. */
+  insertConnectionEvent(event: StoredConnectionEvent, keep: number): Promise<boolean>;
+  /** Events not yet decided, oldest first, across the org. */
+  listPendingConnectionEvents(limit: number): Promise<StoredConnectionEvent[]>;
+  /** Record an event's outcome, or one more failed try; anything but `pending` drops its payload. */
+  settleConnectionEvent(event: Pick<StoredConnectionEvent, 'connectionId' | 'eventId' | 'outcome' | 'attempts'> & Partial<Pick<StoredConnectionEvent, 'score' | 'messageId' | 'rootMessageId'>>): Promise<void>;
+  listConnectionEvents(connectionId: string, opts: { outcome?: ConnectionEventOutcome; limit: number }): Promise<StoredConnectionEvent[]>;
+  /** Per connection: events posted and skipped since `since`, and when the last one arrived. */
+  connectionCounts(connectionIds: string[], since: string): Promise<Map<string, { posted: number; skipped: number; lastEventAt?: string }>>;
+  /** The thread a connection last posted in about a subject. */
+  findConnectionThread(connectionId: string, subject: string): Promise<string | undefined>;
   // the space graph (spec §8 Space graph, 2026-11-12): derived rows, rewritten whole, never part of the log
   listGraphThreads(spaceId: string): Promise<StoredGraphThread[]>;
   putGraphThread(thread: StoredGraphThread): Promise<void>;

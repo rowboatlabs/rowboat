@@ -17,6 +17,18 @@ import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 import { SpaceGraph } from './graph.js';
+import {
+  CONNECTION_NAME_MAX,
+  CONNECTION_TRIGGERS_MAX,
+  ConnectionApp,
+  ConnectionAppSlug,
+  ConnectionEvent,
+  ConnectionEventOutcome,
+  ConnectionId,
+  ConnectionTriggerInput,
+  ConnectionTriggerType,
+  SpaceConnection,
+} from './connection.js';
 
 // Decision 5 (CONTRACT.md): the agent face — direct projections of the core
 // operations; the MCP server attributes every call as the token's member with
@@ -212,6 +224,88 @@ export const readGraph = tool({
     'thread itself with read_thread. `status` says when the graph is off or still building.',
   input: z.object({ spaceId: SpaceId, about: z.string().min(1).max(400).optional(), limit: z.number().int().positive().max(200).optional() }),
   output: SpaceGraph,
+});
+
+// --- space connections (spec §8 Space connections, 2026-11-28) -------------------
+
+export const listConnections = tool({
+  name: 'list_connections',
+  description:
+    'The apps connected to a space (Linear, GitHub, …): each posts what happens there as its own member. Shows what ' +
+    'each listens for, whether it filters to what matters, and how many events it posted and skipped this week.',
+  input: z.object({ spaceId: SpaceId }),
+  output: z.object({ connections: z.array(SpaceConnection), available: z.boolean(), filterAvailable: z.boolean() }),
+});
+
+export const listConnectionApps = tool({
+  name: 'list_connection_apps',
+  description: 'The apps a space can connect, optionally narrowed by a search word. `available` false = this server connects none.',
+  input: z.object({ search: z.string().max(100).optional() }),
+  output: z.object({ apps: z.array(ConnectionApp), available: z.boolean() }),
+});
+
+export const listConnectionTriggers = tool({
+  name: 'list_connection_triggers',
+  description:
+    'The kinds of event one app can send to a space, each with the JSON Schema of the config it needs (a team, a ' +
+    'repository). Read this before update_connection so every trigger gets the config it requires.',
+  input: z.object({ app: ConnectionAppSlug }),
+  output: z.object({ triggers: z.array(ConnectionTriggerType) }),
+});
+
+export const createConnection = tool({
+  name: 'create_connection',
+  description:
+    'Connect an app to a shared space (org admins only; DMs refuse). Returns the connection, still pending, and an ' +
+    '`authorizeUrl`: give it to your person to authorise the app, then check list_connections until it is active and ' +
+    'set what it listens for with update_connection. What it uses bills to your person\'s Rowboat account. Only when ' +
+    'your person asked for it.',
+  input: z.object({ spaceId: SpaceId, app: ConnectionAppSlug, name: z.string().max(CONNECTION_NAME_MAX).optional() }),
+  output: z.object({ connection: SpaceConnection, authorizeUrl: z.string().url() }),
+});
+
+export const authorizeConnection = tool({
+  name: 'authorize_connection',
+  description:
+    'A new address to authorise a connection\'s app (org admins only): for a pending one whose address lapsed, or a ' +
+    'failed one whose authorisation expired. Give the address to your person.',
+  input: z.object({ spaceId: SpaceId, connectionId: ConnectionId }),
+  output: z.object({ connection: SpaceConnection, authorizeUrl: z.string().url() }),
+});
+
+export const updateConnection = tool({
+  name: 'update_connection',
+  description:
+    'Change a space connection (org admins only): its name, the triggers it listens for (`triggers` replaces the ' +
+    'whole set and needs the connection active), `filter` (only post what matters to the space, judged by Jev) and ' +
+    '`paused`. A field left out is left alone.',
+  input: z.object({
+    spaceId: SpaceId,
+    connectionId: ConnectionId,
+    name: z.string().min(1).max(CONNECTION_NAME_MAX).optional(),
+    triggers: z.array(ConnectionTriggerInput).max(CONNECTION_TRIGGERS_MAX).optional(),
+    filter: z.boolean().optional(),
+    paused: z.boolean().optional(),
+  }),
+  output: z.object({ connection: SpaceConnection }),
+});
+
+export const deleteConnection = tool({
+  name: 'delete_connection',
+  description:
+    'Disconnect an app from a space (org admins only): its authorisation and triggers are removed and it stops ' +
+    'posting; what it posted stays. Only when your person asked for it.',
+  input: z.object({ spaceId: SpaceId, connectionId: ConnectionId }),
+  output: z.object({}),
+});
+
+export const listConnectionEvents = tool({
+  name: 'list_connection_events',
+  description:
+    'What a space connection received, newest first (org admins only): each event\'s title, whether it was posted or ' +
+    'skipped, and the score the filter gave it. Use `outcome: "skipped"` to review what the filter left out.',
+  input: z.object({ spaceId: SpaceId, connectionId: ConnectionId, outcome: ConnectionEventOutcome.optional(), limit: z.number().int().positive().max(200).optional() }),
+  output: z.object({ events: z.array(ConnectionEvent) }),
 });
 
 export const unarchiveSpace = tool({
@@ -949,6 +1043,14 @@ export const mcpTools = [
   diff,
   setSpaceGraph,
   readGraph,
+  listConnections,
+  listConnectionApps,
+  listConnectionTriggers,
+  createConnection,
+  authorizeConnection,
+  updateConnection,
+  deleteConnection,
+  listConnectionEvents,
   createAgent,
   deleteAgent,
 ] as const;
@@ -972,6 +1074,10 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   readActivity.name,
   searchSpace.name,
   readGraph.name,
+  listConnections.name,
+  listConnectionApps.name,
+  listConnectionTriggers.name,
+  listConnectionEvents.name,
   listTopics.name,
   listArchivedThreads.name,
   listMyThreads.name,

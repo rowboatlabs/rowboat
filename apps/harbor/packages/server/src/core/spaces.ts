@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import type { z } from 'zod';
 import type { BlobStore } from '../blobs.js';
 import { HarborError } from '../errors.js';
-import { canArchiveSpace, canBind, canDeleteSpace, canChangeMembership, canEditProfile, canInvite, canJoinSpace, canListOnInvite, canReachMember, canReachPersonalAgent, canRemoveFromOrg, canRemoveFromSpace, canRenameSpace, canSetDefaultSpace, canSetOrgSettings, canSetRole, canSetSpaceVisibility, canSignIn, canWriteSpace, enforce } from '../policy.js';
+import { canArchiveSpace, canBind, canRemoveConnectionMember, canDeleteSpace, canChangeMembership, canEditProfile, canInvite, canJoinSpace, canListOnInvite, canReachMember, canReachPersonalAgent, canRemoveFromOrg, canRemoveFromSpace, canRenameSpace, canSetDefaultSpace, canSetOrgSettings, canSetRole, canSetSpaceVisibility, canSignIn, canWriteSpace, enforce } from '../policy.js';
 import { DIRECT_SPACE_NAME, directKeyFor, type PushLevel, type StoredEvent, type StoredInvite } from '../store.js';
 import { Kernel, type ActorCtx, type BindIdentity } from './kernel.js';
 
@@ -479,6 +479,7 @@ export class Spaces {
   async removeMember(ctx: ActorCtx, spaceId: string, memberId: string, input: RemoveMemberInput): Promise<{ removed: boolean }> {
     const space = await this.k.requireMember(ctx, spaceId);
     enforce(canRemoveFromSpace(await this.me(ctx), space, memberId));
+    enforce(canRemoveConnectionMember(await this.k.store.getMember(memberId)));
     const by = this.k.attributionOf(ctx, input);
     const at = this.k.now();
     const removed = await this.k.lockedAs(ctx, spaceId, () => this.removeMembershipLocked(spaceId, memberId, by, at), { archived: 'allow' });
@@ -781,6 +782,31 @@ export class Spaces {
       });
       this.k.hub.publishToMember(agentId, { kind: 'space_removed', spaceId: space.id, by: by.memberId, at });
     }
+  }
+
+  /**
+   * A space connection's member joins the one space it posts in (spec §8
+   * Space connections, 2026-11-28). Not `addMembers`: nobody adds a
+   * connection's member to a space (policy.ts canReachMember), Harbor does
+   * when an admin connects the app, and `by` is that admin.
+   */
+  async addConnectionMember(spaceId: string, memberId: string, by: Attribution): Promise<void> {
+    const at = this.k.now();
+    await this.k.locked(spaceId, async () => {
+      if (await this.k.store.getMembership(spaceId, memberId)) return;
+      const membership: Membership = { spaceId, memberId, joinedAt: at };
+      await this.k.store.putMembership(membership);
+      await this.k.appendNext(spaceId, at, { type: 'membership', membership, action: 'joined', by });
+    });
+  }
+
+  /** A connection's member carries the connection's name: renamed with it, and told to the org like any profile change. */
+  async renameConnectionMember(memberId: string, displayName: string): Promise<void> {
+    const member = await this.k.store.getMember(memberId);
+    if (!member || member.displayName === displayName) return;
+    const updated: Member = { ...member, displayName };
+    await this.k.store.putMember(updated);
+    await this.k.publishProfile(updated);
   }
 
   async publishPresence(
