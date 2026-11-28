@@ -165,6 +165,29 @@ describe('getModelCatalog', () => {
     expect(lastCall.flavor).toBe('ollama');
   });
 
+  it('keeps a refreshed list cached when an older request finishes later', async () => {
+    serveConfig({ ollama: { baseURL: 'http://localhost:11434' } });
+    let finishOld!: (models: string[]) => void;
+    let startOld!: () => void;
+    const started = new Promise<void>((resolve) => { startOld = resolve; });
+    mocks.listModelsForProvider
+      .mockImplementationOnce(() => new Promise<string[]>((resolve) => {
+        finishOld = resolve;
+        startOld();
+      }))
+      .mockResolvedValueOnce(['fresh']);
+    const old = getModelCatalog();
+    await started;
+    const refreshed = await getModelCatalog({ refreshProvider: 'ollama' });
+    expect(refreshed.providers[0].models).toEqual([{ id: 'fresh' }]);
+
+    finishOld(['stale']);
+    await old;
+    const cached = await getModelCatalog();
+    expect(cached.providers[0].models).toEqual([{ id: 'fresh' }]);
+    expect(mocks.listModelsForProvider).toHaveBeenCalledTimes(2);
+  });
+
   it('caches failures briefly so every catalog build does not re-pay the fetch timeout', async () => {
     serveConfig({ ollama: { baseURL: 'http://localhost:11434' } });
     mocks.listModelsForProvider.mockRejectedValue(new Error('down'));

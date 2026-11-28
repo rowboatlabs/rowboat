@@ -215,7 +215,10 @@ async function resolveProviderEntry(
 
     const request = fetchProviderEntry(provider, fingerprint, modelsDevByFlavor)
         .then((entry) => {
-            cache.set(provider.id, entry);
+            // 2026-11-28: an explicit refresh can supersede an older listing.
+            if (inFlight.get(provider.id) === request) {
+                cache.set(provider.id, entry);
+            }
             return entry;
         })
         .finally(() => {
