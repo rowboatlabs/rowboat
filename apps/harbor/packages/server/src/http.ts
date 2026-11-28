@@ -8,6 +8,7 @@ import { clearedSessionCookie, sessionCookie, sessionToken, type SessionCookieCo
 import { MAX_PROFILE_IMAGE_BYTES } from './core/images.js';
 import { HarborError } from './errors.js';
 import { publicOrigin } from './origin.js';
+import { MAX_DELIVERY_BYTES } from './core/connections.js';
 import type { HarborService } from './service.js';
 
 // The render face: every route in the protocol's api.ts, nothing more. Bodies
@@ -168,6 +169,8 @@ export function buildHttpApp(deps: {
     if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health' || c.req.path === routes.createSession.path) return next();
     // A service's alert carries no bearer: the secret in its address is the credential (spec §8 Alerts, 2026-10-03).
     if (c.req.path.startsWith('/v1/hooks/')) return next();
+    // The control plane's delivery of a connection's event is signed, not bearer-authenticated (spec §8 Space connections, 2026-11-28).
+    if (c.req.path === routes.receiveConnectionEvent.path) return next();
     const authorization = c.req.header('authorization');
     const query = new URL(c.req.url).searchParams.get('token');
     // The web app's cookie (session.ts) counts only when neither the header
@@ -719,6 +722,65 @@ export function buildHttpApp(deps: {
       throw new HarborError('invalid_request', 'an alert is a JSON body');
     }
     return reply(c, routes.receiveAgentHook.response, { posted: await service.receiveAgentHook(agentId, token, payload) });
+  });
+
+  // --- space connections (spec §8 Space connections, 2026-11-28) -------------------
+  // The fixed paths come before the ones with a connection id, so `apps` and `events` are never read as one.
+  app.get(routes.listConnectionApps.path, async (c) => {
+    const q = parseWith(routes.listConnectionApps.query, { ...(c.req.query('search') !== undefined ? { search: c.req.query('search') } : {}) });
+    return reply(c, routes.listConnectionApps.response, await service.listConnectionApps(actor(c), q.search));
+  });
+  app.get(routes.listConnectionTriggers.path, async (c) => {
+    const { app: slug } = parseWith(routes.listConnectionTriggers.params, c.req.param());
+    return reply(c, routes.listConnectionTriggers.response, { triggers: await service.listConnectionTriggers(actor(c), slug) });
+  });
+  app.post(routes.receiveConnectionEvent.path, async (c) => {
+    if (Number(c.req.header('content-length') ?? '0') > MAX_DELIVERY_BYTES) throw new HarborError('payload_too_large', `an event is limited to ${MAX_DELIVERY_BYTES} bytes`);
+    // The raw text: the signature covers the bytes as sent, not a re-serialisation of them.
+    const text = await c.req.text();
+    if (text.length > MAX_DELIVERY_BYTES) throw new HarborError('payload_too_large', `an event is limited to ${MAX_DELIVERY_BYTES} bytes`);
+    let taken: boolean;
+    try {
+      taken = await service.receiveConnectionEvent({ timestamp: c.req.header('x-rowboat-timestamp'), signature: c.req.header('x-rowboat-signature'), body: text });
+    } catch (err) {
+      // A connection that is gone is 410, not the 404 of not_found elsewhere: the control plane deletes the
+      // trigger on this answer, and a proxy's 404 while Harbor deploys must never be mistaken for it (2026-11-28).
+      if (err instanceof HarborError && err.code === 'not_found') return c.json({ code: err.code, message: err.message }, 410);
+      throw err;
+    }
+    return reply(c, routes.receiveConnectionEvent.response, { ok: true, taken });
+  });
+  app.get(routes.listSpaceConnections.path, async (c) => {
+    const { spaceId } = parseWith(routes.listSpaceConnections.params, c.req.param());
+    return reply(c, routes.listSpaceConnections.response, await service.listSpaceConnections(actor(c), spaceId));
+  });
+  app.post(routes.createSpaceConnection.path, async (c) => {
+    const { spaceId } = parseWith(routes.createSpaceConnection.params, c.req.param());
+    const input = await body(c, routes.createSpaceConnection.request);
+    return reply(c, routes.createSpaceConnection.response, await service.createSpaceConnection(actor(c), spaceId, input));
+  });
+  app.post(routes.authorizeSpaceConnection.path, async (c) => {
+    const { spaceId, connectionId } = parseWith(routes.authorizeSpaceConnection.params, c.req.param());
+    const input = await body(c, routes.authorizeSpaceConnection.request);
+    return reply(c, routes.authorizeSpaceConnection.response, await service.authorizeSpaceConnection(actor(c), spaceId, connectionId, input));
+  });
+  app.post(routes.updateSpaceConnection.path, async (c) => {
+    const { spaceId, connectionId } = parseWith(routes.updateSpaceConnection.params, c.req.param());
+    const input = await body(c, routes.updateSpaceConnection.request);
+    return reply(c, routes.updateSpaceConnection.response, { connection: await service.updateSpaceConnection(actor(c), spaceId, connectionId, input) });
+  });
+  app.delete(routes.deleteSpaceConnection.path, async (c) => {
+    const { spaceId, connectionId } = parseWith(routes.deleteSpaceConnection.params, c.req.param());
+    await service.deleteSpaceConnection(actor(c), spaceId, connectionId);
+    return reply(c, routes.deleteSpaceConnection.response, {});
+  });
+  app.get(routes.listConnectionEvents.path, async (c) => {
+    const { spaceId, connectionId } = parseWith(routes.listConnectionEvents.params, c.req.param());
+    const q = parseWith(routes.listConnectionEvents.query, {
+      ...(c.req.query('outcome') !== undefined ? { outcome: c.req.query('outcome') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.listConnectionEvents.response, { events: await service.listConnectionEvents(actor(c), spaceId, connectionId, q) });
   });
 
   app.post(routes.createAgentKey.path, async (c) => {

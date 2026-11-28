@@ -13,6 +13,7 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { BUILT_IN_CONNECTION, agentLabel, kindInfo } from '@/lib/agent-kinds'
 import { initials } from '@/lib/spaces-presentation'
 import { isRetiredAgent } from '@/lib/spaces-direct'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { LOCAL_RUNTIME } from '@/lib/feature-flags'
@@ -67,7 +68,8 @@ export function AgentsView({ org }: { org: OrgWithSpaces }) {
     const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
     const agents = useMemo(
-        () => roster.filter((m) => m.kind === 'agent' && !m.removedAt && !m.deactivatedAt && !isRetiredAgent(m))
+        // A space connection's member is not an agent anyone runs or asks (harbor spec §8 Space connections, 2026-11-28): it is managed in its space's settings.
+        () => roster.filter((m) => m.kind === 'agent' && !m.removedAt && !m.deactivatedAt && !isRetiredAgent(m) && !isConnectionMember(m))
             .sort((a, b) => a.displayName.localeCompare(b.displayName)),
         [roster],
     )

@@ -196,6 +196,33 @@ async function dispatch(
       // An agent reads this into its context: thirty threads unless it asks for more.
       return service.getSpaceGraph(ctx, a.spaceId, { ...(a.about !== undefined ? { about: a.about } : {}), limit: a.limit ?? 30 });
     }
+    case 'list_connections':
+      return service.listSpaceConnections(ctx, (args as { spaceId: string }).spaceId);
+    case 'list_connection_apps':
+      return service.listConnectionApps(ctx, (args as { search?: string }).search);
+    case 'list_connection_triggers':
+      return { triggers: await service.listConnectionTriggers(ctx, (args as { app: string }).app) };
+    case 'create_connection': {
+      const a = args as { spaceId: string; app: string; name?: string };
+      return service.createSpaceConnection(ctx, a.spaceId, { app: a.app, ...(a.name !== undefined ? { name: a.name } : {}), ...attribution });
+    }
+    case 'authorize_connection': {
+      const a = args as { spaceId: string; connectionId: string };
+      return service.authorizeSpaceConnection(ctx, a.spaceId, a.connectionId, attribution);
+    }
+    case 'update_connection': {
+      const { spaceId, connectionId, ...change } = args as { spaceId: string; connectionId: string; name?: string; triggers?: Array<{ slug: string; config: Record<string, unknown> }>; filter?: boolean; paused?: boolean };
+      return { connection: await service.updateSpaceConnection(ctx, spaceId, connectionId, { ...change, ...attribution }) };
+    }
+    case 'delete_connection': {
+      const a = args as { spaceId: string; connectionId: string };
+      await service.deleteSpaceConnection(ctx, a.spaceId, a.connectionId);
+      return {};
+    }
+    case 'list_connection_events': {
+      const a = args as { spaceId: string; connectionId: string; outcome?: 'pending' | 'posted' | 'skipped' | 'failed'; limit?: number };
+      return { events: await service.listConnectionEvents(ctx, a.spaceId, a.connectionId, { ...(a.outcome ? { outcome: a.outcome } : {}), limit: a.limit ?? 30 }) };
+    }
     case 'archive_space':
       return { space: await service.archiveSpace(ctx, (args as { spaceId: string }).spaceId, attribution) };
     case 'delete_space':

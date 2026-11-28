@@ -1,20 +1,24 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowLeft, PanelLeft, Bot } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { type OrgWithSpaces, refreshSpacesOrgs } from '@/hooks/use-spaces'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 import { refreshMembers, useOrgRoster } from '@/hooks/use-space-members'
+import { useSpaceConnections } from '@/hooks/use-space-connections'
+import { memberLabel } from '@/lib/spaces-direct'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { AgentsDialog, type AgentsDialogStart } from './agents-dialog'
 import { AddMembersDialog } from './add-members-dialog'
+import { SpaceConnectionsPanel } from './space-connections'
 import { ArchiveSpaceDialog, DeleteSpaceDialog, SpaceVisibilityDialog } from './space-admin-dialogs'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 
-type Tab = 'general' | 'people' | 'agents' | 'actions'
+type Tab = 'general' | 'people' | 'agents' | 'connections' | 'actions'
 type Confirmation = { title: string; description: string; run: () => Promise<unknown> }
 
 // 2026-11-12: Use Harbor's existing operations and live roster for space settings.
@@ -33,9 +37,13 @@ export function SpaceSettings({ org, space, members, onBack, onShowSidebar }: {
     const self = members.find(m => m.id === org.memberId)
     const admin = self?.role === 'admin'
     const people = members.filter(m => m.kind !== 'agent')
-    const agents = members.filter(m => m.kind === 'agent')
+    // A space connection's member is not an agent to manage (harbor spec §8 Space connections, 2026-11-28): it is listed, and changed, under Connections.
+    const agents = members.filter(m => m.kind === 'agent' && !isConnectionMember(m))
+    const connections = useSpaceConnections(org.id, space.id)?.connections
     const [editingVisibility, setEditingVisibility] = useState(false)
     const orgRoster = useOrgRoster(org.id, [space.id])
+    // Who connected each app: whoever it was may have left the space since, so the org's roster stands behind this space's.
+    const names = useMemo(() => new Map([...orgRoster, ...members].map(m => [m.id, memberLabel(m)])), [orgRoster, members])
     const adminCount = orgRoster.filter(m => m.role === 'admin' && !m.removedAt && !m.deactivatedAt).length
     const writable = !!self && !space.archived
     const perform = async (run: () => Promise<unknown>, message: string) => {
@@ -45,7 +53,7 @@ export function SpaceSettings({ org, space, members, onBack, onShowSidebar }: {
         catch (error) { toast(error instanceof Error ? error.message : 'Could not save changes', 'error') }
         finally { setBusy(false) }
     }
-    const tabs: {id: Tab; label: string; count?: number}[] = [{id:'general',label:'General'}, {id:'people',label:'People',count:people.length}, {id:'agents',label:'Agents',count:agents.length}, {id:'actions',label:'Space actions'}]
+    const tabs: {id: Tab; label: string; count?: number}[] = [{id:'general',label:'General'}, {id:'people',label:'People',count:people.length}, {id:'agents',label:'Agents',count:agents.length}, {id:'connections',label:'Connections',...(connections ? {count:connections.length} : {})}, {id:'actions',label:'Space actions'}]
     const roster = (tab === 'agents' ? agents : people).filter(m => m.displayName.toLowerCase().includes(query.trim().toLowerCase())).sort((a,b) => a.displayName.localeCompare(b.displayName))
     if (!admin) return <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
         <h1 className="text-xl font-semibold">Space settings</h1>
@@ -56,7 +64,7 @@ export function SpaceSettings({ org, space, members, onBack, onShowSidebar }: {
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-5"><Button size="icon" variant="ghost" aria-label="Toggle sidebar" onClick={onShowSidebar}><PanelLeft className="size-4" /></Button><span className="truncate text-sm font-medium"># {space.name}</span>{space.archived && <span className="text-xs text-muted-foreground">Archived</span>}</header>
         <div className="flex-1 overflow-y-auto"><div className="mx-auto max-w-4xl px-5 py-8 sm:px-10">
             <Button variant="ghost" size="sm" className="mb-6 -ml-3 text-muted-foreground" onClick={onBack}><ArrowLeft className="size-4" />Back to space</Button>
-            <h1 className="text-2xl font-semibold tracking-tight">Space settings</h1><p className="mt-2 text-sm text-muted-foreground">Manage {space.name} and the people and agents who work here.</p>
+            <h1 className="text-2xl font-semibold tracking-tight">Space settings</h1><p className="mt-2 text-sm text-muted-foreground">Manage {space.name}, the people and agents who work here, and the apps that post here.</p>
             <nav aria-label="Space settings sections" className="mt-7 flex gap-6 overflow-x-auto border-b border-border">{tabs.map(t => <button key={t.id} type="button" aria-current={tab === t.id ? 'page' : undefined} className={cn('flex shrink-0 items-center gap-2 border-b-2 py-3 text-sm',tab === t.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')} onClick={() => {setTab(t.id);setQuery('')}}>{t.label}{t.count !== undefined && <span className="rounded bg-muted px-1.5 text-xs">{t.count}</span>}</button>)}</nav>
             {tab === 'general' && <div className="space-y-8 py-7"><form onSubmit={e => {e.preventDefault();if(!space.isDefault && name.trim() && writable) void perform(() => window.ipc.invoke('spaces:renameSpace',{orgId:org.id,spaceId:space.id,name:name.trim()}),'Space renamed')}}>
                 <h2 className="text-base font-medium">Space details</h2><p className="mt-1 text-sm text-muted-foreground">Give this space a name people recognize.</p><label htmlFor="settings-space-name" className="mt-6 mb-2 block text-sm">Space name</label><Input id="settings-space-name" className="max-w-lg" value={name} onChange={e => setName(e.target.value)} required maxLength={100} disabled={space.isDefault || !writable || busy} /><div className="mt-5 flex gap-2"><Button type="submit" disabled={space.isDefault || !writable || busy || !name.trim() || name.trim() === space.name}>Save changes</Button><Button type="button" variant="outline" disabled={busy || name === space.name} onClick={() => setName(space.name)}>Discard</Button></div>
@@ -78,6 +86,8 @@ export function SpaceSettings({ org, space, members, onBack, onShowSidebar }: {
                     {m.kind !== 'agent' && <Button variant="ghost" size="sm" className="text-destructive" disabled={busy || !writable || !admin || m.id === org.memberId} onClick={() => setConfirmation({title:`Remove ${m.displayName} from ${space.name}?`,description:'They leave this space. Their existing messages stay.',run:() => window.ipc.invoke('spaces:removeMember',{orgId:org.id,spaceId:space.id,memberId:m.id})})}>Remove</Button>}
                 </div>)}{roster.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">{query ? 'No matches.' : `No ${tab} in this space.`}</p>}</div>
             </section>}
+            {/* Connections (2026-11-28, harbor spec §8 Space connections): the apps that post into this space. Settings is not offered on a DM, which has none. */}
+            {tab === 'connections' && <SpaceConnectionsPanel key={space.id} org={org} space={space} names={names} writable={writable} />}
             {tab === 'actions' && <section className="divide-y divide-border py-3"><div className="flex flex-wrap items-center justify-between gap-4 py-6"><div><h2 className="text-base font-medium">{space.archived ? 'Restore this space' : 'Archive this space'}</h2><p className="mt-1 text-sm text-muted-foreground">{space.archived ? 'Allow members to work here again.' : 'Keep the history and close the space to new work.'}</p></div><Button variant="outline" disabled={!admin || busy || space.isDefault} onClick={() => space.archived ? void perform(() => window.ipc.invoke('spaces:unarchiveSpace',{orgId:org.id,spaceId:space.id}),'Space restored') : setArchiveOpen(true)}>{space.archived ? 'Restore space' : 'Archive space'}</Button></div><div className="flex flex-wrap items-center justify-between gap-4 py-6"><div><h2 className="text-base font-medium text-destructive">Delete this space</h2><p className="mt-1 text-sm text-muted-foreground">Permanently delete the space and its contents.</p></div><Button variant="destructive" disabled={!admin || busy || space.isDefault} onClick={() => setDeleteOpen(true)}>Delete space</Button></div>{!admin && <p className="py-4 text-xs text-muted-foreground">Only an org admin can manage these actions.</p>}</section>}
         </div></div>
         <AddMembersDialog kind={tab === 'agents' ? 'agents' : 'people'} org={org} space={space} members={members} open={adding} onOpenChange={setAdding} />

@@ -46,6 +46,7 @@ import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { loadOlderStreamMessages, STREAM_READ_KEY, useSpacePresence, useSpacesUnreadCounts, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useOrgRoster, useSpaceMembers, usePeopleOnline } from '@/hooks/use-space-members'
+import { useConnectionAppsOf } from '@/hooks/use-space-connections'
 import { findSpace, refreshSpacesAccountState, refreshSpacesOrgs, useSpaceFeed, useSpaceLive, useSpaceNames, useSpacesAccountState, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { onServer } from '@x/shared/dist/spaces.js'
 import { noteListingFromEntries } from '@/hooks/use-space-boards'
@@ -388,6 +389,9 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // roster winning on identity), so a chip for someone mentioned from
     // another space still reads as a person here.
     const members = useSpaceMembers(org.id, space.id)
+    // A connected app's posts carry its logo (harbor spec §8 Space connections, 2026-11-28): the space's
+    // connections are read once it has a connection member, for every member and not only an admin in settings.
+    useConnectionAppsOf(org.id, space.id, members)
     // Agent invocations (Harbor spec §8): the lines under messages that invoked an agent.
     const invocationsByMessage = useSpaceInvocations(org.id, space.id)
     const orgSpaceIds = useMemo(() => org.spaces.map((s) => s.id), [org.spaces])

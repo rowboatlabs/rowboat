@@ -272,6 +272,14 @@ const HISTORICAL_KEY_ORDER = [
     "diff",
     "set_space_graph",
     "read_graph",
+    "list_connections",
+    "list_connection_apps",
+    "list_connection_triggers",
+    "create_connection",
+    "authorize_connection",
+    "update_connection",
+    "delete_connection",
+    "list_connection_events",
     "spaces-upload-blob",
     "spaces-download-blob",
     "schedule_message",
@@ -377,6 +385,12 @@ describe("BuiltinTools permission audit", () => {
             archive_space: "prompt",
             // Turning a space's graph on sends its messages to Jev (2026-11-12): the person is asked.
             set_space_graph: "prompt",
+            // Space connections (2026-11-28): connecting an app shows a space what
+            // the person's account can see there and bills them, so every change is asked.
+            create_connection: "prompt",
+            authorize_connection: "prompt",
+            update_connection: "prompt",
+            delete_connection: "prompt",
             unarchive_space: "prompt",
             set_default_space: "prompt",
             delete_space: "prompt",

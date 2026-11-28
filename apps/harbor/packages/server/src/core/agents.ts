@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, PERSONAL_ONLY_CONNECTIONS, isAgentPair, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
+import { HARBOR_RUN_CONNECTIONS, INSTANCE_CONNECTIONS, PERSONAL_ONLY_CONNECTIONS, isAgentPair, isConnectionMember, type AgentCredential, type AgentHook, type AgentKey, type AgentKeySecret, type AgentListing, type InvocationOptionValues, type Member, type PlatformInstance, type SuperAgent } from '@rowboat/spaces-protocol';
 import { hashAgentKey, mintAgentKeySecret } from '../agent-keys.js';
 import { HarborError } from '../errors.js';
 import { agentsManagedBy, canAddAgent, canClearAgentHook, canCreateAgentKey, canDeleteAgent, canRenameAgent, canRevokeAgentKey, canSetAgentHook, canSetAgentPersonal, canSetAgentProfile, canSetSuperAgent, enforce } from '../policy.js';
@@ -66,14 +66,15 @@ export class Agents {
 
   private async agent(agentId: string): Promise<Member> {
     const agent = await this.k.store.getMember(agentId);
-    if (!agent || agent.kind !== 'agent') throw new HarborError('not_found', 'no such agent');
+    // A space connection's member is Harbor's to manage, through its connection (spec §8 Space connections, 2026-11-28): no keys, no rename, no deleting it here.
+    if (!agent || agent.kind !== 'agent' || isConnectionMember(agent)) throw new HarborError('not_found', 'no such agent');
     return agent;
   }
 
   /** The agents the caller manages, each with its keys (never their secrets). */
   async list(ctx: ActorCtx): Promise<AgentListing[]> {
     const actor = await this.actor(ctx);
-    const agents = await this.k.store.listAgents(agentsManagedBy(actor) === 'all' ? null : actor.id);
+    const agents = (await this.k.store.listAgents(agentsManagedBy(actor) === 'all' ? null : actor.id)).filter((a) => !isConnectionMember(a));
     const keys = await this.k.store.listAgentKeys(agents.map((a) => a.id));
     const credentials = await this.k.store.listAgentCredentials(agents.map((a) => a.id));
     const hooks = await this.k.store.listAgentHooks(agents.map((a) => a.id));

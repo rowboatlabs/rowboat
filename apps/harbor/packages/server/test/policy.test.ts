@@ -12,6 +12,8 @@ import {
   canAccessSpace,
   canArchiveSpace,
   canSetSpaceGraph,
+  canManageConnections,
+  canRemoveConnectionMember,
   canDeleteSpace,
   canRemoveFromSpace,
   canRemoveFromOrg,
@@ -82,6 +84,28 @@ describe('policy', () => {
     expect(canSetSpaceGraph({ ...adminRow, role: 'member' }, shared)).toMatchObject({ code: 'forbidden' });
     expect(canSetSpaceGraph(undefined, shared)).toMatchObject({ code: 'forbidden' });
     expect(canSetSpaceGraph(adminRow, direct)).toMatchObject({ code: 'invalid_request' });
+  });
+
+  it('space connections: an org admin changes them, a DM has none, and a connection\'s member is nobody\'s to move or ask (2026-11-28)', () => {
+    const adminRow: Member = { id: 'a', displayName: 'A', role: 'admin', kind: 'human' };
+    expect(canManageConnections(adminRow, shared)).toBeNull();
+    expect(canManageConnections({ ...adminRow, role: 'member' }, shared)).toMatchObject({ code: 'forbidden' });
+    expect(canManageConnections(undefined, shared)).toMatchObject({ code: 'forbidden' });
+    expect(canManageConnections(adminRow, direct)).toMatchObject({ code: 'invalid_request' });
+
+    const connection: Member = { id: 'c', displayName: 'Linear – Eng', role: 'member', kind: 'agent', ownerId: 'a', agentKind: 'connection', agentConnection: 'composio' };
+    const hermes: Member = { id: 'h', displayName: 'Hermes', role: 'member', kind: 'agent', ownerId: 'a', agentKind: 'hermes', agentConnection: 'plugin' };
+    // Added to no other space and messaged by no one; an ordinary agent is.
+    expect(canReachMember(connection)).toMatchObject({ code: 'invalid_request' });
+    expect(canReachMember(hermes)).toBeNull();
+    // It leaves by disconnecting, never by removal from its space or the org.
+    expect(canRemoveConnectionMember(connection)).toMatchObject({ code: 'invalid_request' });
+    expect(canRemoveConnectionMember(hermes)).toBeNull();
+    expect(canRemoveConnectionMember(undefined)).toBeNull();
+    expect(canRemoveFromOrg(adminRow, connection)).toMatchObject({ code: 'invalid_request' });
+    // A mention of it is refused whoever asks, its owner included.
+    expect(invocationRefusal(true, 0, { agent: connection, authorId: 'a' })).toEqual({ reason: 'not_permitted', message: 'Linear – Eng is a connection: it posts updates and takes no requests.' });
+    expect(invocationRefusal(true, 0, { agent: hermes, authorId: 'a' })).toBeNull();
   });
 
   it('open-space reads require org membership; acting still requires space membership', () => {

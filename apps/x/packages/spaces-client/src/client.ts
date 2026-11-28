@@ -55,6 +55,12 @@ import {
   type SearchResults,
   type Space,
   type SpaceGraph,
+  type SpaceConnection,
+  type ConnectionApp,
+  type ConnectionTriggerType,
+  type ConnectionTriggerInput,
+  type ConnectionEvent,
+  type ConnectionEventOutcome,
   type Topic,
   type TopicListing,
   type UnreadSnapshot,
@@ -398,6 +404,62 @@ export class SpacesClient {
     if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
     const query = qs.toString();
     return this.request('GET', this.space(spaceId, `/graph${query ? `?${query}` : ''}`), routes.getSpaceGraph.response);
+  }
+
+  // --- space connections (spec §8 Space connections, 2026-11-28) ---------------
+  // An app connected to a shared space posts its events there. The client is
+  // one method per route; what each means is api.ts's doc comment.
+
+  /** The apps a space can connect (api.ts listConnectionApps). `available` false = this server connects none. */
+  async listConnectionApps(search?: string): Promise<{ apps: ConnectionApp[]; available: boolean }> {
+    return this.request('GET', `${routes.listConnectionApps.path}${search ? `?search=${encodeURIComponent(search)}` : ''}`, routes.listConnectionApps.response);
+  }
+
+  /** The kinds of event one app can send, each with the config its setup needs (api.ts listConnectionTriggers). */
+  async listConnectionTriggers(app: string): Promise<ConnectionTriggerType[]> {
+    return (await this.request('GET', `/v1/connections/apps/${encodeURIComponent(app)}/triggers`, routes.listConnectionTriggers.response)).triggers;
+  }
+
+  /** A space's connections (api.ts listSpaceConnections). The read itself moves a `pending` one to `active` once its app is authorised. */
+  async listSpaceConnections(spaceId: string): Promise<{ connections: SpaceConnection[]; available: boolean; filterAvailable: boolean }> {
+    return this.request('GET', this.space(spaceId, '/connections'), routes.listSpaceConnections.response);
+  }
+
+  /** Connect an app (api.ts createSpaceConnection): `pending` until the person authorises it at `authorizeUrl`. */
+  async createSpaceConnection(spaceId: string, input: { app: string; name?: string }): Promise<{ connection: SpaceConnection; authorizeUrl: string }> {
+    return this.request('POST', this.space(spaceId, '/connections'), routes.createSpaceConnection.response, { ...input, actingMode: 'direct' });
+  }
+
+  /** A new address to authorise a connection's app (api.ts authorizeSpaceConnection). */
+  async authorizeSpaceConnection(spaceId: string, connectionId: string): Promise<{ connection: SpaceConnection; authorizeUrl: string }> {
+    return this.request('POST', this.connection(spaceId, connectionId, '/authorize'), routes.authorizeSpaceConnection.response, { actingMode: 'direct' });
+  }
+
+  /** Change a connection (api.ts updateSpaceConnection): a field left out is left alone; `triggers` replaces the whole set. */
+  async updateSpaceConnection(
+    spaceId: string,
+    connectionId: string,
+    input: { name?: string; triggers?: ConnectionTriggerInput[]; filter?: boolean; paused?: boolean },
+  ): Promise<SpaceConnection> {
+    return (await this.request('POST', this.connection(spaceId, connectionId, ''), routes.updateSpaceConnection.response, { ...input, actingMode: 'direct' })).connection;
+  }
+
+  /** Disconnect (api.ts deleteSpaceConnection). Idempotent. */
+  async deleteSpaceConnection(spaceId: string, connectionId: string): Promise<void> {
+    await this.request('DELETE', this.connection(spaceId, connectionId, ''), routes.deleteSpaceConnection.response);
+  }
+
+  /** What a connection received, newest first (api.ts listConnectionEvents). */
+  async listConnectionEvents(spaceId: string, connectionId: string, opts: { outcome?: ConnectionEventOutcome; limit?: number } = {}): Promise<ConnectionEvent[]> {
+    const qs = new URLSearchParams();
+    if (opts.outcome !== undefined) qs.set('outcome', opts.outcome);
+    if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
+    const query = qs.toString();
+    return (await this.request('GET', this.connection(spaceId, connectionId, `/events${query ? `?${query}` : ''}`), routes.listConnectionEvents.response)).events;
+  }
+
+  private connection(spaceId: string, connectionId: string, rest: string): string {
+    return this.space(spaceId, `/connections/${encodeURIComponent(connectionId)}${rest}`);
   }
 
   /** Rename a shared space (api.ts renameSpace). Identical name = idempotent no-op. */

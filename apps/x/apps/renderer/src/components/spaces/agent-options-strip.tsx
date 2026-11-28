@@ -1,4 +1,5 @@
 import type { spaces } from '@x/shared'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 import { ModelSelector, type ReasoningEffortLevel } from '@/components/model-selector'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import { useSpaceRefs } from '@/components/spaces/space-nav'
@@ -31,7 +32,8 @@ export function AgentOptionsStrip({ draft, values, onChange, followUpAgentId }: 
     const { byId } = useSpaceProfiles()
     const names = useMemberNames()
     const addressed = new Set([...mentionedMemberIds(draft), ...(refs?.directWith ? [refs.directWith] : []), ...(followUpAgentId ? [followUpAgentId] : [])])
-    const agentIds = [...addressed].filter((id) => byId.get(id)?.kind === 'agent')
+    // A space connection's member takes no requests, so it has no options to offer (harbor spec §8 Space connections, 2026-11-28).
+    const agentIds = [...addressed].filter((id) => byId.get(id)?.kind === 'agent' && !isConnectionMember(byId.get(id)))
     const caps = useAgentCapabilities(refs?.orgId, agentIds)
     const defaults = useAgentOptionDefaults(refs?.orgId, agentIds)
     const offering = agentIds.filter((id) => (caps.get(id)?.options.length ?? 0) > 0)

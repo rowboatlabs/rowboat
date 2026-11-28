@@ -39,6 +39,19 @@ import { Approval, ApprovalClose, ApprovalDecision, ApprovalId, ApprovalRequest 
 import { ConnectorCapabilities, Invocation, InvocationId, InvocationOptionValues, InvocationUpdate } from './invocation.js';
 import { SearchKind, SearchResults } from './search.js';
 import { SpaceGraph } from './graph.js';
+import {
+  CONNECTION_NAME_MAX,
+  CONNECTION_TRIGGERS_MAX,
+  ConnectionApp,
+  ConnectionAppSlug,
+  ConnectionDelivery,
+  ConnectionEvent,
+  ConnectionEventOutcome,
+  ConnectionId,
+  ConnectionTriggerInput,
+  ConnectionTriggerType,
+  SpaceConnection,
+} from './connection.js';
 
 /** The most threads one graph read returns. */
 export const GRAPH_THREAD_LIMIT_MAX = 2000;
@@ -498,6 +511,130 @@ export const routes = {
       limit: z.coerce.number().int().positive().max(GRAPH_THREAD_LIMIT_MAX).optional(),
     }),
     response: SpaceGraph,
+  },
+  /**
+   * The apps a space can connect (spec §8 Space connections, 2026-11-28):
+   * any org member. `available` is false on a server without the control
+   * plane, where the list is empty and no space can connect anything.
+   */
+  listConnectionApps: {
+    method: 'GET',
+    path: '/v1/connections/apps',
+    query: z.object({ search: z.string().max(100).optional() }),
+    response: z.object({ apps: z.array(ConnectionApp), available: z.boolean() }),
+  },
+  /** The kinds of event one app can send, each with the config its setup needs: any org member. */
+  listConnectionTriggers: {
+    method: 'GET',
+    path: '/v1/connections/apps/:app/triggers',
+    params: z.object({ app: ConnectionAppSlug }),
+    response: z.object({ triggers: z.array(ConnectionTriggerType) }),
+  },
+  /**
+   * A space's connections: any member of the space. A `pending` one is
+   * checked with the control plane on the way, so it reads `active` once its
+   * person has authorised the app. `filterAvailable` says whether this server
+   * has Jev to decide what is worth a post.
+   */
+  listSpaceConnections: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/connections',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ connections: z.array(SpaceConnection), available: z.boolean(), filterAvailable: z.boolean() }),
+  },
+  /**
+   * Connect an app to a shared space: an org admin who is a member of it,
+   * refused on a DM. Makes the connection `pending`, with its member in the
+   * space, and answers the address where the person authorises the app; what
+   * it listens for is set afterwards with `updateSpaceConnection`. What it
+   * uses bills to the caller's Rowboat account, so a caller without one is
+   * refused.
+   */
+  createSpaceConnection: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/connections',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      app: ConnectionAppSlug,
+      /** Defaults to the app's name. */
+      name: z.string().max(CONNECTION_NAME_MAX).optional(),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ connection: SpaceConnection, authorizeUrl: z.string().url() }),
+  },
+  /**
+   * A new address to authorise a connection's app: for one still `pending`
+   * whose first address lapsed, or a `failed` one whose authorisation expired.
+   * An org admin. The connection is `pending` again until it is authorised.
+   */
+  authorizeSpaceConnection: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/connections/:connectionId/authorize',
+    params: z.object({ spaceId: SpaceId, connectionId: ConnectionId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ connection: SpaceConnection, authorizeUrl: z.string().url() }),
+  },
+  /**
+   * Change a connection: an org admin. A field left out is left alone.
+   * `triggers` replaces the whole set and needs the connection `active`
+   * (`invalid_request` before its app is authorised); each is checked against
+   * the app's own list. `filter` is "only post what matters"; `paused` drops
+   * what arrives.
+   */
+  updateSpaceConnection: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/connections/:connectionId',
+    params: z.object({ spaceId: SpaceId, connectionId: ConnectionId }),
+    request: z.object({
+      name: z.string().min(1).max(CONNECTION_NAME_MAX).optional(),
+      triggers: z.array(ConnectionTriggerInput).max(CONNECTION_TRIGGERS_MAX).optional(),
+      filter: z.boolean().optional(),
+      paused: z.boolean().optional(),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ connection: SpaceConnection }),
+  },
+  /**
+   * Disconnect: an org admin. The app's authorisation and its triggers are
+   * removed on the control plane, and the connection's member leaves the
+   * space, deactivated; what it posted stays. Idempotent.
+   */
+  deleteSpaceConnection: {
+    method: 'DELETE',
+    path: '/v1/spaces/:spaceId/connections/:connectionId',
+    params: z.object({ spaceId: SpaceId, connectionId: ConnectionId }),
+    response: z.object({}),
+  },
+  /**
+   * What a connection received, newest first: an org admin, to see what the
+   * filter skipped. Harbor keeps the most recent few hundred per connection.
+   */
+  listConnectionEvents: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/connections/:connectionId/events',
+    params: z.object({ spaceId: SpaceId, connectionId: ConnectionId }),
+    query: z.object({ outcome: ConnectionEventOutcome.optional(), limit: z.coerce.number().int().positive().max(200).optional() }),
+    response: z.object({ events: z.array(ConnectionEvent) }),
+  },
+  /**
+   * The control plane's delivery of one event. Pre-auth: the request is
+   * signed with the key Harbor and the control plane share
+   * (`x-rowboat-timestamp`, `x-rowboat-signature`), and `ref` names the
+   * connection. Answers once the event is durably taken. `taken` is false
+   * when there was nothing new to take: a redelivery of an `id` already
+   * taken, or an event dropped for a paused connection, an archived space or
+   * a trigger the connection no longer has; the control plane bills only what
+   * was taken. A connection that is gone answers HTTP 410 with `not_found`,
+   * which tells the control plane to stop sending; 410 and not 404, so a
+   * proxy's 404 during a deploy is never read as "this connection is gone".
+   */
+  receiveConnectionEvent: {
+    method: 'POST',
+    path: '/v1/connections/events', // pre-auth allowed
+    request: ConnectionDelivery,
+    response: z.object({ ok: z.literal(true), taken: z.boolean() }),
   },
   /**
    * Change a shared space's visibility (spec §4 Roles, 2026-10-19): an admin

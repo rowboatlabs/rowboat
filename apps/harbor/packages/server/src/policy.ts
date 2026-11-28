@@ -1,5 +1,5 @@
 import type { ErrorCode, Invocation, InvocationRefusal, InvitePolicy, Member, MemberRole, Membership, Message, MessageSecrets, Space } from '@rowboat/spaces-protocol';
-import { BUILT_IN_CONNECTION } from '@rowboat/spaces-protocol';
+import { BUILT_IN_CONNECTION, isConnectionMember } from '@rowboat/spaces-protocol';
 import { HarborError } from './errors.js';
 
 // Who may do what. The service loads the facts (space, membership, message,
@@ -91,6 +91,29 @@ export function canSetSpaceGraph(actor: Member | undefined, space: Space): Decis
   return { code: 'forbidden', message: 'only an org admin can turn its graph on or off' };
 }
 
+/**
+ * A space's connections are an org admin's to change (spec §8 Space
+ * connections, 2026-11-28): connecting an app shows the whole space what the
+ * connecting person's account can see there, and may send its events to Jev,
+ * so it is the space's call, as its graph is. A DM has no admin, so it has
+ * no connections. Any member of the space reads the list.
+ */
+export function canManageConnections(actor: Member | undefined, space: Space): Decision {
+  if (space.kind === 'direct') return { code: 'invalid_request', message: 'a direct message has no connections' };
+  if (actor?.role === 'admin') return null;
+  return { code: 'forbidden', message: 'only an org admin can change a space’s connections' };
+}
+
+/**
+ * A connection's member leaves its space when the app is disconnected, never
+ * by removal: removed, the connection would keep receiving events it could
+ * no longer post (spec §8 Space connections, 2026-11-28).
+ */
+export function canRemoveConnectionMember(target: Member | undefined): Decision {
+  if (!isConnectionMember(target)) return null;
+  return { code: 'invalid_request', message: `${target!.displayName} is a connection: disconnect it in the space’s settings` };
+}
+
 /** Deleting a space is an admin act too, on the same terms as archiving it (spec §6, built 2026-10-14). */
 export function canDeleteSpace(actor: Member, space: Space): Decision {
   if (space.isDefault) return { code: 'invalid_request', message: 'general cannot be deleted' };
@@ -127,7 +150,7 @@ export function canRemoveFromOrg(actor: Member, target: Member): Decision {
   if (actor.role !== 'admin') return { code: 'forbidden', message: 'only an admin can remove someone from the org' };
   if (target.id === actor.id) return { code: 'invalid_request', message: 'you can’t remove yourself from the org' };
   if (target.agentConnection === BUILT_IN_CONNECTION) return { code: 'invalid_request', message: `${target.displayName} is built into the org and can’t be removed` };
-  return null;
+  return canRemoveConnectionMember(target);
 }
 
 /**
@@ -240,6 +263,8 @@ export function canSignIn(member: Member): Decision {
 export function canReachMember(member: Member): Decision {
   if (member.deactivatedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} has deleted their account` };
   if (member.removedAt !== undefined) return { code: 'invalid_request', message: `${member.displayName} is no longer in this org` };
+  // A space connection's member posts in the one space its app was connected to (spec §8 Space connections, 2026-11-28).
+  if (isConnectionMember(member)) return { code: 'invalid_request', message: `${member.displayName} is a connection: it only posts updates in its own space` };
   return null;
 }
 
@@ -425,6 +450,10 @@ export function invocationRefusal(
   depth: number,
   invoked: { agent: Member; authorId: string },
 ): InvocationRefusal | null {
+  // A space connection's member only posts what its app sends (spec §8 Space connections, 2026-11-28): nothing answers a mention of it.
+  if (isConnectionMember(invoked.agent)) {
+    return { reason: 'not_permitted', message: `${invoked.agent.displayName} is a connection: it posts updates and takes no requests.` };
+  }
   if (invoked.agent.personal === true && invoked.agent.ownerId !== invoked.authorId) {
     return { reason: 'not_permitted', message: `${invoked.agent.displayName} is a personal agent: only its owner can ask it for something.` };
   }

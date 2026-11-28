@@ -13,7 +13,9 @@ import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-tex
 import { useSpaceNav, useSpaceRefs } from '@/components/spaces/space-nav'
 import { requestComposeInsert } from '@/lib/spaces-compose'
 import { agentLabel, kindInfo } from '@/lib/agent-kinds'
-import { memberUrl, mentionToken } from '@x/shared/dist/spaces.js'
+import { CONNECTION_KIND, isConnectionMember, memberUrl, mentionToken } from '@x/shared/dist/spaces.js'
+import { useConnectionApp } from '@/hooks/use-space-connections'
+import { ConnectionLogo } from '@/components/spaces/connection-logo'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
@@ -47,10 +49,29 @@ export function AgentBadge({ agentKind, agentConnection, className }: { agentKin
     )
 }
 
+/**
+ * A space connection's member (harbor spec §8 Space connections, 2026-11-28)
+ * says what it is in one word, where an agent names its kind and how it is
+ * reached: it is the author of an app's updates, and nobody asks it anything.
+ */
+export function ConnectionBadge({ className }: { className?: string }) {
+    return (
+        <span className={cn('shrink-0 self-center truncate rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none text-muted-foreground', className)}>
+            Connection
+        </span>
+    )
+}
+
+/** The label a member row carries after the name: an agent's kind, a connection's one word, nothing for a person. */
+export function MemberKindBadge({ member }: { member: Pick<spaces.Member, 'kind' | 'agentKind' | 'agentConnection'> }) {
+    if (member.kind !== 'agent') return null
+    return isConnectionMember(member) ? <ConnectionBadge /> : <AgentBadge agentKind={member.agentKind} agentConnection={member.agentConnection} />
+}
+
 /** The label for an author known only by id, looked up in the roster. */
 export function AgentMark({ id }: { id: string }) {
     const agent = useAgent(id)
-    return agent ? <AgentBadge agentKind={agent.agentKind} agentConnection={agent.agentConnection} /> : null
+    return agent ? <MemberKindBadge member={agent} /> : null
 }
 
 /**
@@ -103,6 +124,7 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
     const photo = useProfileImage(orgId ?? refs?.orgId, avatarUrl ?? byId.get(id)?.avatarUrl)
     const [failedPhoto, setFailedPhoto] = useState<string>()
     const inRoster = useAgent(id)
+    const connectionApp = useConnectionApp(orgId ?? refs?.orgId, id)
     const round = agent ?? inRoster !== undefined
     // Stream dialect: people are near-square tiles; circles stay reserved for AI.
     const dims = size === 'sm' ? 'size-5 rounded-[4px] text-[9px]'
@@ -117,6 +139,12 @@ export function MemberAvatar({ id, name, size = 'md', agent, agentKind, classNam
             {photo && failedPhoto !== photo ? <img src={photo} alt="" className="size-full rounded-[inherit] object-cover" onError={() => setFailedPhoto(photo)} /> : initials(name)}
         </span>
     )
+    // A connection's member is its app (harbor spec §8 Space connections, 2026-11-28): the app's logo where this
+    // session has read the space's connections, a plug otherwise. No kind corner and no presence dot, since it is
+    // neither an agent nor ever away.
+    if (agentKind === CONNECTION_KIND || isConnectionMember(inRoster)) {
+        return <ConnectionLogo app={connectionApp} title={name} className={cn(dims, className)} />
+    }
     if (!round && online === undefined && !paused) return face
     return (
         <span className="relative inline-flex shrink-0">
@@ -149,9 +177,13 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
     const name = member?.displayName ?? names.get(id) ?? id
     const [editing, setEditing] = useState(false)
     const peopleOnline = usePeopleOnline(refs?.orgId ?? '')
-    const isHere = member?.kind === 'agent' ? here.has(id) : peopleOnline.has(id)
+    // A connection's member only posts what its app sends (harbor spec §8 Space connections, 2026-11-28):
+    // it is never here or away, and Harbor refuses a DM with it or a mention of it.
+    const connection = isConnectionMember(member)
+    const connectionApp = useConnectionApp(refs?.orgId, id)
+    const isHere = connection ? false : member?.kind === 'agent' ? here.has(id) : peopleOnline.has(id)
     // Someone else's personal agent answers its owner only (2026-10-30): no Mention or Message for it.
-    const reachable = !member || !isOthersPersonalAgent(member, selfId ?? undefined)
+    const reachable = !connection && (!member || !isOthersPersonalAgent(member, selfId ?? undefined))
     const copyId = () => {
         void navigator.clipboard.writeText(id).then(
             () => toast('Member id copied', 'success'),
@@ -185,7 +217,7 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                         <div className="flex flex-wrap items-center gap-2">
                             <span className="break-words text-2xl font-semibold">{name}</span>
                             {id === selfId && <span className="shrink-0 text-xs text-muted-foreground">(you)</span>}
-                            {member?.kind === 'agent' && <AgentBadge agentKind={member.agentKind} agentConnection={member.agentConnection} />}
+                            {member && <MemberKindBadge member={member} />}
                             {member?.role === 'admin' && (
                                 <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
                             )}
@@ -199,10 +231,16 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
                                 <p className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words leading-relaxed text-foreground">{member.instructions}</p>
                             </details>
                         )}
-                        {member?.role === 'member' && <p className="text-xs text-muted-foreground">Member</p>}
-                        <div className={cn('text-xs', isHere ? 'text-emerald-600' : 'text-muted-foreground')}>
-                            {isHere ? (member?.kind === 'agent' ? 'Here now' : 'Online') : 'Away'}
-                        </div>
+                        {connection ? (
+                            <p className="text-xs text-muted-foreground">Posts updates from {connectionApp?.name ?? 'a connected app'}. It takes no requests.</p>
+                        ) : (
+                            <>
+                                {member?.role === 'member' && <p className="text-xs text-muted-foreground">Member</p>}
+                                <div className={cn('text-xs', isHere ? 'text-emerald-600' : 'text-muted-foreground')}>
+                                    {isHere ? (member?.kind === 'agent' ? 'Here now' : 'Online') : 'Away'}
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
                 <div className="flex flex-col gap-2 text-sm">

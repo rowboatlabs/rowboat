@@ -256,12 +256,15 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   // their agents' mentions after a restart whether or not anyone visits:
   // build, at boot, the runtime of every org that has such an agent. Jev is
   // in every org with the key (spec §8 Jev, 2026-10-07), so only the orgs
-  // where someone has added it to a space are woken for it.
+  // where someone has added it to a space are woken for it. An org with a
+  // space connection is woken too (2026-11-28): events it took before the
+  // restart are waiting to be decided.
   const connectorOrgs = await options.db.query<{ org_id: string }>(
     `select distinct m.org_id from members m
      where m.kind = 'agent' and m.removed_at is null and m.deactivated_at is null and (m.agent_connection = any($1::text[])
        or (m.agent_connection = 'plugin' and m.agent_kind = 'hermes' and m.agent_instance is not null))
-     union select org_id from spaces where graph`,
+     union select org_id from spaces where graph
+     union select s.org_id from space_connections c join spaces s on s.id = c.space_id`,
     [[...HARBOR_RUN_CONNECTIONS]],
   );
   for (const { org_id } of connectorOrgs) {

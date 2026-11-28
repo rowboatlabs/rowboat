@@ -82,6 +82,16 @@ describe('AgentsView', () => {
         expect(screen.queryByText('Gone')).toBeNull()
     })
 
+    it('leaves out a space connection’s member, which is not an agent anyone asks (harbor spec §8 Space connections, 2026-11-28)', async () => {
+        // Harbor makes it an agent owned by whoever connected the app.
+        roster = [...roster, agent('conn', 'Linear – Eng', 'me', 'connection', 'composio')]
+        spaceMembers = { ...spaceMembers, S1: [...spaceMembers.S1!, roster.at(-1)!] }
+        show()
+        await screen.findByText('Scout')
+        expect(screen.getByRole('heading', { name: /Agents/ })).toHaveTextContent('Agents2')
+        expect(screen.queryByText('Linear – Eng')).toBeNull()
+    })
+
     it('marks each card with a people or lock icon, naming Channel or Personal on hover and saying whose a personal one is; a built-in agent has neither (2026-10-27)', async () => {
         roster = roster.map((m) => (m.id === 'scout' ? { ...m, personal: true } : m))
         show()

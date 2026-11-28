@@ -1,6 +1,7 @@
 import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
 import type { ActivityQuery, ActivityRow } from './store.js';
 import type { GraphTopicCategory } from '@rowboat/spaces-protocol';
+import type { ConnectionEventOutcome, ConnectionStatus } from '@rowboat/spaces-protocol';
 import type { ThreadJudgment } from './graph/questions.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
@@ -51,6 +52,9 @@ import {
   type ThreadReadMark,
   type UnreadThreadRow,
   type StoredGraphThread,
+  type StoredConnection,
+  type StoredConnectionEvent,
+  type StoredConnectionTrigger,
   type StoredGraphTopic,
 } from './store.js';
 
@@ -428,6 +432,82 @@ interface AssetRow {
 
 /** The implicit org of every pre-multi-org deployment (migration 003 default). */
 export const DEFAULT_ORG_ID = 'org-default';
+
+interface ConnectionRow {
+  id: string;
+  space_id: string;
+  member_id: string;
+  app_slug: string;
+  app_name: string;
+  app_logo: string | null;
+  name: string;
+  status: ConnectionStatus;
+  problem: string | null;
+  account_id: string | null;
+  triggers: StoredConnectionTrigger[];
+  filter: boolean;
+  paused: boolean;
+  customer: string;
+  sealed_key: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+function connectionOf(r: ConnectionRow): StoredConnection {
+  return {
+    id: r.id,
+    spaceId: r.space_id,
+    memberId: r.member_id,
+    app: { slug: r.app_slug, name: r.app_name, ...(r.app_logo !== null ? { logo: r.app_logo } : {}) },
+    name: r.name,
+    status: r.status,
+    ...(r.problem !== null ? { problem: r.problem } : {}),
+    ...(r.account_id !== null ? { accountId: r.account_id } : {}),
+    triggers: r.triggers,
+    filter: r.filter,
+    paused: r.paused,
+    customer: r.customer,
+    ...(r.sealed_key !== null ? { sealedKey: r.sealed_key } : {}),
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+  };
+}
+
+interface ConnectionEventRow {
+  connection_id: string;
+  space_id: string;
+  event_id: string;
+  trigger_slug: string;
+  received_at: string;
+  outcome: ConnectionEventOutcome;
+  score: number | null;
+  title: string | null;
+  url: string | null;
+  subject: string | null;
+  message_id: string | null;
+  root_message_id: string | null;
+  payload: unknown;
+  attempts: number;
+}
+
+function connectionEventOf(r: ConnectionEventRow): StoredConnectionEvent {
+  return {
+    connectionId: r.connection_id,
+    spaceId: r.space_id,
+    eventId: r.event_id,
+    triggerSlug: r.trigger_slug,
+    receivedAt: r.received_at,
+    outcome: r.outcome,
+    ...(r.score !== null ? { score: Number(r.score) } : {}),
+    ...(r.title !== null ? { title: r.title } : {}),
+    ...(r.url !== null ? { url: r.url } : {}),
+    ...(r.subject !== null ? { subject: r.subject } : {}),
+    ...(r.message_id !== null ? { messageId: r.message_id } : {}),
+    ...(r.root_message_id !== null ? { rootMessageId: r.root_message_id } : {}),
+    ...(r.payload !== null && r.payload !== undefined ? { payload: r.payload } : {}),
+    attempts: Number(r.attempts),
+  };
+}
 
 export class PgStore implements Store {
   private readonly als = new AsyncLocalStorage<SqlExecutor>();
@@ -1187,6 +1267,116 @@ export class PgStore implements Store {
   }
 
   // --- the space graph ----------------------------------------------------------
+
+  // --- space connections (spec §8 Space connections, 2026-11-28) ---------------------
+  // Space-keyed like the graph's rows, so unscoped where a space id leads; a
+  // lookup by the connection's own id joins its space to stay inside the org.
+
+  async putConnection(c: StoredConnection): Promise<void> {
+    await this.sql.query(
+      `insert into space_connections (id, space_id, member_id, app_slug, app_name, app_logo, name, status, problem, account_id, triggers, filter, paused, customer, sealed_key, created_by, created_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       on conflict (id) do update set name = excluded.name, status = excluded.status, problem = excluded.problem, account_id = excluded.account_id,
+         triggers = excluded.triggers, filter = excluded.filter, paused = excluded.paused, sealed_key = excluded.sealed_key`,
+      [c.id, c.spaceId, c.memberId, c.app.slug, c.app.name, c.app.logo ?? null, c.name, c.status, c.problem ?? null, c.accountId ?? null,
+        JSON.stringify(c.triggers), c.filter, c.paused, c.customer, c.sealedKey ?? null, c.createdBy, c.createdAt],
+    );
+  }
+
+  private async connections(where: string, params: unknown[]): Promise<StoredConnection[]> {
+    const rows = await this.sql.query<ConnectionRow>(
+      `select c.* from space_connections c join spaces s on s.id = c.space_id where s.org_id = $1 and ${where} order by c.created_at, c.id`,
+      [this.orgId, ...params],
+    );
+    return rows.map(connectionOf);
+  }
+
+  async getConnection(id: string): Promise<StoredConnection | undefined> {
+    return (await this.connections('c.id = $2', [id]))[0];
+  }
+
+  async listConnections(spaceId: string): Promise<StoredConnection[]> {
+    return this.connections('c.space_id = $2', [spaceId]);
+  }
+
+  async listAllConnections(): Promise<StoredConnection[]> {
+    return this.connections('true', []);
+  }
+
+  async deleteConnection(id: string): Promise<void> {
+    await this.sql.query('delete from space_connections c using spaces s where s.id = c.space_id and s.org_id = $1 and c.id = $2', [this.orgId, id]);
+  }
+
+  async insertConnectionEvent(e: StoredConnectionEvent, keep: number): Promise<boolean> {
+    const inserted = await this.sql.query<{ event_id: string }>(
+      `insert into space_connection_events (connection_id, space_id, event_id, trigger_slug, received_at, outcome, score, title, url, subject, message_id, root_message_id, payload, attempts)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) on conflict (connection_id, event_id) do nothing returning event_id`,
+      [e.connectionId, e.spaceId, e.eventId, e.triggerSlug, e.receivedAt, e.outcome, e.score ?? null, e.title ?? null, e.url ?? null, e.subject ?? null,
+        e.messageId ?? null, e.rootMessageId ?? null, e.payload === undefined ? null : JSON.stringify(e.payload), e.attempts],
+    );
+    if (inserted.length === 0) return false;
+    // The newest `keep` stay: the list is for reviewing what the filter did lately, not an archive of an app's events.
+    await this.sql.query(
+      `delete from space_connection_events where connection_id = $1 and outcome <> 'pending' and event_id in (
+         select event_id from space_connection_events where connection_id = $1 order by received_at desc, event_id desc offset $2)`,
+      [e.connectionId, keep],
+    );
+    return true;
+  }
+
+  async listPendingConnectionEvents(limit: number): Promise<StoredConnectionEvent[]> {
+    const rows = await this.sql.query<ConnectionEventRow>(
+      `select e.* from space_connection_events e join spaces s on s.id = e.space_id
+       where s.org_id = $1 and e.outcome = 'pending' order by e.received_at, e.event_id limit $2`,
+      [this.orgId, limit],
+    );
+    return rows.map(connectionEventOf);
+  }
+
+  async settleConnectionEvent(e: Pick<StoredConnectionEvent, 'connectionId' | 'eventId' | 'outcome' | 'attempts'> & Partial<Pick<StoredConnectionEvent, 'score' | 'messageId' | 'rootMessageId'>>): Promise<void> {
+    await this.sql.query(
+      `update space_connection_events set outcome = $3, attempts = $4, score = coalesce($5, score), message_id = coalesce($6, message_id),
+         root_message_id = coalesce($7, root_message_id), payload = case when $3 = 'pending' then payload else null end
+       where connection_id = $1 and event_id = $2`,
+      [e.connectionId, e.eventId, e.outcome, e.attempts, e.score ?? null, e.messageId ?? null, e.rootMessageId ?? null],
+    );
+  }
+
+  async listConnectionEvents(connectionId: string, opts: { outcome?: ConnectionEventOutcome; limit: number }): Promise<StoredConnectionEvent[]> {
+    const rows = await this.sql.query<ConnectionEventRow>(
+      `select * from space_connection_events where connection_id = $1 and ($2::text is null or outcome = $2)
+       order by received_at desc, event_id desc limit $3`,
+      [connectionId, opts.outcome ?? null, opts.limit],
+    );
+    return rows.map(connectionEventOf);
+  }
+
+  async connectionCounts(connectionIds: string[], since: string): Promise<Map<string, { posted: number; skipped: number; lastEventAt?: string }>> {
+    const counts = new Map<string, { posted: number; skipped: number; lastEventAt?: string }>();
+    if (connectionIds.length === 0) return counts;
+    const rows = await this.sql.query<{ connection_id: string; posted: string | number; skipped: string | number; last_event_at: string | null }>(
+      `select connection_id,
+         count(*) filter (where outcome = 'posted' and received_at >= $2) as posted,
+         count(*) filter (where outcome = 'skipped' and received_at >= $2) as skipped,
+         max(received_at) as last_event_at
+       from space_connection_events where connection_id = any($1::text[]) group by connection_id`,
+      [connectionIds, since],
+    );
+    for (const r of rows) {
+      counts.set(r.connection_id, { posted: Number(r.posted), skipped: Number(r.skipped), ...(r.last_event_at ? { lastEventAt: r.last_event_at } : {}) });
+    }
+    return counts;
+  }
+
+  async findConnectionThread(connectionId: string, subject: string): Promise<string | undefined> {
+    const rows = await this.sql.query<{ root_message_id: string }>(
+      `select root_message_id from space_connection_events
+       where connection_id = $1 and subject = $2 and outcome = 'posted' and root_message_id is not null
+       order by received_at desc, event_id desc limit 1`,
+      [connectionId, subject],
+    );
+    return rows[0]?.root_message_id;
+  }
 
   async listGraphThreads(spaceId: string): Promise<StoredGraphThread[]> {
     const rows = await this.sql.query<{ root_message_id: string; fingerprint: string; last_offset: string | number; judged_at: string; judgment: ThreadJudgment }>(
