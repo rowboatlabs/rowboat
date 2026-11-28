@@ -739,8 +739,16 @@ export function buildHttpApp(deps: {
     // The raw text: the signature covers the bytes as sent, not a re-serialisation of them.
     const text = await c.req.text();
     if (text.length > MAX_DELIVERY_BYTES) throw new HarborError('payload_too_large', `an event is limited to ${MAX_DELIVERY_BYTES} bytes`);
-    await service.receiveConnectionEvent({ timestamp: c.req.header('x-rowboat-timestamp'), signature: c.req.header('x-rowboat-signature'), body: text });
-    return reply(c, routes.receiveConnectionEvent.response, { ok: true });
+    let taken: boolean;
+    try {
+      taken = await service.receiveConnectionEvent({ timestamp: c.req.header('x-rowboat-timestamp'), signature: c.req.header('x-rowboat-signature'), body: text });
+    } catch (err) {
+      // A connection that is gone is 410, not the 404 of not_found elsewhere: the control plane deletes the
+      // trigger on this answer, and a proxy's 404 while Harbor deploys must never be mistaken for it (2026-11-28).
+      if (err instanceof HarborError && err.code === 'not_found') return c.json({ code: err.code, message: err.message }, 410);
+      throw err;
+    }
+    return reply(c, routes.receiveConnectionEvent.response, { ok: true, taken });
   });
   app.get(routes.listSpaceConnections.path, async (c) => {
     const { spaceId } = parseWith(routes.listSpaceConnections.params, c.req.param());

@@ -27,6 +27,10 @@
 #     runs bill to their owners' Rowboat plans and there is no trial)
 #     HARBOR_BILLING_ISSUER (the issuer whose subjects are Rowboat accounts)
 #     HARBOR_BILLING_UPGRADE_URL (else the backend's own app address)
+#     With them spaces can also connect apps (space connections, 2026-11-28):
+#     HARBOR_CONNECTION_APPS (optional; the comma-separated app slugs a space
+#     may connect, `*` for every app with triggers; default linear,github).
+#     Needs HARBOR_INTEGRATION_KEY, which seals each connection's gateway key.
 
 FROM node:22-slim AS build
 RUN corepack enable

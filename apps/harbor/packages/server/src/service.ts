@@ -197,7 +197,7 @@ export class HarborService {
     return this.connections.events(ctx, spaceId, connectionId, opts);
   }
   /** One event from the control plane (pre-auth: its signature is the credential). */
-  receiveConnectionEvent(delivery: { timestamp: string | undefined; signature: string | undefined; body: string }): Promise<void> {
+  receiveConnectionEvent(delivery: { timestamp: string | undefined; signature: string | undefined; body: string }): Promise<boolean> {
     return this.connections.receive(delivery);
   }
   /** The graph worker: keeps every graph space's judgments current. */

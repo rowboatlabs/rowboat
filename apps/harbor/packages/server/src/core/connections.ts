@@ -96,6 +96,7 @@ export class Connections {
   private ticking: Promise<void> | undefined;
   private again = false;
   private lastAccountCheck = 0;
+  private readonly refreshing = new Map<string, Promise<StoredConnection>>();
   private readonly appCache = new Map<string, { at: number; app: BackendApp | undefined }>();
   private readonly triggerCache = new Map<string, { at: number; types: ConnectionTriggerType[] }>();
 
@@ -259,9 +260,17 @@ export class Connections {
     const { deps } = managed;
     this.k.guardWrite();
     let connection = managed.connection;
-    if (input.name !== undefined && input.name.trim() !== connection.name) {
-      const name = input.name.trim();
-      if (!name) throw new HarborError('invalid_request', 'a connection needs a name');
+    // Everything that can refuse is checked before anything changes, so a refused request leaves the connection as it was.
+    const name = input.name?.trim();
+    if (input.name !== undefined && !name) throw new HarborError('invalid_request', 'a connection needs a name');
+    if (input.triggers !== undefined) {
+      if (connection.status === 'pending') connection = await this.refresh(connection);
+      if (connection.status !== 'active' || !connection.accountId) {
+        throw new HarborError('invalid_request', `${connection.app.name} is not authorised yet: authorise it, then choose what it posts`);
+      }
+      await this.checkTriggers(connection, input.triggers);
+    }
+    if (name !== undefined && name !== connection.name) {
       connection = { ...connection, name };
       await this.k.store.putConnection(connection);
       await this.spaces.renameConnectionMember(connection.memberId, name);
@@ -271,15 +280,26 @@ export class Connections {
       await this.k.store.putConnection(connection);
     }
     if (input.triggers !== undefined) {
-      if (connection.status === 'pending') connection = await this.refresh(connection);
-      if (connection.status !== 'active' || !connection.accountId) {
-        throw new HarborError('invalid_request', `${connection.app.name} is not authorised yet: authorise it, then choose what it posts`);
-      }
       const first = connection.triggers.length === 0;
       connection = await this.setTriggers(deps, connection, input.triggers);
       if (first && connection.triggers.length > 0) await this.announce(connection, ctx.memberId);
     }
     return (await this.wire([connection]))[0]!;
+  }
+
+  /** Each wanted trigger is one the app has, with what its config requires, listed once. */
+  private async checkTriggers(connection: StoredConnection, wanted: ConnectionTriggerInput[]): Promise<{ types: Map<string, ConnectionTriggerType>; seen: Set<string> }> {
+    const types = new Map((await this.typesOf(connection.app.slug)).map((t) => [t.slug, t]));
+    const seen = new Set<string>();
+    for (const t of wanted) {
+      const type = types.get(t.slug);
+      if (!type) throw new HarborError('invalid_request', `${connection.app.name} has no trigger ${t.slug}`);
+      const missing = requiredOf(type.config).filter((field) => t.config[field] === undefined || t.config[field] === '');
+      if (missing.length > 0) throw new HarborError('invalid_request', `${type.name} needs ${missing.join(', ')}`);
+      if (seen.has(identity(t))) throw new HarborError('invalid_request', `${type.name} is listed twice with the same settings`);
+      seen.add(identity(t));
+    }
+    return { types, seen };
   }
 
   /**
@@ -290,17 +310,7 @@ export class Connections {
    * part-way leaves Harbor knowing exactly which instances exist.
    */
   private async setTriggers(deps: ConnectionsDeps, connection: StoredConnection, wanted: ConnectionTriggerInput[]): Promise<StoredConnection> {
-    const types = new Map((await this.typesOf(connection.app.slug)).map((t) => [t.slug, t]));
-    const identity = (t: { slug: string; config: Record<string, unknown> }) => `${t.slug}\n${canonical(t.config)}`;
-    const seen = new Set<string>();
-    for (const t of wanted) {
-      const type = types.get(t.slug);
-      if (!type) throw new HarborError('invalid_request', `${connection.app.name} has no trigger ${t.slug}`);
-      const missing = requiredOf(type.config).filter((field) => t.config[field] === undefined || t.config[field] === '');
-      if (missing.length > 0) throw new HarborError('invalid_request', `${type.name} needs ${missing.join(', ')}`);
-      if (seen.has(identity(t))) throw new HarborError('invalid_request', `${type.name} is listed twice with the same settings`);
-      seen.add(identity(t));
-    }
+    const { types, seen } = await this.checkTriggers(connection, wanted);
     let current = connection;
     for (const old of connection.triggers) {
       if (seen.has(identity(old)) && old.triggerId) continue;
@@ -396,8 +406,21 @@ export class Connections {
     }
   }
 
-  /** Ask the control plane where the app's authorisation stands, and store what changed. */
-  private async refresh(connection: StoredConnection): Promise<StoredConnection> {
+  /**
+   * Ask the control plane where the app's authorisation stands, and store
+   * what changed. One at a time per connection: a panel polls while its
+   * person authorises, and two reads that both saw the authorisation land
+   * would each make the owed triggers.
+   */
+  private refresh(connection: StoredConnection): Promise<StoredConnection> {
+    const running = this.refreshing.get(connection.id);
+    if (running) return running;
+    const next = this.refreshOnce(connection).finally(() => this.refreshing.delete(connection.id));
+    this.refreshing.set(connection.id, next);
+    return next;
+  }
+
+  private async refreshOnce(connection: StoredConnection): Promise<StoredConnection> {
     const deps = this.requireDeps();
     if (!connection.accountId) return connection;
     const account = await deps.backend.account(connection.id, connection.accountId);
@@ -485,8 +508,10 @@ export class Connections {
    * id and answered before it is decided. A paused connection, an archived
    * space, or a trigger the connection no longer listens for drops the event
    * quietly: the delivery was right, there is just nothing to do with it.
+   * Answers whether the event was newly taken, which is what the control
+   * plane bills: a redelivery and a dropped event cost their person nothing.
    */
-  async receive(delivery: { timestamp: string | undefined; signature: string | undefined; body: string }): Promise<void> {
+  async receive(delivery: { timestamp: string | undefined; signature: string | undefined; body: string }): Promise<boolean> {
     const deps = this.deps;
     // The same answer for a server without connections and a bad signature: nothing here to probe.
     if (!deps || !deps.backend.verify(delivery)) throw new HarborError('unauthorized', 'the delivery is not signed by the control plane');
@@ -501,9 +526,9 @@ export class Connections {
     const event = parsed.data;
     const connection = await this.k.store.getConnection(event.ref);
     if (!connection) throw new HarborError('not_found', 'no such connection');
-    if (connection.paused || this.k.readOnly) return;
-    if (!connection.triggers.some((t) => t.triggerId !== '' && t.triggerId === event.triggerId)) return;
-    if ((await this.k.store.getSpace(connection.spaceId))?.archived) return;
+    if (connection.paused || this.k.readOnly) return false;
+    if (!connection.triggers.some((t) => t.triggerId !== '' && t.triggerId === event.triggerId)) return false;
+    if ((await this.k.store.getSpace(connection.spaceId))?.archived) return false;
     const url = urlOf(event.data);
     const title = titleOf(event.data);
     const subject = subjectOf(event.data);
@@ -524,6 +549,7 @@ export class Connections {
       EVENTS_KEPT,
     );
     if (taken) void this.tick();
+    return taken;
   }
 
   // --- the worker -------------------------------------------------------------------
@@ -665,6 +691,9 @@ function appOf(app: BackendApp): ConnectionApp {
     triggersCount: app.triggersCount,
   };
 }
+
+/** What makes two triggers the same one: the slug and the settings. */
+const identity = (t: { slug: string; config: Record<string, unknown> }): string => `${t.slug}\n${canonical(t.config)}`;
 
 /** The fields a trigger's config schema requires. */
 function requiredOf(schema: Record<string, unknown>): string[] {

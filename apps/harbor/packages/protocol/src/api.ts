@@ -622,15 +622,19 @@ export const routes = {
    * The control plane's delivery of one event. Pre-auth: the request is
    * signed with the key Harbor and the control plane share
    * (`x-rowboat-timestamp`, `x-rowboat-signature`), and `ref` names the
-   * connection. Answers once the event is durably taken; a redelivery of the
-   * same `id` is taken once. `not_found` for a connection that is gone, which
-   * tells the control plane to stop sending.
+   * connection. Answers once the event is durably taken. `taken` is false
+   * when there was nothing new to take: a redelivery of an `id` already
+   * taken, or an event dropped for a paused connection, an archived space or
+   * a trigger the connection no longer has; the control plane bills only what
+   * was taken. A connection that is gone answers HTTP 410 with `not_found`,
+   * which tells the control plane to stop sending; 410 and not 404, so a
+   * proxy's 404 during a deploy is never read as "this connection is gone".
    */
   receiveConnectionEvent: {
     method: 'POST',
     path: '/v1/connections/events', // pre-auth allowed
     request: ConnectionDelivery,
-    response: z.object({ ok: z.literal(true) }),
+    response: z.object({ ok: z.literal(true), taken: z.boolean() }),
   },
   /**
    * Change a shared space's visibility (spec §4 Roles, 2026-10-19): an admin

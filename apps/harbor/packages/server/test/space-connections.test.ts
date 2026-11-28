@@ -362,8 +362,8 @@ describe('an event', () => {
     const unsigned = await fetch(`${harbor.url}${routes.receiveConnectionEvent.path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(unsigned.status).toBe(401);
     expect(await eventsOf(c.connection.id)).toEqual([]);
-    // A connection that is gone answers not_found: the control plane stops sending.
-    expect((await deliver({ ...body, ref: '01ARZ3NDEKTSV4RRFFQ69G5FAV' })).status).toBe(404);
+    // A connection that is gone answers 410: the control plane stops sending, and a proxy's 404 is never taken for it.
+    expect(await deliver({ ...body, ref: '01ARZ3NDEKTSV4RRFFQ69G5FAV' })).toMatchObject({ status: 410, body: { code: 'not_found' } });
     expect((await deliver({ ref: c.connection.id })).status).toBe(400);
     await admin().delete(`${base()}/${c.connection.id}`);
   });
@@ -372,7 +372,7 @@ describe('an event', () => {
     const c = await connected('Linear – Eng');
     const before = (await messages()).length;
     const first = event(c, TYPES[0]!.slug, issue(412, 'Web login loops on Safari'));
-    expect(await deliver(first)).toEqual({ status: 200, body: { ok: true } });
+    expect(await deliver(first)).toEqual({ status: 200, body: { ok: true, taken: true } });
     const decided = await settledEvent(c.connection.id, first.id);
     expect(decided).toMatchObject({ outcome: 'posted', trigger: TYPES[0]!.slug, title: 'Web login loops on Safari', url: 'https://linear.app/rowboat/issue/ENG-412/slug', score: 0.91 });
 
@@ -389,8 +389,8 @@ describe('an event', () => {
     // The model ran on the connection's own gateway key, and was told where the link goes.
     expect(writer.asked.at(-1)).toMatchObject({ key: `rbg_${c.connection.id}`, system: expect.stringContaining('[Open in Linear](https://linear.app/rowboat/issue/ENG-412/slug)') });
 
-    // The control plane retries a delivery it is unsure of: the same id is taken once.
-    expect((await deliver(first)).status).toBe(200);
+    // The control plane retries a delivery it is unsure of: the same id is taken once, and says so, so it is billed once.
+    expect(await deliver(first)).toEqual({ status: 200, body: { ok: true, taken: false } });
     // A comment's address is its issue's with a fragment, so it joins the issue's thread as a reply.
     const comment = event(c, TYPES[1]!.slug, { id: 'c1', body: 'Reproduced on 17.4', url: 'https://linear.app/rowboat/issue/ENG-412/slug#comment-c1', user: { name: 'Gagan' } });
     await deliver(comment);
@@ -480,10 +480,10 @@ describe('an event', () => {
   it('is dropped while the connection is paused, and for a trigger it no longer listens for', async () => {
     const c = await connected('Quiet', { filter: false });
     await admin().post(`${base()}/${c.connection.id}`, { paused: true, actingMode: 'direct' });
-    expect((await deliver(event(c, TYPES[0]!.slug, issue(20, 'While paused')))).status).toBe(200);
+    expect(await deliver(event(c, TYPES[0]!.slug, issue(20, 'While paused')))).toEqual({ status: 200, body: { ok: true, taken: false } });
     await admin().post(`${base()}/${c.connection.id}`, { paused: false, triggers: [{ slug: TYPES[0]!.slug, config: { team_id: 'ENG' } }], actingMode: 'direct' });
     // The comment trigger was dropped just now; a late event from it is not the connection's any more.
-    expect((await deliver(event(c, TYPES[1]!.slug, { body: 'late', url: 'https://linear.app/x#comment-1' }))).status).toBe(200);
+    expect(await deliver(event(c, TYPES[1]!.slug, { body: 'late', url: 'https://linear.app/x#comment-1' }))).toEqual({ status: 200, body: { ok: true, taken: false } });
     const live = event(c, TYPES[0]!.slug, issue(21, 'After resuming'));
     await deliver(live);
     await settledEvent(c.connection.id, live.id);
@@ -554,9 +554,9 @@ describe('disconnecting', () => {
     expect(member.deactivatedAt).toBeDefined();
     expect((await harbor.store.listSpaceMembers(spaceId)).map((m) => m.id)).not.toContain(member.id);
     expect((await messages()).find((m) => m.id === posted.messageId)).toMatchObject({ author: { memberId: member.id } });
-    // Idempotent, and a late event answers not_found.
+    // Idempotent, and a late event is told the connection is gone.
     expect((await admin().delete(`${base()}/${c.connection.id}`)).status).toBe(200);
-    expect((await deliver(event(c, TYPES[0]!.slug, issue(31, 'Too late')))).status).toBe(404);
+    expect((await deliver(event(c, TYPES[0]!.slug, issue(31, 'Too late')))).status).toBe(410);
   });
 
   it('happens for every connection of a space that is deleted', async () => {
