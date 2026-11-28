@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MENTION_GRAMMAR } from './mentions.js';
 import { ActivityKind, NewPoll, ThreadListing } from './api.js';
+import { CalendarEntryPatch, CalendarOccurrence, NewCalendarEntry } from './calendar.js';
 import {
   Asset,
   ChangeSet,
@@ -11,7 +12,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Attribution, InvitePolicy, Member, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
+import { Attribution, CalendarEntry, CalendarEntryId, InvitePolicy, Member, SuperAgentResult, MemberRole, Membership, Message, OrgSettings, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, Topic, UpdateProfile } from './core.js';
 import { AssetId, AssetPath, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult, MAX_INVITE_SPACES } from './invite.js';
 import { Invocation, InvocationId, InvocationOptionValues, InvocationRefusal, InvocationState } from './invocation.js';
@@ -435,10 +436,14 @@ export const postMessage = tool({
     'a few lines: a plan, research, a report), also pass `summary`: one or two lines with the outcome, ' +
     'which people see first, with "Show more" for the full body. Pass `session: {title}` on a new root ' +
     'to start a session (short-lived work someone ends when done) when your person asks for one. ' +
+    'To say something about a calendar entry, pass calendarEntryId in place of threadRoot: the message ' +
+    'goes in that entry\'s one thread, which is started with the entry\'s card if it has none. ' +
     MENTION_GRAMMAR,
   input: z.object({
     spaceId: SpaceId,
     threadRoot: MessageId.optional(),
+    /** In place of threadRoot: reply in this calendar entry's thread, starting it if there is none (2026-11-28). */
+    calendarEntryId: CalendarEntryId.optional(),
     body: z.string().min(1).max(65_536),
     /** One or two lines with the outcome of a long body; shown first (2026-10-25). */
     summary: z.string().min(1).max(1_000).optional(),
@@ -516,6 +521,73 @@ export const react = tool({
     action: z.enum(['add', 'remove']),
   }),
   output: z.object({ message: Message }),
+});
+
+// --- the space calendar (2026-11-28, "channel calendar" in rowboat) -----------
+
+/** What a calendar write answers: the entry, and the message Harbor posted about it, if any. */
+const CalendarWriteResult = z.object({
+  entry: CalendarEntry,
+  /** The message Harbor posted to tell the tagged members, when there was someone to tell. */
+  messageId: MessageId.optional(),
+  /** Agents that message invoked, or was refused (spec §8): say so if one was refused. */
+  invocations: z.array(z.object({ agentId: MemberId, state: InvocationState, refusal: InvocationRefusal.optional() })).optional(),
+});
+
+export const listCalendarEntries = tool({
+  name: 'list_calendar_entries',
+  description:
+    "A space's calendar: the entries that happen between `from` and `to` (default: the next 30 days from now), " +
+    'and `occurrences`, each time they happen in that range with repeats already worked out. An entry is ' +
+    'what a member, person or agent, said they plan to do and when; nothing enforces it. `threadRoot` on an ' +
+    'entry is the one thread about it (read_thread).',
+  input: z.object({
+    spaceId: SpaceId,
+    /** ISO 8601 instants, e.g. 2026-12-01T00:00:00Z. At most 400 days apart. */
+    from: z.iso.datetime({ offset: true }).optional(),
+    to: z.iso.datetime({ offset: true }).optional(),
+  }),
+  output: z.object({ entries: z.array(CalendarEntry), occurrences: z.array(CalendarOccurrence) }),
+});
+
+export const createCalendarEntry = tool({
+  name: 'create_calendar_entry',
+  description:
+    "Put an entry on a space's calendar: something planned, with a title and a time. Use it for your own " +
+    'scheduled or recurring work too, so people can see what you do and when. An entry is a record only: ' +
+    'nothing runs and nobody is reminded when it starts, so add your own entry once the schedule that will ' +
+    'actually run it exists. `start` and `end` are ISO 8601 instants with an offset ' +
+    '(2026-12-01T09:00:00-08:00); for an all-day entry pass allDay and dates (YYYY-MM-DD, end = its last day). ' +
+    '`timeZone` is the IANA zone the times are meant in (the person\'s if you know it, else UTC); a repeat ' +
+    'keeps its wall-clock time in that zone. `recurrence` repeats it: {freq: daily|weekly|monthly, interval?, ' +
+    'weekdays? (weekly; 0 = Sunday to 6 = Saturday), until? (YYYY-MM-DD)}. `attendees` tags members of the ' +
+    'space by member id: tagging anyone but yourself posts the entry\'s card in the space mentioning them, ' +
+    'which notifies people and starts a turn for agents; an entry that tags no one else posts nothing. ' +
+    'When the entry comes out of a thread, pass that thread as `threadRoot`, so what follows about it ' +
+    'stays there.',
+  input: NewCalendarEntry.omit({ actingMode: true, agentName: true }).extend({ spaceId: SpaceId }),
+  output: CalendarWriteResult,
+});
+
+export const updateCalendarEntry = tool({
+  name: 'update_calendar_entry',
+  description:
+    'Change a calendar entry (entryId from list_calendar_entries, or the `calendarEntry` on its card): pass ' +
+    'only what changes; null clears the description or the repeat. Any member may change any entry. A ' +
+    'repeating entry changes as a whole series. A new time, or newly tagged members, is told in the ' +
+    "entry's thread to the tagged members it concerns. Keep your own entries current: move or delete one " +
+    'when the plan changes.',
+  input: CalendarEntryPatch.omit({ actingMode: true, agentName: true }).extend({ spaceId: SpaceId, entryId: CalendarEntryId }),
+  output: CalendarWriteResult,
+});
+
+export const deleteCalendarEntry = tool({
+  name: 'delete_calendar_entry',
+  description:
+    'Delete a calendar entry: it leaves the calendar, its card says so, and the tagged members other than ' +
+    'you are told in its thread. A repeating entry is deleted as a whole series.',
+  input: z.object({ spaceId: SpaceId, entryId: CalendarEntryId }),
+  output: CalendarWriteResult,
 });
 
 export const votePoll = tool({
@@ -932,6 +1004,10 @@ export const mcpTools = [
   react,
   votePoll,
   endPoll,
+  listCalendarEntries,
+  createCalendarEntry,
+  updateCalendarEntry,
+  deleteCalendarEntry,
   listTopics,
   createTopic,
   manageTopic,
@@ -975,6 +1051,7 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   listTopics.name,
   listArchivedThreads.name,
   listMyThreads.name,
+  listCalendarEntries.name,
   readAsset.name,
   assetHistory.name,
   diff.name,

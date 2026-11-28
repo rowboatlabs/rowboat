@@ -291,7 +291,7 @@ A deployment runs one Harbor instance until each of these is addressed. Everythi
 
 ### Anatomy — **Decided**
 
-A space is a **directory of assets + one feed + members**. Opening a space lands on two things side by side: the **README** (what this is) and the **feed** (what's happening). Everything else — inner files, other topics — is one click deeper.
+A space is a **directory of assets + one feed + members**. *(Amended 2026-11-28: and a calendar, §7 The space calendar.)* Opening a space lands on two things side by side: the **README** (what this is) and the **feed** (what's happening). Everything else — inner files, other topics — is one click deeper.
 
 The symmetry that makes the anatomy teachable: **README.md is to files what the feed is to chats** — the designated front door of its kind.
 
@@ -524,6 +524,19 @@ Everything that involves a member across every space and DM they are in, newest 
 - **Deliberately absent:** "added you to a space" — no durable fact records who added whom (`Membership` has no `by`); it arrives with that fact (§5, open spaces).
 
 Wire and storage: [CONTRACT.md](./CONTRACT.md), the Activity bullet.
+
+### The space calendar — **Decided** *(added 2026-11-28, "channel calendar" in rowboat)*
+
+Every space, a DM included, has a calendar: entries its members put on it, people and agents alike. An entry has a title, a time or whole days, an optional repeat, a description, and the members it tags. It answers "what is planned here, and what are the agents doing" on month, week and day views, the way a shared Google calendar does.
+
+- **Self-reported, never enforced.** An entry is a record of a plan. Harbor runs nothing and reminds no one when it starts, and nothing checks that the work happened. An agent told of an entry decides for itself whether to set up a schedule of its own (a Hermes trigger, a Replicas automation), and an agent that takes on scheduled work adds its own entry once the schedule that will run it exists, so the calendar does not show work that never runs. Rejected for now: a second mention when an entry starts, which would be the first scheduler in Harbor (§10: no new scheduler).
+- **Telling is a message.** Tagging anyone but yourself posts the entry's card in the space as you, mentioning them, so people are notified and agents invoked by the rules a mention already has (Mentions above, §8 Invoking agent members), and there is no second way to reach a member. An entry that tags no one else posts nothing: agents logging their own work would otherwise fill the channel with cards nobody has to act on.
+- **One thread per entry, and the entry points at it.** The thread is the card's, or the thread the entry was asked for in when its creator names it, so "do this every day" and the daily updates stay in one place. A new time, a newly tagged member and a deletion are each one line there, mentioning the tagged members they concern other than whoever acted; a new title or description alone says nothing. A message about an entry is addressed to the entry, not to a thread: Harbor finds the thread, or starts it with the entry's card when there is none. Rejected: guidance alone ("find the event's thread, or start one"), because finding a thread by an entry's name starts two when two members post at once, and misses after a rename.
+- **Any member changes any entry**, whoever created it: the content plane is role-flat (§4 Roles). A tagged member must be in the space when tagged, as a mention must.
+- **A repeat is one series.** Daily, weekly on chosen weekdays, or monthly, every so many, until a date or forever. Occurrences are computed, never stored, in the entry's own time zone, so nine o'clock stays nine o'clock across a daylight-saving change. Changing or deleting a repeating entry changes all of it. One occurrence on its own is Deferred (§12).
+- **The card is a message with the entry riding on it**, as a poll rides on its message: its text is what Harbor wrote when it posted, for agents and for clients that cannot show the card, and the card always shows the entry as it stands. The card cannot be edited; deleting it leaves the entry on the calendar.
+
+Wire and storage: [CONTRACT.md](./CONTRACT.md), the space calendar bullet.
 
 ---
 
@@ -760,6 +773,7 @@ Each absence below is a decision:
 | Guests (single- and multi-space) | Shape settled 2026-09-22 (§4 Invites): a member flag removing browse, self-join, and the org-wide roster; admin-invited. Built after teammates' invites work. |
 | Invite approval mode (members request, admins approve) | Slack's paid-plan option; needs a request queue nobody has asked for. Deferred 2026-09-22. |
 | Admin edits of another member's profile; IdP avatar seeding at bind | Slack has the first and rarely uses it; the second is a server-side fetch of a claimed URL that wants its own review. Deferred 2026-09-22 (§4 Member profile). |
+| Calendar: one occurrence of a repeat, RSVP, reminders, external calendar sync, free/busy, one calendar across spaces | The space calendar (§7) is a self-reported record with whole-series repeats. Trigger: a real need for any one of them. Deferred 2026-11-28. |
 | Org-level audit log | Org facts (role and policy changes) have no log in v1; their space-level consequences land on space logs. Trigger: a compliance ask. Deferred 2026-09-22. |
 | Live frame for profile changes | Roster re-fetch on sync/focus/reconnect covers it. Trigger: a stale name noticed live. Deferred 2026-09-22. |
 | Removal from a space by any member (not only admins); un-leavable `general` | Slack's owner-set knob and its mandatory channel; both wait for someone to ask. Deferred 2026-09-22. |
