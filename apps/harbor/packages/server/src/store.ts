@@ -1,5 +1,6 @@
 import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
+  CalendarEntry,
   AgentCredential,
   AgentHook,
   AgentHosting,
@@ -653,6 +654,19 @@ export interface Store {
   listUnappliedDecisions(agentId: string): Promise<Approval[]>;
   /** The approvals riding on these messages (their cards). */
   listApprovalsForMessages(spaceId: string, messageIds: string[]): Promise<Approval[]>;
+
+  // --- the space calendar (2026-11-28, "channel calendar" in rowboat) ---
+  /** Write an entry as it now stands, new or changed. */
+  putCalendarEntry(entry: CalendarEntry): Promise<void>;
+  getCalendarEntry(spaceId: string, id: string): Promise<CalendarEntry | undefined>;
+  /**
+   * The live entries that could happen between two dates (YYYY-MM-DD): those
+   * starting before `before` that end on or after `onOrAfter`, or repeat
+   * until then. A coarse cut; the caller computes the occurrences.
+   */
+  listCalendarEntries(spaceId: string, onOrAfter: string, before: string): Promise<CalendarEntry[]>;
+  /** These entries as they stand, deleted ones included: what their cards show. */
+  listCalendarEntriesByIds(spaceId: string, ids: string[]): Promise<CalendarEntry[]>;
   getAgentCapabilities(agentId: string): Promise<ConnectorCapabilities | undefined>;
   /** The defaults an agent's owner set for its declared options (spec §8, 2026-10-01). */
   getAgentOptionDefaults(agentId: string): Promise<InvocationOptionValues | undefined>;

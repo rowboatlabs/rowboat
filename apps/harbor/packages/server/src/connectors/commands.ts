@@ -239,35 +239,6 @@ export function formatWhen(iso: string, timeZone?: string): string {
   }
 }
 
-/** A zone's offset from UTC at an instant, in minutes (positive east of Greenwich). */
-export function zoneOffsetMinutes(timeZone: string, at: Date): number {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
-      .formatToParts(at)
-      .map((p) => [p.type, p.value]),
-  );
-  const asUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
-  return Math.round((asUtc - Math.floor(at.getTime() / 1000) * 1000) / 60_000);
-}
-
-/** The instant a wall-clock time in a zone names: `2026-10-05T15:00` in America/New_York → 19:00Z. */
-export function zonedToUtc(wall: string, timeZone: string): Date {
-  const naive = new Date(`${wall}Z`);
-  if (Number.isNaN(naive.getTime())) return naive;
-  // Twice: the offset at the guess can differ from the offset at the answer across a DST change.
-  let at = new Date(naive.getTime() - zoneOffsetMinutes(timeZone, naive) * 60_000);
-  at = new Date(naive.getTime() - zoneOffsetMinutes(timeZone, at) * 60_000);
-  return at;
-}
-
-/** The calendar date (YYYY-MM-DD) an instant falls on in a zone. */
-export function dateInZone(at: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
-}
-
-/** The date after this one, both YYYY-MM-DD. */
-export function nextDate(date: string, days = 1): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+// The zone arithmetic moved to the protocol package with the space calendar (2026-11-28), which
+// computes occurrences with it on the server and in the app. Kept here by name for the bots.
+export { dateInZone, nextDate, zonedToUtc, zoneOffsetMinutes } from '@rowboat/spaces-protocol';

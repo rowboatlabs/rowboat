@@ -9,6 +9,7 @@ import type {
   BlobInfo,
   ConnectorCapabilities,
   Approval,
+  CalendarEntry,
   ApprovalState,
   Invocation,
   InvocationOptionValues,
@@ -324,6 +325,7 @@ interface MessageRow {
   edited_at: string | null;
   poll: Poll | null;
   approval?: Approval | null;
+  calendar_entry?: CalendarEntry | null;
   stream_offset: number;
   mentions: string[] | null;
   mentions_here: boolean | null;
@@ -369,6 +371,8 @@ function rowToMessage(r: MessageRow): Message {
     ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
     // An approval card's approval as raised; the current one folds in on reads (spec §8 part 4).
     ...(r.approval !== null && r.approval !== undefined ? { approval: r.approval } : {}),
+    // A calendar entry's card keeps the entry as posted; the current one folds in on reads (2026-11-28).
+    ...(r.calendar_entry ? { calendarEntry: r.calendar_entry } : {}),
     ...(r.people_only ? { peopleOnly: true as const } : {}),
     ...(r.secrets ? { secrets: r.secrets } : {}),
     ...(r.archived ? { archived: true as const } : {}),
@@ -1313,8 +1317,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only, secrets, session_title)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18, $19::jsonb, $20)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text, approval, summary, people_only, secrets, session_title, calendar_entry)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18, $19::jsonb, $20, $21::jsonb)`,
       [
         message.id,
         message.spaceId,
@@ -1336,6 +1340,7 @@ export class PgStore implements Store {
         message.peopleOnly === true,
         message.secrets ? JSON.stringify(message.secrets) : null,
         message.session?.title ?? null,
+        message.calendarEntry ? JSON.stringify(message.calendarEntry) : null,
       ],
     );
   }
@@ -1447,7 +1452,7 @@ export class PgStore implements Store {
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', summary = null, deleted_at = $3, poll = null, approval = null, secrets = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
+      `update messages set body = '', summary = null, deleted_at = $3, poll = null, approval = null, calendar_entry = null, secrets = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
        where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
@@ -1458,7 +1463,7 @@ export class PgStore implements Store {
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}' #- '{summary}' #- '{secrets}') || jsonb_build_object(
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}' #- '{approval}' #- '{calendarEntry}' #- '{summary}' #- '{secrets}') || jsonb_build_object(
          'body', '', 'deletedAt', $3::text, 'mentions', '[]'::jsonb, 'mentionsHere', false, 'mentionsRowboat', false))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],
@@ -2099,6 +2104,50 @@ export class PgStore implements Store {
       'select data from approvals where space_id = $1 and org_id = $2 and message_id = any($3::text[])',
       [spaceId, this.orgId, messageIds],
     );
+    return rows.map((r) => r.data);
+  }
+
+  // --- the space calendar (2026-11-28, "channel calendar" in rowboat) ------------
+
+  async putCalendarEntry(entry: CalendarEntry): Promise<void> {
+    await this.sql.query(
+      `insert into calendar_entries (space_id, id, starts, ends, repeats, repeats_until, deleted, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       on conflict (space_id, id) do update set
+         starts = excluded.starts, ends = excluded.ends, repeats = excluded.repeats,
+         repeats_until = excluded.repeats_until, deleted = excluded.deleted, data = excluded.data`,
+      [
+        entry.spaceId,
+        entry.id,
+        entry.start,
+        entry.end,
+        entry.recurrence !== undefined,
+        entry.recurrence?.until ?? null,
+        entry.deletedAt !== undefined,
+        JSON.stringify(entry),
+      ],
+    );
+  }
+
+  async getCalendarEntry(spaceId: string, id: string): Promise<CalendarEntry | undefined> {
+    const rows = await this.sql.query<{ data: CalendarEntry }>('select data from calendar_entries where space_id = $1 and id = $2', [spaceId, id]);
+    return rows[0]?.data;
+  }
+
+  async listCalendarEntries(spaceId: string, onOrAfter: string, before: string): Promise<CalendarEntry[]> {
+    const rows = await this.sql.query<{ data: CalendarEntry }>(
+      `select data from calendar_entries
+       where space_id = $1 and not deleted and starts < $3
+         and case when repeats then repeats_until is null or repeats_until >= $2 else ends >= $2 end
+       order by starts, id`,
+      [spaceId, onOrAfter, before],
+    );
+    return rows.map((r) => r.data);
+  }
+
+  async listCalendarEntriesByIds(spaceId: string, ids: string[]): Promise<CalendarEntry[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.sql.query<{ data: CalendarEntry }>('select data from calendar_entries where space_id = $1 and id = any($2::text[])', [spaceId, ids]);
     return rows.map((r) => r.data);
   }
 
