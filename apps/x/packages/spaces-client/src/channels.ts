@@ -25,6 +25,7 @@ export type HarborChannel =
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
   | 'spaces:setSpaceGraph' | 'spaces:getSpaceGraph'
+  | 'spaces:listCalendar' | 'spaces:createCalendarEntry' | 'spaces:updateCalendarEntry' | 'spaces:deleteCalendarEntry'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower' | 'spaces:getHostingSize' | 'spaces:setHostingSize'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
   | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
@@ -346,6 +347,7 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
     'spaces:postMessage': async (args) =>
       getClient(args.orgId).postMessage(args.spaceId, {
         ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
+        ...(args.calendarEntryId ? { calendarEntryId: args.calendarEntryId } : {}),
         ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
         body: args.body,
         ...(args.poll ? { poll: args.poll } : {}),
@@ -355,6 +357,14 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
         ...(args.session ? { session: args.session } : {}),
         actingMode: 'direct',
       }),
+
+    'spaces:listCalendar': async (args) => getClient(args.orgId).listCalendarEntries(args.spaceId, args.from, args.to),
+
+    'spaces:createCalendarEntry': async ({ orgId, spaceId, ...entry }) => getClient(orgId).createCalendarEntry(spaceId, entry),
+
+    'spaces:updateCalendarEntry': async ({ orgId, spaceId, entryId, ...patch }) => getClient(orgId).updateCalendarEntry(spaceId, entryId, patch),
+
+    'spaces:deleteCalendarEntry': async (args) => getClient(args.orgId).deleteCalendarEntry(args.spaceId, args.entryId),
 
     'spaces:reactToMessage': async (args) => ({
       message: await getClient(args.orgId).reactToMessage(args.spaceId, args.messageId, {

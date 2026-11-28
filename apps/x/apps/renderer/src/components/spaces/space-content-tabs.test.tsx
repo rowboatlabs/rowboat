@@ -33,6 +33,8 @@ describe('space content tabs', () => {
         expect(onSelect).toHaveBeenLastCalledWith({ kind: 'discussions' })
         fireEvent.click(tab('Files'))
         expect(onSelect).toHaveBeenLastCalledWith({ kind: 'files' })
+        fireEvent.click(tab('Calendar'))
+        expect(onSelect).toHaveBeenLastCalledWith({ kind: 'calendar' })
         fireEvent.click(tab('Messages'))
         expect(onSelect).toHaveBeenLastCalledWith({ kind: 'general' })
     })
@@ -53,6 +55,7 @@ describe('space content tabs', () => {
         [{ kind: 'general' }, 'Messages'],
         [{ kind: 'thread', rootMessageId: 'root-old' }, 'Threads'],
         [{ kind: 'whiteboard', assetId: 'board' }, 'Files'],
+        [{ kind: 'calendar', entryId: 'entry' }, 'Calendar'],
     ] as [RailSelection, string][])('marks the view %o belongs to as current', (selection, label) => {
         mount({ selection })
         expect(tab(label)).toHaveAttribute('aria-current', 'page')

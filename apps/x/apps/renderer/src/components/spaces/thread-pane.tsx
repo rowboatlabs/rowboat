@@ -18,6 +18,7 @@ import { AgentMark, MemberAvatar, MemberProfilePopover } from '@/components/spac
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { MemberName, MemberText } from '@/components/spaces/member-text'
+import { CalendarCard } from '@/components/spaces/calendar-card'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
 import type { ChatMessage, SpacePresence } from '@/hooks/use-space-chat'
@@ -1286,6 +1287,9 @@ export function ThreadPane({
                             <div className={MESSAGE_PROSE}>
                                 {root.deletedAt ? (
                                     <span className="italic text-muted-foreground">This message was deleted</span>
+                                ) : root.calendarEntry ? (
+                                    // A calendar event's thread opens on its card, as the stream shows it (2026-11-28).
+                                    <CalendarCard entry={root.calendarEntry} />
                                 ) : (
                                     <SpaceMarkdown body={root.body} />
                                 )}

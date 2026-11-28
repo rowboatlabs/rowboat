@@ -5,8 +5,12 @@ export { Availability, NotificationSchedule, currentStatus, notificationsPaused 
 export { LLM_PROVIDERS, ownerSetsUp } from '@rowboat/spaces-protocol';
 // The space graph (harbor spec §8 Space graph, 2026-11-12): the one computation of an edge's weight, so the app and the server agree.
 export { weighGraph, GRAPH_HALF_LIFE_DAYS } from '@rowboat/spaces-protocol';
+// The space calendar (harbor spec §7 The space calendar, 2026-11-28): the one computation of a repeat's occurrences, so the grid and the server agree.
+export { expandOccurrences, describeCalendarWhen, describeRecurrence, dateInZone, nextDate, zonedToUtc } from '@rowboat/spaces-protocol';
+export type { CalendarEntry, CalendarRecurrence, CalendarOccurrence, NewCalendarEntry, CalendarEntryPatch } from '@rowboat/spaces-protocol';
 export type { SpaceGraph, GraphThread, GraphEntity, GraphEdge, GraphThreadKind, GraphEntityKind, GraphRelation, WeighedEdge, GraphWeightOptions } from '@rowboat/spaces-protocol';
 import type {
+  CalendarEntry,
   AcceptInviteResult,
   AgentCredential,
   AgentHook,
@@ -243,6 +247,13 @@ export interface SpacesThreadPage {
 export interface SpacesPostResult {
   message: Message;
   /** The agents the message invoked, or was refused to (Harbor spec §8, 2026-09-30); absent from older orgs. */
+  invocations?: Invocation[];
+}
+
+/** What a calendar write answers (harbor createCalendarEntry, 2026-11-28): the entry, and the message Harbor posted about it, if any. */
+export interface SpacesCalendarWrite {
+  entry: CalendarEntry;
+  message?: Message;
   invocations?: Invocation[];
 }
 

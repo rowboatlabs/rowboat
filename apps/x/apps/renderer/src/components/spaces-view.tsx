@@ -128,6 +128,8 @@ const isAttachmentKey = (key: string) => isBlobAppUrl(key)
 // The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
 // the first time a board opens, never inflating the main renderer bundle.
 const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
+// The calendar's grid library is as heavy as the board's canvas, and most visits never open the tab (2026-11-28).
+const SpaceCalendarView = lazy(() => import('@/components/spaces/space-calendar-view').then((m) => ({ default: m.SpaceCalendarView })))
 
 
 // ---------------------------------------------------------------------------
@@ -365,7 +367,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // 2026-11-03: Threads uses the stream's side-pane layout and keeps its list in place.
     const threadsListOpen = selection.kind === 'discussions'
     // Files and the graph each take the whole pane; the stream stays mounted behind them.
-    const collectionOpen = selection.kind === 'files' || selection.kind === 'graph'
+    const collectionOpen = selection.kind === 'files' || selection.kind === 'graph' || selection.kind === 'calendar'
     const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
     // The org listing (module store): resolves a canonical link's org address
     // + space to an org this install is in.
@@ -657,7 +659,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // right; anything from Chat reopens the left — and, narrow, closes the
     // doc so the chat actually shows.
     const placeSelection = (next: RailSelection) => {
-        if (next.kind === 'discussions' || next.kind === 'files' || next.kind === 'graph') return
+        if (next.kind === 'discussions' || next.kind === 'files' || next.kind === 'graph' || next.kind === 'calendar') return
         if (next.kind === 'file' || next.kind === 'whiteboard') {
             setDocKey(next.assetId)
             setDocIsBoard(next.kind === 'whiteboard' || spaces.isWhiteboardPath(entryById.get(next.assetId)?.path ?? ''))
@@ -988,6 +990,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         }
     }
 
+    const openCalendar = (entryId?: string) => select({ kind: 'calendar', ...(entryId ? { entryId } : {}) })
+
     if (selection.kind === 'settings' && !isDirect) return <SpaceSettings org={org} space={space} members={members} onBack={() => select({ kind: 'general' })} onShowSidebar={onToggleRail} />
 
     return (
@@ -998,7 +1002,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         <SpaceRefsProvider refs={spaceRefs}>
         <SpaceInvocationsProvider byMessage={invocationsByMessage} orgId={org.id} selfId={org.memberId} isAdmin={selfIsAdmin}>
         <SpaceAssetsProvider entries={entries}>
-        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={openDirect} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
+        <SpaceNavProvider onOpenFile={openFile} onOpenSpaceFile={openSpaceFile} onOpenSpace={openSpace} onOpenMessage={openMessage} onOpenDirect={openDirect} onOpenCalendar={openCalendar} resolveOrg={resolveOrg} resolveSpace={resolveSpace} onOpenAttachment={(src, name) => {
             const url = new URL(src)
             url.searchParams.set('name', name)
             select({ kind: 'attachment', src: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
@@ -1204,6 +1208,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+                    {/* The calendar (2026-11-28): its grid library loads when the tab first opens. */}
+                    {selection.kind === 'calendar' && <Suspense fallback={<div className="flex flex-1 items-center justify-center"><Loader2 className="size-4 animate-spin text-muted-foreground" /></div>}>
+                        <SpaceCalendarView orgId={org.id} space={space} spaceLabel={isDirect ? spaceTitle : `#${spaceTitle}`} members={members} selfMemberId={org.memberId} writable={writable}
+                            {...(selection.entryId ? { entryId: selection.entryId } : {})}
+                            onShown={() => select({ kind: 'calendar' })}
+                            onOpenThread={(rootMessageId) => select({ kind: 'thread', rootMessageId })} />
+                    </Suspense>}
                     {selection.kind === 'graph' && <SpaceGraphView orgId={org.id} space={space} members={members} admin={canAdminSpace} refreshTick={refreshTick}
                         onOpenThread={(rootMessageId) => select({ kind: 'thread', rootMessageId })} onOpenSettings={() => select({ kind: 'settings' })} />}
                     {selection.kind === 'files' && <>

@@ -42,6 +42,7 @@ import {
     type SpacesAssetEntry,
     type SpacesBusEvent,
     type SpacesManageTopicAction,
+    type SpacesCalendarWrite,
     type SpacesPostResult,
   SpacesCreateInput,
   SpacesProposeInput,
@@ -4411,6 +4412,8 @@ export const ipcSchemas = {
       orgId: z.string(),
       spaceId: z.string(),
       threadRoot: z.string().optional(),
+      /** In place of threadRoot: a reply in this calendar entry's thread, started with its card when there is none (2026-11-28). */
+      calendarEntryId: z.string().optional(),
       anchorChangeSetId: z.string().optional(),
       body: z.string(),
       /** Present = the message carries a poll; body must be its markdown fallback. */
@@ -4425,6 +4428,51 @@ export const ipcSchemas = {
       session: z.object({ title: z.string() }).optional(),
     }),
     res: z.custom<SpacesPostResult>(),
+  },
+  // The space calendar (harbor spec §7 The space calendar, 2026-11-28): the
+  // entries in a range with each time they happen, and the three writes. A
+  // write answers with the message Harbor posted to tell the members the
+  // entry tags, when there was anyone to tell. actingMode is main's, as for
+  // postMessage.
+  'spaces:listCalendar': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), from: z.string(), to: z.string() }),
+    res: z.object({ entries: z.array(z.custom<SpacesTypes.CalendarEntry>()), occurrences: z.array(z.custom<SpacesTypes.CalendarOccurrence>()) }),
+  },
+  'spaces:createCalendarEntry': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      title: z.string(),
+      description: z.string().optional(),
+      allDay: z.boolean().optional(),
+      start: z.string(),
+      end: z.string(),
+      timeZone: z.string(),
+      recurrence: z.custom<SpacesTypes.CalendarRecurrence>().optional(),
+      attendees: z.array(z.string()).optional(),
+      threadRoot: z.string().optional(),
+    }),
+    res: z.custom<SpacesCalendarWrite>(),
+  },
+  'spaces:updateCalendarEntry': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      entryId: z.string(),
+      title: z.string().optional(),
+      description: z.string().nullable().optional(),
+      allDay: z.boolean().optional(),
+      start: z.string().optional(),
+      end: z.string().optional(),
+      timeZone: z.string().optional(),
+      recurrence: z.custom<SpacesTypes.CalendarRecurrence>().nullable().optional(),
+      attendees: z.array(z.string()).optional(),
+    }),
+    res: z.custom<SpacesCalendarWrite>(),
+  },
+  'spaces:deleteCalendarEntry': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), entryId: z.string() }),
+    res: z.custom<SpacesCalendarWrite>(),
   },
   // Agent invocations (Harbor spec §8, 2026-09-30): a space's, newest first,
   // for the lines under the messages that invoked an agent; cancel a queued
