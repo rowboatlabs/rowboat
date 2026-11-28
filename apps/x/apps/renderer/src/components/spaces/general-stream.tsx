@@ -6,7 +6,7 @@ import { useSpaceAccess, JoinSpacePrompt, canActInSpace } from '@/lib/spaces-acc
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowUp, CornerDownRight, X } from 'lucide-react'
 import type { autoRoute, spaces } from '@x/shared'
-import { mentionToken, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
+import { isConnectionMember, mentionToken, mentionsAnyone, messageUrl } from '@x/shared/dist/spaces.js'
 import { copySpacesLink } from '@/lib/spaces-copy-link'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
@@ -525,7 +525,8 @@ export function GeneralStream({
     const tagSuggestions = useTagSuggestionsEnabled()
     // A tag is a mention, so Auto never offers someone else's personal agent (2026-10-30), as Jev doesn't.
     const roster = useSpaceMembers(org.id, space.id)
-    const untaggable = useMemo(() => new Set(roster.filter((m) => isOthersPersonalAgent(m, org.memberId)).map((m) => m.id)), [roster, org.memberId])
+    // Nor a space connection's member (harbor spec §8 Space connections, 2026-11-28): nothing answers a mention of it.
+    const untaggable = useMemo(() => new Set(roster.filter((m) => isOthersPersonalAgent(m, org.memberId) || isConnectionMember(m)).map((m) => m.id)), [roster, org.memberId])
     const [currentDraft, setCurrentDraft] = useState('')
     const [declined, setDeclined] = useState<ReadonlySet<string>>(() => new Set())
     const HERE_TOKEN = mentionToken({ kind: 'here' })

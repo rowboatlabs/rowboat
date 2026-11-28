@@ -10,6 +10,7 @@ import {
   type SpacesMentionTargets,
 } from '@/lib/mention-targets'
 import { isDeparted, isOthersPersonalAgent, isRetiredAgent } from '@/lib/spaces-direct'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 
 /**
  * What the assistant composer's @ menu can name in Spaces: every shared
@@ -44,7 +45,8 @@ export function useSpacesMentionTargets(): SpacesMentionTargets {
       }
       for (const member of rosters.get(org.id) ?? []) {
         // Someone else's personal agent can't be messaged (2026-10-26), so it isn't offered; nor Ro while it is off (2026-10-30).
-        if (member.id === org.memberId || isDeparted(member) || isOthersPersonalAgent(member, org.memberId) || isRetiredAgent(member)) continue
+        // Nor a space connection's member (harbor spec §8 Space connections, 2026-11-28): it takes no messages and answers no mention.
+        if (member.id === org.memberId || isDeparted(member) || isOthersPersonalAgent(member, org.memberId) || isRetiredAgent(member) || isConnectionMember(member)) continue
         members.push({ kind: 'member', orgId: org.id, orgName: org.name, memberId: member.id, displayName: member.displayName })
       }
     }

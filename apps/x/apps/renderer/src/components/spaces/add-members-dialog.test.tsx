@@ -58,6 +58,23 @@ describe('AddMembersDialog', () => {
         expect(screen.queryByRole('checkbox', { name: /Gone/ })).not.toBeInTheDocument()
     })
 
+    it('never offers a space connection’s member, as people or as agents (harbor spec §8 Space connections, 2026-11-28)', async () => {
+        const linear = { id: 'conn', displayName: 'Linear – Eng', role: 'member', kind: 'agent', agentKind: 'connection', agentConnection: 'composio' } as spaces.Member
+        invoke.mockImplementation(async (channel: string) => {
+            if (channel === 'spaces:listOrgMembers') return { members: [harsh, ram, replicas, linear] }
+            throw new Error(`unexpected ${channel}`)
+        })
+        const org3 = { ...org, id: 'org-3' } as OrgWithSpaces
+        const { unmount } = render(<AddMembersDialog org={org3} space={space} members={[ram]} open onOpenChange={vi.fn()} />)
+        await waitFor(() => expect(screen.getByRole('checkbox', { name: /Replicas/ })).toBeInTheDocument())
+        expect(screen.queryByRole('checkbox', { name: /Linear/ })).not.toBeInTheDocument()
+        unmount()
+
+        render(<AddMembersDialog kind="agents" org={org3} space={space} members={[ram]} open onOpenChange={vi.fn()} />)
+        await waitFor(() => expect(screen.getByRole('checkbox', { name: /Replicas/ })).toBeInTheDocument())
+        expect(screen.queryByRole('checkbox', { name: /Linear/ })).not.toBeInTheDocument()
+    })
+
     it('limits the agent picker to owned agents and preserves the add route', async () => {
         render(<AddMembersDialog kind="agents" org={org} space={space} members={[ram]} open onOpenChange={vi.fn()} />)
         await waitFor(() => expect(screen.getByRole('checkbox', { name: /Replicas/ })).toBeInTheDocument())

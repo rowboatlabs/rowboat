@@ -15,6 +15,7 @@ import { useSpacesOrgs } from '@/hooks/use-spaces'
 import { assetWireUrl } from '@/lib/spaces-presentation'
 import { byRank, matchRank } from '@/lib/mention-rank'
 import { isDeparted, isOthersPersonalAgent, isRetiredAgent } from '@/lib/spaces-direct'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 
 // The @ autocomplete behind every mention surface — the composer and the
 // inline message editor. The hook owns the popup's whole lifecycle off the
@@ -116,7 +117,8 @@ export function useMentionAutocomplete(editor: Editor | null) {
         // Nobody names a deleted account (2026-10-13); a DM keeps one as a member.
         // Someone else's personal agent is left out too (2026-10-26): it answers its owner only.
         // So is Ro while an admin has it off (2026-10-30).
-        const pickable = (m: spaces.Member) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId) && !isRetiredAgent(m)
+        // And a space connection's member (harbor spec §8 Space connections, 2026-11-28): it posts what its app sends, and nothing answers a mention of it.
+        const pickable = (m: spaces.Member) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId) && !isRetiredAgent(m) && !isConnectionMember(m)
         people.push(...byRank(spaceMembers.filter(pickable).map((m) => {
             const hint = m.id === selfMemberId ? 'you' : m.kind === 'agent' ? agentHint(m) : undefined
             return { row: { id: m.id, label: m.displayName, ...(hint ? { hint } : {}) }, rank: rank(m) }

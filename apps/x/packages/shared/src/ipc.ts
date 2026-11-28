@@ -3938,6 +3938,51 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), about: z.string().optional(), limit: z.number().optional() }),
     res: z.custom<SpacesTypes.SpaceGraph>(),
   },
+  // Space connections (2026-11-28, harbor spec §8 Space connections): an org
+  // admin connects an app to a shared space and chooses what it posts there.
+  // One Harbor route each (api.ts), so the desktop and the web app serve them
+  // from the same table. Harbor sends no live event for a connection, which
+  // is why the settings panel asks again instead of listening.
+  'spaces:listConnectionApps': {
+    req: z.object({ orgId: z.string(), search: z.string().optional() }),
+    res: z.object({ apps: z.array(z.custom<SpacesTypes.ConnectionApp>()), available: z.boolean() }),
+  },
+  'spaces:listConnectionTriggers': {
+    req: z.object({ orgId: z.string(), app: z.string() }),
+    res: z.object({ triggers: z.array(z.custom<SpacesTypes.ConnectionTriggerType>()) }),
+  },
+  'spaces:listSpaceConnections': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ connections: z.array(z.custom<SpacesTypes.SpaceConnection>()), available: z.boolean(), filterAvailable: z.boolean() }),
+  },
+  'spaces:createSpaceConnection': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), app: z.string(), name: z.string().optional() }),
+    res: z.object({ connection: z.custom<SpacesTypes.SpaceConnection>(), authorizeUrl: z.string() }),
+  },
+  'spaces:authorizeSpaceConnection': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), connectionId: z.string() }),
+    res: z.object({ connection: z.custom<SpacesTypes.SpaceConnection>(), authorizeUrl: z.string() }),
+  },
+  'spaces:updateSpaceConnection': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      connectionId: z.string(),
+      name: z.string().optional(),
+      triggers: z.array(z.custom<SpacesTypes.ConnectionTriggerInput>()).optional(),
+      filter: z.boolean().optional(),
+      paused: z.boolean().optional(),
+    }),
+    res: z.object({ connection: z.custom<SpacesTypes.SpaceConnection>() }),
+  },
+  'spaces:deleteSpaceConnection': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), connectionId: z.string() }),
+    res: z.object({}),
+  },
+  'spaces:listConnectionEvents': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), connectionId: z.string(), outcome: z.enum(['pending', 'posted', 'skipped', 'failed']).optional(), limit: z.number().optional() }),
+    res: z.object({ events: z.array(z.custom<SpacesTypes.ConnectionEvent>()) }),
+  },
   // Archive, unarchive and delete a shared space (2026-10-14, harbor #1186
   // and #1189): admin only. A delete's departure reaches every window as
   // the space_removed frame, the same as leaving.

@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { refreshMembers, refreshOrgRoster } from '@/hooks/use-space-members'
 import { isDeparted } from '@/lib/spaces-direct'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 import { toast } from '@/lib/toast'
 
 // An admin's acts on a person or an agent (Harbor spec §4 Roles, 2026-10-19):
@@ -66,6 +67,8 @@ export function MemberAdminActions({ member, onAct }: { member: spaces.Member | 
     const admin = useContext(MemberAdminContext)
     const [busy, setBusy] = useState(false)
     if (!admin?.isAdmin || !member || isDeparted(member)) return null
+    // A connection's member leaves when its app is disconnected, in the space's settings (harbor spec §8 Space connections, 2026-11-28): Harbor refuses its removal here.
+    if (isConnectionMember(member)) return null
     const self = member.id === admin.selfId
     const canRemoveFromSpace = !!admin.space && !self && admin.inSpace(member.id)
     // An agent is never an admin; Jev is built into the org and can't be removed.

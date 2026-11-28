@@ -4,6 +4,7 @@ import { invokeSpace } from '@/lib/spaces-invoke'
 import { canActInSpace, useSpaceAccess } from '@/lib/spaces-access'
 import { useSpaceMembers } from '@/hooks/use-space-members'
 import { isDeparted, isOthersPersonalAgent, isRetiredAgent } from '@/lib/spaces-direct'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { MemberAvatar } from '@/components/spaces/atoms'
@@ -154,7 +155,8 @@ export function TodoListView({ orgId, spaceId, selfMemberId, assetId, content, v
         [server.content, pending],
     )
     // An assignee is a mention, so someone else's personal agent is left out (2026-10-30), and Ro while it is off.
-    const roster = useMemo(() => members.filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId) && !isRetiredAgent(m)), [members, selfMemberId])
+    // Nor a space connection's member (harbor spec §8 Space connections, 2026-11-28), which does no work to be assigned.
+    const roster = useMemo(() => members.filter((m) => !isDeparted(m) && !isOthersPersonalAgent(m, selfMemberId) && !isRetiredAgent(m) && !isConnectionMember(m)), [members, selfMemberId])
     const names = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
 
     const [widths, setWidths] = useState(() => readWidths(columnsKey(orgId, spaceId, assetId)))

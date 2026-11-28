@@ -25,6 +25,8 @@ export type HarborChannel =
   | 'spaces:createAgentKey' | 'spaces:revokeAgentKey' | 'spaces:renameAgent' | 'spaces:setAgentPersonal' | 'spaces:setAgentSuper' | 'spaces:setupInstances' | 'spaces:createSetupInstance' | 'spaces:setAgentProfile'
   | 'spaces:managedAgentKinds' | 'spaces:createManagedAgent' | 'spaces:deleteManagedAgent' | 'spaces:setHostingLlm'
   | 'spaces:setSpaceGraph' | 'spaces:getSpaceGraph'
+  | 'spaces:listConnectionApps' | 'spaces:listConnectionTriggers' | 'spaces:listSpaceConnections' | 'spaces:createSpaceConnection'
+  | 'spaces:authorizeSpaceConnection' | 'spaces:updateSpaceConnection' | 'spaces:deleteSpaceConnection' | 'spaces:listConnectionEvents'
   | 'spaces:getHosting' | 'spaces:setHostingEnv' | 'spaces:deleteHostingEnv' | 'spaces:hostingPower' | 'spaces:getHostingSize' | 'spaces:setHostingSize'
   | 'spaces:runHostingCommand' | 'spaces:getHostingCommand' | 'spaces:cancelHostingCommand' | 'spaces:openHostingConsole' | 'spaces:checkHostingSignIn' | 'spaces:revokeHostingSignIn' | 'spaces:getHostingLogs'
   | 'spaces:listHostingFiles' | 'spaces:readHostingFile' | 'spaces:writeHostingFile' | 'spaces:makeHostingDir' | 'spaces:moveHostingFile' | 'spaces:deleteHostingFile'
@@ -94,6 +96,32 @@ export function harborChannelHandlers({ getClient, getLive, subscriptions, emit,
 
     'spaces:getSpaceGraph': async (args) =>
       getClient(args.orgId).getSpaceGraph(args.spaceId, { ...(args.about !== undefined ? { about: args.about } : {}), ...(args.limit !== undefined ? { limit: args.limit } : {}) }),
+
+    // Space connections (spec §8 Space connections, 2026-11-28): one Harbor call each, so the desktop and the web app serve them alike.
+    'spaces:listConnectionApps': async (args) => getClient(args.orgId).listConnectionApps(args.search),
+    'spaces:listConnectionTriggers': async (args) => ({ triggers: await getClient(args.orgId).listConnectionTriggers(args.app) }),
+    'spaces:listSpaceConnections': async (args) => getClient(args.orgId).listSpaceConnections(args.spaceId),
+    'spaces:createSpaceConnection': async (args) =>
+      getClient(args.orgId).createSpaceConnection(args.spaceId, { app: args.app, ...(args.name !== undefined ? { name: args.name } : {}) }),
+    'spaces:authorizeSpaceConnection': async (args) => getClient(args.orgId).authorizeSpaceConnection(args.spaceId, args.connectionId),
+    'spaces:updateSpaceConnection': async ({ orgId, spaceId, connectionId, name, triggers, filter, paused }) => ({
+      connection: await getClient(orgId).updateSpaceConnection(spaceId, connectionId, {
+        ...(name !== undefined ? { name } : {}),
+        ...(triggers !== undefined ? { triggers } : {}),
+        ...(filter !== undefined ? { filter } : {}),
+        ...(paused !== undefined ? { paused } : {}),
+      }),
+    }),
+    'spaces:deleteSpaceConnection': async (args) => {
+      await getClient(args.orgId).deleteSpaceConnection(args.spaceId, args.connectionId);
+      return {};
+    },
+    'spaces:listConnectionEvents': async (args) => ({
+      events: await getClient(args.orgId).listConnectionEvents(args.spaceId, args.connectionId, {
+        ...(args.outcome !== undefined ? { outcome: args.outcome } : {}),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      }),
+    }),
 
     'spaces:archiveSpace': async (args) => ({
       space: await getClient(args.orgId).archiveSpace(args.spaceId),
