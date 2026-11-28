@@ -118,6 +118,7 @@ export interface AbortableCommandResult extends CommandResult {
 }
 
 const SIGKILL_GRACE_MS = 200;
+const STDIO_DRAIN_GRACE_MS = 1000;
 
 /**
  * Kill a process tree using negative PID (process group kill on Unix).
@@ -232,36 +233,38 @@ export function executeCommandAbortable(
       }, options.timeout);
     }
 
-    proc.once('exit', (code) => {
+    let drainTimer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
       exited = true;
-      // Cleanup listeners
-      if (options?.signal) {
-        options.signal.removeEventListener('abort', abortHandler);
-      }
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      options?.signal?.removeEventListener('abort', abortHandler);
+      clearTimeout(timeoutId);
+      clearTimeout(drainTimer);
+    };
 
-      if (wasAborted) {
-        stdout += '\n\n(Command was aborted)';
-      }
-
+    const finish = (code: number | null) => {
+      cleanup();
       resolve({
-        stdout: stdout.trim(),
+        stdout: (wasAborted ? stdout + '\n\n(Command was aborted)' : stdout).trim(),
         stderr: stderr.trim(),
         exitCode: code ?? 1,
         wasAborted,
       });
+    };
+
+    proc.once('exit', (code) => {
+      cleanup();
+      // 2026-11-28: exit can precede the last bytes on the pipes. Wait for
+      // close, but bound the wait in case descendants keep the pipes open.
+      drainTimer = setTimeout(() => {
+        proc.stdout?.destroy();
+        proc.stderr?.destroy();
+        finish(code);
+      }, STDIO_DRAIN_GRACE_MS);
     });
+    proc.once('close', finish);
 
     proc.once('error', (err) => {
-      exited = true;
-      if (options?.signal) {
-        options.signal.removeEventListener('abort', abortHandler);
-      }
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      cleanup();
       resolve({
         stdout: '',
         stderr: err.message,
