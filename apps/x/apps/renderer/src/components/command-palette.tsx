@@ -29,6 +29,7 @@ import { projectLabel, useCodeSessions } from '@/components/code/use-code-sessio
 import { highlight } from '@/components/spaces/highlight'
 import { useOrgRosters } from '@/hooks/use-space-members'
 import { useSpaceFeeds, useSpacesOrgs } from '@/hooks/use-spaces'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 import {
   PALETTE_SCOPES,
   PALETTE_SECTIONS,
@@ -385,7 +386,8 @@ export function CommandPalette({ open, onOpenChange, chats, notes, defaultScope,
         })
       }
       for (const m of rosters.get(org.id) ?? []) {
-        if (m.id === org.memberId || withDm.has(m.id)) continue
+        // A space connection's member is not someone to message (harbor spec §8 Space connections, 2026-11-28): Harbor refuses the DM.
+        if (m.id === org.memberId || withDm.has(m.id) || isConnectionMember(m)) continue
         items.push({
           texts: [m.displayName],
           priority: 2,

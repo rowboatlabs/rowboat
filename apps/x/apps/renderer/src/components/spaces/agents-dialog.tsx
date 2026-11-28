@@ -2,6 +2,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useState, type ReactNo
 import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Hash, Loader2, MessageSquare, Plus } from 'lucide-react'
 import { ConnectIcon, RowboatRunsIcon, ThisComputerIcon } from '@/components/spaces/path-icons'
 import type { spaces } from '@x/shared'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -324,7 +325,8 @@ export function AgentsDialog({ org, open, onOpenChange, start }: {
     const names = useMemo(() => new Map(roster.map((m) => [m.id, m.displayName])), [roster])
     const isAdmin = roster.find((m) => m.id === org.memberId)?.role === 'admin'
     const [agents, setAgents] = useState<spaces.AgentListing[] | null>(null)
-    const activeAgents = agents?.filter(({ agent, hosting }) => !agent.deactivatedAt && !agent.removedAt && hosting?.status !== 'deleting' && hosting?.status !== 'deleted') ?? null
+    // Harbor's listing leaves out space connections' members (harbor spec §8 Space connections, 2026-11-28); a server that listed one would offer keys and settings it refuses.
+    const activeAgents = agents?.filter(({ agent, hosting }) => !agent.deactivatedAt && !agent.removedAt && !isConnectionMember(agent) && hosting?.status !== 'deleting' && hosting?.status !== 'deleted') ?? null
     const [screen, setScreen] = useState<Screen>({ name: 'list' })
     const [busy, setBusy] = useState(false)
     const [chosen, setChosen] = useState<string | null>(null)

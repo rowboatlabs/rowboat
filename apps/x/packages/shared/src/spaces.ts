@@ -6,6 +6,9 @@ export { LLM_PROVIDERS, ownerSetsUp } from '@rowboat/spaces-protocol';
 // The space graph (harbor spec §8 Space graph, 2026-11-12): the one computation of an edge's weight, so the app and the server agree.
 export { weighGraph, GRAPH_HALF_LIFE_DAYS } from '@rowboat/spaces-protocol';
 export type { SpaceGraph, GraphThread, GraphEntity, GraphEdge, GraphThreadKind, GraphEntityKind, GraphRelation, WeighedEdge, GraphWeightOptions } from '@rowboat/spaces-protocol';
+// Space connections (harbor spec §8 Space connections, 2026-11-28): the one test of whether a member is a connection's, so every picker and label agrees with the server.
+export { isConnectionMember, CONNECTION_KIND, CONNECTION_NAME_MAX, CONNECTION_TRIGGERS_MAX } from '@rowboat/spaces-protocol';
+export type { SpaceConnection, ConnectionApp, ConnectionTriggerType, ConnectionTrigger, ConnectionTriggerInput, ConnectionEvent, ConnectionEventOutcome, ConnectionStatus } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
   AgentCredential,

@@ -11,6 +11,7 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { isDeparted, isRetiredAgent } from '@/lib/spaces-direct'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 
 // "Add people" (2026-09-29): any member adds existing org members, people or
 // agents, to a space they are in. The candidates are the org roster (the
@@ -37,7 +38,8 @@ export function AddMembersDialog({ org, space, members, open, onOpenChange, kind
         const q = query.trim().toLowerCase()
         // A deleted account, or someone else's personal agent, is never offered
         // (2026-10-13, 2026-10-26): Harbor refuses the add. Nor is Ro while it is off (2026-10-30).
-        return roster.filter((m) => (!kind || (m.kind === 'agent') === (kind === 'agents')) && !inSpace.has(m.id) && !isDeparted(m) && !isRetiredAgent(m) && (!q || m.displayName.toLowerCase().includes(q)))
+        // Nor a space connection's member (harbor spec §8 Space connections, 2026-11-28): it belongs to the one space its app was connected to.
+        return roster.filter((m) => (!kind || (m.kind === 'agent') === (kind === 'agents')) && !inSpace.has(m.id) && !isDeparted(m) && !isRetiredAgent(m) && !isConnectionMember(m) && (!q || m.displayName.toLowerCase().includes(q)))
     }, [roster, inSpace, query, kind])
 
     useEffect(() => {

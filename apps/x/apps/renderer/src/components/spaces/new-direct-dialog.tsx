@@ -6,6 +6,7 @@ import { AgentBadge, MemberAvatar } from '@/components/spaces/atoms'
 import { useOrgRoster } from '@/hooks/use-space-members'
 import { refreshSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { isDeparted, isOthersPersonalAgent, isSelfDirect, isRetiredAgent, otherParticipant } from '@/lib/spaces-direct'
+import { isConnectionMember } from '@x/shared/dist/spaces.js'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -44,7 +45,8 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
         const others = roster
             // A deleted account, or someone else's personal agent, is never offered
             // (2026-10-13, 2026-10-26): Harbor refuses the DM. Nor is Ro while it is off (2026-10-30).
-            .filter((m) => m.id !== org.memberId && !isDeparted(m) && !isOthersPersonalAgent(m, org.memberId) && !isRetiredAgent(m) && (!q || m.displayName.toLowerCase().includes(q)))
+            // Nor a space connection's member (harbor spec §8 Space connections, 2026-11-28): it posts in its own space only.
+            .filter((m) => m.id !== org.memberId && !isDeparted(m) && !isOthersPersonalAgent(m, org.memberId) && !isRetiredAgent(m) && !isConnectionMember(m) && (!q || m.displayName.toLowerCase().includes(q)))
             .sort((a, b) => Number(existing.has(b.id)) - Number(existing.has(a.id)))
         return self.concat(others)
     }, [roster, org.memberId, query, existing])
