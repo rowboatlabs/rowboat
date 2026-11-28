@@ -51,6 +51,10 @@ import {
   type ResolveInviteResult,
   type RestoreAssetResult,
   type Routes,
+  type CalendarEntry,
+  type CalendarEntryPatch,
+  type CalendarOccurrence,
+  type NewCalendarEntry,
   type SearchKind,
   type SearchResults,
   type Space,
@@ -164,6 +168,7 @@ type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 type VotePollInput = z.infer<Routes['votePoll']['request']>;
+type CalendarWriteResult = z.infer<Routes['createCalendarEntry']['response']>;
 type EndPollInput = z.infer<Routes['endPoll']['request']>;
 type DecideApprovalInput = z.infer<Routes['decideApproval']['request']>;
 
@@ -1050,6 +1055,28 @@ export class SpacesClient {
         input,
       )
     ).message;
+  }
+
+  // --- the space calendar (api.ts, 2026-11-28) ---
+
+  /** The entries that happen in [from, to) and each time they do (api.ts listCalendarEntries). */
+  async listCalendarEntries(spaceId: string, from: string, to: string): Promise<{ entries: CalendarEntry[]; occurrences: CalendarOccurrence[] }> {
+    const qs = new URLSearchParams({ from, to });
+    return this.request('GET', this.space(spaceId, `/calendar?${qs.toString()}`), routes.listCalendarEntries.response);
+  }
+
+  /** Put an entry on the calendar (api.ts createCalendarEntry): `message` is the card Harbor posted, when the entry tags someone else. */
+  async createCalendarEntry(spaceId: string, input: Omit<NewCalendarEntry, 'actingMode' | 'agentName'>): Promise<CalendarWriteResult> {
+    return this.request('POST', this.space(spaceId, '/calendar'), routes.createCalendarEntry.response, { ...input, actingMode: 'direct' });
+  }
+
+  /** Change the fields present (api.ts updateCalendarEntry); null clears the description or the repeat. */
+  async updateCalendarEntry(spaceId: string, entryId: string, patch: Omit<CalendarEntryPatch, 'actingMode' | 'agentName'>): Promise<CalendarWriteResult> {
+    return this.request('POST', this.space(spaceId, `/calendar/${encodeURIComponent(entryId)}`), routes.updateCalendarEntry.response, { ...patch, actingMode: 'direct' });
+  }
+
+  async deleteCalendarEntry(spaceId: string, entryId: string): Promise<CalendarWriteResult> {
+    return this.request('POST', this.space(spaceId, `/calendar/${encodeURIComponent(entryId)}/delete`), routes.deleteCalendarEntry.response, { actingMode: 'direct' });
   }
 
   async archiveThread(spaceId: string, rootMessageId: string, archived: boolean): Promise<Message> {

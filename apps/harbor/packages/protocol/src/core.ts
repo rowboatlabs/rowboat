@@ -1,7 +1,7 @@
 import { Availability } from './availability.js';
 import { z } from 'zod';
 import { Approval, type ApprovalAction } from './approval.js';
-import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetId, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId, Ulid } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
 // (spec §2, principle 4); attribution carries the acting mode. An agent that
@@ -734,6 +734,74 @@ export const PollEnd = z.object({
 });
 export type PollEnd = z.infer<typeof PollEnd>;
 
+/** An IANA time zone name the runtime knows ("America/Los_Angeles", "UTC"). */
+export const TimeZone = z.string().min(1).max(100).refine((value) => {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}, 'expected an IANA time zone');
+export type TimeZone = z.infer<typeof TimeZone>;
+
+export const CalendarEntryId = Ulid;
+export type CalendarEntryId = z.infer<typeof CalendarEntryId>;
+
+/**
+ * How a calendar entry repeats (2026-11-28, "channel calendar" in rowboat):
+ * daily, weekly or monthly, the whole series edited as one. Occurrences are
+ * computed, never stored (calendar.ts `expandOccurrences`), in the entry's
+ * time zone, so 9:00 stays 9:00 across a daylight-saving change. A monthly
+ * entry repeats on its start's day of the month and skips months without it.
+ */
+export const CalendarRecurrence = z.object({
+  freq: z.enum(['daily', 'weekly', 'monthly']),
+  /** Every `interval` days, weeks or months. */
+  interval: z.number().int().min(1).max(99).default(1),
+  /** Weekly only: the days it falls on, 0 = Sunday to 6 = Saturday. Absent = the start's weekday. */
+  weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+  /** The last date, in the entry's time zone, an occurrence may start on. Absent = it never ends. */
+  until: z.iso.date().optional(),
+});
+export type CalendarRecurrence = z.infer<typeof CalendarRecurrence>;
+
+/**
+ * One entry on a space's calendar (2026-11-28, "channel calendar" in
+ * rowboat): what a member plans to do and when, written by people and agents
+ * alike. It is a record: Harbor runs nothing and reminds no one when it
+ * starts. `Entry` on the wire, "event" in the UI, since an event here is a
+ * fact on the log.
+ *
+ * A timed entry's `start` and `end` are UTC instants; an all-day entry's are
+ * dates, `end` being its last day. `threadRoot` is the one thread about it:
+ * the card Harbor posts when the entry tags someone else, the thread it was
+ * asked for in, or the card posted with the first update. A deleted entry
+ * keeps its row so its card can say so.
+ */
+export const CalendarEntry = z.object({
+  id: CalendarEntryId,
+  spaceId: SpaceId,
+  title: z.string().min(1).max(200),
+  /** Markdown. */
+  description: z.string().min(1).max(4_000).optional(),
+  allDay: z.boolean(),
+  start: z.string(),
+  end: z.string(),
+  /** The zone the times were meant in: recurrence expands in it, and Harbor's text names times in it. */
+  timeZone: TimeZone,
+  recurrence: CalendarRecurrence.optional(),
+  /** The members it tags, each a member of the space when tagged. */
+  attendees: z.array(MemberId).max(50).default([]),
+  threadRoot: MessageId.optional(),
+  createdBy: Attribution,
+  createdAt: z.iso.datetime(),
+  updatedBy: Attribution.optional(),
+  updatedAt: z.iso.datetime().optional(),
+  deletedAt: z.iso.datetime().optional(),
+});
+export type CalendarEntry = z.infer<typeof CalendarEntry>;
+
 /**
  * The author tombstoning their own message — the one act the content plane
  * restricts to a single member (deleter == author always; admin powers are
@@ -860,6 +928,14 @@ export const Message = z.object({
    * show the card.
    */
   approval: Approval.optional(),
+  /**
+   * Present on a calendar entry's card (2026-11-28, "channel calendar" in
+   * rowboat), folded to the entry as it stands wherever messages are read;
+   * `calendar_entry` space events carry each change. `body` keeps the text
+   * Harbor wrote when it posted the card, for agents and for clients that
+   * cannot show it. Deletion redacts it with the body.
+   */
+  calendarEntry: CalendarEntry.optional(),
   /** The secrets this message hands over: names and who may read them, never values (2026-11-04). Written once; deletion removes them. */
   secrets: MessageSecrets.optional(),
   /** A thread reply its author sent to people only (NewMessage.peopleOnly, 2026-10-27). Written once. */

@@ -12,7 +12,8 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, SecretName, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
+import { CalendarEntryPatch, CalendarOccurrence, NewCalendarEntry } from './calendar.js';
+import { ActingMode, CalendarEntry, CalendarEntryId, AgentCredential, AgentHook, AgentKey, AgentKeySecret, AgentListing, Attribution, InvitePolicy, Member, MemberRole, Membership, Message, OrgSettings, SecretName, SessionMark, ReactionEmoji, Space, SpaceKind, SpaceVisibility, SuperAgent, PlatformInstance, Topic, UpdateAgentProfile, UpdateProfile,
   AgentHosting,
   HostingEnvVar,
   HostingConsole,
@@ -83,6 +84,13 @@ const NewMessage = z.object({
    * container — a topic exists only via createTopic.
    */
   threadRoot: MessageId.optional(),
+  /**
+   * In place of `threadRoot`: a reply in this calendar entry's thread
+   * (2026-11-28, "channel calendar" in rowboat). An entry with no thread yet
+   * gets one first, its card posted as a new root by this author, so there
+   * is one thread per entry however many members post about it at once.
+   */
+  calendarEntryId: CalendarEntryId.optional(),
   /** Reply-to-activity-row provenance (root posts only): the change-set this message answers. */
   anchorChangeSetId: ChangeSetId.optional(),
   body: z.string().min(1).max(65_536),
@@ -1563,6 +1571,63 @@ export const routes = {
       agentName: z.string().max(64).optional(),
     }),
     response: z.object({ message: Message }),
+  },
+  // --- the space calendar (2026-11-28, "channel calendar" in rowboat) ----------
+  /**
+   * The entries that happen in [from, to), and each time they do: a repeating
+   * entry's occurrences are computed for the range (calendar.ts
+   * `expandOccurrences`), so a reader needs no recurrence arithmetic. Deleted
+   * entries are left out. The range is at most CALENDAR_RANGE_DAYS_MAX days.
+   * Readable wherever the space is.
+   */
+  listCalendarEntries: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/calendar',
+    params: z.object({ spaceId: SpaceId }),
+    query: z.object({ from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }) }),
+    response: z.object({ entries: z.array(CalendarEntry), occurrences: z.array(CalendarOccurrence) }),
+  },
+  /**
+   * Put an entry on the space's calendar. Any member may, and may tag any
+   * members of the space. Tagging someone other than yourself tells them:
+   * Harbor posts the entry's card as you, mentioning them, as a new root, or
+   * as a reply when `threadRoot` names the entry's thread. That is `message`,
+   * with the agents it invoked. An entry that tags no one else posts nothing.
+   * Nothing happens when the entry starts.
+   */
+  createCalendarEntry: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/calendar',
+    params: z.object({ spaceId: SpaceId }),
+    request: NewCalendarEntry,
+    response: z.object({ entry: CalendarEntry, message: Message.optional(), invocations: z.array(Invocation).default([]) }),
+  },
+  /**
+   * Change an entry: any member may, whoever created it. Only the fields
+   * present change, and a change that changes nothing is a no-op with no
+   * event. A new time, or newly tagged members, is told in the entry's thread
+   * to the tagged members it concerns, other than you (`message`); an entry
+   * with no thread gets its card first.
+   */
+  updateCalendarEntry: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/calendar/:entryId',
+    params: z.object({ spaceId: SpaceId, entryId: CalendarEntryId }),
+    request: CalendarEntryPatch,
+    response: z.object({ entry: CalendarEntry, message: Message.optional(), invocations: z.array(Invocation).default([]) }),
+  },
+  /**
+   * Delete an entry: any member may. It leaves the calendar and its card says
+   * so; the tagged members other than you are told in its thread
+   * (`message`). Deleting twice is a no-op. POST like deleteMessage: the
+   * acting mode rides the body.
+   */
+  deleteCalendarEntry: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/calendar/:entryId/delete',
+    params: z.object({ spaceId: SpaceId, entryId: CalendarEntryId }),
+    request: z.object({ actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ entry: CalendarEntry, message: Message.optional(), invocations: z.array(Invocation).default([]) }),
   },
   /**
    * Toggle a vote on a poll answer (reaction semantics: per-(member, answer),

@@ -38,6 +38,7 @@ export function parseRoute(pathname: string): WebRoute {
         : kind === 'settings' ? { kind: 'settings' }
         : kind === 'files' ? { kind: 'files' }
         : kind === 'graph' ? { kind: 'graph' }
+        : kind === 'calendar' ? { kind: 'calendar', ...(id === 'e' && parts[5] ? { entryId: parts[5] } : {}) }
         : kind === 't' && id ? { kind: 'thread', rootMessageId: id }
         : kind === 'a' && id ? { kind: 'file', assetId: id }
         : kind === 'w' && id ? { kind: 'whiteboard', assetId: id }
@@ -58,6 +59,8 @@ export function routePath(orgKey: string, target: { spaceId?: string; view?: Org
         case 'files':
         case 'graph':
             return `${space}/${rail.kind}`
+        case 'calendar':
+            return `${space}/calendar${rail.entryId ? `/e/${encodeURIComponent(rail.entryId)}` : ''}`
         case 'thread':
             return `${space}/t/${encodeURIComponent(rail.rootMessageId)}`
         case 'file':

@@ -225,6 +225,36 @@ describe('SpacesClient', () => {
     expect(removed.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'], lastOffset: expect.any(Number) }]);
   });
 
+  it('the calendar round-trip: an entry that tags someone posts its card, reads back in its range, moves and goes', async () => {
+    const written = await ramnique.createCalendarEntry(spaceId, {
+      title: 'Roadmap review',
+      start: '2026-12-01T15:00:00Z',
+      end: '2026-12-01T16:00:00Z',
+      timeZone: 'UTC',
+      recurrence: { freq: 'weekly', interval: 1 },
+      attendees: ['ramnique', 'gagan'],
+    });
+    expect(written.message).toMatchObject({ mentions: ['gagan'], calendarEntry: { id: written.entry.id } });
+    expect(written.entry.threadRoot).toBe(written.message?.id);
+
+    const read = await gagan.listCalendarEntries(spaceId, '2026-12-01T00:00:00Z', '2026-12-15T00:00:00Z');
+    expect(read.entries.map((e) => e.id)).toEqual([written.entry.id]);
+    expect(read.occurrences.map((o) => o.start)).toEqual(['2026-12-01T15:00:00.000Z', '2026-12-08T15:00:00.000Z']);
+
+    const moved = await gagan.updateCalendarEntry(spaceId, written.entry.id, { start: '2026-12-02T15:00:00Z', end: '2026-12-02T16:00:00Z', recurrence: null });
+    expect(moved.entry).toMatchObject({ start: '2026-12-02T15:00:00.000Z', updatedBy: { memberId: 'gagan' } });
+    expect(moved.entry.recurrence).toBeUndefined();
+    expect(moved.message?.threadRoot).toBe(written.entry.threadRoot);
+
+    // A message about the entry is addressed to the entry and lands in its thread.
+    const update = await ramnique.postMessage(spaceId, { calendarEntryId: written.entry.id, body: 'room changed', actingMode: 'direct' });
+    expect(update.message.threadRoot).toBe(written.entry.threadRoot);
+
+    const gone = await ramnique.deleteCalendarEntry(spaceId, written.entry.id);
+    expect(gone.entry.deletedAt).toBeDefined();
+    expect((await gagan.listCalendarEntries(spaceId, '2026-12-01T00:00:00Z', '2026-12-15T00:00:00Z')).entries).toEqual([]);
+  });
+
   it('deletion tombstones the message: author-only, body gone from reads', async () => {
     const started = await ramnique.postMessage(spaceId, { body: 'posted in the wrong space', actingMode: 'direct' });
     const messageId = started.message.id;

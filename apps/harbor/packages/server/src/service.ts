@@ -12,6 +12,7 @@ import type { BillingAccounts } from './billing.js';
 import { Assets } from './core/assets.js';
 import { Images } from './core/images.js';
 import { Feed } from './core/feed.js';
+import { Calendar, type CalendarWrite, type DeleteCalendarEntryInput } from './core/calendar.js';
 import { approvalCardBody } from './core/approval-card.js';
 import { Invocations } from './core/invocations.js';
 import { Kernel, type ActorCtx, type BindIdentity, type OrgInfo } from './core/kernel.js';
@@ -30,6 +31,10 @@ import type {
   ActivityKind,
   ActivityPage,
   Asset,
+  CalendarEntry,
+  CalendarEntryPatch,
+  CalendarOccurrence,
+  NewCalendarEntry,
   BlobInfo,
   ChangeSet,
   CreateAsset,
@@ -93,6 +98,7 @@ export class HarborService {
   private readonly assets: Assets;
   private readonly images: Images;
   private readonly feed: Feed;
+  private readonly calendar: Calendar;
   private readonly readState: ReadState;
   private readonly agents: Agents;
   private readonly hosting: Hosting;
@@ -119,6 +125,7 @@ export class HarborService {
     this.images = new Images(this.k, blobs);
     this.invocations = new Invocations(this.k);
     this.feed = new Feed(this.k, this.assets, notifier, this.invocations);
+    this.calendar = new Calendar(this.k, this.feed);
     this.readState = new ReadState(this.k, this.spaces, this.feed);
     this.agents = new Agents(this.k, this.spaces);
     this.hosting = new Hosting(this.k, this.spaces, this.agents);
@@ -671,7 +678,24 @@ export class HarborService {
     return this.feed.getMessage(ctx, spaceId, messageId);
   }
   postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message; invocations: Invocation[] }> {
+    // A message about a calendar entry goes to the entry's thread, which the calendar finds or starts (2026-11-28).
+    const { calendarEntryId } = input;
+    if (calendarEntryId) return this.calendar.post(ctx, spaceId, { ...input, calendarEntryId });
     return this.feed.postMessage(ctx, spaceId, input);
+  }
+
+  // --- the space calendar (2026-11-28, "channel calendar" in rowboat) ---
+  listCalendarEntries(ctx: ActorCtx, spaceId: string, range: { from: string; to: string }): Promise<{ entries: CalendarEntry[]; occurrences: CalendarOccurrence[] }> {
+    return this.calendar.list(ctx, spaceId, range);
+  }
+  createCalendarEntry(ctx: ActorCtx, spaceId: string, input: NewCalendarEntry): Promise<CalendarWrite> {
+    return this.calendar.create(ctx, spaceId, input);
+  }
+  updateCalendarEntry(ctx: ActorCtx, spaceId: string, entryId: string, input: CalendarEntryPatch): Promise<CalendarWrite> {
+    return this.calendar.update(ctx, spaceId, entryId, input);
+  }
+  deleteCalendarEntry(ctx: ActorCtx, spaceId: string, entryId: string, input: DeleteCalendarEntryInput): Promise<CalendarWrite> {
+    return this.calendar.delete(ctx, spaceId, entryId, input);
   }
   readMessageSecret(ctx: ActorCtx, spaceId: string, messageId: string, name: string): Promise<string> {
     return this.feed.readMessageSecret(ctx, spaceId, messageId, name);

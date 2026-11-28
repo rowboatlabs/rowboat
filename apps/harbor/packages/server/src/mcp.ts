@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { agentOnlyMcpToolNames, mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
+import { agentOnlyMcpToolNames, mcpTools, NewPoll, type ActingMode, type ReadAssetResult, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message, type CalendarEntry, type CalendarEntryPatch, type Invocation, type NewCalendarEntry } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import { authenticateRequest, wwwAuthenticate, type OrgAuth } from './auth.js';
 import { HarborError } from './errors.js';
@@ -136,6 +136,18 @@ function binaryNote(origin: string, tool: string, args: unknown, result: unknown
     text: `This file is binary, so read_asset carries no bytes. Download them with the bearer you call this ` +
       `server with: GET ${origin}/v1/spaces/${spaceId}/blobs/${blob.hash}`,
   }];
+}
+
+/** A calendar write as a tool answers it: the entry, and the id of the message Harbor posted about it, if any. */
+function calendarWritten(written: { entry: CalendarEntry; message?: Message; invocations: Invocation[] }) {
+  return {
+    entry: written.entry,
+    ...(written.message ? { messageId: written.message.id } : {}),
+    // A refused hand-off comes back to the agent whose entry tagged it (spec §8).
+    ...(written.invocations.length > 0
+      ? { invocations: written.invocations.map((i) => ({ agentId: i.agentId, state: i.state, ...(i.refusal ? { refusal: i.refusal } : {}) })) }
+      : {}),
+  };
 }
 
 async function dispatch(
@@ -375,6 +387,7 @@ async function dispatch(
       const a = args as {
         spaceId: string;
         threadRoot?: string;
+        calendarEntryId?: string;
         body: string;
         summary?: string;
         poll?: z.infer<typeof NewPoll>;
@@ -383,6 +396,7 @@ async function dispatch(
       };
       const { message, invocations } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
+        ...(a.calendarEntryId ? { calendarEntryId: a.calendarEntryId } : {}),
         body: a.body,
         ...(a.summary ? { summary: a.summary } : {}),
         ...(a.poll !== undefined ? { poll: a.poll } : {}),
@@ -443,6 +457,26 @@ async function dispatch(
     case 'end_poll': {
       const a = args as { spaceId: string; messageId: string };
       return { message: await service.endPoll(ctx, a.spaceId, a.messageId, attribution) };
+    }
+    // --- the space calendar (2026-11-28, "channel calendar" in rowboat) ----------
+    case 'list_calendar_entries': {
+      const a = args as { spaceId: string; from?: string; to?: string };
+      // With no range, the next thirty days: what an agent asking "what is planned" means.
+      const from = a.from ?? service.now();
+      const to = a.to ?? new Date(Date.parse(from) + 30 * 86_400_000).toISOString();
+      return service.listCalendarEntries(ctx, a.spaceId, { from, to });
+    }
+    case 'create_calendar_entry': {
+      const { spaceId, ...entry } = args as Omit<NewCalendarEntry, 'actingMode' | 'agentName'> & { spaceId: string };
+      return calendarWritten(await service.createCalendarEntry(ctx, spaceId, { ...entry, ...attribution }));
+    }
+    case 'update_calendar_entry': {
+      const { spaceId, entryId, ...patch } = args as Omit<CalendarEntryPatch, 'actingMode' | 'agentName'> & { spaceId: string; entryId: string };
+      return calendarWritten(await service.updateCalendarEntry(ctx, spaceId, entryId, { ...patch, ...attribution }));
+    }
+    case 'delete_calendar_entry': {
+      const a = args as { spaceId: string; entryId: string };
+      return calendarWritten(await service.deleteCalendarEntry(ctx, a.spaceId, a.entryId, attribution));
     }
     case 'restore_asset': {
       const a = args as { spaceId: string; assetId: string; reason: string };

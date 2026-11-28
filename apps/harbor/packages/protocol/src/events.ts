@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Attribution, Member, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, SessionMark, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
+import { Attribution, CalendarEntry, Member, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, SessionMark, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetId, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 import { Approval } from './approval.js';
 import { Invocation, InvocationActivity, InvocationId } from './invocation.js';
@@ -79,6 +79,18 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     type: z.literal('thread_session'),
     rootMessageId: MessageId,
     session: SessionMark.nullable(),
+    by: Attribution,
+  }),
+  /**
+   * A calendar entry created, changed or deleted (2026-11-28, "channel
+   * calendar" in rowboat): the whole entry as it now stands. Clients redraw
+   * it on the calendar and on its card, the message whose `calendarEntry`
+   * has this id. A change that changes nothing emits nothing.
+   */
+  z.object({
+    type: z.literal('calendar_entry'),
+    entry: CalendarEntry,
+    action: z.enum(['created', 'updated', 'deleted']),
     by: Attribution,
   }),
   MembershipEvent,

@@ -326,6 +326,62 @@
 .space-graph-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
 .space-graph-dot[data-type='thread'] { border-radius: 2px; }
 
+/* The Calendar tab (2026-11-28). The grid is FullCalendar's "classic" theme,
+   which draws from a palette of custom properties. This is that palette in
+   Spaces' own colours, so the grid takes the app's light and dark themes with
+   no second set of values, and its popover, which the library mounts outside
+   the view, takes them too. Events are quiet blue washes with their owner's
+   face: identity is carried by the avatar, not by a colour per person. */
+:root {
+  --fc-classic-button: var(--foreground);
+  --fc-classic-button-border: var(--foreground);
+  --fc-classic-button-strong: var(--foreground);
+  --fc-classic-button-strong-border: var(--foreground);
+  --fc-classic-button-outline: var(--border);
+  --fc-classic-button-foreground: var(--background);
+  --fc-classic-primary: var(--stream-link, #1264a3);
+  --fc-classic-primary-foreground: #fff;
+  --fc-classic-event: color-mix(in srgb, var(--stream-link, #1264a3) 16%, var(--background));
+  --fc-classic-event-contrast: var(--foreground);
+  --fc-classic-background-event: var(--stream-link, #1264a3);
+  --fc-classic-background-event-opacity: 12%;
+  --fc-classic-background-event-foreground-opacity: 50%;
+  --fc-classic-highlight: color-mix(in srgb, var(--stream-link, #1264a3) 12%, transparent);
+  --fc-classic-today: color-mix(in srgb, var(--stream-link, #1264a3) 6%, transparent);
+  --fc-classic-now: #e5484d;
+  --fc-classic-small-dot-width: 8px;
+  --fc-classic-large-dot-width: 10px;
+  --fc-classic-background: var(--background);
+  --fc-classic-faint: color-mix(in srgb, var(--foreground) 3%, transparent);
+  --fc-classic-muted: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --fc-classic-strong: color-mix(in srgb, var(--foreground) 12%, transparent);
+  --fc-classic-foreground: var(--foreground);
+  --fc-classic-faint-foreground: color-mix(in srgb, var(--muted-foreground) 60%, transparent);
+  --fc-classic-muted-foreground: var(--muted-foreground);
+  --fc-classic-border: var(--border);
+  --fc-classic-strong-border: color-mix(in srgb, var(--foreground) 24%, transparent);
+}
+.space-calendar { font-size: 13px; }
+.space-calendar-event {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+  padding: 1px 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--foreground);
+  overflow: hidden;
+}
+.space-calendar-event-time { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.space-calendar-event-title { min-width: 0; flex: 1 1 auto; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-calendar-event-more { flex: none; font-size: 10px; color: var(--muted-foreground); }
+/* In the month, the library leads a timed event with a dot. The owner's face is already there. */
+.space-calendar-block.is-timed > div:empty { display: none; }
+.space-calendar-block { cursor: pointer; }
+.space-calendar-block.is-past { opacity: 0.62; }
+
 /* The Spaces rail floats the same way when docked (2026-11-13): the same
    16px corners, hairline ring and soft shadow as the main sidebar (sidebar.css). */
 .rowboat-floating-rail {

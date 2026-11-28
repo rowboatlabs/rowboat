@@ -3,6 +3,7 @@ import {
   stampsEqual,
   type Attribution,
   type Approval,
+  type CalendarEntry,
   type ApprovalAction,
   type ApprovalRequest,
   type Invocation,
@@ -67,6 +68,27 @@ export type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 export type VotePollInput = z.infer<Routes['votePoll']['request']>;
 
 export type EndPollInput = z.infer<Routes['endPoll']['request']>;
+
+/**
+ * What rides a post in-process, never on the wire: `finishes`, `approval`
+ * and `relayOf` (postMessage), and for a calendar entry's card (2026-11-28)
+ * `calendarEntry`, the entry it shows, and `quiet`, a card posted only to
+ * start the thread the next message replies in, which invokes and notifies
+ * no one, since that reply is the news.
+ */
+export interface PostOptions {
+  finishes?: string;
+  approval?: { invocationId: string; request: ApprovalRequest; action?: ApprovalAction };
+  relayOf?: string;
+  calendarEntry?: CalendarEntry;
+  quiet?: boolean;
+}
+
+/** What posts made inside one space lock leave to do once it commits: invocation frames, and a notification decision per message. */
+export interface PostBatch {
+  outbox: InvocationOutbox;
+  posted: Message[];
+}
 
 /** Poll duration when the create request names none — Discord's default. */
 const DEFAULT_POLL_HOURS = 24;
@@ -144,11 +166,15 @@ export class Feed {
     const cardIds = messages.filter((m) => m.approval).map((m) => m.id);
     const approvals = new Map<string, Approval>();
     for (const a of await this.k.store.listApprovalsForMessages(spaceId, cardIds)) approvals.set(a.messageId, a);
+    // A calendar entry's card shows the entry as it stands (2026-11-28), fetched the same way.
+    const entries = new Map<string, CalendarEntry>();
+    for (const e of await this.k.store.listCalendarEntriesByIds(spaceId, [...new Set(messages.flatMap((m) => (m.calendarEntry ? [m.calendarEntry.id] : [])))])) entries.set(e.id, e);
     return messages.map((m) => ({
       ...m,
       reactions: foldReactions(byMessage.get(m.id) ?? []),
       ...(m.poll ? { poll: foldPollVotes(m.poll, votesByMessage.get(m.id) ?? []) } : {}),
       ...(m.approval && !m.deletedAt ? { approval: approvals.get(m.id) ?? m.approval } : {}),
+      ...(m.calendarEntry ? { calendarEntry: entries.get(m.calendarEntry.id) ?? m.calendarEntry } : {}),
     }));
   }
 
@@ -338,6 +364,9 @@ export class Feed {
     if (message.approval && !message.deletedAt) {
       folded.approval = (await this.k.store.listApprovalsForMessages(spaceId, [message.id]))[0] ?? message.approval;
     }
+    if (message.calendarEntry) {
+      folded.calendarEntry = (await this.k.store.getCalendarEntry(spaceId, message.calendarEntry.id)) ?? message.calendarEntry;
+    }
     return folded;
   }
 
@@ -352,14 +381,40 @@ export class Feed {
    * and the agents it mentions take that message's hand-off depth (spec §8
    * Jev, 2026-10-07).
    */
-  async postMessage(
-    ctx: ActorCtx,
-    spaceId: string,
-    input: NewMessage,
-    opts: { finishes?: string; approval?: { invocationId: string; request: ApprovalRequest; action?: ApprovalAction }; relayOf?: string } = {},
-  ): Promise<{ message: Message; invocations: Invocation[] }> {
+  async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage, opts: PostOptions = {}): Promise<{ message: Message; invocations: Invocation[] }> {
     const space = await this.k.requireMember(ctx, spaceId);
     this.k.guardWrite();
+    if (input.session && input.threadRoot) throw new HarborError('invalid_request', 'a reply cannot start a session: mark its thread with setSession');
+    const batch = this.newBatch();
+    const result = await this.k.lockedAs(ctx, spaceId, () => this.postWithin(ctx, space, input, opts, batch));
+    this.settle(space, batch);
+    return result;
+  }
+
+  /** Collects what posts made inside one space lock leave to do after it (settle). */
+  newBatch(): PostBatch {
+    return { outbox: [], posted: [] };
+  }
+
+  /**
+   * After the lock returns: the invocation frames leave, then the
+   * notification decisions run, never blocking the reply (notify.ts: the
+   * `notify` frame to every connection, push to phones; the notifier logs
+   * its own failures).
+   */
+  settle(space: Space, batch: PostBatch): void {
+    this.invocations?.flush(batch.outbox);
+    if (this.notifier) for (const message of batch.posted) void this.notifier.onMessage(space, message);
+  }
+
+  /**
+   * One post, inside a space lock the caller already holds (2026-11-28): how
+   * a write that also posts, a calendar entry and its card, lands whole or
+   * not at all. `postMessage` is this in a lock of its own. The caller holds
+   * `lockedAs` for this actor, and settles the batch once the lock returns.
+   */
+  async postWithin(ctx: ActorCtx, space: Space, input: NewMessage, opts: PostOptions, batch: PostBatch): Promise<{ message: Message; invocations: Invocation[] }> {
+    const spaceId = space.id;
     const author = this.k.attributionOf(ctx, input);
 
     const stamps = await this.stampsFor(spaceId, input.body);
@@ -367,10 +422,12 @@ export class Feed {
     // The agents this message invokes are decided in its transaction, so a
     // mention is never lost between the post and the queue (spec §8); their
     // frames leave with the rest, after the commit.
-    const outbox: InvocationOutbox = [];
+    const outbox = batch.outbox;
     let finishing: Invocation | undefined;
     let raising: Invocation | undefined;
     const invoke = async (message: Message): Promise<{ message: Message; invocations: Invocation[] }> => {
+      if (opts.quiet) return { message, invocations: [] };
+      batch.posted.push(message);
       if (!this.invocations) return { message, invocations: [] };
       // Recorded before the answer below finishes its turn: Jev may tag
       // someone for this message later, at this depth (spec §8 Jev, 2026-10-07).
@@ -380,8 +437,7 @@ export class Feed {
       if (finishing && this.invocations) await this.invocations.finishWithin(finishing, outbox);
       return { message, invocations: invocations.map(forPeople) };
     };
-    if (input.session && input.threadRoot) throw new HarborError('invalid_request', 'a reply cannot start a session: mark its thread with setSession');
-    const result = await this.k.lockedAs(ctx, spaceId, async () => {
+    {
       if (opts.finishes) {
         if (!this.invocations || !input.threadRoot) throw new HarborError('invalid_request', 'an answer is a reply in its invocation\'s thread');
         finishing = await this.invocations.assertFinishable(ctx, opts.finishes, spaceId, input.threadRoot);
@@ -423,6 +479,7 @@ export class Feed {
           reactions: [],
           ...(poll ? { poll } : {}),
           ...(raising && opts.approval ? { approval: this.invocations!.approvalFor(raising, id, opts.approval.request, opts.approval.action) } : {}),
+          ...(opts.calendarEntry ? { calendarEntry: opts.calendarEntry } : {}),
           ...(input.peopleOnly ? { peopleOnly: true as const } : {}),
           ...(secrets ? { secrets: secrets.card } : {}),
           ...stampFields(stamps),
@@ -480,6 +537,7 @@ export class Feed {
         ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
         reactions: [],
         ...(poll ? { poll } : {}),
+        ...(opts.calendarEntry ? { calendarEntry: opts.calendarEntry } : {}),
         ...(secrets ? { secrets: secrets.card } : {}),
         ...(input.session ? { session: input.session } : {}),
         ...stampFields(stamps),
@@ -491,13 +549,7 @@ export class Feed {
       if (author.actingMode === 'direct') await this.k.store.advanceStreamReadMark(spaceId, ctx.memberId, offset, at);
       await this.followMentioned(spaceId, message.id, stamps, ctx.memberId, at);
       return invoke(message);
-    });
-    this.invocations?.flush(outbox);
-    // Notification decisions run OUTSIDE the lock and never block the reply
-    // (notify.ts: the `notify` frame to every connection, push to phones);
-    // the notifier logs its own failures.
-    if (this.notifier) void this.notifier.onMessage(space, result.message);
-    return result;
+    }
   }
 
   /**
@@ -767,7 +819,7 @@ export class Feed {
         },
       });
       // A poll is content: redacted with the body (the store already dropped it). A tombstone addresses nobody.
-      const { poll: _poll, approval: _approval, summary: _summary, ...rest } = message;
+      const { poll: _poll, approval: _approval, calendarEntry: _calendarEntry, summary: _summary, ...rest } = message;
       return this.foldLive(spaceId, { ...rest, body: '', deletedAt: at, mentions: [], mentionsHere: false, mentionsRowboat: false });
     });
   }
@@ -798,6 +850,8 @@ export class Feed {
       // The Discord posture: a poll message is immutable once posted — its
       // body is the poll's fallback rendering, and votes were cast on it.
       if (message.poll) throw new HarborError('invalid_request', 'poll messages cannot be edited');
+      // A calendar entry's card is Harbor's text for the entry (2026-11-28): the entry changes, and its thread says so.
+      if (message.calendarEntry) throw new HarborError('invalid_request', "a calendar entry's card cannot be edited: change the entry");
       // The summary (2026-10-25): left out = kept, null = removed.
       const summary = input.summary === undefined ? message.summary : (input.summary ?? undefined);
       if (message.body === input.body && message.summary === summary) return this.foldLive(spaceId, message);

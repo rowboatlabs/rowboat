@@ -1078,6 +1078,32 @@ export function buildHttpApp(deps: {
     return reply(c, routes.endPoll.response, { message });
   });
 
+  // --- the space calendar (2026-11-28, "channel calendar" in rowboat) -----------
+
+  app.get('/v1/spaces/:spaceId/calendar', async (c) => {
+    const { spaceId } = parseWith(routes.listCalendarEntries.params, c.req.param());
+    const range = parseWith(routes.listCalendarEntries.query, c.req.query());
+    return reply(c, routes.listCalendarEntries.response, await service.listCalendarEntries(actor(c), spaceId, range));
+  });
+
+  app.post('/v1/spaces/:spaceId/calendar', async (c) => {
+    const { spaceId } = parseWith(routes.createCalendarEntry.params, c.req.param());
+    const input = await body(c, routes.createCalendarEntry.request);
+    return reply(c, routes.createCalendarEntry.response, await service.createCalendarEntry(actor(c), spaceId, input));
+  });
+
+  app.post('/v1/spaces/:spaceId/calendar/:entryId', async (c) => {
+    const { spaceId, entryId } = parseWith(routes.updateCalendarEntry.params, c.req.param());
+    const input = await body(c, routes.updateCalendarEntry.request);
+    return reply(c, routes.updateCalendarEntry.response, await service.updateCalendarEntry(actor(c), spaceId, entryId, input));
+  });
+
+  app.post('/v1/spaces/:spaceId/calendar/:entryId/delete', async (c) => {
+    const { spaceId, entryId } = parseWith(routes.deleteCalendarEntry.params, c.req.param());
+    const input = await body(c, routes.deleteCalendarEntry.request);
+    return reply(c, routes.deleteCalendarEntry.response, await service.deleteCalendarEntry(actor(c), spaceId, entryId, input));
+  });
+
   app.post('/v1/spaces/:spaceId/topics/:topicId', async (c) => {
     const { spaceId, topicId } = parseWith(routes.manageTopic.params, c.req.param());
     const input = await body(c, routes.manageTopic.request);

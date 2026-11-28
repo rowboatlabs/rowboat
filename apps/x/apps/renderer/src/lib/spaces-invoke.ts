@@ -8,6 +8,7 @@ const memberActions = new Set<InvokeChannels>([
     'spaces:restoreAsset', 'spaces:uploadBlob', 'spaces:renameSpace', 'spaces:createInvite',
     'spaces:markRead', 'spaces:followThread', 'spaces:presence', 'spaces:whiteboard',
     'spaces:invokeRowboat', 'spaces:stopRowboat', 'spaces:schedule', 'spaces:addMembers',
+    'spaces:createCalendarEntry', 'spaces:updateCalendarEntry', 'spaces:deleteCalendarEntry',
 ])
 
 // What an archived space still allows its members (harbor #1186, 2026-10-14):

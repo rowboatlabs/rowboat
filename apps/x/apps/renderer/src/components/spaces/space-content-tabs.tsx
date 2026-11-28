@@ -9,8 +9,9 @@ import { cn } from '@/lib/utils'
 // the header, with a highlight that slides to the chosen tab. The hover
 // "recent" menus and their decorative ▾ are gone — they opened by surprise and
 // duplicated the full Discussions and Files views one click away.
+// Calendar (2026-11-28) is the fourth view; Graph, where a space has one, stays last.
 
-type Tab = 'messages' | 'discussions' | 'files' | 'graph'
+type Tab = 'messages' | 'discussions' | 'files' | 'calendar' | 'graph'
 
 export function SpaceContentTabs({ orgId, spaceId, direct, graph = false, entries, unreadAssetIds, selection, onSelect }: {
     orgId: string
@@ -28,6 +29,7 @@ export function SpaceContentTabs({ orgId, spaceId, direct, graph = false, entrie
     const filesBadge = { unread: entries.filter((entry) => !entry.state && unreadAssetIds.has(entry.id)).length, forYou: 0 }
     const current: Tab = selection.kind === 'discussions' || selection.kind === 'thread' ? 'discussions'
         : ['files', 'file', 'whiteboard', 'attachment'].includes(selection.kind) ? 'files'
+            : selection.kind === 'calendar' ? 'calendar'
             : selection.kind === 'graph' ? 'graph'
             : 'messages'
 
@@ -35,6 +37,8 @@ export function SpaceContentTabs({ orgId, spaceId, direct, graph = false, entrie
         { id: 'messages', label: 'Messages', badge: streamBadge(orgId, spaceId, direct), go: { kind: 'general' } },
         { id: 'discussions', label: 'Threads', badge: discussionBadge, go: { kind: 'discussions' } },
         { id: 'files', label: 'Files', badge: filesBadge, go: { kind: 'files' } },
+        // The space calendar (2026-11-28): every space has one, a DM included.
+        { id: 'calendar', label: 'Calendar', badge: { unread: 0, forYou: 0 }, go: { kind: 'calendar' } },
         ...(graph ? [{ id: 'graph' as const, label: 'Graph', badge: { unread: 0, forYou: 0 }, go: { kind: 'graph' as const } }] : []),
     ]
 

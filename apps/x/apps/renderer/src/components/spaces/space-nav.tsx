@@ -29,6 +29,8 @@ export interface SpaceNav {
     onOpenMessage?: (orgId: string, spaceId: string, messageId: string) => void
     /** Open (creating on first use) the DM with a member of an org the reader is signed into. */
     onOpenDirect?: (orgId: string, memberId: string) => void
+    /** Open this space's calendar, on one event when given (2026-11-28). */
+    onOpenCalendar?: (entryId?: string) => void
     /** The org id behind an address the reader is signed into — null otherwise. */
     resolveOrg?: (orgAddress: string) => string | null
     /** The org id behind an address + space the reader is in — null when the space is not in their listing. */

@@ -92,7 +92,7 @@ const AttachmentNavContext = createContext<((src: string, name: string) => void)
 
 
 /** Mounted beside SpaceRefsProvider — lets every org link in rendered markdown open what it names: a file, a space, a message, a person's DM. */
-export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, onOpenMessage, onOpenDirect, resolveOrg, resolveSpace, onOpenAttachment, children }: SpaceNav & { onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
+export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, onOpenMessage, onOpenDirect, onOpenCalendar, resolveOrg, resolveSpace, onOpenAttachment, children }: SpaceNav & { onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
     const nav = useMemo<SpaceNav>(
         () => ({
             onOpenFile,
@@ -100,10 +100,11 @@ export function SpaceNavProvider({ onOpenFile, onOpenSpaceFile, onOpenSpace, onO
             ...(onOpenSpace ? { onOpenSpace } : {}),
             ...(onOpenMessage ? { onOpenMessage } : {}),
             ...(onOpenDirect ? { onOpenDirect } : {}),
+            ...(onOpenCalendar ? { onOpenCalendar } : {}),
             ...(resolveOrg ? { resolveOrg } : {}),
             ...(resolveSpace ? { resolveSpace } : {}),
         }),
-        [onOpenFile, onOpenSpaceFile, onOpenSpace, onOpenMessage, onOpenDirect, resolveOrg, resolveSpace],
+        [onOpenFile, onOpenSpaceFile, onOpenSpace, onOpenMessage, onOpenDirect, onOpenCalendar, resolveOrg, resolveSpace],
     )
     return <SpaceNavContext.Provider value={nav}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
 }

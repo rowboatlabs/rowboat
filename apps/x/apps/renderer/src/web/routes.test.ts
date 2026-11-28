@@ -10,6 +10,8 @@ describe('web routes', () => {
         { kind: 'discussions', rootMessageId: 'thread/with spaces' },
         { kind: 'files' },
         { kind: 'graph' },
+        { kind: 'calendar' },
+        { kind: 'calendar', entryId: '01ARZ3NDEKTSV4RRFFQ69G5FAY' },
         { kind: 'thread', rootMessageId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' },
         { kind: 'file', assetId: '01ARZ3NDEKTSV4RRFFQ69G5FAW' },
         { kind: 'whiteboard', assetId: '01ARZ3NDEKTSV4RRFFQ69G5FAX' },

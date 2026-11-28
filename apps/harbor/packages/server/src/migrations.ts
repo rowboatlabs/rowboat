@@ -1721,6 +1721,32 @@ export const MIGRATIONS: Migration[] = [
         where not exists (select 1 from spaces where org_id = 'org-default' and is_default)`, [ulid(), now]);
     },
   },
+  {
+    // The space calendar (2026-11-28, "channel calendar" in rowboat): one row
+    // per entry, the entry itself in `data`. The columns beside it are what a
+    // range read filters on before occurrences are computed: where the entry
+    // starts and ends as stored, whether it repeats and until when. They are
+    // dates or UTC instants as text, compared bytewise so a date sorts before
+    // every instant on it. An entry's card keeps the entry as posted on its
+    // message row, as an approval's card does.
+    id: '068-calendar-entries',
+    statements: [
+      `create table if not exists calendar_entries (
+        space_id text not null,
+        id text not null,
+        starts text collate "C" not null,
+        ends text collate "C" not null,
+        repeats boolean not null default false,
+        repeats_until text collate "C",
+        deleted boolean not null default false,
+        data jsonb not null,
+        primary key (space_id, id),
+        constraint calendar_entries_space_fk foreign key (space_id) references spaces(id) on delete cascade
+      )`,
+      `create index if not exists calendar_entries_range on calendar_entries (space_id, starts) where not deleted`,
+      `alter table messages add column if not exists calendar_entry jsonb`,
+    ],
+  },
 ];
 
 /**
