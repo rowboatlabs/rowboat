@@ -9,7 +9,7 @@ const fixturesDir = fileURLToPath(new URL('../../protocol/fixtures/merge/', impo
 describe('golden merge fixtures (the conformance suite)', () => {
   const files = readdirSync(fixturesDir).filter((f) => f.endsWith('.json')).sort();
   it('has the six fixtures', () => {
-    expect(files.length).toBe(6);
+    expect(files.length).toBe(7);
   });
 
   for (const file of files) {
